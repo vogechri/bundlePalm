@@ -106,24 +106,24 @@ def init_lib():
                                     ctypes.c_void_p, ctypes.c_void_p,
                                     ctypes.c_void_p]
 
-def process_cluster_lib(num_lands, num_res, kClusters, point_indices_in_cluster_, res_indices_in_cluster_, point_indices):
+def process_cluster_lib(num_lands_, num_res_, kClusters__, point_indices_in_cluster__, res_indices_in_cluster__, point_indices__):
     init_lib()
     # Flatten the nested lists and get the sizes of the sublists
-    point_indices_in_cluster_flat = [item for sublist in point_indices_in_cluster_ for item in sublist]
-    point_indices_in_cluster_sizes = [len(sublist) for sublist in point_indices_in_cluster_]
+    point_indices_in_cluster_flat = [item for sublist in point_indices_in_cluster__ for item in sublist]
+    point_indices_in_cluster_sizes = [len(sublist) for sublist in point_indices_in_cluster__]
 
-    res_indices_in_cluster_flat = [item for sublist in res_indices_in_cluster_ for item in sublist]
-    res_indices_in_cluster_sizes = [len(sublist) for sublist in res_indices_in_cluster_]
+    res_indices_in_cluster_flat = [item for sublist in res_indices_in_cluster__ for item in sublist]
+    res_indices_in_cluster_sizes = [len(sublist) for sublist in res_indices_in_cluster__]
 
     # Convert the input arguments to C types
-    c_num_lands_ = ctypes.c_int(num_lands)
-    c_num_res_ = ctypes.c_int(num_res)
-    c_kClusters_ = ctypes.c_int(kClusters)
+    c_num_lands_ = ctypes.c_int(num_lands_)
+    c_num_res_ = ctypes.c_int(num_res_)
+    c_kClusters_ = ctypes.c_int(kClusters__)
 
     c_point_indices_in_cluster_flat_ptr = (ctypes.c_int * len(point_indices_in_cluster_flat))(*point_indices_in_cluster_flat)
     c_point_indices_in_cluster_sizes_ptr = (ctypes.c_int * len(point_indices_in_cluster_sizes))(*point_indices_in_cluster_sizes)
 
-    c_point_indices_ptr = (ctypes.c_int * len(point_indices))(*point_indices)
+    c_point_indices_ptr = (ctypes.c_int * len(point_indices__))(*point_indices__)
 
     c_res_indices_in_cluster_flat_ptr = (ctypes.c_int * len(res_indices_in_cluster_flat))(*res_indices_in_cluster_flat)
     c_res_indices_in_cluster_sizes_ptr = (ctypes.c_int * len(res_indices_in_cluster_sizes))(*res_indices_in_cluster_sizes)
