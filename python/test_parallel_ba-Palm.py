@@ -13,6 +13,7 @@ from numpy.linalg import eigvalsh
 # idea reimplement projection with torch to get a jacobian -> numpy then
 import torch
 import math
+import ctypes
 from torch.autograd.functional import jacobian
 from torch import tensor, from_numpy, flatten
 
@@ -26,17 +27,20 @@ FILE_NAME = "problem-73-11032-pre.txt.bz2"
 # FILE_NAME = "problem-21-11315-pre.txt.bz2"
 
 BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/dubrovnik/"
-#FILE_NAME = "problem-16-22106-pre.txt.bz2"
+FILE_NAME = "problem-16-22106-pre.txt.bz2"
 #FILE_NAME = "problem-135-90642-pre.txt.bz2"
 #FILE_NAME = "problem-173-111908-pre.txt.bz2"
 #FILE_NAME = "problem-237-154414-pre.txt.bz2"
-FILE_NAME = "problem-356-226730-pre.txt.bz2" # large dub, play with ideas: cover, etc
+#FILE_NAME = "problem-356-226730-pre.txt.bz2" # large dub, play with ideas: cover, etc
 
 # BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/venice/"
 # FILE_NAME = "problem-52-64053-pre.txt.bz2"
 
 # BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/final/"
 # FILE_NAME = "problem-93-61203-pre.txt.bz2"
+
+BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/dubrovnik/"
+FILE_NAME = "problem-16-22106-pre.txt.bz2"
 
 URL = BASE_URL + FILE_NAME
 
@@ -953,6 +957,125 @@ def process_clusters(num_lands, num_res, kClusters, point_indices_in_cluster_, p
 
     return res_toadd_to_c, point_indices_already_covered, covered_landmark_indices_c, num_res_per_c
 
+def fillPythonVec(out, sizes_out, kClusters):
+    ret = []
+    start = 0
+    for i__ in range (kClusters):
+        tmp = []
+        k = 0
+        #print("lib.vector_get(sizes_out, i) ", i__, " : ", lib.vector_get(sizes_out, i__))
+        for j in range(lib.vector_get(sizes_out, i__)):
+            tmp.append(lib.vector_get(out, start+j))
+            k += 1
+        start += k
+        ret.append(np.array(tmp))
+    return ret
+
+def fillPythonVecSimple(out):
+    tmp = []
+    for j in range(lib.vector_size(out)):
+        tmp.append(lib.vector_get(out, j))
+    return np.array(tmp)
+
+def init_lib():
+    lib.process_clusters.restype = ctypes.POINTER(ctypes.c_int)
+    lib.process_clusters.argtypes = [ctypes.c_int, ctypes.c_int, ctypes.c_int,
+                                    ctypes.POINTER(ctypes.c_int),
+                                    ctypes.POINTER(ctypes.c_int),
+                                    ctypes.POINTER(ctypes.c_int),
+                                    ctypes.POINTER(ctypes.c_int),
+                                    ctypes.POINTER(ctypes.c_int)]
+    # before?                        ctypes.POINTER(ctypes.POINTER(ctypes.c_int)),
+    lib.new_vector.restype = ctypes.c_void_p
+    lib.new_vector.argtypes = None
+    lib.new_vector_of_size.restype = ctypes.c_void_p
+    lib.new_vector_of_size.argtypes = [ctypes.c_int]
+    lib.vector_set.restype = None
+    lib.vector_set.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_int]
+    lib.vector_get.restype = ctypes.c_int
+    lib.vector_get.argtypes = [ctypes.c_void_p, ctypes.c_int]
+    lib.vector_size.restype = ctypes.c_int
+    lib.vector_size.argtypes = [ctypes.c_void_p]
+    lib.new_vector_by_copy.restype = ctypes.c_void_p
+    lib.new_vector_by_copy.argtypes = [ctypes.POINTER(ctypes.c_int), ctypes.c_int]
+    lib.delete_vector.restype = None
+    lib.delete_vector.argtypes = [ctypes.c_void_p]
+    lib.process_clusters_test.restype = None
+    #lib.process_clusters_test.argtypes = [ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_void_p]
+    #lib.process_clusters_test(c_num_lands, c_num_res, c_kClusters, c_res_indices_in_cluster_flat_cpp)
+    #lib.delete_vector(c_res_indices_in_cluster_flat_cpp)
+
+    lib.process_clusters.restype = None #[ctypes.c_void_p, ctypes.c_void_p]
+    lib.process_clusters.argtypes = [ctypes.c_int, ctypes.c_int, ctypes.c_int,
+                                    ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,
+                                    ctypes.c_void_p, ctypes.c_void_p,
+                                    ctypes.c_void_p, ctypes.c_void_p, # out:
+                                    ctypes.c_void_p, ctypes.c_void_p,
+                                    ctypes.c_void_p, ctypes.c_void_p,
+                                    ctypes.c_void_p]
+
+def process_cluster_lib(num_lands_, num_res_, kClusters__, point_indices_in_cluster__, res_indices_in_cluster__, point_indices__):
+    init_lib()
+    # Flatten the nested lists and get the sizes of the sublists
+    point_indices_in_cluster_flat = [item for sublist in point_indices_in_cluster__ for item in sublist]
+    point_indices_in_cluster_sizes = [len(sublist) for sublist in point_indices_in_cluster__]
+
+    res_indices_in_cluster_flat = [item for sublist in res_indices_in_cluster__ for item in sublist]
+    res_indices_in_cluster_sizes = [len(sublist) for sublist in res_indices_in_cluster__]
+
+    # Convert the input arguments to C types
+    c_num_lands_ = ctypes.c_int(num_lands_)
+    c_num_res_ = ctypes.c_int(num_res_)
+    c_kClusters_ = ctypes.c_int(kClusters__)
+
+    c_point_indices_in_cluster_flat_ptr = (ctypes.c_int * len(point_indices_in_cluster_flat))(*point_indices_in_cluster_flat)
+    c_point_indices_in_cluster_sizes_ptr = (ctypes.c_int * len(point_indices_in_cluster_sizes))(*point_indices_in_cluster_sizes)
+
+    c_point_indices_ptr = (ctypes.c_int * len(point_indices__))(*point_indices__)
+
+    c_res_indices_in_cluster_flat_ptr = (ctypes.c_int * len(res_indices_in_cluster_flat))(*res_indices_in_cluster_flat)
+    c_res_indices_in_cluster_sizes_ptr = (ctypes.c_int * len(res_indices_in_cluster_sizes))(*res_indices_in_cluster_sizes)
+
+    #c_res_indices_in_cluster_flat = lib.new_vector_of_size(len(c_res_indices_in_cluster_flat))
+    c_point_indices_in_cluster_flat_cpp = lib.new_vector_by_copy(c_point_indices_in_cluster_flat_ptr, len(c_point_indices_in_cluster_flat_ptr))
+    c_point_indices_in_cluster_sizes_cpp = lib.new_vector_by_copy(c_point_indices_in_cluster_sizes_ptr, len(c_point_indices_in_cluster_sizes_ptr))
+    c_point_indices_cpp = lib.new_vector_by_copy(c_point_indices_ptr, len(c_point_indices_ptr))
+    c_res_indices_in_cluster_flat_cpp = lib.new_vector_by_copy(c_res_indices_in_cluster_flat_ptr, len(c_res_indices_in_cluster_flat_ptr))
+    c_res_indices_in_cluster_sizes_cpp = lib.new_vector_by_copy(c_res_indices_in_cluster_sizes_ptr, len(c_res_indices_in_cluster_sizes_ptr))
+
+    #lib.vector_set(c_res_indices_in_cluster_flat, i, value)
+
+    res_toadd_out = lib.new_vector()
+    res_toadd_sizes_out = lib.new_vector_of_size(kClusters)
+
+    point_indices_already_covered_out = lib.new_vector_of_size(kClusters)
+    point_indices_already_covered_sizes = lib.new_vector_of_size(kClusters)
+
+    # print("point_indices_already_covered_outsiez ", lib.vector_size(point_indices_already_covered_out))
+    # print("point_indices_already_covered_sizes siez ", lib.vector_size(point_indices_already_covered_sizes))
+
+    covered_landmark_indices_c_out = lib.new_vector()
+    covered_landmark_indices_c_sizes = lib.new_vector_of_size(kClusters)
+
+    num_res_per_c_out = lib.new_vector()
+
+    lib.process_clusters(c_num_lands_, c_num_res_, c_kClusters_,
+                        c_point_indices_in_cluster_flat_cpp, c_point_indices_in_cluster_sizes_cpp,
+                        c_point_indices_cpp,
+                        c_res_indices_in_cluster_flat_cpp,c_res_indices_in_cluster_sizes_cpp,
+                        res_toadd_out, res_toadd_sizes_out,
+                        point_indices_already_covered_out, point_indices_already_covered_sizes,
+                        covered_landmark_indices_c_out, covered_landmark_indices_c_sizes,
+                        num_res_per_c_out)
+
+    #print("lib.vector_get(res_toadd_sizes_out, i) ", 0, " : ", lib.vector_get(res_toadd_sizes_out, 0))
+    res_toadd_to_c_ = fillPythonVec(res_toadd_out, res_toadd_sizes_out, kClusters)
+    point_indices_already_covered_ = fillPythonVec(point_indices_already_covered_out, point_indices_already_covered_sizes, kClusters)
+    covered_landmark_indices_c_ = fillPythonVec(covered_landmark_indices_c_out, covered_landmark_indices_c_sizes, kClusters)
+    num_res_per_c_ = fillPythonVecSimple(res_toadd_out)
+
+    return res_toadd_to_c_, point_indices_already_covered_, covered_landmark_indices_c_, num_res_per_c_
+
 def cluster_by_camera_gpt(
     camera_indices_, points_3d_, points_2d_, point_indices_, kClusters_, startL_, init_cam_id=0, init_lm_id=0, seed=0
 ):
@@ -1038,16 +1161,20 @@ def cluster_by_camera_gpt(
     # 2. lm -> res missing by id (only incomplete)
     # 3. distribute equally, pick cluster w least res. pick lm with least res to add, add (bunch)
 
-    (res_toadd_to_c_, point_indices_already_covered_, covered_landmark_indices_c_, num_res_per_c) = \
-        process_clusters(num_lands, num_res, kClusters, \
-            point_indices_in_cluster_, point_indices_, res_indices_in_cluster_)
+    print(point_indices_in_cluster_.shape)
+    print(point_indices_.shape)
+    print(res_indices_in_cluster_.shape)
+
+    res_toadd_to_c_, point_indices_already_covered_, covered_landmark_indices_c_, num_res_per_c_ = \
+        process_cluster_lib(num_lands, num_res, kClusters, point_indices_in_cluster_, res_indices_in_cluster_, point_indices)
+
+    # (res_toadd_to_c_, point_indices_already_covered_, covered_landmark_indices_c_, num_res_per_c) = \
+    #     process_clusters(num_lands, num_res, kClusters, \
+    #         point_indices_in_cluster_, point_indices_, res_indices_in_cluster_)
     
     for ci in range(kClusters):
         print(ci, " adding " , np.concatenate(res_toadd_to_c_[ci]).shape, " residuals to ", \
             point_indices_in_cluster_[ci].shape, " original residuals")
-
-    # Todo: np.concatenate(res_toadd_to_c_[ci]) are the residuals also needed
-    # extract cam indices not present. 
     
     additional_point_indices_in_cluster_ = [0 for _ in range(kClusters)] # variables to add, just unique (additional cameras -> not needed)
     additional_camera_indices_in_cluster_ = [0 for _ in range(kClusters)] # index into var per res
