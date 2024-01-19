@@ -16,10 +16,7 @@
 // maybe add cam_to_cluster and landmark_to_cluster to mark the variables to update
 extern "C"
 void cluster_covis(
-    int num_res,
-    int kClusters, 
-    int num_lands,
-    int num_cams,
+    int kClusters,
     const std::vector<int>& camera_indices_in, 
     const std::vector<int>& landmark_indices_in,
     std::vector<int>& res_to_cluster, std::vector<int>& res_to_cluster_sizes);
@@ -29,15 +26,31 @@ process_clusters(
     int num_lands,
     int num_res,
     int kClusters, 
-    const std::vector<int>& point_indices_in_cluster_flat, 
+    const std::vector<int>& point_indices_in_cluster_flat, //those inclusters
     const std::vector<int>& point_indices_in_cluster_sizes,
-    const std::vector<int>& point_indices_, 
+    const std::vector<int>& point_indices_, // all points
     const std::vector<int>& res_indices_in_cluster_flat,
     const std::vector<int>& res_indices_in_cluster_sizes,
     std::vector<int>& res_toadd_out, std::vector<int>& res_toadd_sizes,
     std::vector<int>& point_indices_already_covered_out, std::vector<int>& point_indices_already_covered_sizes,
     std::vector<int>& covered_landmark_indices_c_out, std::vector<int>& covered_landmark_indices_c_sizes, 
     std::vector<int>& num_res_per_c_out);
+
+// simplify removing inputs
+// extern "C"
+// void cluster_covis_full(
+//     int num_res,
+//     int kClusters,
+//     int num_lands,
+//     int num_cams,
+//     const std::vector<int>& camera_indices_in,
+//     const std::vector<int>& landmark_indices_in,
+//     std::vector<int>& res_to_cluster, std::vector<int>& res_to_cluster_sizes,
+//     // out
+//     std::vector<int>& res_toadd_out, std::vector<int>& res_toadd_sizes,
+//     std::vector<int>& point_indices_already_covered_out, std::vector<int>& point_indices_already_covered_sizes,
+//     std::vector<int>& covered_landmark_indices_c_out, std::vector<int>& covered_landmark_indices_c_sizes,
+//     std::vector<int>& num_res_per_c_out);
 
 extern "C" void process_clusters_test(
     int num_lands,
