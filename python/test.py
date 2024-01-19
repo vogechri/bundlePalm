@@ -16,6 +16,20 @@ import numpy as np
 
 BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/dubrovnik/"
 FILE_NAME = "problem-16-22106-pre.txt.bz2"
+FILE_NAME = "problem-135-90642-pre.txt.bz2"
+
+#BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/ladybug/"
+#FILE_NAME = "problem-49-7776-pre.txt.bz2"
+#FILE_NAME = "problem-73-11032-pre.txt.bz2"
+
+#BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/dubrovnik/"
+
+# BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/final/"
+# FILE_NAME = "problem-93-61203-pre.txt.bz2"
+
+# BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/venice/"
+# FILE_NAME = "problem-52-64053-pre.txt.bz2"
+
 
 URL = BASE_URL + FILE_NAME
 
@@ -70,13 +84,13 @@ def fillPythonVecSimple(out):
     return np.array(tmp)
 
 def init_lib():
-    lib.process_clusters.restype = ctypes.POINTER(ctypes.c_int)
-    lib.process_clusters.argtypes = [ctypes.c_int, ctypes.c_int, ctypes.c_int,
-                                    ctypes.POINTER(ctypes.c_int),
-                                    ctypes.POINTER(ctypes.c_int),
-                                    ctypes.POINTER(ctypes.c_int),
-                                    ctypes.POINTER(ctypes.c_int),
-                                    ctypes.POINTER(ctypes.c_int)]
+    # lib.process_clusters.restype = ctypes.POINTER(ctypes.c_int)
+    # lib.process_clusters.argtypes = [ctypes.c_int, ctypes.c_int, ctypes.c_int,
+    #                                 ctypes.POINTER(ctypes.c_int),
+    #                                 ctypes.POINTER(ctypes.c_int),
+    #                                 ctypes.POINTER(ctypes.c_int),
+    #                                 ctypes.POINTER(ctypes.c_int),
+    #                                 ctypes.POINTER(ctypes.c_int)]
     # before?                        ctypes.POINTER(ctypes.POINTER(ctypes.c_int)),
     lib.new_vector.restype = ctypes.c_void_p
     lib.new_vector.argtypes = None
@@ -92,22 +106,28 @@ def init_lib():
     lib.new_vector_by_copy.argtypes = [ctypes.POINTER(ctypes.c_int), ctypes.c_int]
     lib.delete_vector.restype = None
     lib.delete_vector.argtypes = [ctypes.c_void_p]
-    lib.process_clusters_test.restype = None
+    #lib.process_clusters_test.restype = None
     #lib.process_clusters_test.argtypes = [ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_void_p]
     #lib.process_clusters_test(c_num_lands, c_num_res, c_kClusters, c_res_indices_in_cluster_flat_cpp)
     #lib.delete_vector(c_res_indices_in_cluster_flat_cpp)
 
     lib.process_clusters.restype = None #[ctypes.c_void_p, ctypes.c_void_p]
     lib.process_clusters.argtypes = [ctypes.c_int, ctypes.c_int, ctypes.c_int,
-                                    ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, 
+                                    ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,
                                     ctypes.c_void_p, ctypes.c_void_p,
-                                    ctypes.c_void_p, ctypes.c_void_p, # out                                 
+                                    ctypes.c_void_p, ctypes.c_void_p, # out
                                     ctypes.c_void_p, ctypes.c_void_p,
                                     ctypes.c_void_p, ctypes.c_void_p,
                                     ctypes.c_void_p]
 
+    lib.cluster_covis.restype = None
+    lib.cluster_covis.argtypes = [ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int,
+                                  ctypes.c_void_p, ctypes.c_void_p] #,
+    #                                  ctypes.c_void_p, ctypes.c_void_p] # out]
+
+
 def process_cluster_lib(num_lands_, num_res_, kClusters__, point_indices_in_cluster__, res_indices_in_cluster__, point_indices__):
-    init_lib()
+
     # Flatten the nested lists and get the sizes of the sublists
     point_indices_in_cluster_flat = [item for sublist in point_indices_in_cluster__ for item in sublist]
     point_indices_in_cluster_sizes = [len(sublist) for sublist in point_indices_in_cluster__]
@@ -132,6 +152,7 @@ def process_cluster_lib(num_lands_, num_res_, kClusters__, point_indices_in_clus
     c_point_indices_in_cluster_flat_cpp = lib.new_vector_by_copy(c_point_indices_in_cluster_flat_ptr, len(c_point_indices_in_cluster_flat_ptr))
     c_point_indices_in_cluster_sizes_cpp = lib.new_vector_by_copy(c_point_indices_in_cluster_sizes_ptr, len(c_point_indices_in_cluster_sizes_ptr))
     c_point_indices_cpp = lib.new_vector_by_copy(c_point_indices_ptr, len(c_point_indices_ptr))
+
     c_res_indices_in_cluster_flat_cpp = lib.new_vector_by_copy(c_res_indices_in_cluster_flat_ptr, len(c_res_indices_in_cluster_flat_ptr))
     c_res_indices_in_cluster_sizes_cpp = lib.new_vector_by_copy(c_res_indices_in_cluster_sizes_ptr, len(c_res_indices_in_cluster_sizes_ptr))
 
@@ -168,6 +189,31 @@ def process_cluster_lib(num_lands_, num_res_, kClusters__, point_indices_in_clus
 
     return res_toadd_to_c_, point_indices_already_covered_, covered_landmark_indices_c_, num_res_per_c_
 
+def cluster_covis_lib(num_res_, kClusters, n_points, n_cameras, camera_indices__, point_indices__):
+    c_num_lands_ = ctypes.c_int(n_points)
+    c_num_cams_ = ctypes.c_int(n_cameras)
+    c_num_res_ = ctypes.c_int(num_res_)
+    c_kClusters_ = ctypes.c_int(kClusters)
+
+    camera_indices_list = camera_indices__.tolist()
+    point_indices_list = point_indices__.tolist()
+
+    c_point_indices_ptr = (ctypes.c_int * len(point_indices_list))(*point_indices_list)
+    c_point_indices_cpp = lib.new_vector_by_copy(c_point_indices_ptr, len(c_point_indices_ptr))
+    c_cam_indices_ptr = (ctypes.c_int * len(camera_indices_list))(*camera_indices_list)
+    c_cam_indices_cpp = lib.new_vector_by_copy(c_cam_indices_ptr, len(c_cam_indices_ptr))
+
+    #c_point_indices_ptr = (ctypes.c_int * len(point_indices__))(*point_indices__)
+    #c_point_indices_cpp = lib.new_vector_by_copy(c_point_indices_ptr, len(c_point_indices_ptr))
+
+    # res_to_cluster_c_out = lib.new_vector()
+    # res_to_cluster_c_sizes = lib.new_vector_of_size(kClusters)
+
+    lib.cluster_covis(c_num_res_, c_kClusters_, c_num_lands_, c_num_cams_, 
+        c_cam_indices_cpp, c_point_indices_cpp)#, res_to_cluster_c_out, res_to_cluster_c_sizes)
+    
+    # copy data, free c++ mem
+
 
 cameras, points_3d, camera_indices, point_indices, points_2d = read_bal_data(FILE_NAME)
 n_cameras = cameras.shape[0]
@@ -187,6 +233,8 @@ kClusters = 3 # 6 cluster also not bad at all !
 # Load the shared library
 #lib = ctypes.CDLL("/path/to/your/library.so")
 lib = ctypes.CDLL("/home/vogechri/bupa/python/libprocess_clusters.so")
+init_lib()
+cluster_covis_lib(m, kClusters, n_points, n_cameras, camera_indices, point_indices)
 
 camera_indices_ = camera_indices
 points_3d_  = points_3d
