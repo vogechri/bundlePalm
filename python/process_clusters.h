@@ -13,6 +13,17 @@
 // std::vector<std::vector<int>>, 
 // std::vector<int>>
 
+// maybe add cam_to_cluster and landmark_to_cluster to mark the variables to update
+extern "C"
+void cluster_covis(
+    int num_res,
+    int kClusters, 
+    int num_lands,
+    int num_cams,
+    const std::vector<int>& camera_indices_in, 
+    const std::vector<int>& landmark_indices_in,
+    std::vector<int>& res_to_cluster, std::vector<int>& res_to_cluster_sizes);
+
 extern "C" void
 process_clusters(
     int num_lands,
@@ -48,6 +59,7 @@ extern "C" {
     std::vector<int>* new_vector_by_copy(int* v, int size){
         auto* vec = new std::vector<int>(size);
         std::copy(v, v + size, vec->data());
+        //std::cout << vec->size() << " v[0]" << (*vec)[0] << std::endl; 
         return vec;
     }
     void delete_vector(std::vector<int>* v){
