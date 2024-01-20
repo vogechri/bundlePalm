@@ -28,10 +28,10 @@ FILE_NAME = "problem-73-11032-pre.txt.bz2"
 
 BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/dubrovnik/"
 FILE_NAME = "problem-16-22106-pre.txt.bz2"
-#FILE_NAME = "problem-135-90642-pre.txt.bz2"
+FILE_NAME = "problem-135-90642-pre.txt.bz2"
 #FILE_NAME = "problem-173-111908-pre.txt.bz2"
 #FILE_NAME = "problem-237-154414-pre.txt.bz2"
-FILE_NAME = "problem-356-226730-pre.txt.bz2" # large dub, play with ideas: cover, etc
+#FILE_NAME = "problem-356-226730-pre.txt.bz2" # large dub, play with ideas: cover, etc
 # point_indices_to_complete  (135668,)
 # 0  point_indices_already_covered  (7013,)
 # 1  point_indices_already_covered  (11267,)
@@ -75,9 +75,6 @@ FILE_NAME = "problem-356-226730-pre.txt.bz2" # large dub, play with ideas: cover
 
 # BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/final/"
 # FILE_NAME = "problem-93-61203-pre.txt.bz2"
-
-BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/dubrovnik/"
-FILE_NAME = "problem-16-22106-pre.txt.bz2"
 
 URL = BASE_URL + FILE_NAME
 
@@ -991,6 +988,8 @@ def process_clusters(num_lands, num_res, kClusters, point_indices_in_cluster_, p
         res_toadd_to_c[ci].append(res_of_lm_notin_c[ci][i][0])
         num_res_per_c[ci] += len(res_of_lm_notin_c[ci][i][0])
         covered_landmark_indices_c[ci].append(i)
+    for ci in range(kClusters):
+        res_toadd_to_c[ci] = np.concatenate(res_toadd_to_c[ci])
 
     return res_toadd_to_c, point_indices_already_covered, covered_landmark_indices_c, num_res_per_c
 
@@ -1006,6 +1005,7 @@ def fillPythonVec(out, sizes_out, kClusters):
             k += 1
         start += k
         ret.append(np.array(tmp))
+        #print(i__, " fillPythonVec ", len(ret), " ", ret[i__].shape)
     return ret
 
 def fillPythonVecSimple(out):
@@ -1198,15 +1198,15 @@ def cluster_by_camera_gpt(
     # 2. lm -> res missing by id (only incomplete)
     # 3. distribute equally, pick cluster w least res. pick lm with least res to add, add (bunch)
 
-    res_toadd_to_c_, point_indices_already_covered_, covered_landmark_indices_c_, num_res_per_c_ = \
-        process_cluster_lib(num_lands, num_res, kClusters, point_indices_in_cluster_, res_indices_in_cluster_, point_indices)
+    #res_toadd_to_c_, point_indices_already_covered_, covered_landmark_indices_c_, num_res_per_c_ = \
+    #    process_cluster_lib(num_lands, num_res, kClusters, point_indices_in_cluster_, res_indices_in_cluster_, point_indices)
 
-    # (res_toadd_to_c_, point_indices_already_covered_, covered_landmark_indices_c_, num_res_per_c) = \
-    #     process_clusters(num_lands, num_res, kClusters, \
-    #         point_indices_in_cluster_, point_indices_, res_indices_in_cluster_)
+    (res_toadd_to_c_, point_indices_already_covered_, covered_landmark_indices_c_, num_res_per_c) = \
+        process_clusters(num_lands, num_res, kClusters, \
+            point_indices_in_cluster_, point_indices_, res_indices_in_cluster_)
     
     for ci in range(kClusters):
-        print(ci, " adding " , np.concatenate(res_toadd_to_c_[ci]).shape, " residuals to ", \
+        print(ci, " adding " , res_toadd_to_c_[ci].shape, " residuals to ", \
             point_indices_in_cluster_[ci].shape, " original residuals")
     
     additional_point_indices_in_cluster_ = [0 for _ in range(kClusters)] # variables to add, just unique (additional cameras -> not needed)
@@ -1217,7 +1217,7 @@ def cluster_by_camera_gpt(
 
     for ci in range(kClusters):
         #print("camera_indices_ ", camera_indices_.shape)
-        con_res = np.concatenate(res_toadd_to_c_[ci])
+        con_res = res_toadd_to_c_[ci]
         #print("camera_indices_ ", con_res.shape)
         new_cam_indices_ = np.unique(camera_indices_[con_res])
         #print(ci, " new cam indices ", new_cam_indices_, " " , new_cam_indices_.shape)
@@ -2595,7 +2595,7 @@ x0_p = x0_p.reshape(n_cameras, 9)
 
 # 1. take problem and split, sort indices by camera, define local global map and test it.
 startL = 1
-kClusters = 10 # 6 cluster also not bad at all !
+kClusters = 5 # 6 cluster also not bad at all !
 innerIts = 1  # change to get an update, not 1 iteration
 its = 100
 cost = np.zeros(kClusters)

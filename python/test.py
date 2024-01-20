@@ -232,7 +232,7 @@ kClusters = 3 # 6 cluster also not bad at all !
 
 # Load the shared library
 #lib = ctypes.CDLL("/path/to/your/library.so")
-lib = ctypes.CDLL("/home/vogechri/bupa/python/libprocess_clusters.so")
+lib = ctypes.CDLL("./libprocess_clusters.so")
 init_lib()
 cluster_covis_lib(m, kClusters, n_points, n_cameras, camera_indices, point_indices)
 

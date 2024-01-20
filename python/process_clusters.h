@@ -84,4 +84,4 @@ extern "C" {
 
 // g++ -c -fPIC process_clusters.cpp -o process_clusters.o
 // g++ -shared -o libprocess_clusters.so process_clusters.o -Wl,--export-dynamic
-// clang++-15 -c -fPIC process_clusters.cpp -o process_clusters.o;clang++-15 -shared -o libprocess_clusters.so process_clusters.o -Wl,--export-dynamic
+// clang++-15 -c -fPIC -std=c++17 process_clusters.cpp -o process_clusters.o;clang++-15 -shared -o libprocess_clusters.so process_clusters.o -Wl,--export-dynamic
