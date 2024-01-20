@@ -32,6 +32,7 @@ FILE_NAME = "problem-356-226730-pre.txt.bz2"
 
 #BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/venice/"
 #FILE_NAME = "problem-52-64053-pre.txt.bz2"
+FILE_NAME = "problem-1778-993923-pre.txt.bz2"
 
 # BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/final/"
 # FILE_NAME = "problem-93-61203-pre.txt.bz2"
@@ -1250,6 +1251,8 @@ bfgs_rhos = np.zeros([bfgs_mem, 1])
 
 # compute f(x0) and Jacobians given x0
 useExtInCost = False # with using extrapolation, does it lead to lower cost, how much?
+# FILE_NAME = "problem-1778-993923-pre.txt.bz2"
+# 50 it. cost ext    3394330.965571229 with
 # todo: find better scheduling
 L0 = 1.0 # 30 or 40, 5 is ok? for RNA? debug from 20 at 80 bfgs fails, from 60 fails at larger L forever.
 # maybe restart if extr totally off?

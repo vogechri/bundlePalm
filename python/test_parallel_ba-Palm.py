@@ -31,9 +31,46 @@ BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/dubrovnik/"
 #FILE_NAME = "problem-173-111908-pre.txt.bz2"
 #FILE_NAME = "problem-237-154414-pre.txt.bz2"
 FILE_NAME = "problem-356-226730-pre.txt.bz2" # large dub, play with ideas: cover, etc
+# point_indices_to_complete  (135668,)
+# 0  point_indices_already_covered  (7013,)
+# 1  point_indices_already_covered  (11267,)
+# 2  point_indices_already_covered  (12428,)
+# 3  point_indices_already_covered  (10041,)
+# 4  point_indices_already_covered  (8934,)
+# 5  point_indices_already_covered  (8230,)
+# 6  point_indices_already_covered  (6734,)
+# 7  point_indices_already_covered  (5806,)
+# 8  point_indices_already_covered  (12957,)
+# 9  point_indices_already_covered  (7652,)
+# Together covered points  226730   sum_points_covered:  91062
+# ^[[B0  adding  (60111,)  residuals to  (112799,)  original residuals
+# 1  adding  (75621,)  residuals to  (135493,)  original residuals
+# 2  adding  (49590,)  residuals to  (124954,)  original residuals
+# 3  adding  (38066,)  residuals to  (113403,)  original residuals
+# 4  adding  (37379,)  residuals to  (159366,)  original residuals
+# 5  adding  (35957,)  residuals to  (131367,)  original residuals
+# 6  adding  (72851,)  residuals to  (122188,)  original residuals
+# 7  adding  (42600,)  residuals to  (118581,)  original residuals
+# 8  adding  (36358,)  residuals to  (125925,)  original residuals
+# 9  adding  (36502,)  residuals to  (111192,)  original residuals
+# ===== Cluster  0  covers  (21389,) landmarks   of  226730
+# ===== Cluster  1  covers  (22142,) landmarks   of  226730
+# ===== Cluster  2  covers  (23632,) landmarks   of  226730
+# ===== Cluster  3  covers  (25566,) landmarks   of  226730
+# ===== Cluster  4  covers  (19566,) landmarks   of  226730
+# ===== Cluster  5  covers  (20717,) landmarks   of  226730
+# ===== Cluster  6  covers  (20296,) landmarks   of  226730
+# ===== Cluster  7  covers  (22905,) landmarks   of  226730
+# ===== Cluster  8  covers  (25885,) landmarks   of  226730
+# ===== Cluster  9  covers  (24632,) landmarks   of  226730
+# 10 ==== f(v)=  1102778  and  1620355
+# 20 ==== f(v)=  1067053  and  1563869
+# 49 ==== f(v)=  1048755  and  1535594
+# 99 ==== f(v)=  1041578  and  1524700
 
 # BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/venice/"
 # FILE_NAME = "problem-52-64053-pre.txt.bz2"
+#FILE_NAME = "problem-1778-993923-pre.txt.bz2"
 
 # BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/final/"
 # FILE_NAME = "problem-93-61203-pre.txt.bz2"
@@ -2435,9 +2472,9 @@ x0_p = x0_p.reshape(n_cameras, 9)
 
 # 1. take problem and split, sort indices by camera, define local global map and test it.
 startL = 1
-kClusters = 3 # 6 cluster also not bad at all !
+kClusters = 10 # 6 cluster also not bad at all !
 innerIts = 1  # change to get an update, not 1 iteration
-its = 20
+its = 100
 cost = np.zeros(kClusters)
 lastCost = 1e20
 lastCostDRE = 1e20
