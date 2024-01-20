@@ -17,8 +17,10 @@
 // Speedup, very little worse, else retries rejected merges.
 #define inheritInvalidEdgeness_
 #define simpleConstraint_  // if undefined works well with max-sum
-// if undefined: maxWeight (much faster & better) - sum overestimates overlap.
-// #define sumWeight_
+// if undefined: maxWeight (much faster & better than sumWeight)? - sum overestimates overlap.
+//#define explicitWeight_ // exact overlap
+// if defined -> explicit weight -> sum weight
+//#define sumWeight_
 #define debug_out_
 // Permanent recomputation does not help unless sumWeight / maxWeight are
 // replaced by 2nd order (expensive) estimate [maxWeight: 1st order approx].
@@ -156,15 +158,10 @@ process_clusters(
         }
     }
 
-    // can this be any slower?
     std::vector<int> res_per_lm(num_lands, 0);
     for(int i :point_indices_) {
         res_per_lm[i]++;
     }
-    // std::vector<int> res_per_lm(num_res);
-    // for (int i = 0; i < num_res; i++) {
-    //     res_per_lm[i] = std::count(point_indices_.begin(), point_indices_.end(), point_indices_[i]);
-    // }
  
     std::vector<std::vector<int>> missing_res_per_lm_c(kClusters, std::vector<int>(num_res));
     std::vector<int> num_res_per_c(kClusters);
@@ -178,18 +175,13 @@ process_clusters(
             const int lm_index =point_indices_[i];
             const auto count_itr = counts.find(point_indices_[i]);
             if (count_itr != counts.end()) {
-                missing_res_per_lm_c[ci][lm_index] = res_per_lm[lm_index] - count_itr->second;//counts[point_indices_[i]];
+                missing_res_per_lm_c[ci][lm_index] = res_per_lm[lm_index] - count_itr->second;
             } else {
                 missing_res_per_lm_c[ci][lm_index] = res_per_lm[lm_index];
             }
         }
-        num_res_per_c[ci] = point_indices_in_cluster_.size();//std::accumulate(counts.begin(), counts.end(), 0, [](int sum, const std::pair<int, int>& p) { return sum + p.second; });
+        num_res_per_c[ci] = point_indices_in_cluster_.size();
     }
-
-    // std::unordered_map<int, std::vector<int>> res_of_lm;
-    // for (int i = 0; i < num_res; i++) {
-    //     res_of_lm[point_indices_[i]].push_back(i);
-    // }
 
     // We want the set of residual indices of lms for esiduals in the 
     // cluster / not in the cluster sum if total res of lm index = cams that see point.
@@ -228,16 +220,11 @@ process_clusters(
     fill_vec(num_res_per_c_out, num_res_per_c);
     fill_vec_and_size(covered_landmark_indices_c_out, covered_landmark_indices_c_sizes, covered_landmark_indices_c);
 
-    //std::pair<std::vector<int> *, std::vector<int> *> res_toadd_to_c_return = vec_and_size(res_toadd_to_c);
-
-    // (res_toadd_to_c_, point_indices_already_covered_, covered_landmark_indices_c_, num_res_per_c)
-    // hmm how to return? make new vectors & fill?
     return;
-    // all are per cluster even. so vector<vector<int>>
-    //return std::make_tuple(res_toadd_to_c, point_indices_already_covered, covered_landmark_indices_c, num_res_per_c);
 }
 
 struct VolumePartitionOptions {
+  float targetVolumeOfUnion = 1000.;  // Limit of a partition.
   float maxVolumeOfUnion = 1000.;  // Limit of a partition.
   int maxNumKfsInPart = 100;       // Limit of a partition.
 };
@@ -272,7 +259,10 @@ float GetCostGain(const std::pair<int, int>& edge,
   const float kldivQP = desiredVol / totalVolume *
                         std::log(std::max(kEps, (volI + volJ) / (volI * volJ)));
 
-  const float prior = 0.0001 * kldivPQ + 0.001 * kldivQP;
+    // Original:
+  // const float prior = 0.0001 * kldivPQ + 0.001 * kldivQP;
+  // kldivPQ -> equal cams , kldivQP -> equal volume/landmarks/edges.
+  const float prior = 0.5 * kldivPQ + 0.1 * kldivQP; // ToDo play around here.
 
   const float wi = weightPerVtx[vtxI];
   const float wj = weightPerVtx[vtxJ];
@@ -308,7 +298,7 @@ std::pair<int, float> GetBestCostGainForPart(
                                             numVtxsInUnion,
                                             volumeOfUnions,
                                             totalVolume,
-                                            options.maxVolumeOfUnion);
+                                            options.targetVolumeOfUnion);
     if (bestCostGain < costOfNewEdge) {
       bestCostGain = costOfNewEdge;
       bestPartId = adjPartId;
@@ -340,6 +330,7 @@ void RedoAdjacentPartToWeight(
     const std::map<int, float>& oldAdjacentPartToWeight,
     int vtxIdx,
     const std::vector<int>& vtxsToPart,
+    const std::vector<std::set<int>>& lms_in_part, // alternative way to compute edge weights.
 #ifdef inheritInvalidEdgeness_
     std::set<std::pair<int, int>>* invalidEdges,
 #else
@@ -350,23 +341,34 @@ void RedoAdjacentPartToWeight(
     // adjacentParts must also have weight, else we must have old edges to
     // get weight and new edges to get new connections. can the PQ then also
     // take unordered edges and use this cost / memory?
+    float newWeight = weight;
     const int adjPartIdx = FindRootInVtxToPartMap(vtxsToPart, adjvtxIdx);
     if (adjPartIdx != vtxIdx) {
-      auto itr = adjacentPartToWeight->try_emplace(adjPartIdx, weight);
-      if (!itr.second) {
-#ifdef sumWeight_
-        itr.first->second += weight;  // better compute [maybe just top 3 max?]
-#else
-        itr.first->second = std::max(itr.first->second, weight);
-#endif
-      }
-    }
 #ifdef inheritInvalidEdgeness_
     if (invalidEdges->find({std::min(vtxIdx, adjvtxIdx), std::max(vtxIdx, adjvtxIdx)}) != invalidEdges->end()) {
       invalidEdges->emplace(std::min(vtxIdx, adjPartIdx),
                             std::max(vtxIdx, adjPartIdx));
+        newWeight = std::numeric_limits<float>::max(); 
     }
 #endif
+      auto itr = adjacentPartToWeight->try_emplace(adjPartIdx, newWeight);
+      if (!itr.second) {
+#ifdef explicitWeight_
+#ifdef sumWeight_
+        itr.first->second += newWeight;  // better compute [maybe just top 3 max?]
+#else
+        std::set<int> intersection;
+        std::set_union(lms_in_part[vtxIdx].begin(), lms_in_part[vtxIdx].end(), 
+            lms_in_part[adjPartIdx].begin(), lms_in_part[adjPartIdx].end(),
+            std::inserter(intersection, intersection.begin()));
+        const int volumeOfUnion = intersection.size();
+        itr.first->second = volumeOfUnion;
+#endif
+#else
+        itr.first->second = std::max(itr.first->second, newWeight);
+#endif
+      }
+    }
   }
 };
 
@@ -417,23 +419,27 @@ void PlotStatistics(const std::vector<int>& vtxsToPart,
 // cams are cams, # landmakrs seen by cam are volume, union is number of lms seen by boths sets of cams.
 extern "C" 
 void cluster_covis(
-    int num_res,
     int kClusters, 
-    int num_lands,
-    int num_cams,
-    const std::vector<int>& camera_indices_in, 
+    const std::vector<int>& camera_indices_in,
     const std::vector<int>& landmark_indices_in,
     std::vector<int>& res_to_cluster, std::vector<int>& res_to_cluster_sizes) {
 
     const bool verbose = false;
+    const int num_res = landmark_indices_in.size();
+    const int num_cams = std::set<double>( camera_indices_in.begin(), camera_indices_in.end() ).size();
+    const int num_lands = std::set<double>( landmark_indices_in.begin(), landmark_indices_in.end() ).size();
 
-    if (verbose) {
+    std::cout << "Starting cluster_covis\n";
+
+    if (camera_indices_in.size() != num_res || verbose) {
     std::cout << "Start #res " << num_res<< " " << kClusters << " #lnds" << num_lands << "  #cams " << num_cams << "\n";
     std::cout << " camera_indices_in " <<"\n";
     std::cout << " camera_indices_in " << camera_indices_in.size() << "\n";
     std::cout << " landmark_indices_in  " << landmark_indices_in.size() << "\n";
     }
-    VolumePartitionOptions options = {.maxVolumeOfUnion = (2 * num_lands) / static_cast<float>(kClusters), .maxNumKfsInPart = static_cast<int>((2 * num_cams) / kClusters)};
+    VolumePartitionOptions options = {.targetVolumeOfUnion = 1.5f * static_cast<float>(num_lands) / static_cast<float>(kClusters), 
+        .maxVolumeOfUnion = (4 * num_lands) / static_cast<float>(kClusters), // hard constraint can lead to invalid # clusters
+        .maxNumKfsInPart = static_cast<int>((2 * num_cams) / kClusters)};
 
 struct OrderedEdge {
   int srcIdx;
@@ -475,15 +481,6 @@ struct OrderedEdge {
         lms_in_part[cam_id].insert(lm_id);
     }
 
-    // int cm = 0;
-    // for (const std::set<int>& lm_from_cam : lms_from_cam) {
-    //     std::cout << "cam "<< cm++ << " sees " << lm_from_cam.size() << " landmarks\n";
-    // }
-    // int lm = 0;
-    // for (const std::set<int>& cam_from_lm : cams_from_lm) {
-    //     std::cout << "lm "<< lm++ << " sees " << cam_from_lm.size() << " cams\n";
-    // }
-
     // edge if cam share lm. weight = number of lms shared.
     std::map<OrderedEdge, float> edgeWeightMap;
     for (const std::set<int>& cams_of_lm : cams_from_lm) {
@@ -499,7 +496,7 @@ struct OrderedEdge {
 
    std::vector<float> weightPerVtx(num_cams, 0);
    std::vector<float> weightPerVtxSelected(num_cams, 0);
-   std::vector<std::map<int, float>> adjacentPartAndEdgeWeight(num_cams);
+   std::vector<std::map<int, float>> adjacentPartAndEdgeWeight(num_cams); // This is edgeweight used in pq. keep up to date.
 
    // The costs used in the heap based greedy strategy.
    for (const auto& [edge, weight] : edgeWeightMap) {
@@ -557,14 +554,13 @@ struct OrderedEdge {
 
   int merges = 0;
   int fullComputes = 0;
-
-  while (!pq.empty()) {
+  while (!pq.empty() && (num_cams - merges > kClusters)) {
     const int edgeId = pq.top();
     const auto& [vtxA, vtxB] = edgeVector[edgeId];
     const float intersectionVolumeEstimate = edgeWeightVector[edgeId];
     pq.pop();
 
-    if (pq.size() % 100 == 0) {
+    if (pq.size() % 20 == 0) {
       std::cout << "pq.size: " << pq.size() << " fullComputes: " << fullComputes
                 << " weight/cost: " << intersectionVolumeEstimate << " / "
                 << costVector[edgeId] << " merges: " << merges
@@ -597,6 +593,7 @@ struct OrderedEdge {
     RedoAdjacentPartToWeight(adjacentPartAndEdgeWeight[vtxA],
                              vtxA,
                              vtxsToPart,
+                             lms_in_part,
                              &invalidEdges,
                              &adjacentPartToWeight);
     adjacentPartAndEdgeWeight[vtxA] = adjacentPartToWeight;
@@ -616,7 +613,7 @@ struct OrderedEdge {
     if (vtxABestCostGain > costVector[edgeId]) {  // very rare.
       std::cout << "\n Better cost at different vtx" << vtxABestCostGain << ">"
                 << costVector[edgeId] << " " << vtxABestAdjPartId
-                << "!=" << rootVtxInPartB << "\n";
+                << "!=" << rootVtxInPartB << "\r";
     }
 
     if (vtxABestAdjPartId < 0 || vtxABestAdjPartId == vtxA) {
@@ -711,6 +708,7 @@ struct OrderedEdge {
                                  volumeOfUnions,
                                  totalVolume,
                                  options);
+
       if (bestAdjPartId >= 0) {
         edgeVector[edgeId] = {vtxA, bestAdjPartId};
         edgeWeightVector[edgeId] =
@@ -746,6 +744,7 @@ struct OrderedEdge {
       RedoAdjacentPartToWeight(adjacentPartAndEdgeWeight[oldPartId],
                                oldPartId,
                                vtxsToPart,
+                               lms_in_part,
                                &invalidEdges,
                                &adjacentPartToWeight);
     }
@@ -824,4 +823,24 @@ struct OrderedEdge {
 
     //return vtxsToPart;
 
+////////// out put should be.
+// const std::vector<int>& res_indices_in_cluster_flat,
+// const std::vector<int>& res_indices_in_cluster_sizes,
+// I got vtxsToPart[bbId] : camid to part.
+// this is sufficient to map res to part (cam id contained: camera_indices_in)
+//std::vector<int> res_in_cluster(num_res);
+std::cout << " res size " << camera_indices_in.size() << " num_res " << num_res << "\n";
+std::vector<std::vector<int>> res_indices_in_cluster(kClusters);
+//res_to_cluster_sizes.clear();
+//res_to_cluster_sizes.resize(kClusters, 0);
+for(int res_id = 0; res_id < num_res; ++res_id) {
+    const int cam_id = camera_indices_in[res_id];
+    const int part_id = vtxsToPart[cam_id];
+    //std::cout << res_id << " residual " << cam_id << " to " << part_id << "\n";  
+    //res_to_cluster_sizes[part_id]++;
+    //res_in_cluster[res_id] = vtxsToPart[cam_id]; // could also be output, simpler
+    res_indices_in_cluster[part_id].push_back(res_id);
+}
+
+fill_vec_and_size(res_to_cluster, res_to_cluster_sizes, res_indices_in_cluster);
 }

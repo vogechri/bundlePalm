@@ -18,9 +18,10 @@ BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/dubrovnik/"
 FILE_NAME = "problem-16-22106-pre.txt.bz2"
 FILE_NAME = "problem-135-90642-pre.txt.bz2"
 
-#BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/ladybug/"
+BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/ladybug/"
 #FILE_NAME = "problem-49-7776-pre.txt.bz2"
-#FILE_NAME = "problem-73-11032-pre.txt.bz2"
+FILE_NAME = "problem-73-11032-pre.txt.bz2"
+FILE_NAME = "problem-138-19878-pre.txt.bz2"
 
 #BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/dubrovnik/"
 
@@ -121,9 +122,8 @@ def init_lib():
                                     ctypes.c_void_p]
 
     lib.cluster_covis.restype = None
-    lib.cluster_covis.argtypes = [ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int,
-                                  ctypes.c_void_p, ctypes.c_void_p] #,
-    #                                  ctypes.c_void_p, ctypes.c_void_p] # out]
+    lib.cluster_covis.argtypes = [ctypes.c_int, ctypes.c_void_p, ctypes.c_void_p,
+                                  ctypes.c_void_p, ctypes.c_void_p] # out]
 
 
 def process_cluster_lib(num_lands_, num_res_, kClusters__, point_indices_in_cluster__, res_indices_in_cluster__, point_indices__):
@@ -189,31 +189,26 @@ def process_cluster_lib(num_lands_, num_res_, kClusters__, point_indices_in_clus
 
     return res_toadd_to_c_, point_indices_already_covered_, covered_landmark_indices_c_, num_res_per_c_
 
-def cluster_covis_lib(num_res_, kClusters, n_points, n_cameras, camera_indices__, point_indices__):
-    c_num_lands_ = ctypes.c_int(n_points)
-    c_num_cams_ = ctypes.c_int(n_cameras)
-    c_num_res_ = ctypes.c_int(num_res_)
+def cluster_covis_lib(kClusters, camera_indices__, point_indices__):
     c_kClusters_ = ctypes.c_int(kClusters)
 
     camera_indices_list = camera_indices__.tolist()
     point_indices_list = point_indices__.tolist()
 
+    #c_point_indices_ptr = (ctypes.c_int * len(point_indices__))(*point_indices__)
     c_point_indices_ptr = (ctypes.c_int * len(point_indices_list))(*point_indices_list)
     c_point_indices_cpp = lib.new_vector_by_copy(c_point_indices_ptr, len(c_point_indices_ptr))
     c_cam_indices_ptr = (ctypes.c_int * len(camera_indices_list))(*camera_indices_list)
     c_cam_indices_cpp = lib.new_vector_by_copy(c_cam_indices_ptr, len(c_cam_indices_ptr))
 
-    #c_point_indices_ptr = (ctypes.c_int * len(point_indices__))(*point_indices__)
-    #c_point_indices_cpp = lib.new_vector_by_copy(c_point_indices_ptr, len(c_point_indices_ptr))
+    res_to_cluster_c_out = lib.new_vector()
+    res_to_cluster_c_sizes = lib.new_vector_of_size(kClusters)
 
-    # res_to_cluster_c_out = lib.new_vector()
-    # res_to_cluster_c_sizes = lib.new_vector_of_size(kClusters)
+    lib.cluster_covis(c_kClusters_, c_cam_indices_cpp, c_point_indices_cpp, res_to_cluster_c_out, res_to_cluster_c_sizes)
 
-    lib.cluster_covis(c_num_res_, c_kClusters_, c_num_lands_, c_num_cams_, 
-        c_cam_indices_cpp, c_point_indices_cpp)#, res_to_cluster_c_out, res_to_cluster_c_sizes)
-    
+    res_indices_in_cluster__ = fillPythonVec(res_to_cluster_c_out, res_to_cluster_c_sizes, kClusters)
+    return res_indices_in_cluster__
     # copy data, free c++ mem
-
 
 cameras, points_3d, camera_indices, point_indices, points_2d = read_bal_data(FILE_NAME)
 n_cameras = cameras.shape[0]
@@ -234,7 +229,7 @@ kClusters = 3 # 6 cluster also not bad at all !
 #lib = ctypes.CDLL("/path/to/your/library.so")
 lib = ctypes.CDLL("./libprocess_clusters.so")
 init_lib()
-cluster_covis_lib(m, kClusters, n_points, n_cameras, camera_indices, point_indices)
+#res_indices_in_cluster_ = cluster_covis_lib(kClusters, camera_indices, point_indices)
 
 camera_indices_ = camera_indices
 points_3d_  = points_3d
@@ -313,6 +308,19 @@ for c in range(kClusters_):
     point_indices_in_cluster_.append(point_indices_[res_indices_in_cluster])
     res_indices_in_cluster_.append(res_indices_in_cluster.copy())
 
+# from lib
+if True:
+    res_indices_in_cluster_ = cluster_covis_lib(kClusters, camera_indices, point_indices)
+    camera_indices_in_cluster_ = []
+    point_indices_in_cluster_ = []
+    points_2d_in_cluster_ = []
+    for c in range(kClusters_):
+        res_indices_in_c_ = np.sort(res_indices_in_cluster_[c])
+        points_2d_in_cluster_.append(points_2d_[res_indices_in_c_])
+        camera_indices_in_cluster_.append(camera_indices_[res_indices_in_c_])
+        point_indices_in_cluster_.append(point_indices_[res_indices_in_c_])
+        #res_indices_in_cluster_.append(res_indices_in_cluster.copy())
+
 # based on this i must add lms(and res) to cluster EXTRA.
 # each lm should have one cluster with all cam ids (+res) it occurs in
 # notion of 
@@ -328,8 +336,34 @@ point_indices_in_cluster = point_indices_in_cluster_
 point_indices = point_indices_ #np.array(point_indices_)
 #res_indices_in_cluster = res_indices_in_cluster_
 
-res_toadd_to_c, point_indices_already_covered, covered_landmark_indices_c, num_res_per_c = \
+res_toadd_to_c_, point_indices_already_covered_, covered_landmark_indices_c_, num_res_per_c_ = \
     process_cluster_lib(num_lands, num_res, kClusters, point_indices_in_cluster_, res_indices_in_cluster_, point_indices)
+
+for ci in range(kClusters):
+    print(ci, " adding " , res_toadd_to_c_[ci].shape, " residuals to ", \
+        point_indices_in_cluster_[ci].shape, " original residuals")
+
+additional_point_indices_in_cluster_ = [0 for _ in range(kClusters)] # variables to add, just unique (additional cameras -> not needed)
+additional_camera_indices_in_cluster_ = [0 for _ in range(kClusters)] # index into var per res
+additional_points_2d_in_cluster_ = [0 for _ in range(kClusters)] # essentially rhs for res
+# point_indices_already_covered: landmarks to be updated, present in main res only not in additional res (since complete)
+# covered_landmark_indices_c_: landmarks to be updated in additional!!! set of res since completely contained in cluster
+
+for ci in range(kClusters):
+    #print("camera_indices_ ", camera_indices_.shape)
+    con_res = res_toadd_to_c_[ci]
+    #print("camera_indices_ ", con_res.shape)
+    new_cam_indices_ = np.unique(camera_indices_[con_res])
+    #print(ci, " new cam indices ", new_cam_indices_, " " , new_cam_indices_.shape)
+    #print(ci, " old cam indices ", np.unique(camera_indices_in_cluster_[ci]), " " , np.unique(camera_indices_in_cluster_[ci]).shape)
+    new_cam_indices_ = np.setdiff1d(new_cam_indices_, np.unique(camera_indices_in_cluster_[ci])) # not needed since disjoint anyway
+    #print(ci, " new cam indices ", new_cam_indices_, " " , new_cam_indices_.shape)
+    additional_camera_indices_in_cluster_[ci] = camera_indices_[con_res]
+    additional_points_2d_in_cluster_[ci] = points_2d_[con_res]
+    covered_landmark_indices_c_[ci] = np.array(covered_landmark_indices_c_[ci]) #?
+    additional_point_indices_in_cluster_[ci] = point_indices_[con_res]
+    point_indices_already_covered_[ci] = np.union1d(point_indices_already_covered_[ci], covered_landmark_indices_c_[ci])
+    print("===== Cluster ", ci , " covers ", point_indices_already_covered_[ci].shape, "landmarks ", " of ", num_lands)
 
 exit()
 

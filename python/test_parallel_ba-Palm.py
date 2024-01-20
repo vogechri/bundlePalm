@@ -20,18 +20,18 @@ from torch import tensor, from_numpy, flatten
 # look at website. This is the smallest problem. guess: pytoch cpu is pure python?
 BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/ladybug/"
 #FILE_NAME = "problem-49-7776-pre.txt.bz2"
-FILE_NAME = "problem-73-11032-pre.txt.bz2"
-#FILE_NAME = "problem-138-19878-pre.txt.bz2"
+#FILE_NAME = "problem-73-11032-pre.txt.bz2"
+FILE_NAME = "problem-138-19878-pre.txt.bz2"
 
 # BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/trafalgar/"
 # FILE_NAME = "problem-21-11315-pre.txt.bz2"
 
-BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/dubrovnik/"
-FILE_NAME = "problem-16-22106-pre.txt.bz2"
-FILE_NAME = "problem-135-90642-pre.txt.bz2"
+# BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/dubrovnik/"
+# FILE_NAME = "problem-16-22106-pre.txt.bz2"
+# FILE_NAME = "problem-135-90642-pre.txt.bz2"
 #FILE_NAME = "problem-173-111908-pre.txt.bz2"
 #FILE_NAME = "problem-237-154414-pre.txt.bz2"
-#FILE_NAME = "problem-356-226730-pre.txt.bz2" # large dub, play with ideas: cover, etc
+FILE_NAME = "problem-356-226730-pre.txt.bz2" # large dub, play with ideas: cover, etc
 # point_indices_to_complete  (135668,)
 # 0  point_indices_already_covered  (7013,)
 # 1  point_indices_already_covered  (11267,)
@@ -69,7 +69,7 @@ FILE_NAME = "problem-135-90642-pre.txt.bz2"
 # 49 ==== f(v)=  1048755  and  1535594
 # 99 ==== f(v)=  1041578  and  1524700
 
-# BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/venice/"
+#BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/venice/"
 # FILE_NAME = "problem-52-64053-pre.txt.bz2"
 #FILE_NAME = "problem-1778-993923-pre.txt.bz2"
 
@@ -1015,14 +1015,6 @@ def fillPythonVecSimple(out):
     return np.array(tmp)
 
 def init_lib():
-    lib.process_clusters.restype = ctypes.POINTER(ctypes.c_int)
-    lib.process_clusters.argtypes = [ctypes.c_int, ctypes.c_int, ctypes.c_int,
-                                    ctypes.POINTER(ctypes.c_int),
-                                    ctypes.POINTER(ctypes.c_int),
-                                    ctypes.POINTER(ctypes.c_int),
-                                    ctypes.POINTER(ctypes.c_int),
-                                    ctypes.POINTER(ctypes.c_int)]
-    # before?                        ctypes.POINTER(ctypes.POINTER(ctypes.c_int)),
     lib.new_vector.restype = ctypes.c_void_p
     lib.new_vector.argtypes = None
     lib.new_vector_of_size.restype = ctypes.c_void_p
@@ -1051,8 +1043,12 @@ def init_lib():
                                     ctypes.c_void_p, ctypes.c_void_p,
                                     ctypes.c_void_p]
 
+    lib.cluster_covis.restype = None
+    lib.cluster_covis.argtypes = [ctypes.c_int, ctypes.c_void_p, ctypes.c_void_p,
+                                  ctypes.c_void_p, ctypes.c_void_p] # out]
+
+
 def process_cluster_lib(num_lands_, num_res_, kClusters__, point_indices_in_cluster__, res_indices_in_cluster__, point_indices__):
-    init_lib()
     # Flatten the nested lists and get the sizes of the sublists
     point_indices_in_cluster_flat = [item for sublist in point_indices_in_cluster__ for item in sublist]
     point_indices_in_cluster_sizes = [len(sublist) for sublist in point_indices_in_cluster__]
@@ -1113,8 +1109,29 @@ def process_cluster_lib(num_lands_, num_res_, kClusters__, point_indices_in_clus
 
     return res_toadd_to_c_, point_indices_already_covered_, covered_landmark_indices_c_, num_res_per_c_
 
+def cluster_covis_lib(kClusters, camera_indices__, point_indices__):
+    c_kClusters_ = ctypes.c_int(kClusters)
+
+    camera_indices_list = camera_indices__.tolist()
+    point_indices_list = point_indices__.tolist()
+
+    #c_point_indices_ptr = (ctypes.c_int * len(point_indices__))(*point_indices__)
+    c_point_indices_ptr = (ctypes.c_int * len(point_indices_list))(*point_indices_list)
+    c_point_indices_cpp = lib.new_vector_by_copy(c_point_indices_ptr, len(c_point_indices_ptr))
+    c_cam_indices_ptr = (ctypes.c_int * len(camera_indices_list))(*camera_indices_list)
+    c_cam_indices_cpp = lib.new_vector_by_copy(c_cam_indices_ptr, len(c_cam_indices_ptr))
+
+    res_to_cluster_c_out = lib.new_vector()
+    res_to_cluster_c_sizes = lib.new_vector_of_size(kClusters)
+
+    lib.cluster_covis(c_kClusters_, c_cam_indices_cpp, c_point_indices_cpp, res_to_cluster_c_out, res_to_cluster_c_sizes)
+
+    res_indices_in_cluster__ = fillPythonVec(res_to_cluster_c_out, res_to_cluster_c_sizes, kClusters)
+    return res_indices_in_cluster__
+    # copy data, free c++ mem
+
 def cluster_by_camera_gpt(
-    camera_indices_, points_3d_, points_2d_, point_indices_, kClusters_, startL_, init_cam_id=0, init_lm_id=0, seed=0
+    camera_indices_, points_3d_, points_2d_, point_indices_, kClusters_, startL_, baseline_clustering=False, init_cam_id=0, init_lm_id=0, seed=0
 ):
     np.random.seed(seed)
     # sort by res-indices by camera indices
@@ -1123,87 +1140,107 @@ def cluster_by_camera_gpt(
     num_cams = np.unique(camera_indices_).shape[0]
     num_lands = points_3d_.shape[0]
     print("number of residuum: ", num_res)
-    # now split by cameras. list [] of nparrays with camera_ind
-    cluster_to_camera_ = np.array_split(np.arange(n_cameras), kClusters_)
 
-    # smarter cluster to camera. in loop pick cam for smallest cluster the one with most overlap
-    # to current set or better ratio 'in set'+1 / 'not other sets'+1
-    cluster_to_camera_smart_ = [] # list of sets
-    cluster_to_landmarks_ = []
-    # make map cam id to landmark indices seen by cam as set.
-    cam_idx_to_lms = [ set(point_indices_[camera_indices_ == cam_idx]) for cam_idx in range(num_cams) ]
+    if baseline_clustering:
 
-    # init pick
-    cameras_available = set(range(num_cams))
-    #print("cameras_available ", cameras_available, " num_cams ", num_cams)
-    cluster_to_camera_smart_.append(set([init_cam_id])) # cam 0 to set 0
-    cluster_to_landmarks_.append(cam_idx_to_lms[init_lm_id])
-    cameras_available.remove(init_cam_id)
-    for i in range(kClusters-1):
-        best_cam = min(cameras_available, key=lambda candidate: sum(np.random.normal(0,1,1)**2 + len(set.intersection(cluster_to_landmarks_[set_id], cam_idx_to_lms[candidate])) for set_id in range(len(cluster_to_camera_smart_))))
-        cluster_to_camera_smart_.append(set([best_cam]))
-        cameras_available.remove(best_cam)
-        cluster_to_landmarks_.append(cam_idx_to_lms[best_cam])
-    # init done
+        # now split by cameras. list [] of nparrays with camera_ind
+        cluster_to_camera_ = np.array_split(np.arange(n_cameras), kClusters_)
 
-    while cameras_available:
-        cid = np.argmin(np.array([len(x) for x in cluster_to_landmarks_]))
-        best_score = 0
-        best_cam = -1
-        for candidate in cameras_available:
-            overlap = len(set.intersection(cluster_to_landmarks_[cid], cam_idx_to_lms[candidate]))
-            total_overlap = sum(len(set.intersection(cluster_to_landmarks_[set_id], cam_idx_to_lms[candidate])) for set_id in range(len(cluster_to_camera_smart_)))
-            score = overlap / (total_overlap + 1)
-            if score > best_score:
-                best_score = score
-                best_cam = candidate
-        cluster_to_camera_smart_[cid].add(best_cam)
-        cameras_available.remove(best_cam)
-        cluster_to_landmarks_[cid] = cluster_to_landmarks_[cid].union(cam_idx_to_lms[best_cam])
-        #print("cluster_to_camera_smart_ mid ", cluster_to_camera_smart_)
-    #print("cluster_to_camera_smart_ end ", cluster_to_camera_smart_)
+        # smarter cluster to camera. in loop pick cam for smallest cluster the one with most overlap
+        # to current set or better ratio 'in set'+1 / 'not other sets'+1
+        cluster_to_camera_smart_ = [] # list of sets
+        cluster_to_landmarks_ = []
+        # make map cam id to landmark indices seen by cam as set.
+        cam_idx_to_lms = [ set(point_indices_[camera_indices_ == cam_idx]) for cam_idx in range(num_cams) ]
 
-    camera_indices_in_cluster_ = []
-    point_indices_in_cluster_ = []
-    points_2d_in_cluster_ = []
-    res_indices_in_cluster_ = []
-    for c in range(kClusters_):
-        #res_indices_in_cluster = np.sort(indices_in_cluster)
-        if True: # other version of clustering
-            indices_in_cluster = np.zeros(num_res, dtype=bool)
-            for camid_in_c_ in cluster_to_camera_smart_[c]:
-                #print(indices_in_cluster.shape, " ", indices_in_cluster.shape, " ", camid_in_c_)
-                indices_in_cluster = np.logical_or(indices_in_cluster, camera_indices_==camid_in_c_)
-            res_indices_in_cluster = np.arange(num_res)[indices_in_cluster]
-            print(res_indices_in_cluster.shape," ", res_indices_in_cluster)
-        else:
-            indices_in_cluster = np.logical_and( # indices of residums in cluster, unclear why indirection below or sorting is needed?
-            camera_indices_[res_sorted] <= cluster_to_camera_[c][-1],
-            camera_indices_[res_sorted] >= cluster_to_camera_[c][0],
-            )
-            res_indices_in_cluster = res_sorted[indices_in_cluster]
-            print(res_indices_in_cluster.shape," ", res_indices_in_cluster)
+        # init pick
+        cameras_available = set(range(num_cams))
+        #print("cameras_available ", cameras_available, " num_cams ", num_cams)
+        cluster_to_camera_smart_.append(set([init_cam_id])) # cam 0 to set 0
+        cluster_to_landmarks_.append(cam_idx_to_lms[init_lm_id])
+        cameras_available.remove(init_cam_id)
+        for i in range(kClusters-1):
+            best_cam = min(cameras_available, key=lambda candidate: sum(np.random.normal(0,1,1)**2 + len(set.intersection(cluster_to_landmarks_[set_id], cam_idx_to_lms[candidate])) for set_id in range(len(cluster_to_camera_smart_))))
+            cluster_to_camera_smart_.append(set([best_cam]))
+            cameras_available.remove(best_cam)
+            cluster_to_landmarks_.append(cam_idx_to_lms[best_cam])
+        # init done
 
-        res_indices_in_cluster = np.sort(res_indices_in_cluster)
-        # res_indices_in_cluster are the residuums of th e cameras ids in cluster, so map cam id to res id
-        points_2d_in_cluster_.append(points_2d_[res_indices_in_cluster])
-        camera_indices_in_cluster_.append(camera_indices_[res_indices_in_cluster])
-        point_indices_in_cluster_.append(point_indices_[res_indices_in_cluster])
-        res_indices_in_cluster_.append(res_indices_in_cluster.copy())
+        while cameras_available:
+            cid = np.argmin(np.array([len(x) for x in cluster_to_landmarks_]))
+            best_score = 0
+            best_cam = -1
+            for candidate in cameras_available:
+                overlap = len(set.intersection(cluster_to_landmarks_[cid], cam_idx_to_lms[candidate]))
+                total_overlap = sum(len(set.intersection(cluster_to_landmarks_[set_id], cam_idx_to_lms[candidate])) for set_id in range(len(cluster_to_camera_smart_)))
+                score = overlap / (total_overlap + 1)
+                if score > best_score:
+                    best_score = score
+                    best_cam = candidate
+            cluster_to_camera_smart_[cid].add(best_cam)
+            cameras_available.remove(best_cam)
+            cluster_to_landmarks_[cid] = cluster_to_landmarks_[cid].union(cam_idx_to_lms[best_cam])
+            #print("cluster_to_camera_smart_ mid ", cluster_to_camera_smart_)
+        #print("cluster_to_camera_smart_ end ", cluster_to_camera_smart_)
 
-    # based on this i must add lms(and res) to cluster EXTRA.
-    # each lm should have one cluster with all cam ids (+res) it occurs in
-    # notion of 
-    # 1. find incomplete lms -> not all res in single cluster. 
-    # 2. lm -> res missing by id (only incomplete)
-    # 3. distribute equally, pick cluster w least res. pick lm with least res to add, add (bunch)
+        camera_indices_in_cluster_ = []
+        point_indices_in_cluster_ = []
+        points_2d_in_cluster_ = []
+        res_indices_in_cluster_ = []
+        for c in range(kClusters_):
+            #res_indices_in_cluster = np.sort(indices_in_cluster)
+            cluster_to_camera_[c] = cluster_to_camera_smart_[c]
+            if True: # other version of clustering
+                indices_in_cluster = np.zeros(num_res, dtype=bool)
+                for camid_in_c_ in cluster_to_camera_smart_[c]:
+                    #print(indices_in_cluster.shape, " ", indices_in_cluster.shape, " ", camid_in_c_)
+                    indices_in_cluster = np.logical_or(indices_in_cluster, camera_indices_==camid_in_c_)
+                res_indices_in_cluster = np.arange(num_res)[indices_in_cluster]
+                print(res_indices_in_cluster.shape," ", res_indices_in_cluster)
+            else:
+                indices_in_cluster = np.logical_and( # indices of residums in cluster, unclear why indirection below or sorting is needed?
+                camera_indices_[res_sorted] <= cluster_to_camera_[c][-1],
+                camera_indices_[res_sorted] >= cluster_to_camera_[c][0],
+                )
+                res_indices_in_cluster = res_sorted[indices_in_cluster]
+                print(res_indices_in_cluster.shape," ", res_indices_in_cluster)
 
-    #res_toadd_to_c_, point_indices_already_covered_, covered_landmark_indices_c_, num_res_per_c_ = \
-    #    process_cluster_lib(num_lands, num_res, kClusters, point_indices_in_cluster_, res_indices_in_cluster_, point_indices)
+            res_indices_in_cluster = np.sort(res_indices_in_cluster)
+            # res_indices_in_cluster are the residuums of th e cameras ids in cluster, so map cam id to res id
+            points_2d_in_cluster_.append(points_2d_[res_indices_in_cluster])
+            camera_indices_in_cluster_.append(camera_indices_[res_indices_in_cluster])
+            point_indices_in_cluster_.append(point_indices_[res_indices_in_cluster])
+            res_indices_in_cluster_.append(res_indices_in_cluster.copy())
 
-    (res_toadd_to_c_, point_indices_already_covered_, covered_landmark_indices_c_, num_res_per_c) = \
-        process_clusters(num_lands, num_res, kClusters, \
-            point_indices_in_cluster_, point_indices_, res_indices_in_cluster_)
+        # based on this i must add lms(and res) to cluster EXTRA.
+        # each lm should have one cluster with all cam ids (+res) it occurs in
+        # notion of 
+        # 1. find incomplete lms -> not all res in single cluster. 
+        # 2. lm -> res missing by id (only incomplete)
+        # 3. distribute equally, pick cluster w least res. pick lm with least res to add, add (bunch)
+
+    else:
+        res_indices_in_cluster_ = cluster_covis_lib(kClusters_, camera_indices_, point_indices_)
+        camera_indices_in_cluster_ = []
+        point_indices_in_cluster_ = []
+        points_2d_in_cluster_ = []
+        cluster_to_camera_ = []
+        for c in range(kClusters_):
+            res_indices_in_c_ = np.sort(res_indices_in_cluster_[c])
+            points_2d_in_cluster_.append(points_2d_[res_indices_in_c_])
+            camera_indices_in_cluster_.append(camera_indices_[res_indices_in_c_])
+            point_indices_in_cluster_.append(point_indices_[res_indices_in_c_])
+            cluster_to_camera_.append(np.unique(camera_indices_[res_indices_in_c_]))
+
+            #res_indices_in_cluster_.append(res_indices_in_cluster.copy())
+
+
+    res_toadd_to_c_, point_indices_already_covered_, covered_landmark_indices_c_, num_res_per_c_ = \
+        process_cluster_lib(num_lands, num_res, kClusters, point_indices_in_cluster_, res_indices_in_cluster_, point_indices)
+
+    # (res_toadd_to_c_, point_indices_already_covered_, covered_landmark_indices_c_, num_res_per_c) = \
+    #     process_clusters(num_lands, num_res, kClusters, \
+    #         point_indices_in_cluster_, point_indices_, res_indices_in_cluster_)
     
     for ci in range(kClusters):
         print(ci, " adding " , res_toadd_to_c_[ci].shape, " residuals to ", \
@@ -2595,7 +2632,7 @@ x0_p = x0_p.reshape(n_cameras, 9)
 
 # 1. take problem and split, sort indices by camera, define local global map and test it.
 startL = 1
-kClusters = 5 # 6 cluster also not bad at all !
+kClusters = 10 # 6 cluster also not bad at all !
 innerIts = 1  # change to get an update, not 1 iteration
 its = 100
 cost = np.zeros(kClusters)
@@ -2609,6 +2646,8 @@ Fs = []
 Fes = []
 rnaBufferSize = 6
 lib = ctypes.CDLL("./libprocess_clusters.so")
+init_lib()
+baseline_clustering = False
 # DRE:
 # f(x) + 1/2 (v^T Vlk * v - v^T 2 * Vlk (2x - sk) ) for x=u/v. Does not look right .. haeh
 # 
@@ -2665,7 +2704,7 @@ else:
         additional_point_indices_in_cluster, additional_camera_indices_in_cluster, additional_points_2d_in_cluster, point_indices_already_covered_c, covered_landmark_indices_c,
         L_in_cluster,
     ) = cluster_by_camera_gpt(
-        camera_indices, points_3d, points_2d, point_indices, kClusters, startL
+        camera_indices, points_3d, points_2d, point_indices, kClusters, startL, baseline_clustering
     )
 
 if write_cluster:
@@ -2696,7 +2735,7 @@ if multiCluster:
         additional_point_indices_in_cluster_2, additional_camera_indices_in_cluster_2, additional_points_2d_in_cluster_2, point_indices_already_covered_c_2, covered_landmark_indices_c_2,
         L_in_cluster_2,
     ) = cluster_by_camera_gpt(
-        camera_indices, points_3d, points_2d, point_indices, kClusters, startL, init_cam_id=30, init_lm_id=5, seed=1234
+        camera_indices, points_3d, points_2d, point_indices, kClusters, startL, baseline_clustering = True, init_cam_id=30, init_lm_id=5, seed=1234
     )
     Vl_in_cluster_2 = [0 for x in range(kClusters)] # dummy fill list
 
