@@ -13,6 +13,7 @@ from numpy.linalg import eigvalsh
 # idea reimplement projection with torch to get a jacobian -> numpy then
 import torch
 import math
+import ctypes
 from torch.autograd.functional import jacobian
 from torch import tensor, from_numpy
 
@@ -21,10 +22,10 @@ BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/ladybug/"
 FILE_NAME = "problem-49-7776-pre.txt.bz2"
 FILE_NAME = "problem-73-11032-pre.txt.bz2"
 
-BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/dubrovnik/"
+#BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/dubrovnik/"
 # FILE_NAME = "problem-16-22106-pre.txt.bz2"
-FILE_NAME = "problem-356-226730-pre.txt.bz2" # large dub, play with ideas: cover, etc
-FILE_NAME = "problem-237-154414-pre.txt.bz2"
+#FILE_NAME = "problem-356-226730-pre.txt.bz2" # large dub, play with ideas: cover, etc
+#FILE_NAME = "problem-237-154414-pre.txt.bz2"
 
 URL = BASE_URL + FILE_NAME
 
@@ -58,6 +59,77 @@ def read_bal_data(file_name):
 
     return camera_params, points_3d_, camera_indices_, point_indices_, points_2d_
 
+def fillPythonVec(out, sizes_out, kClusters):
+    ret = []
+    start = 0
+    for i__ in range (kClusters):
+        tmp = []
+        k = 0
+        #print("lib.vector_get(sizes_out, i) ", i__, " : ", lib.vector_get(sizes_out, i__))
+        for j in range(lib.vector_get(sizes_out, i__)):
+            tmp.append(lib.vector_get(out, start+j))
+            k += 1
+        start += k
+        ret.append(np.array(tmp))
+        #print(i__, " fillPythonVec ", len(ret), " ", ret[i__].shape)
+    return ret
+
+def fillPythonVecSimple(out):
+    tmp = []
+    for j in range(lib.vector_size(out)):
+        tmp.append(lib.vector_get(out, j))
+    return np.array(tmp)
+
+def init_lib():
+    lib.new_vector.restype = ctypes.c_void_p
+    lib.new_vector.argtypes = None
+    lib.new_vector_of_size.restype = ctypes.c_void_p
+    lib.new_vector_of_size.argtypes = [ctypes.c_int]
+    lib.vector_set.restype = None
+    lib.vector_set.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_int]
+    lib.vector_get.restype = ctypes.c_int
+    lib.vector_get.argtypes = [ctypes.c_void_p, ctypes.c_int]
+    lib.vector_size.restype = ctypes.c_int
+    lib.vector_size.argtypes = [ctypes.c_void_p]
+    lib.new_vector_by_copy.restype = ctypes.c_void_p
+    lib.new_vector_by_copy.argtypes = [ctypes.POINTER(ctypes.c_int), ctypes.c_int]
+    lib.delete_vector.restype = None
+    lib.delete_vector.argtypes = [ctypes.c_void_p]
+    lib.process_clusters_test.restype = None
+
+    lib.process_clusters.restype = None #[ctypes.c_void_p, ctypes.c_void_p]
+    lib.process_clusters.argtypes = [ctypes.c_int, ctypes.c_int, ctypes.c_int,
+                                    ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,
+                                    ctypes.c_void_p, ctypes.c_void_p,
+                                    ctypes.c_void_p, ctypes.c_void_p, # out:
+                                    ctypes.c_void_p, ctypes.c_void_p,
+                                    ctypes.c_void_p, ctypes.c_void_p,
+                                    ctypes.c_void_p]
+
+    lib.cluster_covis.restype = None
+    lib.cluster_covis.argtypes = [ctypes.c_int, ctypes.c_void_p, ctypes.c_void_p,
+                                  ctypes.c_void_p, ctypes.c_void_p] # out]
+
+def cluster_covis_lib(kClusters, camera_indices__, point_indices__):
+    c_kClusters_ = ctypes.c_int(kClusters)
+
+    camera_indices_list = camera_indices__.tolist()
+    point_indices_list = point_indices__.tolist()
+
+    #c_point_indices_ptr = (ctypes.c_int * len(point_indices__))(*point_indices__)
+    c_point_indices_ptr = (ctypes.c_int * len(point_indices_list))(*point_indices_list)
+    c_point_indices_cpp = lib.new_vector_by_copy(c_point_indices_ptr, len(c_point_indices_ptr))
+    c_cam_indices_ptr = (ctypes.c_int * len(camera_indices_list))(*camera_indices_list)
+    c_cam_indices_cpp = lib.new_vector_by_copy(c_cam_indices_ptr, len(c_cam_indices_ptr))
+
+    res_to_cluster_c_out = lib.new_vector()
+    res_to_cluster_c_sizes = lib.new_vector_of_size(kClusters)
+
+    lib.cluster_covis(c_kClusters_, c_cam_indices_cpp, c_point_indices_cpp, res_to_cluster_c_out, res_to_cluster_c_sizes)
+
+    res_indices_in_cluster__ = fillPythonVec(res_to_cluster_c_out, res_to_cluster_c_sizes, kClusters)
+    return res_indices_in_cluster__
+    # copy data, free c++ mem
 
 def AngleAxisRotatePoint(angleAxis, pt):
     theta2 = (angleAxis * angleAxis).sum(dim=1)
@@ -679,12 +751,110 @@ def cluster_by_camera(
         points_2d_in_cluster_.append(points_2d_[res_indices_in_cluster])
         camera_indices_in_cluster_.append(camera_indices_[res_indices_in_cluster])
         point_indices_in_cluster_.append(point_indices_[res_indices_in_cluster])
+        print("cams in ",c," " , np.unique(camera_indices_[res_indices_in_cluster]))
 
     points_3d_in_cluster_ = []
     L_in_cluster_ = []
     for _ in range(kClusters_):
         points_3d_in_cluster_.append(points_3d_.copy())
         L_in_cluster_.append(startL_)
+    return (
+        camera_indices_in_cluster_,
+        point_indices_in_cluster_,
+        points_2d_in_cluster_,
+        cluster_to_camera_,
+        points_3d_in_cluster_,
+        L_in_cluster_,
+    )
+
+def cluster_by_camera_smarter(
+    camera_indices_, points_3d_, points_2d_, point_indices_, kClusters_, startL_,init_cam_id=0, init_lm_id=0
+):
+
+    cluster_to_camera_ = [] # list of sets
+    cluster_to_landmarks_ = []
+    num_cams = np.unique(camera_indices_).shape[0]
+    num_res = camera_indices_.shape[0]
+
+    baseline_clustering = False #True
+
+    if baseline_clustering:
+
+        # make map cam id to landmark indices seen by cam as set.
+        # smarter might be to pick cam 'furthest' apart
+        cam_idx_to_lms = [ set(point_indices_[camera_indices_ == cam_idx]) for cam_idx in range(num_cams) ]
+
+        # init pick
+        cameras_available = set(range(num_cams))
+        #print("cameras_available ", cameras_available, " num_cams ", num_cams)
+        cluster_to_camera_.append(set([init_cam_id])) # cam 0 to set 0
+        cluster_to_landmarks_.append(cam_idx_to_lms[init_lm_id])
+        cameras_available.remove(init_cam_id)
+        for i in range(kClusters_-1):
+            best_cam = min(cameras_available, key=lambda candidate: sum(np.random.normal(0,1,1)**2 + len(set.intersection(cluster_to_landmarks_[set_id], cam_idx_to_lms[candidate])) for set_id in range(len(cluster_to_camera_))))
+            cluster_to_camera_.append(set([best_cam]))
+            cameras_available.remove(best_cam)
+            cluster_to_landmarks_.append(cam_idx_to_lms[best_cam])
+        # init done
+
+        while cameras_available:
+            cid = np.argmin(np.array([len(x) for x in cluster_to_landmarks_]))
+            best_score = 0
+            best_cam = -1
+            for candidate in cameras_available:
+                overlap = len(set.intersection(cluster_to_landmarks_[cid], cam_idx_to_lms[candidate]))
+                total_overlap = sum(len(set.intersection(cluster_to_landmarks_[set_id], cam_idx_to_lms[candidate])) for set_id in range(len(cluster_to_camera_)))
+                score = overlap / (total_overlap + 1)
+                if score > best_score:
+                    best_score = score
+                    best_cam = candidate
+            cluster_to_camera_[cid].add(best_cam)
+            cameras_available.remove(best_cam)
+            cluster_to_landmarks_[cid] = cluster_to_landmarks_[cid].union(cam_idx_to_lms[best_cam])
+            #print("cluster_to_camera_smart_ mid ", cluster_to_camera_smart_)
+        #print("cluster_to_camera_smart_ end ", cluster_to_camera_smart_)
+
+        camera_indices_in_cluster_ = []
+        point_indices_in_cluster_ = []
+        points_2d_in_cluster_ = []
+        res_indices_in_cluster_ = []
+        for c in range(kClusters_):
+            #res_indices_in_cluster = np.sort(indices_in_cluster)
+            indices_in_cluster = np.zeros(num_res, dtype=bool)
+            for camid_in_c_ in cluster_to_camera_[c]:
+                #print(indices_in_cluster.shape, " ", indices_in_cluster.shape, " ", camid_in_c_)
+                indices_in_cluster = np.logical_or(indices_in_cluster, camera_indices_==camid_in_c_)
+            res_indices_in_cluster = np.arange(num_res)[indices_in_cluster]
+            print(res_indices_in_cluster.shape," ", res_indices_in_cluster)
+
+            res_indices_in_cluster = np.sort(res_indices_in_cluster)
+            # res_indices_in_cluster are the residuums of th e cameras ids in cluster, so map cam id to res id
+            points_2d_in_cluster_.append(points_2d_[res_indices_in_cluster])
+            camera_indices_in_cluster_.append(camera_indices_[res_indices_in_cluster])
+            point_indices_in_cluster_.append(point_indices_[res_indices_in_cluster])
+            res_indices_in_cluster_.append(res_indices_in_cluster.copy())
+            print("cams in ",c," " , np.unique(camera_indices_[res_indices_in_cluster]))
+    else:
+        res_indices_in_cluster_ = cluster_covis_lib(kClusters_, camera_indices_, point_indices_)
+        camera_indices_in_cluster_ = []
+        point_indices_in_cluster_ = []
+        points_2d_in_cluster_ = []
+        cluster_to_camera_ = []
+        for c in range(kClusters_):
+            res_indices_in_c_ = np.sort(res_indices_in_cluster_[c])
+            points_2d_in_cluster_.append(points_2d_[res_indices_in_c_])
+            camera_indices_in_cluster_.append(camera_indices_[res_indices_in_c_])
+            point_indices_in_cluster_.append(point_indices_[res_indices_in_c_])
+            cluster_to_camera_.append(np.unique(camera_indices_[res_indices_in_c_]))
+
+            #res_indices_in_cluster_.append(res_indices_in_cluster.copy())
+
+    points_3d_in_cluster_ = []
+    L_in_cluster_ = []
+    for _ in range(kClusters_):
+        points_3d_in_cluster_.append(points_3d_.copy())
+        L_in_cluster_.append(startL_)
+
     return (
         camera_indices_in_cluster_,
         point_indices_in_cluster_,
@@ -891,7 +1061,11 @@ def primal_cost(
     min_cam_index_in_c = np.min(camera_indices_in_cluster_)
     points_3d_in_c = points_3d_in_cluster_[unique_points_in_c_]
 
-    camera_indices_ = camera_indices_in_cluster_ - min_cam_index_in_c
+    #camera_indices_ = camera_indices_in_cluster_ - min_cam_index_in_c
+    camera_indices_ = np.zeros(camera_indices_in_cluster_.shape[0], dtype=int)
+    for i in range(cameras_indices_in_c_.shape[0]):
+        camera_indices_[camera_indices_in_cluster_ == cameras_indices_in_c_[i]] = i
+
     point_indices_ = point_indices_in_c
     torch_points_2d = torch_points_2d_in_c
     cameras_in = cameras_in_c
@@ -1367,6 +1541,12 @@ def updateCluster(
 ):
     cameras_indices_in_c_ = np.unique(camera_indices_in_cluster_)
     cameras_in_c = x0_p_[cameras_indices_in_c_]
+    #local_camera_indices_in_cluster = camera_indices_in_cluster_ - min_cam_index_in_c
+    # alternative 
+    local_camera_indices_in_cluster = np.zeros(camera_indices_in_cluster_.shape[0], dtype=int)
+    for i in range(cameras_indices_in_c_.shape[0]):
+        local_camera_indices_in_cluster[camera_indices_in_cluster_ == cameras_indices_in_c_[i]] = i
+
     # torch_points_2d_in_c = torch_points_2d[points_2d_in_cluster[ci], :]
     torch_points_2d_in_c = from_numpy(points_2d_in_cluster_)
     torch_points_2d_in_c.requires_grad_(False)
@@ -1394,7 +1574,7 @@ def updateCluster(
     landmark_s_in_c = landmark_s_in_cluster_[unique_points_in_c_]
 
     cost_, x0_p_c_, x0_l_c_, Lnew_c_, Vl_c_, delta_l_c_ = bundle_adjust(
-        camera_indices_in_cluster_ - min_cam_index_in_c,
+        local_camera_indices_in_cluster,
         point_indices_in_c,
         landmarks_only_in_cluster_, # input those lms not present anywhere else to relax hold on those.
         torch_points_2d_in_c,
@@ -1633,6 +1813,9 @@ lastCostDRE = 1e20
 basic_version = True # accelerated or basic
 sequential = True
 linearize_at_last_solution = False # linearize at uk or v. maybe best to check energy. at u or v. DRE:
+lib = ctypes.CDLL("./libprocess_clusters.so")
+init_lib()
+
 # f(x) + 1/2 (v^T Vlk * v - v^T 2 * Vlk (2x - sk) ) for x=u/v. Does not look right .. haeh
 # 
 # The Lagrangian is sum_k f_k (x_k^t) - <mu^t_k, x_k^t - Bk z^t> + rho_k/2 | Bk z^t-x_k^t |^2
@@ -1647,16 +1830,28 @@ linearize_at_last_solution = False # linearize at uk or v. maybe best to check e
 globalSingleLandmarksA_in_c = [0 for x in range(kClusters)]
 globalSingleLandmarksB_in_c = [0 for x in range(kClusters)]
 
-(
-    camera_indices_in_cluster,
-    point_indices_in_cluster,
-    points_2d_in_cluster,
-    cluster_to_camera,
-    points_3d_in_cluster,
-    L_in_cluster,
-) = cluster_by_camera(
-    camera_indices, points_3d, points_2d, point_indices, kClusters, startL
-)
+if False:
+    (
+        camera_indices_in_cluster,
+        point_indices_in_cluster,
+        points_2d_in_cluster,
+        cluster_to_camera,
+        points_3d_in_cluster,
+        L_in_cluster,
+    ) = cluster_by_camera(
+        camera_indices, points_3d, points_2d, point_indices, kClusters, startL
+    )
+else:
+    (
+        camera_indices_in_cluster,
+        point_indices_in_cluster,
+        points_2d_in_cluster,
+        cluster_to_camera,
+        points_3d_in_cluster,
+        L_in_cluster,
+    ) = cluster_by_camera_smarter(
+        camera_indices, points_3d, points_2d, point_indices, kClusters, startL, init_cam_id=0, init_lm_id=0
+    )
 
 print(L_in_cluster)
 Vl_in_cluster = [0 for x in range(kClusters)] # dummy fill list

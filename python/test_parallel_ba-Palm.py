@@ -1047,7 +1047,6 @@ def init_lib():
     lib.cluster_covis.argtypes = [ctypes.c_int, ctypes.c_void_p, ctypes.c_void_p,
                                   ctypes.c_void_p, ctypes.c_void_p] # out]
 
-
 def process_cluster_lib(num_lands_, num_res_, kClusters__, point_indices_in_cluster__, res_indices_in_cluster__, point_indices__):
     # Flatten the nested lists and get the sizes of the sublists
     point_indices_in_cluster_flat = [item for sublist in point_indices_in_cluster__ for item in sublist]
@@ -1159,7 +1158,7 @@ def cluster_by_camera_gpt(
         cluster_to_camera_smart_.append(set([init_cam_id])) # cam 0 to set 0
         cluster_to_landmarks_.append(cam_idx_to_lms[init_lm_id])
         cameras_available.remove(init_cam_id)
-        for i in range(kClusters-1):
+        for i in range(kClusters_-1):
             best_cam = min(cameras_available, key=lambda candidate: sum(np.random.normal(0,1,1)**2 + len(set.intersection(cluster_to_landmarks_[set_id], cam_idx_to_lms[candidate])) for set_id in range(len(cluster_to_camera_smart_))))
             cluster_to_camera_smart_.append(set([best_cam]))
             cameras_available.remove(best_cam)
