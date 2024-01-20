@@ -29,13 +29,17 @@ BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/dubrovnik/"
 #FILE_NAME = "problem-16-22106-pre.txt.bz2"
 FILE_NAME = "problem-356-226730-pre.txt.bz2"
 #FILE_NAME = "problem-237-154414-pre.txt.bz2"
+FILE_NAME = "problem-173-111908-pre.txt.bz2" # ex where power its are worse
+
 
 #BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/venice/"
 #FILE_NAME = "problem-52-64053-pre.txt.bz2"
-FILE_NAME = "problem-1778-993923-pre.txt.bz2"
+#FILE_NAME = "problem-1778-993923-pre.txt.bz2"
 
-# BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/final/"
-# FILE_NAME = "problem-93-61203-pre.txt.bz2"
+BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/final/"
+FILE_NAME = "problem-93-61203-pre.txt.bz2"
+FILE_NAME = "problem-871-527480-pre.txt.bz2"
+FILE_NAME = "problem-394-100368-pre.txt.bz2"
 
 URL = BASE_URL + FILE_NAME
 old_c = 0
@@ -1250,7 +1254,8 @@ bfgs_ps = np.zeros([bfgs_mem, n])
 bfgs_rhos = np.zeros([bfgs_mem, 1])
 
 # compute f(x0) and Jacobians given x0
-useExtInCost = False # with using extrapolation, does it lead to lower cost, how much?
+# do not understand can elad to hicup despite being better per step.
+useExtInCost = True # with using extrapolation, does it lead to lower cost, how much? -- must use with TR as well?
 # FILE_NAME = "problem-1778-993923-pre.txt.bz2"
 # 50 it. cost ext    3394330.965571229 with
 # todo: find better scheduling
@@ -1258,7 +1263,7 @@ L0 = 1.0 # 30 or 40, 5 is ok? for RNA? debug from 20 at 80 bfgs fails, from 60 f
 # maybe restart if extr totally off?
 # either totally off at small energies == not quadratic at all?
 L = L0 # ? really unsure L=3 start works but then ..
-iterations = 50
+iterations = 20
 verbose = False
 debug = False
 useInvSolver = False
@@ -1390,9 +1395,9 @@ while it < iterations:
         # Ax = b <-> K A K x = K b, then return K x since K^-1 x is computed as solution of [K A K] x = K b
     else:
         #delta_p = - solveByGDPolak(Ul, W, Vli, bS, powerits, L, 0.9)
-        #delta_p = - solveByGDNesterov(Ul, W, Vli, bS, powerits, L)
+        delta_p = - solveByGDNesterov(Ul, W, Vli, bS, powerits, L)
         #delta_p = - solveByGDPower(Ul,W, Vli, bS, powerits, gamma/L)
-        delta_p = - solvePowerIts(Ul,W, Vli, bS, powerits)
+        #delta_p = - solvePowerIts(Ul,W, Vli, bS, powerits)
         #delta_p = - solveByGD(Ul, W, Vli, bS, powerits, gamma/L) # likely does not work well
 
     if verbose:
@@ -1549,9 +1554,12 @@ while it < iterations:
 
         fx1 = funx0_st1(camera_ext[camera_indices[:]], point_ext[point_indices[:]], torch_points_2d[:,:])
         costExt = np.sum(fx1.numpy()**2)
-        print(it, "it. cost ext   ", costExt)
+        delta_ext_p = extr[:n_cameras*9] - (x0_p - delta_p)
+        delta_ext_l = extr[n_cameras*9:] - (x0_l - delta_l)
+        costExtPenalty = costExt + L * (delta_ext_p.dot(JtJDiag * delta_ext_p) + delta_ext_l.dot(JltJlDiag * delta_ext_l))
+        print(it, "it. cost ext   ", round(costExt), "      with penalty ", round(costExtPenalty))
         #L = max(L0, L/2)
-        if useExtInCost and costExt < costEndPenalty: # todo: + penalty again
+        if useExtInCost and costExt < costEnd and costExtPenalty < costStart: # todo: + penalty again
             x0 = extr
             x0_p = x0[:9 * n_cameras]
             x0_l = x0[9 * n_cameras:]
