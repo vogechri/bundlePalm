@@ -9,7 +9,7 @@ from scipy.sparse import csr_array, csr_matrix, issparse
 from scipy.sparse import diags as diag_sparse
 from scipy.sparse.linalg import inv as inv_sparse
 from numpy.linalg import pinv as inv_dense
-from numpy.linalg import eigvalsh 
+from numpy.linalg import eigvalsh
 # idea reimplement projection with torch to get a jacobian -> numpy then
 import torch
 import math
@@ -26,6 +26,10 @@ FILE_NAME = "problem-73-11032-pre.txt.bz2"
 # FILE_NAME = "problem-16-22106-pre.txt.bz2"
 #FILE_NAME = "problem-356-226730-pre.txt.bz2" # large dub, play with ideas: cover, etc
 #FILE_NAME = "problem-237-154414-pre.txt.bz2"
+
+BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/trafalgar/"
+# FILE_NAME = "problem-21-11315-pre.txt.bz2"
+FILE_NAME = "problem-257-65132-pre.txt.bz2"
 
 URL = BASE_URL + FILE_NAME
 
@@ -673,7 +677,7 @@ def blockEigenvalue(M, bs):
         for i in range(int(M.data.shape[0] / bs2)):
             mat = M.data[bs2 * i : bs2 * i + bs2].reshape(bs, bs)
             # print(i, " ", mat)
-            evs = eigvalsh(mat)  # inv or pinv?
+            evs = eigvalsh(mat)
             Ei[bs*i:bs*i+bs] = evs[bs-1]
         Ei = diag_sparse(Ei)
     else:
@@ -712,7 +716,7 @@ def solvePowerIts(Ul, W, Vli, bS, m_):
     xk = Uli * bS
     g = xk
 
-    for _ in range(m_):
+    for it in range(m_):
         # here uli^1/2 * M uli^1/2 * 'uli^1/2 * g' could be a symmetric split.
         # to the power of k uli^1/2 * uli^1/2 = uli
         g = Uli * (W * (Vli * (W.transpose() * g)))
@@ -1115,7 +1119,7 @@ def bundle_adjust(
     successfull_its_=1,
 ):
     # print("landmarks_only_in_cluster_  ", landmarks_only_in_cluster_, " ", np.sum(landmarks_only_in_cluster_), " vs ", np.sum(1 - landmarks_only_in_cluster_) )
-    newForUnique = True #False
+    newForUnique = True
     blockEigMult = 1e-4 # 1e-3 was used before
     normal_case_ = True # No L * JltJl at all. Does not work
     # define x0_t, x0_p, x0_l, L # todo: missing Lb: inner L for bundle, Lc: to fix duplicates
@@ -1132,7 +1136,7 @@ def bundle_adjust(
     n_cameras_ = int(x0_p_.shape[0] / 9)
     n_points_ = int(x0_l_.shape[0] / 3)
     powerits = 20 # kind of any value works here? > =5?
-    tr_eta_1 = 0.9
+    tr_eta_1 = 0.8
     tr_eta_2 = 0.25
 
     it_ = 0
@@ -1804,7 +1808,7 @@ x0_p = x0_p.reshape(n_cameras, 9)
 
 # 1. take problem and split, sort indices by camera, define local global map and test it.
 startL = 1
-kClusters = 3
+kClusters = 5
 innerIts = 1  # change to get an update, not 1 iteration
 its = 100
 cost = np.zeros(kClusters)
@@ -1976,11 +1980,13 @@ else:
     for it in range(its):
 
         steplength = 0
-        tau = 2
+        tau = 1 # todo sqrt(2), not sure what is happening here.
         for ci in range(kClusters):
             landmark_s_in_cluster_pre[ci] = landmark_s_in_cluster[ci] + tau * (landmark_v - points_3d_in_cluster[ci]) # update s = s + v - u.
             steplength += np.linalg.norm(landmark_s_in_cluster_pre[ci] - landmark_s_in_cluster[ci], 2)
-            #steplength += (landmark_s_in_cluster_pre[ci] - landmark_s_in_cluster[ci]).dot(Vl_all * (landmark_s_in_cluster_pre[ci] - landmark_s_in_cluster[ci]))
+            update_flat = (landmark_v - points_3d_in_cluster[ci]).flatten()
+            #steplength += update_flat.dot(Vl_all * update_flat)
+        #steplength = np.sqrt(steplength)
 
         # debugging cost block ################
         if False:
@@ -2017,14 +2023,16 @@ else:
             #bfgs_r[ci * 3 * n_points: (ci+1) * 3 * n_points] = (landmark_s_in_cluster_pre[ci] - landmark_s_in_cluster[ci]).flatten() # with tau NO likely due to + h * nab
             rna_s[ci * 3 * n_points: (ci+1) * 3 * n_points] = landmark_s_in_cluster_pre[ci].flatten()
 
-        use_bfgs = False
+        use_bfgs = False # maybe full u,v?
         if use_bfgs:
             dk = BFGS_direction(bfgs_r, bfgs_ps, bfgs_qs, bfgs_rhos, it, bfgs_mem, bfgs_mu)
             dk_stepLength = np.linalg.norm(dk, 2)
+            # step length by using Vl, also above computing steplength!
             #dk_stepLength = 0
             for ci in range(kClusters): #bfgs_r = u-v
                 bfgs_r[ci * 3 * n_points: (ci+1) * 3 * n_points] = landmark_v.flatten() - points_3d_in_cluster[ci].flatten()
                 #dk_stepLength += (bfgs_r[ci * 3 * n_points: (ci+1) * 3 * n_points]).dot(Vl_all * (bfgs_r[ci * 3 * n_points: (ci+1) * 3 * n_points]))
+            #dk_stepLength = np.sqrt(dk_stepLength)
             multiplier = steplength / dk_stepLength
         else:
             L_rna = max(L_in_cluster)

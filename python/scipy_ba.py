@@ -18,8 +18,33 @@ FILE_NAME = "problem-1778-993923-pre.txt.bz2"
 
 BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/dubrovnik/"
 #FILE_NAME = "problem-16-22106-pre.txt.bz2"
-FILE_NAME = "problem-356-226730-pre.txt.bz2"
-
+#FILE_NAME = "problem-356-226730-pre.txt.bz2"
+FILE_NAME = "problem-173-111908-pre.txt.bz2"
+# n_cameras: 173
+# n_points: 111908
+# Total number of parameters: 337281
+# Total number of residuals: 1269140
+# Residuum initial  [-7.42211774  8.14923825 -0.80491448 ... -0.25041295 -0.16280334
+#   0.39991869]   (1269140,)
+# Residuum equals initially  120750865.30234598
+#    Iteration     Total nfev        Cost      Cost reduction    Step norm     Optimality
+#        0              1         6.0375e+07                                    1.47e+08
+#        1              2         2.8597e+05      6.01e+07       2.91e+05       7.17e+06
+#        2              3         2.6250e+05      2.35e+04       3.70e+05       6.22e+06
+#        3              4         2.6215e+05      3.52e+02       4.15e+04       3.35e+05
+#        4              5         2.6214e+05      1.08e+01       2.79e+04       5.27e+04
+#        5              6         2.6213e+05      9.06e+00       2.68e+04       7.95e+03
+#        6              7         2.6212e+05      4.56e+00       1.98e+04       4.55e+03
+#        7              8         2.6212e+05      4.49e+00       2.05e+04       4.00e+03
+#        8              9         2.6212e+05      3.37e+00       1.73e+04       2.70e+03
+#        9             10         2.6211e+05      2.95e+00       1.29e+04       1.67e+03
+#       10             11         2.6211e+05      1.62e+00       4.06e+03       1.32e+03
+# `ftol` termination condition is satisfied.
+# Function evaluations 11, initial cost 6.0375e+07, final cost 2.6211e+05, first-order optimality 1.32e+03.
+# Optimization took 331 seconds
+# Residuum final  [ 0.79748542 -0.09474595  0.10791841 ...  0.00582406  0.00141867
+#  -0.00343391]   (1269140,)
+# Residuum equals finally  524221.45726861514
 
 URL = BASE_URL + FILE_NAME
 
