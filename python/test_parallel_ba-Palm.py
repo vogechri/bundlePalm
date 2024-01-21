@@ -25,13 +25,14 @@ FILE_NAME = "problem-138-19878-pre.txt.bz2"
 
 # BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/trafalgar/"
 # FILE_NAME = "problem-21-11315-pre.txt.bz2"
+FILE_NAME = "problem-257-65132-pre.txt.bz2"
 
 # BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/dubrovnik/"
 # FILE_NAME = "problem-16-22106-pre.txt.bz2"
 # FILE_NAME = "problem-135-90642-pre.txt.bz2"
 #FILE_NAME = "problem-173-111908-pre.txt.bz2"
 #FILE_NAME = "problem-237-154414-pre.txt.bz2"
-FILE_NAME = "problem-356-226730-pre.txt.bz2" # large dub, play with ideas: cover, etc
+#FILE_NAME = "problem-356-226730-pre.txt.bz2" # large dub, play with ideas: cover, etc
 # point_indices_to_complete  (135668,)
 # 0  point_indices_already_covered  (7013,)
 # 1  point_indices_already_covered  (11267,)
@@ -1763,7 +1764,8 @@ def local_bundle_adjust(
                 L = L / 2
     print("LfkDiagonal ", LfkDiagonal, " L ", L)
 
-    return costEnd, x0_p_.numpy(), x0_l_[covered_landmark_indices_,:].numpy(), L, L * JltJlDiag + 1e-12 * Vl
+    L_out = np.minimum(L_in_cluster_ * 2, L) # not clear if generally ok, or 2 or 4 should be used.
+    return costEnd, x0_p_.numpy(), x0_l_[covered_landmark_indices_,:].numpy(), L_out, L * JltJlDiag + 1e-12 * Vl
 
 
 # TODO: to run multiple iterations in distributed version we need to use f(x) + L/2|x -  z|
@@ -2405,15 +2407,19 @@ def palm_f(x0_p_, camera_indices_in_cluster_, point_indices_in_cluster_,
         L_in_cluster_[ci] = Lnew_c_
         Vl_in_cluster_[ci] = Vl_c_
         landmark_v_[update_point_indices_in_c_, :] = x0_l_c_.copy() # global ensure disjoint
-        use_inertia = False # bad
+        #use_inertia = False # 19 ==== f(v)=  204322  and  244836
+        use_inertia = False # sometime ok, not sure how much. range: 1 - sqrt(2). Maybe only lm/cam?
+        tau = np.sqrt(1.1)
         if use_inertia:
+            #tau = np.sqrt(1.0) # 1.1: 19 ==== f(v)=  203488  and  243832, without, 1.2 19 ==== f(v)=  206533  and  247554. Fluke L -> 8. This is an issue.
+            # 1.3: 204, 1.4: 205. SQRT(2) 204
             x0_p_[update_cameras_indices_in_c_] = x0_p_[update_cameras_indices_in_c_] + tau * (x0_p_c_- x0_p_[update_cameras_indices_in_c_])
         else:
             x0_p_[update_cameras_indices_in_c_] = x0_p_c_.copy() # this is also instant update.
         if sequential: # can be parallel since all use same input. Then update from outside.
             if use_inertia:
+                #tau = 1 #np.sqrt(1.1) # 19 ==== f(v)=  204300  and  244808
                 for ci in range(kClusters): # update for all
-                    tau = np.sqrt(1.2)
                     points_3d_in_cluster_[ci][update_point_indices_in_c_, :] = points_3d_in_cluster_[ci][update_point_indices_in_c_, :] \
                         + tau * (x0_l_c_ - points_3d_in_cluster_[ci][update_point_indices_in_c_, :])
             else:
@@ -2631,9 +2637,9 @@ x0_p = x0_p.reshape(n_cameras, 9)
 
 # 1. take problem and split, sort indices by camera, define local global map and test it.
 startL = 1
-kClusters = 10 # 6 cluster also not bad at all !
+kClusters = 3 # 6 cluster also not bad at all !
 innerIts = 1  # change to get an update, not 1 iteration
-its = 100
+its = 20
 cost = np.zeros(kClusters)
 lastCost = 1e20
 lastCostDRE = 1e20
@@ -3015,7 +3021,7 @@ else:
         if use_bfgs:
             dk = BFGS_direction(bfgs_r, bfgs_ps, bfgs_qs, bfgs_rhos, it, bfgs_mem, bfgs_mu)
             dk_stepLength = np.linalg.norm(dk, 2)
-            multiplier = steplength / dk_stepLength
+            multiplier = steplength / dk_stepLength # wrt Vl
         else:
             Gs, Fs, Fes, dk = RNA(Gs, Fs, rna_s, bfgs_r, it, rnaBufferSize, Fes, bfgs_r, lamda = 1)
             dk = dk - (rna_s - bfgs_r)

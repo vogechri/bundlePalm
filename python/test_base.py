@@ -21,9 +21,11 @@ BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/ladybug/"
 #FILE_NAME = "problem-49-7776-pre.txt.bz2"
 #FILE_NAME = "problem-73-11032-pre.txt.bz2"
 FILE_NAME = "problem-138-19878-pre.txt.bz2"
+FILE_NAME = "problem-646-73584-pre.txt.bz2"
 
-# BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/trafalgar/"
+BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/trafalgar/"
 # FILE_NAME = "problem-21-11315-pre.txt.bz2"
+FILE_NAME = "problem-257-65132-pre.txt.bz2"
 
 BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/dubrovnik/"
 #FILE_NAME = "problem-16-22106-pre.txt.bz2"
@@ -39,7 +41,14 @@ FILE_NAME = "problem-173-111908-pre.txt.bz2" # ex where power its are worse
 BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/final/"
 FILE_NAME = "problem-93-61203-pre.txt.bz2"
 FILE_NAME = "problem-871-527480-pre.txt.bz2"
-FILE_NAME = "problem-394-100368-pre.txt.bz2"
+#FILE_NAME = "problem-394-100368-pre.txt.bz2"
+
+BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/trafalgar/"
+# FILE_NAME = "problem-21-11315-pre.txt.bz2"
+FILE_NAME = "problem-257-65132-pre.txt.bz2"
+
+# todo: manipulate / copy make test with 10 & comapre
+# need to solve hanging (n times increasing L, failing TR)
 
 URL = BASE_URL + FILE_NAME
 old_c = 0
@@ -1256,13 +1265,8 @@ bfgs_rhos = np.zeros([bfgs_mem, 1])
 # compute f(x0) and Jacobians given x0
 # do not understand can elad to hicup despite being better per step.
 useExtInCost = True # with using extrapolation, does it lead to lower cost, how much? -- must use with TR as well?
-# FILE_NAME = "problem-1778-993923-pre.txt.bz2"
-# 50 it. cost ext    3394330.965571229 with
-# todo: find better scheduling
-L0 = 1.0 # 30 or 40, 5 is ok? for RNA? debug from 20 at 80 bfgs fails, from 60 fails at larger L forever.
-# maybe restart if extr totally off?
-# either totally off at small energies == not quadratic at all?
-L = L0 # ? really unsure L=3 start works but then ..
+L0 = 1.0 #e-3
+L = L0
 iterations = 20
 verbose = False
 debug = False
@@ -1289,7 +1293,7 @@ gamma = 1/1
 Gs = [] 
 Fs = []
 Fes = []
-rnaBufferSize = 5
+rnaBufferSize = 6
 sit = 0
 updateJacobian = True
 #gamma = 1/10000000000000 # recall 2/(L+mu), adding L*diag as U *(I-X) -> L+=k*L and mu + k*L, 
@@ -1395,9 +1399,9 @@ while it < iterations:
         # Ax = b <-> K A K x = K b, then return K x since K^-1 x is computed as solution of [K A K] x = K b
     else:
         #delta_p = - solveByGDPolak(Ul, W, Vli, bS, powerits, L, 0.9)
-        delta_p = - solveByGDNesterov(Ul, W, Vli, bS, powerits, L)
+        #delta_p = - solveByGDNesterov(Ul, W, Vli, bS, powerits, L)
         #delta_p = - solveByGDPower(Ul,W, Vli, bS, powerits, gamma/L)
-        #delta_p = - solvePowerIts(Ul,W, Vli, bS, powerits)
+        delta_p = - solvePowerIts(Ul,W, Vli, bS, powerits)
         #delta_p = - solveByGD(Ul, W, Vli, bS, powerits, gamma/L) # likely does not work well
 
     if verbose:
@@ -1497,6 +1501,9 @@ while it < iterations:
                 print(" |deltaL - deltaL_old| ", np.linalg.norm(qk,1))
                 print("<deltaL , deltaL_old> ", qk.dot(delta))
                 pk = deltaS
+                #bfgs_mu = diag_sparse(1./(np.concatenate([JtJ.diagonal(), np.fmax(JltJl.diagonal(), 1e-3)])))
+                #bfgs_mu = diag_sparse((np.concatenate([JtJ.diagonal(), np.fmax(JltJl.diagonal(), 1e-3)]))) # rho is 0 here.
+
                 # todo: maybe this gets disturbed by few super large landmark deltas / unconstrained landmarks.
                 # mega todo: of course we cannot fill the buffer before we accept in this case.
                 dk, bfgs_ps, bfgs_qs, bfgs_rhos = BFGS_direction(bfgs_r, pk, qk, bfgs_ps, bfgs_qs, bfgs_rhos, sit-1, bfgs_mem, bfgs_mu)
@@ -1512,21 +1519,29 @@ while it < iterations:
                 #extr = x0 + 0.051 * (dk - delta)
 
                 # line search or check step length in line with L / delta
-                DeltaDiag = diag_sparse(np.concatenate([np.squeeze(JtJ.diagonal()), np.squeeze(JltJl.diagonal())] ))
-                #DeltaDiag = blockInverse(DeltaDiag, 1)
-                #DeltaDiag = diag_sparse(np.ones(n))
-                deltaStepLength = np.linalg.norm(delta,2)
-                dkStepLength = np.linalg.norm(dk,2)
-                # different #extr = x0 + 1. * (deltaStepLength / dkStepLength * dk - delta)
-                extr = x0 + 0.3 * deltaStepLength / dkStepLength * (dk - delta)
-                print("1. deltaStepLength", deltaStepLength, " dkStepLength ", dkStepLength, " ratio ", deltaStepLength / dkStepLength)
-                deltaStepLength = delta.dot(DeltaDiag * delta)
-                dkStepLength = dk.dot(DeltaDiag * dk)
+                if False:
+                    deltaStepLength = np.linalg.norm(delta,2)
+                    dkStepLength = np.linalg.norm(dk,2)
+                    # different #extr = x0 + 1. * (deltaStepLength / dkStepLength * dk - delta)
+                    extr = x0 + 0.3 * deltaStepLength / dkStepLength * (dk - delta)
+                    print("1. deltaStepLength", deltaStepLength, " dkStepLength ", dkStepLength, " ratio ", deltaStepLength / dkStepLength)
+                if False:
+                    DeltaDiag = diag_sparse(np.concatenate([np.squeeze(JtJ.diagonal()), np.squeeze(JltJl.diagonal())] ))
+                    #DeltaDiag = blockInverse(DeltaDiag, 1)
+                    #DeltaDiag = diag_sparse(np.ones(n))
+                    deltaStepLength = delta.dot(DeltaDiag * delta)
+                    dkStepLength = dk.dot(DeltaDiag * dk)
+                if True:
+                    deltaStepLength = np.sqrt(delta_p.dot(JtJDiag * delta_p) + delta_l.dot(JltJlDiag * delta_l))
+                    dkStepLength = np.sqrt(dk[:n_cameras*9].dot(JtJDiag * dk[:n_cameras*9]) + dk[n_cameras*9:].dot(JltJlDiag * dk[n_cameras*9:]))
+                    # step length is 1e-12 or so. ALWAYS WRONG.
+
                 ##extr = x0 + 1. * (deltaStepLength / dkStepLength * dk - delta)
                 print("2. deltaStepLength", deltaStepLength, " dkStepLength ", dkStepLength, " ratio ", deltaStepLength / dkStepLength)
 
                 # works but slow w.o. 239 -> *1 218 normal: 214, dk not pk: 215, 213 l0/l, this does not work with lo/l
                 #extr = x0 + 1 * deltaStepLength / dkStepLength * (dk - delta)
+                extr = x0 + 0.5 * (deltaStepLength / dkStepLength * dk - delta)
             else:
                 #extr = x0 + delta
                 extr = x0
@@ -1536,8 +1551,9 @@ while it < iterations:
             # deltaL does not appear to matter much
             deltaL = L * np.hstack((JtJDiag * delta_p, JltJlDiag * delta_l)) # ? no L * is same as lambdaRna * L?
             deltaL = L * np.hstack((delta_p, delta_l)) # much difference over not 'L * '. maybe linesearch
-            #deltaL = L * np.hstack((bp,bl)) # also not working
+            #deltaL = L * np.hstack((bp,bl)) # also not working gradient direction
             delta = np.hstack((delta_p, delta_l))
+            # maybe min in delta norm? |sum_i nabla fi ci|^2-> min
             Gs, Fs, Fes, extr, old_c = RNA(Gs, Fs, x0, deltaL, sit, rnaBufferSize, Fes, delta, lamda = lamdaRNA, old_c = old_c)
             #_, _, _, extr, _ = RNA(Gs, Fs, x0, deltaL, sit+1, rnaBufferSize, Fes, delta, lamda = lamdaRNA, old_c = old_c) # better with hmm
 
@@ -1559,7 +1575,9 @@ while it < iterations:
         costExtPenalty = costExt + L * (delta_ext_p.dot(JtJDiag * delta_ext_p) + delta_ext_l.dot(JltJlDiag * delta_ext_l))
         print(it, "it. cost ext   ", round(costExt), "      with penalty ", round(costExtPenalty))
         #L = max(L0, L/2)
-        if useExtInCost and costExt < costEnd and costExtPenalty < costStart: # todo: + penalty again
+        # unsure about exact check. Does one ever work, why does the other lead to issues.
+        if useExtInCost and costExtPenalty < costEndPenalty: #costStart: # todo: + penalty again
+        #if useExtInCost and costExt < costEnd and costExtPenalty < costStart: # todo: + penalty again
             x0 = extr
             x0_p = x0[:9 * n_cameras]
             x0_l = x0[9 * n_cameras:]
