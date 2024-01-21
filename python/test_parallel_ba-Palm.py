@@ -678,8 +678,8 @@ def copy_selected_blocks(M, block_selection_, bs):
                 Mi.data[i : i + 1] = 1e-12
     return Mi
 
-def stop_criterion(delta, delta_i, i):
-    eps = 1e-2 #1e-2 used in paper, tune. might allow smaller as faster?
+def stop_criterion(delta, delta_i, i): # maybe lower at later stage?
+    eps = 1e-3 #1e-2 used in paper, tune. might allow smaller as faster?
     return (i+1) * delta_i / delta < eps
 
 def solvePowerIts(Ul, W, Vli, bS, m_):
@@ -690,7 +690,7 @@ def solvePowerIts(Ul, W, Vli, bS, m_):
     xk = Uli * bS
     g = xk
 
-    for _ in range(m_):
+    for it__ in range(m_):
         # here uli^1/2 * M uli^1/2 * 'uli^1/2 * g' could be a symmetric split.
         # to the power of k uli^1/2 * uli^1/2 = uli
         g = Uli * (W * (Vli * (W.transpose() * g)))
@@ -700,9 +700,45 @@ def solvePowerIts(Ul, W, Vli, bS, m_):
             costk = np.sum(((Ul - W * Vli * W.transpose()) * xk - bS) ** 2)
             print(it, " gd cost ", costk)
 
-        if stop_criterion(np.linalg.norm(xk, 2), np.linalg.norm(g, 2), it):
+        if stop_criterion(np.linalg.norm(xk, 2), np.linalg.norm(g, 2), it__):
            return xk
 
+    return xk
+
+# test Loop over L0=x, L=y here. Likely best to do grid search to get an idea. model as exp(-poly(L,it))
+def solveByGDNesterov(Ul, W, Vli, bS, m):
+    Lip = 0.9 # 100 -> 1. 
+    lambda0 = (1.+np.sqrt(5.)) / 2. # l=0 g=1, 0, .. L0=1 g = 0,..
+
+    Uli = blockInverse(Ul, 9)
+    ubs = - Uli * bS
+    xk = - ubs
+    y0 = - ubs
+
+    verbose = False
+    if verbose:
+        costk = xk.dot(Ul * xk - W * (Vli * (W.transpose() * xk)) - 2 * bS)
+        print("-1 gd cost ", costk)
+    
+    for it__ in range(m):
+       lambda1 = (1 + np.sqrt(1 + 4 * lambda0**2)) / 2
+       gamma = (1-lambda0) / lambda1
+       lambda0 = lambda1
+
+       #( I - Uli * W * Vli * W.transpose()) 
+       g = xk - Uli*(W*(Vli*(W.transpose() * xk))) + ubs
+       yk = xk - 1/Lip * g
+       xk = (1-gamma) * yk + gamma * y0
+       y0 = yk
+
+       if verbose:
+         # test: 
+         # eq is Ul [I - Uli * W * Vli * W.transpose()] x = b
+         costk = xk.dot(Ul * xk - W * (Vli * (W.transpose() * xk)) - 2 * bS)
+         print(it, " gd cost ", costk)
+
+       if stop_criterion(np.linalg.norm(xk, 2), np.linalg.norm(1/Lip * g, 2), it__):
+           return xk
     return xk
 
 # more smart and new. After partitioning by camera non overlapping, we add
@@ -1445,7 +1481,6 @@ def cost_DRE(
     print("---- |u-s|^2_D ", round(sum_u_s), "|u-v|^2_D ", round(sum_u_v), "|2u-s-v|^2_D ", round(sum_2u_s_v), "|u-v|^2 ", round(sum_u_v_))
     return cost_input
 
-
 def average_landmarks(point_indices_in_cluster_, points_3d_in_cluster_, L_in_cluster_):
     mean_points = np.zeros(points_3d_in_cluster_[0].shape)
     num_clusters = np.zeros(points_3d_in_cluster_[0].shape[0])
@@ -1544,6 +1579,7 @@ def local_bundle_adjust(
 ):
     # define x0_t, x0_p, x0_l, L # todo: missing Lb: inner L for bundle, Lc: to fix duplicates
     L = L_in_cluster_
+    minimumL = 1e-6
     updateJacobian = True
     x0_l_ = from_numpy(points_3d_in_) # only update covered landmarks!
     x0_p_ = from_numpy(cameras_in_)
@@ -1555,7 +1591,7 @@ def local_bundle_adjust(
     # torch_points_2d = from_numpy(points_2d)
     n_cameras_ = int(x0_p_.shape[0])
     n_points_ = int(x0_l_.shape[0])
-    powerits = 20 # kind of any value works here? > =5?
+    powerits = 100 # kind of any value works here? > =5?
 
     it_ = 0
     funx0_st1 = lambda X0, X1, X2: \
@@ -1691,7 +1727,9 @@ def local_bundle_adjust(
         Vli = blockInverse(Vl, 3)
         bS = (bp - W * Vli * bl).flatten()
 
-        delta_p = -solvePowerIts(Ul, W, Vli, bS, powerits)
+        #delta_p = - solvePowerIts(Ul, W, Vli, bS, powerits)
+        delta_p = - solveByGDNesterov(Ul, W, Vli, bS, powerits)
+
         delta_l = -Vli * ((W.transpose() * delta_p).flatten() + bl)
         # delta_l = delta_l * 0 # test ok error in landmark update.
         #print("delta_l[covered_indices] ", delta_l[covered_indices_3d])
@@ -1756,12 +1794,12 @@ def local_bundle_adjust(
             eta_1 = 0.8
             eta_2 = 0.25
             if LfkDiagonal > 2 or costStart < costEnd + penaltyL + penaltyP: #tr_check > eta_1: # and L > 0.1: # needs a limit else with my L * Vl, or 1/L in diag?
-                L = L * 2
+                L = L * 4
             if LfkDiagonal < -1: #tr_check < eta_2 or LfkDiagonal > 2: # tr check becomes descent lemma, might need > 1?
                 L = L / 2
     print("LfkDiagonal ", LfkDiagonal, " L ", L)
 
-    L_out = np.minimum(L_in_cluster_ * 2, L) # not clear if generally ok, or 2 or 4 should be used.
+    L_out = np.maximum(minimumL, np.minimum(L_in_cluster_ * 2, L)) # not clear if generally ok, or 2 or 4 should be used.
     return costEnd, x0_p_.numpy(), x0_l_[covered_landmark_indices_,:].numpy(), L_out, L * JltJlDiag + 1e-12 * Vl
 
 
@@ -2636,7 +2674,7 @@ x0_p = x0_p.reshape(n_cameras, 9)
 startL = 1
 kClusters = 3 # 6 cluster also not bad at all !
 innerIts = 1  # change to get an update, not 1 iteration
-iterations = 50
+iterations = 100
 cost = np.zeros(kClusters)
 lastCost = 1e20
 lastCostDRE = 1e20
@@ -2650,10 +2688,10 @@ rnaBufferSize = 6
 lib = ctypes.CDLL("./libprocess_clusters.so")
 init_lib()
 baseline_clustering = False
-reCluster = False
-pre_merges = 0
-if reCluster:
-    pre_merges = int(0.15 * n_cameras) # random merges
+reCluster = True
+pre_merges = 0 # does not help.
+if reCluster: # maybe less often. verbose!
+    pre_merges = int(0.2 * n_cameras) # random merges 20%?
 
 # DRE:
 # f(x) + 1/2 (v^T Vlk * v - v^T 2 * Vlk (2x - sk) ) for x=u/v. Does not look right .. haeh
@@ -2833,7 +2871,7 @@ if basic_version:
         else:
             if multiCluster:
                 # need to map points_3d_in_cluster to points_3d_in_cluster_ just copy
-                if it %2 ==0:
+                if it %2 == 0:
                     (
                         cost,
                         L_in_cluster,
@@ -2862,7 +2900,7 @@ if basic_version:
                         L_in_cluster_2, Vl_in_cluster_2, kClusters, innerIts=innerIts, sequential=True,
                         )
             else:
-                if reCluster:
+                if reCluster and it % 3 == 0:
                     (
                         camera_indices_in_cluster,
                         point_indices_in_cluster,
