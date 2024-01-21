@@ -1045,7 +1045,7 @@ def init_lib():
                                     ctypes.c_void_p]
 
     lib.cluster_covis.restype = None
-    lib.cluster_covis.argtypes = [ctypes.c_int, ctypes.c_void_p, ctypes.c_void_p,
+    lib.cluster_covis.argtypes = [ctypes.c_int, ctypes.c_int, ctypes.c_void_p, ctypes.c_void_p,
                                   ctypes.c_void_p, ctypes.c_void_p] # out]
 
 def process_cluster_lib(num_lands_, num_res_, kClusters__, point_indices_in_cluster__, res_indices_in_cluster__, point_indices__):
@@ -1109,8 +1109,9 @@ def process_cluster_lib(num_lands_, num_res_, kClusters__, point_indices_in_clus
 
     return res_toadd_to_c_, point_indices_already_covered_, covered_landmark_indices_c_, num_res_per_c_
 
-def cluster_covis_lib(kClusters, camera_indices__, point_indices__):
+def cluster_covis_lib(kClusters, pre_merges_, camera_indices__, point_indices__):
     c_kClusters_ = ctypes.c_int(kClusters)
+    c_pre_merges_ = ctypes.c_int(pre_merges_)
 
     camera_indices_list = camera_indices__.tolist()
     point_indices_list = point_indices__.tolist()
@@ -1124,14 +1125,15 @@ def cluster_covis_lib(kClusters, camera_indices__, point_indices__):
     res_to_cluster_c_out = lib.new_vector()
     res_to_cluster_c_sizes = lib.new_vector_of_size(kClusters)
 
-    lib.cluster_covis(c_kClusters_, c_cam_indices_cpp, c_point_indices_cpp, res_to_cluster_c_out, res_to_cluster_c_sizes)
+    lib.cluster_covis(c_kClusters_, c_pre_merges_, c_cam_indices_cpp, c_point_indices_cpp, res_to_cluster_c_out, res_to_cluster_c_sizes)
+    kClusters = lib.vector_size(res_to_cluster_c_sizes)
 
     res_indices_in_cluster__ = fillPythonVec(res_to_cluster_c_out, res_to_cluster_c_sizes, kClusters)
-    return res_indices_in_cluster__
+    return res_indices_in_cluster__, kClusters
     # copy data, free c++ mem
 
 def cluster_by_camera_gpt(
-    camera_indices_, points_3d_, points_2d_, point_indices_, kClusters_, startL_, baseline_clustering=False, init_cam_id=0, init_lm_id=0, seed=0
+    camera_indices_, points_3d_, points_2d_, point_indices_, kClusters_, startL_, pre_merges, baseline_clustering=False, init_cam_id=0, init_lm_id=0, seed=0
 ):
     np.random.seed(seed)
     # sort by res-indices by camera indices
@@ -1220,7 +1222,8 @@ def cluster_by_camera_gpt(
         # 3. distribute equally, pick cluster w least res. pick lm with least res to add, add (bunch)
 
     else:
-        res_indices_in_cluster_ = cluster_covis_lib(kClusters_, camera_indices_, point_indices_)
+        res_indices_in_cluster_, kClusters = cluster_covis_lib(kClusters_, pre_merges, camera_indices_, point_indices_)
+        kClusters_ = kClusters
         camera_indices_in_cluster_ = []
         point_indices_in_cluster_ = []
         points_2d_in_cluster_ = []
@@ -1279,19 +1282,13 @@ def cluster_by_camera_gpt(
         print("sum_landmarks_cover ", sum_landmarks_cover, " / ", num_lands)
         return
 
-    points_3d_in_cluster_ = []
-    L_in_cluster_ = []
-    for _ in range(kClusters_):
-        points_3d_in_cluster_.append(points_3d_.copy())
-        L_in_cluster_.append(startL_)
     return (
         camera_indices_in_cluster_,
         point_indices_in_cluster_,
         points_2d_in_cluster_,
         cluster_to_camera_,
-        points_3d_in_cluster_,
         additional_point_indices_in_cluster_, additional_camera_indices_in_cluster_, additional_points_2d_in_cluster_, point_indices_already_covered_, covered_landmark_indices_c_,
-        L_in_cluster_,
+        kClusters
     )
 
 
@@ -2639,7 +2636,7 @@ x0_p = x0_p.reshape(n_cameras, 9)
 startL = 1
 kClusters = 3 # 6 cluster also not bad at all !
 innerIts = 1  # change to get an update, not 1 iteration
-its = 20
+iterations = 50
 cost = np.zeros(kClusters)
 lastCost = 1e20
 lastCostDRE = 1e20
@@ -2653,6 +2650,11 @@ rnaBufferSize = 6
 lib = ctypes.CDLL("./libprocess_clusters.so")
 init_lib()
 baseline_clustering = False
+reCluster = False
+pre_merges = 0
+if reCluster:
+    pre_merges = int(0.15 * n_cameras) # random merges
+
 # DRE:
 # f(x) + 1/2 (v^T Vlk * v - v^T 2 * Vlk (2x - sk) ) for x=u/v. Does not look right .. haeh
 # 
@@ -2670,6 +2672,12 @@ globalSingleLandmarksB_in_c = [0 for x in range(kClusters)]
 
 read_cluster = False
 write_cluster = False
+
+points_3d_in_cluster = []
+L_in_cluster = []
+for _ in range(kClusters):
+    points_3d_in_cluster.append(points_3d.copy())
+    L_in_cluster.append(startL)
 
 if read_cluster:
     L_in_cluster = [0 for x in range(kClusters)] # dummy fill list
@@ -2700,49 +2708,49 @@ if read_cluster:
         L_in_cluster[ci] = startL
     #exit()
 else:
-    (
-        camera_indices_in_cluster,
-        point_indices_in_cluster,
-        points_2d_in_cluster,
-        cluster_to_camera,
-        points_3d_in_cluster,
-        additional_point_indices_in_cluster, additional_camera_indices_in_cluster, additional_points_2d_in_cluster, point_indices_already_covered_c, covered_landmark_indices_c,
-        L_in_cluster,
-    ) = cluster_by_camera_gpt(
-        camera_indices, points_3d, points_2d, point_indices, kClusters, startL, baseline_clustering
-    )
+    if not reCluster:
+        (
+            camera_indices_in_cluster,
+            point_indices_in_cluster,
+            points_2d_in_cluster,
+            cluster_to_camera,
+            additional_point_indices_in_cluster, additional_camera_indices_in_cluster, additional_points_2d_in_cluster, point_indices_already_covered_c,
+            covered_landmark_indices_c,
+            kClusters
+        ) = cluster_by_camera_gpt( # todo clustering takes old edges broken in and joins them into same cluster early. not sure this works at all. or just for some
+            camera_indices, points_3d, points_2d, point_indices, kClusters, startL, pre_merges, baseline_clustering
+        )
 
-if write_cluster:
-    for ci in range(kClusters):
-        camera_indices_in_cluster[ci].tofile("camera_indices_in_cluster" + str(ci) + ".dat")
-        point_indices_in_cluster[ci].tofile("point_indices_in_cluster" + str(ci) + ".dat")
-        points_2d_in_cluster[ci].tofile("points_2d_in_cluster"+ str(ci) +".dat")
-        cluster_to_camera[ci].tofile("cluster_to_camera"+ str(ci) +".dat")
-        points_3d_in_cluster[ci].tofile("points_3d_in_cluster"+ str(ci) +".dat")
-        print("ci", points_3d_in_cluster[ci].shape)
-        print("ci", points_2d_in_cluster[ci].shape)
-        additional_point_indices_in_cluster[ci].tofile("additional_point_indices_in_cluster"+ str(ci) +".dat")
-        additional_camera_indices_in_cluster[ci].tofile("additional_camera_indices_in_cluster"+ str(ci) +".dat")
-        additional_points_2d_in_cluster[ci].tofile("additional_points_2d_in_cluster"+ str(ci) +".dat")
-        point_indices_already_covered_c[ci].tofile("point_indices_already_covered_c"+ str(ci) +".dat")
-        covered_landmark_indices_c[ci].tofile("covered_landmark_indices_c"+ str(ci) +".dat")
-        print("ci", point_indices_in_cluster[ci].shape)
-    #exit()
+    if write_cluster:
+        for ci in range(kClusters):
+            camera_indices_in_cluster[ci].tofile("camera_indices_in_cluster" + str(ci) + ".dat")
+            point_indices_in_cluster[ci].tofile("point_indices_in_cluster" + str(ci) + ".dat")
+            points_2d_in_cluster[ci].tofile("points_2d_in_cluster"+ str(ci) +".dat")
+            cluster_to_camera[ci].tofile("cluster_to_camera"+ str(ci) +".dat")
+            points_3d_in_cluster[ci].tofile("points_3d_in_cluster"+ str(ci) +".dat")
+            print("ci", points_3d_in_cluster[ci].shape)
+            print("ci", points_2d_in_cluster[ci].shape)
+            additional_point_indices_in_cluster[ci].tofile("additional_point_indices_in_cluster"+ str(ci) +".dat")
+            additional_camera_indices_in_cluster[ci].tofile("additional_camera_indices_in_cluster"+ str(ci) +".dat")
+            additional_points_2d_in_cluster[ci].tofile("additional_points_2d_in_cluster"+ str(ci) +".dat")
+            point_indices_already_covered_c[ci].tofile("point_indices_already_covered_c"+ str(ci) +".dat")
+            covered_landmark_indices_c[ci].tofile("covered_landmark_indices_c"+ str(ci) +".dat")
+            print("ci", point_indices_in_cluster[ci].shape)
+        #exit()
 
-multiCluster = False # verify overlap ? setting L delayed is a slow down. Tried to increase variance, about same. Also same as non clustered. Maybe each step different clusters?
-if multiCluster:
-    (
-        camera_indices_in_cluster_2,
-        point_indices_in_cluster_2,
-        points_2d_in_cluster_2,
-        cluster_to_camera_2,
-        points_3d_in_cluster_2,
-        additional_point_indices_in_cluster_2, additional_camera_indices_in_cluster_2, additional_points_2d_in_cluster_2, point_indices_already_covered_c_2, covered_landmark_indices_c_2,
-        L_in_cluster_2,
-    ) = cluster_by_camera_gpt(
-        camera_indices, points_3d, points_2d, point_indices, kClusters, startL, baseline_clustering = True, init_cam_id=30, init_lm_id=5, seed=1234
-    )
-    Vl_in_cluster_2 = [0 for x in range(kClusters)] # dummy fill list
+    multiCluster = False # verify overlap ? setting L delayed is a slow down. Tried to increase variance, about same. Also same as non clustered. Maybe each step different clusters?
+    if multiCluster:
+        (
+            camera_indices_in_cluster_2,
+            point_indices_in_cluster_2,
+            points_2d_in_cluster_2,
+            cluster_to_camera_2,
+            additional_point_indices_in_cluster_2, additional_camera_indices_in_cluster_2, additional_points_2d_in_cluster_2, point_indices_already_covered_c_2,
+            covered_landmark_indices_c_2,
+        ) = cluster_by_camera_gpt(
+            camera_indices, points_3d, points_2d, point_indices, kClusters, startL, pre_merges, baseline_clustering = True, init_cam_id=30, init_lm_id=5, seed=1234
+        )
+        Vl_in_cluster_2 = [0 for x in range(kClusters)] # dummy fill list
 
 print(L_in_cluster)
 Vl_in_cluster = [0 for x in range(kClusters)] # dummy fill list
@@ -2751,7 +2759,7 @@ landmark_v = points_3d_in_cluster[0].copy()
 
 if basic_version:
 
-    for it in range(its):
+    for it in range(iterations):
         run_DRS = False
         if run_DRS:
             start = time.time()
@@ -2854,6 +2862,19 @@ if basic_version:
                         L_in_cluster_2, Vl_in_cluster_2, kClusters, innerIts=innerIts, sequential=True,
                         )
             else:
+                if reCluster:
+                    (
+                        camera_indices_in_cluster,
+                        point_indices_in_cluster,
+                        points_2d_in_cluster,
+                        cluster_to_camera,
+                        additional_point_indices_in_cluster, additional_camera_indices_in_cluster, additional_points_2d_in_cluster, point_indices_already_covered_c,
+                        covered_landmark_indices_c,
+                        kClusters
+                    ) = cluster_by_camera_gpt( # todo clustering takes old edges broken in and joins them into same cluster early. not sure this works at all. or just for some
+                        camera_indices, points_3d, points_2d, point_indices, kClusters, startL, pre_merges, baseline_clustering
+                    )
+
                 (
                     cost,
                     L_in_cluster,
@@ -2976,7 +2997,7 @@ else:
         point_indices_in_cluster, points_3d_in_cluster, landmark_s_in_cluster, L_in_cluster, Vl_in_cluster, landmark_v, delta_l_in_cluster
     )
 
-    for it in range(its):
+    for it in range(iterations):
 
         steplength = 0
         for ci in range(kClusters):

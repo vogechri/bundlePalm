@@ -122,7 +122,7 @@ def init_lib():
                                     ctypes.c_void_p]
 
     lib.cluster_covis.restype = None
-    lib.cluster_covis.argtypes = [ctypes.c_int, ctypes.c_void_p, ctypes.c_void_p,
+    lib.cluster_covis.argtypes = [ctypes.c_int, ctypes.c_int, ctypes.c_void_p, ctypes.c_void_p,
                                   ctypes.c_void_p, ctypes.c_void_p] # out]
 
 
@@ -189,8 +189,9 @@ def process_cluster_lib(num_lands_, num_res_, kClusters__, point_indices_in_clus
 
     return res_toadd_to_c_, point_indices_already_covered_, covered_landmark_indices_c_, num_res_per_c_
 
-def cluster_covis_lib(kClusters, camera_indices__, point_indices__):
+def cluster_covis_lib(kClusters, pre_merges_, camera_indices__, point_indices__):
     c_kClusters_ = ctypes.c_int(kClusters)
+    c_pre_merges_ = ctypes.c_int(pre_merges_)
 
     camera_indices_list = camera_indices__.tolist()
     point_indices_list = point_indices__.tolist()
@@ -204,10 +205,12 @@ def cluster_covis_lib(kClusters, camera_indices__, point_indices__):
     res_to_cluster_c_out = lib.new_vector()
     res_to_cluster_c_sizes = lib.new_vector_of_size(kClusters)
 
-    lib.cluster_covis(c_kClusters_, c_cam_indices_cpp, c_point_indices_cpp, res_to_cluster_c_out, res_to_cluster_c_sizes)
+    lib.cluster_covis(c_kClusters_, c_pre_merges_, c_cam_indices_cpp, c_point_indices_cpp, res_to_cluster_c_out, res_to_cluster_c_sizes)
+
+    kClusters = lib.vector_size(res_to_cluster_c_sizes)
 
     res_indices_in_cluster__ = fillPythonVec(res_to_cluster_c_out, res_to_cluster_c_sizes, kClusters)
-    return res_indices_in_cluster__
+    return res_indices_in_cluster__, kClusters
     # copy data, free c++ mem
 
 cameras, points_3d, camera_indices, point_indices, points_2d = read_bal_data(FILE_NAME)
@@ -228,9 +231,11 @@ kClusters = 3 # 6 cluster also not bad at all !
 # Load the shared library
 #lib = ctypes.CDLL("/path/to/your/library.so")
 lib = ctypes.CDLL("./libprocess_clusters.so")
+#lib = ctypes.CDLL("./libprocess_clusters_new.so")
 init_lib()
 #res_indices_in_cluster_ = cluster_covis_lib(kClusters, camera_indices, point_indices)
 
+pre_merges = 20
 camera_indices_ = camera_indices
 points_3d_  = points_3d
 points_2d_  = points_2d
@@ -310,7 +315,8 @@ for c in range(kClusters_):
 
 # from lib
 if True:
-    res_indices_in_cluster_ = cluster_covis_lib(kClusters, camera_indices, point_indices)
+    res_indices_in_cluster_, kClusters_ = cluster_covis_lib(kClusters, pre_merges, camera_indices, point_indices)
+    kClusters = kClusters_
     camera_indices_in_cluster_ = []
     point_indices_in_cluster_ = []
     points_2d_in_cluster_ = []

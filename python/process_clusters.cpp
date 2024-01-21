@@ -13,10 +13,11 @@
 #include <algorithm>
 #include <numeric>
 #include <cmath>
+#include <random> // for std::mt19937
+#include <chrono> // for std::chrono
 
 // Speedup, very little worse, else retries rejected merges.
 #define inheritInvalidEdgeness_
-#define simpleConstraint_  // if undefined works well with max-sum
 // if undefined: maxWeight (much faster & better than sumWeight)? - sum overestimates overlap.
 //#define explicitWeight_ // exact overlap
 // if defined -> explicit weight -> sum weight
@@ -357,11 +358,11 @@ void RedoAdjacentPartToWeight(
 #ifdef sumWeight_
         itr.first->second += newWeight;  // better compute [maybe just top 3 max?]
 #else
-        std::set<int> intersection;
+        std::set<int> union_new_part;
         std::set_union(lms_in_part[vtxIdx].begin(), lms_in_part[vtxIdx].end(), 
             lms_in_part[adjPartIdx].begin(), lms_in_part[adjPartIdx].end(),
-            std::inserter(intersection, intersection.begin()));
-        const int volumeOfUnion = intersection.size();
+            std::inserter(union_new_part, union_new_part.begin()));
+        const int volumeOfUnion = union_new_part.size();
         itr.first->second = volumeOfUnion;
 #endif
 #else
@@ -415,11 +416,96 @@ void PlotStatistics(const std::vector<int>& vtxsToPart,
             << " vertices\n";
 }
 
+struct OrderedEdge {
+int srcIdx;
+int tgtIdx;
+
+OrderedEdge() : srcIdx(-1), tgtIdx(-1) {}
+OrderedEdge(int idx1, int idx2) {srcIdx = std::min(idx1, idx2);tgtIdx = std::max(idx1, idx2);};
+
+bool operator<(const OrderedEdge& other) const{
+    if (srcIdx < other.srcIdx) {
+        return true;
+    } else if (srcIdx == other.srcIdx) {
+        return tgtIdx < other.tgtIdx;
+    } else {
+        return false;
+    }
+}
+bool operator==(const OrderedEdge& other) const {
+    return srcIdx == other.srcIdx && tgtIdx == other.tgtIdx;
+};
+};
+
+
+// idea, draw edge, maybe based on weight (more likely to draw), maybe just pairs? not already merged ones?
+int RandomMerge(int number_merges,
+     std::vector<float>& volumeOfUnions,
+     std::vector<int>& numVtxsInUnion,
+     std::vector<int>& vtxsToPart,
+     std::vector<std::set<int>>& lms_in_part,
+     std::set<std::pair<int, int>>& invalidEdges,
+     std::vector<float>& weightPerVtx,
+     std::vector<float>& weightPerVtxSelected,
+     const std::map<OrderedEdge, float>& edgeWeightMap,
+     const VolumePartitionOptions& options) {
+    int num_merges = 0;
+    int num_vtx = vtxsToPart.size();
+    int num_edges = edgeWeightMap.size();
+    std::mt19937 mt{ static_cast<std::mt19937::result_type>(
+		std::chrono::steady_clock::now().time_since_epoch().count() ) };
+    std::uniform_int_distribution dist{ 0, num_edges};
+    while (num_merges < std::min(number_merges, static_cast<int>(0.5 * (num_vtx-1)))) {
+        // draw edge seed from time.
+        auto elementId = edgeWeightMap.begin();
+        int id = dist(mt);
+        std::advance(elementId, id);
+
+        const auto& [ordered_edge, weight] = *elementId; //edgeWeightMap[id];
+        const int rootVtxInPartA = FindRootInVtxToPartMap(vtxsToPart, ordered_edge.srcIdx);
+        const int rootVtxInPartB = FindRootInVtxToPartMap(vtxsToPart, ordered_edge.tgtIdx);
+        if (rootVtxInPartA == rootVtxInPartB) {continue;}
+        const int rootVtxInPart = std::min(rootVtxInPartA, rootVtxInPartB);
+        const int largestVtxInPart = std::max(rootVtxInPartA, rootVtxInPartB);
+
+        std::pair<int,int> edge (std::min(rootVtxInPartA, rootVtxInPartB), std::max(rootVtxInPartA, rootVtxInPartB));
+        RemapToRootInVtxToPartMap(&vtxsToPart, edge.first, rootVtxInPart);
+        RemapToRootInVtxToPartMap(&vtxsToPart, edge.second, rootVtxInPart);
+        const int numVtxs = numVtxsInUnion[rootVtxInPartA] + numVtxsInUnion[rootVtxInPartB];
+        if (numVtxs > options.maxNumKfsInPart || invalidEdges.find(edge) != invalidEdges.end()) {
+            continue;
+        }
+
+        num_merges++;
+        std::set<int> union_new_part;
+        std::set_union(lms_in_part[rootVtxInPartA].begin(), lms_in_part[rootVtxInPartA].end(), 
+            lms_in_part[rootVtxInPartB].begin(), lms_in_part[rootVtxInPartB].end(),
+            std::inserter(union_new_part, union_new_part.begin()));
+        const int volumeOfUnion = union_new_part.size();
+        const int numVtxsInCover = numVtxsInUnion[rootVtxInPart] + numVtxsInUnion[largestVtxInPart];
+        int intersectionVolume = lms_in_part[rootVtxInPartA].size() - volumeOfUnion;
+
+        volumeOfUnions[rootVtxInPartA] = volumeOfUnion;
+        lms_in_part[rootVtxInPart]= union_new_part;
+        numVtxsInUnion[rootVtxInPart] = numVtxsInCover;
+
+        // TODO: intersectionVolumeEstimate or better intersectionVolume ?
+        const float intersectionVolumeEstimate = intersectionVolume;//edgeWeightVector[edgeId];
+        weightPerVtx[rootVtxInPart] +=
+            weightPerVtx[largestVtxInPart] - intersectionVolumeEstimate;
+        weightPerVtxSelected[rootVtxInPart] +=
+            weightPerVtxSelected[largestVtxInPart] + intersectionVolumeEstimate;
+        invalidEdges.emplace(rootVtxInPart, largestVtxInPart);
+      }
+      return num_merges;
+  }
+
 // same sa volume:
 // cams are cams, # landmakrs seen by cam are volume, union is number of lms seen by boths sets of cams.
 extern "C" 
 void cluster_covis(
     int kClusters, 
+    int random_pre_number_merges,
     const std::vector<int>& camera_indices_in,
     const std::vector<int>& landmark_indices_in,
     std::vector<int>& res_to_cluster, std::vector<int>& res_to_cluster_sizes) {
@@ -429,7 +515,7 @@ void cluster_covis(
     const int num_cams = std::set<double>( camera_indices_in.begin(), camera_indices_in.end() ).size();
     const int num_lands = std::set<double>( landmark_indices_in.begin(), landmark_indices_in.end() ).size();
 
-    std::cout << "Starting cluster_covis\n";
+    std::cout << "Starting cluster_covis " << kClusters << " clusters, pre merges: " << random_pre_number_merges << "\n";
 
     if (camera_indices_in.size() != num_res || verbose) {
     std::cout << "Start #res " << num_res<< " " << kClusters << " #lnds" << num_lands << "  #cams " << num_cams << "\n";
@@ -440,27 +526,6 @@ void cluster_covis(
     VolumePartitionOptions options = {.targetVolumeOfUnion = 1.5f * static_cast<float>(num_lands) / static_cast<float>(kClusters), 
         .maxVolumeOfUnion = (4 * num_lands) / static_cast<float>(kClusters), // hard constraint can lead to invalid # clusters
         .maxNumKfsInPart = static_cast<int>((2 * num_cams) / kClusters)};
-
-struct OrderedEdge {
-  int srcIdx;
-  int tgtIdx;
-
-  OrderedEdge() : srcIdx(-1), tgtIdx(-1) {}
-  OrderedEdge(int idx1, int idx2) {srcIdx = std::min(idx1, idx2);tgtIdx = std::max(idx1, idx2);};
-
-  bool operator<(const OrderedEdge& other) const{
-    if (srcIdx < other.srcIdx) {
-        return true;
-    } else if (srcIdx == other.srcIdx) {
-        return tgtIdx < other.tgtIdx;
-    } else {
-        return false;
-    }
-  }
-  bool operator==(const OrderedEdge& other) const {
-    return srcIdx == other.srcIdx && tgtIdx == other.tgtIdx;
-  };
-};
 
     // 0. check that vertex indices are in range 0-num_cams
     // 1. define graph 
@@ -518,8 +583,20 @@ struct OrderedEdge {
     volumeOfUnions[bbId] = lms_from_cam[bbId].size(); // lms in part!
     numVtxsInUnion[bbId] = 1; // cam
   }
+  std::set<std::pair<int, int>> invalidEdges;
   const float totalVolume = num_lands;
     //   std::accumulate(volumeOfUnions.begin(), volumeOfUnions.end(), 0.f);
+
+ int num_random_merged = RandomMerge(random_pre_number_merges,
+     volumeOfUnions,
+     numVtxsInUnion,
+     vtxsToPart,
+     lms_in_part,
+     invalidEdges, // neded to set or will automatically?
+     weightPerVtx,
+     weightPerVtxSelected,
+     edgeWeightMap,
+     options);
 
   std::vector<float> costVector;
   auto cmp = [&costVector](int left, int right) {
@@ -528,7 +605,6 @@ struct OrderedEdge {
   std::priority_queue<int, std::vector<int>, decltype(cmp)> pq(cmp);
   std::vector<std::pair<int, int>> edgeVector;
   std::vector<float> edgeWeightVector;
-  std::set<std::pair<int, int>> invalidEdges;
 
   for (int partId = 0; partId < num_cams; ++partId) {
     const auto [bestAdjPartId, bestCostGain] =
@@ -552,7 +628,10 @@ struct OrderedEdge {
   }
   //PlotWeightPercentiles(edgeWeightVector); // good debug?
 
-  int merges = 0;
+  // stochastic: perform random merges at start, 10% / 20% of cameras ?
+  // always group
+
+  int merges = num_random_merged;
   int fullComputes = 0;
   while (!pq.empty() && (num_cams - merges > kClusters)) {
     const int edgeId = pq.top();
@@ -633,64 +712,23 @@ struct OrderedEdge {
     const int rootVtxInPart = std::min(vtxA, rootVtxInPartB);
     const int largestVtxInPart = std::max(vtxA, rootVtxInPartB);
 
-    const float intersectionVolumeLowerBound = 0;
     fullComputes++;
     // Todo: simple in this case: size of set of landmarks in intersection.
     // float volumeOfUnion = (*boundingVolumes)[vtxA].ComputeVolumeOfUnion(
     //       (*boundingVolumes)[rootVtxInPartB], numSamplesPerBox);
-    std::set<int> intersection;
+    std::set<int> union_new_part;
     std::set_union(lms_in_part[vtxA].begin(), lms_in_part[vtxA].end(), 
         lms_in_part[rootVtxInPartB].begin(), lms_in_part[rootVtxInPartB].end(),
-        std::inserter(intersection, intersection.begin()));
-    const int volumeOfUnion = intersection.size();
+        std::inserter(union_new_part, union_new_part.begin()));
+    const int volumeOfUnion = union_new_part.size();
+    // TODO:? better?
+    //intersectionVolumeEstimate = volumeOfUnion - lms_in_part[vtxA].size();
 
     // std::cout << "vtxA,b lms in part, union " << vtxA << "-" << rootVtxInPartB << " : " 
     //     << lms_in_part[vtxA].size() << " " << lms_in_part[rootVtxInPartB].size() << " " << volumeOfUnion << "\n";
 
-#ifndef simpleConstraint_
-    // const float maxCandidateVolume = std::max(
-    //     volumeOfUnions[vtxA], volumeOfUnions[rootVtxInPartB]);
-    // const float relativeVolumeGain =
-    //     (volumeOfUnion - maxCandidateVolume) / maxCandidateVolume;
-    const float minCandidateVolume =
-        std::min(volumeOfUnions[vtxA], volumeOfUnions[rootVtxInPartB]);
-    const float sumCandidateVolume =
-        volumeOfUnions[vtxA] + volumeOfUnions[rootVtxInPartB];
-    const float relativeVolumeGain =
-        (sumCandidateVolume - volumeOfUnion) / minCandidateVolume;  // Standard
-    // intersection/union or inter/min variants:
-    // 1.f - (sumCandidateVolume - volumeOfUnion) / volumeOfUnion;
-    // 1.f - (volumeOfUnion - maxCandidateVolume) / maxCandidateVolume;
-
-    const float relativeVolumeViolation =
-        (volumeOfUnion - options.maxVolumeOfUnion) / options.maxVolumeOfUnion;
-    // Below is relativeVolumeGain wrt to max.
-    // const float relativeVolumeViolation = // variant too soft / grows away.
-    //     (volumeOfUnion -
-    //      std::max(maxCandidateVolume, options.maxVolumeOfUnion)) /
-    //     options.maxVolumeOfUnion;
-    const float volumeConstraintMultiplicator = 7.f;
-
-#ifdef __rejDebugInfo__
-    if (volumeOfUnion > options.maxVolumeOfUnion &&
-        relativeVolumeViolation * volumeConstraintMultiplicator <
-            relativeVolumeGain) {
-      std::cout << "Vol vio/inc in \%: " << 100 * relativeVolumeViolation << " "
-                << 100 * relativeVolumeGain << "\n";
-      std::cout << "Acc (vol) " << volumeOfUnion << " > "
-                << options.maxVolumeOfUnion
-                << " vol: " << (*boundingVolumes)[vtxA].Volume() << " V "
-                << (*boundingVolumes)[rootVtxInPartB].Volume() << "\n";
-    }
-#endif
-    if (volumeOfUnion > options.maxVolumeOfUnion &&
-        relativeVolumeViolation * volumeConstraintMultiplicator >=
-            1. - relativeVolumeGain &&
-        relativeVolumeGain > 0) {
-#else
     // Constraints fail, abandon merge !?
     if (volumeOfUnion > options.maxVolumeOfUnion) {
-#endif
     if (verbose) {
       std::cout << " volumeOfUnion > options.maxVolumeOfUnion " << volumeOfUnion << " " <<  options.maxVolumeOfUnion<< "\n";
     }
@@ -727,14 +765,9 @@ struct OrderedEdge {
     // merge sets of landmarks
     // (*boundingVolumes)[rootVtxInPart].Merge(
     //     (*boundingVolumes)[largestVtxInPart], volumeOfUnion);
-    lms_in_part[rootVtxInPart]= intersection;
+    lms_in_part[rootVtxInPart]= union_new_part;
     numVtxsInUnion[rootVtxInPart] = numVtxsInCover;
 
-#ifdef recomputeVolumeAllTheTime_
-    (*boundingVolumes)[rootVtxInPart].Merge(
-        (*boundingVolumes)[largestVtxInPart]);
-    volumeOfUnions[rootVtxInPart] = (*boundingVolumes)[rootVtxInPart].Volume();
-#endif
     RemapToRootInVtxToPartMap(&vtxsToPart, vtxA, rootVtxInPart);
     RemapToRootInVtxToPartMap(&vtxsToPart, vtxB, rootVtxInPart);
 

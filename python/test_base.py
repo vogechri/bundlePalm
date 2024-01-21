@@ -46,9 +46,24 @@ FILE_NAME = "problem-871-527480-pre.txt.bz2"
 BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/trafalgar/"
 # FILE_NAME = "problem-21-11315-pre.txt.bz2"
 FILE_NAME = "problem-257-65132-pre.txt.bz2"
-
-# todo: manipulate / copy make test with 10 & comapre
+#
+# solver -> super slow cholesky is more accurate. Why? float-?double or need more iterations?
+# better stopping crit?
+# TODO: understand why not working. scipy -> 193k
+# Lm step took  1.0648386478424072 s
+# 99 it. cost 0      198024
+# 99 it. cost 0/new  198023  cost with penalty  198023
+# 99 it. cost 1      198023       with penalty  198023  cost compute took  0.10829901695251465 s
+# c  [ 0.01516885 -0.02060484  0.00302279  0.98726985  0.05791101 -0.04276767]   (6,)
+# 100 it. cost ext    198023       with penalty  198023
+# 100 it. cost ext    197271       with penalty  197271 # 50 its, stop at 1e-6 (==off?)
+# 100 it. cost ext    196614       with penalty  196614 with extrapolation
+# 61 it. cost 1      197215       with penalty  197216  cost compute took  0.10839438438415527 s
+# todo: manipulate / copy make test with 10 & compare
 # need to solve hanging (n times increasing L, failing TR)
+# powerits = 100 Lm step took  2.429298162460327 s, 46 it. cost 1      196634
+# 99 it. cost 1      195253       with penalty  195254  cost compute took  0.10700201988220215 s
+# powerits = 200: 99 it. cost 1      193227
 
 URL = BASE_URL + FILE_NAME
 old_c = 0
@@ -63,7 +78,7 @@ def read_bal_data(file_name):
 
         camera_indices = np.empty(n_observations, dtype=int)
         point_indices = np.empty(n_observations, dtype=int)
-        points_2d = np.empty((n_observations, 2))
+        points_2d = np.empty((n_observations, 2), dtype=np.float64)
 
         for i in range(n_observations):
             camera_index, point_index, x, y = file.readline().split()
@@ -71,12 +86,12 @@ def read_bal_data(file_name):
             point_indices[i] = int(point_index)
             points_2d[i] = [float(x), float(y)]
 
-        camera_params = np.empty(n_cameras * 9)
+        camera_params = np.empty(n_cameras * 9, dtype=np.float64)
         for i in range(n_cameras * 9):
             camera_params[i] = float(file.readline())
         camera_params = camera_params.reshape((n_cameras, -1))
 
-        points_3d = np.empty(n_points * 3)
+        points_3d = np.empty(n_points * 3, dtype=np.float64)
         for i in range(n_points * 3):
             points_3d[i] = float(file.readline())
         points_3d = points_3d.reshape((n_points, -1))
@@ -428,7 +443,7 @@ print("Total number of residuals: {}".format(m))
 
 x0_p = cameras.ravel()
 x0_l = points_3d.ravel()
-x0 = np.hstack((x0_p, x0_l))
+x0 = np.hstack((x0_p, x0_l), dtype=np.float64)
 torch_points_2d = from_numpy(points_2d)
 torch_points_2d.requires_grad_(False)
 x0_t = from_numpy(x0)
@@ -1084,7 +1099,7 @@ def solveByGDPolak(Ul, W, Vli, bS, m, L, mu):
 # stop criterion is 
 # stop_criterion(np.linalg.norm(delta, 2), np.linalg.norm(delta_i, 2), it)
 def stop_criterion(delta, delta_i, i):
-    eps = 1e-2 #1e-2 used in paper, tune. might allow smaller as faster?
+    eps = 1e-6 #1e-2 used in paper, tune. might allow smaller as faster? TODO: confusing first step, not av step
     return (i+1) * delta_i / delta < eps
 
 # |f(x0) + J(xo) * delta|^2 + lambda | [Ip,Il] * delta|^2
@@ -1244,8 +1259,8 @@ def BFGS_direction(r, pk, qk, ps, qs, rhos, k, mem, mu):
 write_output = False #True
 read_output = False
 if read_output:
-    camera_params_np = np.fromfile("camera_params.dat", dtype=float)
-    point_params_np = np.fromfile("point_params.dat", dtype=float)
+    camera_params_np = np.fromfile("camera_params.dat", dtype=np.float64)
+    point_params_np = np.fromfile("point_params.dat", dtype=np.float64)
     x0_p = camera_params_np.reshape(-1)
     x0_l = point_params_np.reshape(-1)
     #x0 = np.concatenate([x0_p, x0_l])
@@ -1267,7 +1282,7 @@ bfgs_rhos = np.zeros([bfgs_mem, 1])
 useExtInCost = True # with using extrapolation, does it lead to lower cost, how much? -- must use with TR as well?
 L0 = 1.0 #e-3
 L = L0
-iterations = 20
+iterations = 100
 verbose = False
 debug = False
 useInvSolver = False
@@ -1288,7 +1303,7 @@ useInvSolver = False
 #9 it. cost 1      1082638.0196162288       with penalty  1098187.86145675
 #14 it. cost 1      701979.4950357398
 
-powerits = 20
+powerits = 200
 gamma = 1/1
 Gs = [] 
 Fs = []
@@ -1399,9 +1414,9 @@ while it < iterations:
         # Ax = b <-> K A K x = K b, then return K x since K^-1 x is computed as solution of [K A K] x = K b
     else:
         #delta_p = - solveByGDPolak(Ul, W, Vli, bS, powerits, L, 0.9)
-        #delta_p = - solveByGDNesterov(Ul, W, Vli, bS, powerits, L)
+        delta_p = - solveByGDNesterov(Ul, W, Vli, bS, powerits, L)
         #delta_p = - solveByGDPower(Ul,W, Vli, bS, powerits, gamma/L)
-        delta_p = - solvePowerIts(Ul,W, Vli, bS, powerits)
+        #delta_p = - solvePowerIts(Ul,W, Vli, bS, powerits)
         #delta_p = - solveByGD(Ul, W, Vli, bS, powerits, gamma/L) # likely does not work well
 
     if verbose:
@@ -1429,7 +1444,7 @@ while it < iterations:
     x0_p = x0_p + delta_p
     x0_l = x0_l + delta_l
 
-    x0 = np.hstack((x0_p, x0_l))
+    x0 = np.hstack((x0_p, x0_l), dtype=np.float64)
     x0_t = from_numpy(x0)
     camera_params = x0_t[:n_cameras*9].reshape(n_cameras,9)
     point_params  = x0_t[n_cameras*9:].reshape(n_points,3)
@@ -1458,7 +1473,7 @@ while it < iterations:
 
         x0_p = x0_p - delta_p
         x0_l = x0_l - delta_l
-        x0 = np.hstack((x0_p, x0_l))
+        x0 = np.hstack((x0_p, x0_l), dtype=np.float64)
         x0_t = from_numpy(x0)
         camera_params = x0_t[:n_cameras*9].reshape(n_cameras,9)
         point_params  = x0_t[n_cameras*9:].reshape(n_points,3)
