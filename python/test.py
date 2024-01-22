@@ -123,7 +123,7 @@ def init_lib():
 
     lib.cluster_covis.restype = None
     lib.cluster_covis.argtypes = [ctypes.c_int, ctypes.c_int, ctypes.c_void_p, ctypes.c_void_p,
-                                  ctypes.c_void_p, ctypes.c_void_p] # out]
+                                  ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p] # out]
 
 
 def process_cluster_lib(num_lands_, num_res_, kClusters__, point_indices_in_cluster__, res_indices_in_cluster__, point_indices__):
@@ -189,7 +189,7 @@ def process_cluster_lib(num_lands_, num_res_, kClusters__, point_indices_in_clus
 
     return res_toadd_to_c_, point_indices_already_covered_, covered_landmark_indices_c_, num_res_per_c_
 
-def cluster_covis_lib(kClusters, pre_merges_, camera_indices__, point_indices__):
+def cluster_covis_lib(kClusters, pre_merges_, camera_indices__, point_indices__, old_vtxsToPart_=0):
     c_kClusters_ = ctypes.c_int(kClusters)
     c_pre_merges_ = ctypes.c_int(pre_merges_)
 
@@ -205,12 +205,19 @@ def cluster_covis_lib(kClusters, pre_merges_, camera_indices__, point_indices__)
     res_to_cluster_c_out = lib.new_vector()
     res_to_cluster_c_sizes = lib.new_vector_of_size(kClusters)
 
-    lib.cluster_covis(c_kClusters_, c_pre_merges_, c_cam_indices_cpp, c_point_indices_cpp, res_to_cluster_c_out, res_to_cluster_c_sizes)
+    if (isinstance(old_vtxsToPart_, list)):
+        c_old_vtxsToPart_ptr = (ctypes.c_int * len(old_vtxsToPart_))(*old_vtxsToPart_)
+        old_vtxsToPart_cpp = lib.new_vector_by_copy(c_old_vtxsToPart_ptr, len(c_old_vtxsToPart_ptr))
+    else:
+        old_vtxsToPart_cpp = lib.new_vector()
 
+    lib.cluster_covis(c_kClusters_, c_pre_merges_, c_cam_indices_cpp, c_point_indices_cpp, res_to_cluster_c_out, res_to_cluster_c_sizes, old_vtxsToPart_cpp)
+
+    old_vtxsToPart_ = fillPythonVecSimple(old_vtxsToPart_cpp).tolist()
     kClusters = lib.vector_size(res_to_cluster_c_sizes)
 
     res_indices_in_cluster__ = fillPythonVec(res_to_cluster_c_out, res_to_cluster_c_sizes, kClusters)
-    return res_indices_in_cluster__, kClusters
+    return res_indices_in_cluster__, kClusters, old_vtxsToPart_
     # copy data, free c++ mem
 
 cameras, points_3d, camera_indices, point_indices, points_2d = read_bal_data(FILE_NAME)
@@ -315,7 +322,7 @@ for c in range(kClusters_):
 
 # from lib
 if True:
-    res_indices_in_cluster_, kClusters_ = cluster_covis_lib(kClusters, pre_merges, camera_indices, point_indices)
+    res_indices_in_cluster_, kClusters_, old_vtx_to_part = cluster_covis_lib(kClusters, pre_merges, camera_indices, point_indices)
     kClusters = kClusters_
     camera_indices_in_cluster_ = []
     point_indices_in_cluster_ = []

@@ -679,7 +679,7 @@ def copy_selected_blocks(M, block_selection_, bs):
     return Mi
 
 def stop_criterion(delta, delta_i, i): # maybe lower at later stage?
-    eps = 1e-3 #1e-2 used in paper, tune. might allow smaller as faster?
+    eps = 1e-4 #1e-2 used in paper, tune. might allow smaller as faster?
     return (i+1) * delta_i / delta < eps
 
 def solvePowerIts(Ul, W, Vli, bS, m_):
@@ -1082,7 +1082,7 @@ def init_lib():
 
     lib.cluster_covis.restype = None
     lib.cluster_covis.argtypes = [ctypes.c_int, ctypes.c_int, ctypes.c_void_p, ctypes.c_void_p,
-                                  ctypes.c_void_p, ctypes.c_void_p] # out]
+                                  ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p] # out]
 
 def process_cluster_lib(num_lands_, num_res_, kClusters__, point_indices_in_cluster__, res_indices_in_cluster__, point_indices__):
     # Flatten the nested lists and get the sizes of the sublists
@@ -1145,7 +1145,7 @@ def process_cluster_lib(num_lands_, num_res_, kClusters__, point_indices_in_clus
 
     return res_toadd_to_c_, point_indices_already_covered_, covered_landmark_indices_c_, num_res_per_c_
 
-def cluster_covis_lib(kClusters, pre_merges_, camera_indices__, point_indices__):
+def cluster_covis_lib(kClusters, pre_merges_, camera_indices__, point_indices__, old_vtxsToPart_=0):
     c_kClusters_ = ctypes.c_int(kClusters)
     c_pre_merges_ = ctypes.c_int(pre_merges_)
 
@@ -1161,22 +1161,30 @@ def cluster_covis_lib(kClusters, pre_merges_, camera_indices__, point_indices__)
     res_to_cluster_c_out = lib.new_vector()
     res_to_cluster_c_sizes = lib.new_vector_of_size(kClusters)
 
-    lib.cluster_covis(c_kClusters_, c_pre_merges_, c_cam_indices_cpp, c_point_indices_cpp, res_to_cluster_c_out, res_to_cluster_c_sizes)
+    if (isinstance(old_vtxsToPart_, list)):
+        c_old_vtxsToPart_ptr = (ctypes.c_int * len(old_vtxsToPart_))(*old_vtxsToPart_)
+        old_vtxsToPart_cpp = lib.new_vector_by_copy(c_old_vtxsToPart_ptr, len(c_old_vtxsToPart_ptr))
+    else:
+        old_vtxsToPart_cpp = lib.new_vector()
+
+    lib.cluster_covis(c_kClusters_, c_pre_merges_, c_cam_indices_cpp, c_point_indices_cpp, res_to_cluster_c_out, res_to_cluster_c_sizes, old_vtxsToPart_cpp)
+
+    old_vtxsToPart_ = fillPythonVecSimple(old_vtxsToPart_cpp).tolist()
     kClusters = lib.vector_size(res_to_cluster_c_sizes)
 
     res_indices_in_cluster__ = fillPythonVec(res_to_cluster_c_out, res_to_cluster_c_sizes, kClusters)
-    return res_indices_in_cluster__, kClusters
+    return res_indices_in_cluster__, kClusters, old_vtxsToPart_
     # copy data, free c++ mem
 
 def cluster_by_camera_gpt(
-    camera_indices_, points_3d_, points_2d_, point_indices_, kClusters_, startL_, pre_merges, baseline_clustering=False, init_cam_id=0, init_lm_id=0, seed=0
+    camera_indices_, points_2d_, point_indices_, kClusters_, pre_merges, old_vtxsToPart=0, baseline_clustering=False, init_cam_id=0, init_lm_id=0, seed=0
 ):
     np.random.seed(seed)
     # sort by res-indices by camera indices
     res_sorted = np.argsort(camera_indices_)
     num_res = camera_indices_.shape[0]
     num_cams = np.unique(camera_indices_).shape[0]
-    num_lands = points_3d_.shape[0]
+    num_lands = np.unique(point_indices_).shape[0] #points_3d_.shape[0]
     print("number of residuum: ", num_res)
 
     if baseline_clustering:
@@ -1258,7 +1266,7 @@ def cluster_by_camera_gpt(
         # 3. distribute equally, pick cluster w least res. pick lm with least res to add, add (bunch)
 
     else:
-        res_indices_in_cluster_, kClusters = cluster_covis_lib(kClusters_, pre_merges, camera_indices_, point_indices_)
+        res_indices_in_cluster_, kClusters, old_vtxsToPart = cluster_covis_lib(kClusters_, pre_merges, camera_indices_, point_indices_, old_vtxsToPart)
         kClusters_ = kClusters
         camera_indices_in_cluster_ = []
         point_indices_in_cluster_ = []
@@ -1324,7 +1332,7 @@ def cluster_by_camera_gpt(
         points_2d_in_cluster_,
         cluster_to_camera_,
         additional_point_indices_in_cluster_, additional_camera_indices_in_cluster_, additional_points_2d_in_cluster_, point_indices_already_covered_, covered_landmark_indices_c_,
-        kClusters
+        old_vtxsToPart, kClusters
     )
 
 
@@ -2678,6 +2686,8 @@ iterations = 100
 cost = np.zeros(kClusters)
 lastCost = 1e20
 lastCostDRE = 1e20
+old_primal_cost_v = 1e20
+gains = []
 basic_version = True # accelerated or basic
 sequential = True
 linearize_at_last_solution = False # linearize at uk or v. Maybe check energy at u or v. Currently with energy check: always pick v (False here)
@@ -2688,11 +2698,27 @@ rnaBufferSize = 6
 lib = ctypes.CDLL("./libprocess_clusters.so")
 init_lib()
 baseline_clustering = False
-reCluster = True
+reCluster = False
+old_vtxsToPart = 0
 pre_merges = 0 # does not help.
 if reCluster: # maybe less often. verbose!
-    pre_merges = int(0.2 * n_cameras) # random merges 20%?
-
+    pre_merges = int(0.4 * n_cameras) # random merges 20%? Also try explicitly different. 
+    # remember old edges cut, sample from those (first/only)
+# Gains:  [ 98648, 28114, 10547, 3708, 2695, 1653,  932,  546,  590,  442, 670, 510, 289, 335, 431, 187, 490, 152, 538, 325, 479, 395, 110, 83, 195, 188, 291, 237, 255, 205, 130, 93, 96, 79, 19,  9, 41, 36, 41, 22,  59, 61, 83, 85]
+# Gains:  [110783, 33216, 13537, 6433, 5496, 2480, 1332,  690,  953,  628, 702, 613, 805, 990, 678, 273, 481, 381, 171, 115,  44,  23,  53, 32, 242, 322, 198, 124, 195,  50,  18, 11, 25, 23, 22, 28, 17, 16, 76, 69, 105, 99, 79, 80, 105, 59, 39, 37, 36]
+# Gains:  [ 76245, 18663,  9014, 6017, 3842, 2222, 1611, 1132, 1658, 1082, 695, 506, 664, 460, 440, 251, 496, 268, 486, 572, 657, 242,  85, 42,  39,  48, 174, 113, 128,  74,  42, 30, 59, 73
+# Frequenz %1 / 0.4
+# 99 ====== f(v)=  196557  Gain:  7  and  264714
+# Gains:  [ 94040, 28707, 9503, 7154, 2656, 2741, 2666, 502, 611, 426, 456, 469, 472, 278, 328, 352, 295, 254, 236, 469, 273, 335, 126, 351, 241, 176, 505, 137, 316, 476, 164, 352, 260, 131, 46, 100, 125, 51, 80, 60, 44, 20, 34, 39, 73, 40, 55, 74, 52, 46, 43, 54, 35, 38, 54, 38, 11, 33, 31, 24, 14, 33, 13, 20, 7, 38, 31, 22, 11, 15, 15, 23, 13, 7, 22, 40, 22, 24, 15, 24, 14, 15, 9, 13, 11, 9, 12, 25, 8, 10, 10, 4, 21, 18, 25, 7]
+# Baseline
+# 99 ====== f(v)=  197151  Gain:  10  and  231734
+# Gains:  [ 67158, 30973, 15330, 10081, 5044, 3056, 1770, 1004, 688, 573, 470, 431, 524, 472, 548, 588, 572, 609, 473, 556, 319, 333, 139, 74, 34, 18, 16, 18, 27, 28, 26, 24, 25, 29, 38, 55, 86, 109, 102, 119, 86, 71, 62, 54, 49, 44, 40, 37, 35, 32, 31, 29, 28, 26, 25, 24, 23, 22, 22, 21, 19, 21, 19, 19, 18, 18, 17, 17, 16, 16, 16, 15, 15, 14, 14, 14, 14, 13, 13, 13, 13, 12, 12, 12, 12, 12, 11, 11, 11, 11, 11, 10, 10, 10, 10, 10]
+# extra pre cluster with provided vtx to part, like random
+# 99 ====== f(v)=  196724  Gain:  10  and  239710
+# Gains:  [ 78453, 23565, 15950,  8073,  4155, 2918, 1817, 1501, 1251, 350, 520, 226, 321, 322, 425, 373, 488, 305, 456, 167, 278, 281, 247, 319, 90, 69, 116, 155, 221, 252, 309, 429, 204, 194, 188, 137, 27, 17, 90, 44, 54, 39, 39, 60, 46, 42, 34, 36, 81, 138, 89, 71, 70, 29, 17, 11, 47, 51, 44, 45, 22, 17, 39, 30, 26, 22, 8, 6, 16, 10, 24, 18, 18, 17, 21, 17, 44, 26, 12, 6, 17, 15, 5, 4, 28, 23, 26, 18, 24, 15, 8, 5, 12, 9, 11, 10]
+# Swap version. Does do better than base but still.
+#99 ====== f(v)=  196989  Gain:  15  and  235806
+# Gains:  [242197, 88558, 47096, 18442, 12542, 4655, 3177, 3470, 1459, 1933, 646, 1179, 538, 857, 358, 664, 193, 693, 221, 467, 255, 285, 120, 178, 137, 133, 161, 117, 179, 122, 173, 99, 155, 151, 157, 114, 111, 98, 70, 83, 54, 50, 65, 51, 71, 47, 80, 47, 85, 51, 78, 65, 57, 46, 39, 37, 37, 36, 36, 35, 40, 38, 46, 43, 53, 53, 47, 62, 44, 51, 37, 39, 32, 36, 29, 29, 28, 26, 27, 24, 25, 22, 23, 21, 22, 19, 20, 18, 19, 18, 18, 17, 17, 16, 16, 15]
 # DRE:
 # f(x) + 1/2 (v^T Vlk * v - v^T 2 * Vlk (2x - sk) ) for x=u/v. Does not look right .. haeh
 # 
@@ -2713,9 +2739,11 @@ write_cluster = False
 
 points_3d_in_cluster = []
 L_in_cluster = []
+L_in_cluster_2 = []
 for _ in range(kClusters):
     points_3d_in_cluster.append(points_3d.copy())
     L_in_cluster.append(startL)
+    L_in_cluster_2.append(startL)
 
 if read_cluster:
     L_in_cluster = [0 for x in range(kClusters)] # dummy fill list
@@ -2754,9 +2782,10 @@ else:
             cluster_to_camera,
             additional_point_indices_in_cluster, additional_camera_indices_in_cluster, additional_points_2d_in_cluster, point_indices_already_covered_c,
             covered_landmark_indices_c,
+            old_vtxsToPart,
             kClusters
         ) = cluster_by_camera_gpt( # todo clustering takes old edges broken in and joins them into same cluster early. not sure this works at all. or just for some
-            camera_indices, points_3d, points_2d, point_indices, kClusters, startL, pre_merges, baseline_clustering
+            camera_indices, points_2d, point_indices, kClusters, pre_merges, old_vtxsToPart, baseline_clustering
         )
 
     if write_cluster:
@@ -2785,8 +2814,10 @@ else:
             cluster_to_camera_2,
             additional_point_indices_in_cluster_2, additional_camera_indices_in_cluster_2, additional_points_2d_in_cluster_2, point_indices_already_covered_c_2,
             covered_landmark_indices_c_2,
+            old_vtxsToPart,
+            kClusters_2
         ) = cluster_by_camera_gpt(
-            camera_indices, points_3d, points_2d, point_indices, kClusters, startL, pre_merges, baseline_clustering = True, init_cam_id=30, init_lm_id=5, seed=1234
+            camera_indices, points_2d, point_indices, kClusters, pre_merges, old_vtxsToPart, baseline_clustering=False, init_cam_id=30, init_lm_id=5, seed=1234
         )
         Vl_in_cluster_2 = [0 for x in range(kClusters)] # dummy fill list
 
@@ -2894,13 +2925,13 @@ if basic_version:
                         x0_p_new
                     ) = palm_f(
                         x0_p, camera_indices_in_cluster_2, point_indices_in_cluster_2, points_2d_in_cluster_2, 
-                        points_3d_in_cluster, # ?!?!
+                        points_3d_in_cluster,
                         additional_point_indices_in_cluster_2, additional_camera_indices_in_cluster_2, additional_points_2d_in_cluster_2, 
                         point_indices_already_covered_c_2, covered_landmark_indices_c_2,
                         L_in_cluster_2, Vl_in_cluster_2, kClusters, innerIts=innerIts, sequential=True,
                         )
             else:
-                if reCluster and it % 3 == 0:
+                if reCluster and it % 2 == 0: # 3 no gain?! if cost gain stalls?
                     (
                         camera_indices_in_cluster,
                         point_indices_in_cluster,
@@ -2908,9 +2939,10 @@ if basic_version:
                         cluster_to_camera,
                         additional_point_indices_in_cluster, additional_camera_indices_in_cluster, additional_points_2d_in_cluster, point_indices_already_covered_c,
                         covered_landmark_indices_c,
+                        old_vtxsToPart,
                         kClusters
                     ) = cluster_by_camera_gpt( # todo clustering takes old edges broken in and joins them into same cluster early. not sure this works at all. or just for some
-                        camera_indices, points_3d, points_2d, point_indices, kClusters, startL, pre_merges, baseline_clustering
+                        camera_indices, points_2d, point_indices, kClusters, pre_merges, old_vtxsToPart, baseline_clustering
                     )
 
                 (
@@ -2934,7 +2966,11 @@ if basic_version:
                     point_indices_in_cluster[ci],
                     points_2d_in_cluster[ci],
                     landmark_v)
-            print( it, "==== f(v)= ", round(primal_cost_v), " and ", round(np.sum(cost)))
+            print( it, "====== f(v)= ", round(primal_cost_v), " Gain: ", round(old_primal_cost_v - primal_cost_v), " and ", round(np.sum(cost)))
+            if it > 3:
+                gains.append(round(old_primal_cost_v - primal_cost_v))
+                print("Gains: ", gains)
+            old_primal_cost_v = primal_cost_v
 
             extrapolate = False
             if extrapolate:

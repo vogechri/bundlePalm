@@ -94,12 +94,13 @@ process_clusters(
     std::vector<int>& covered_landmark_indices_c_out, std::vector<int>& covered_landmark_indices_c_sizes, 
     std::vector<int>& num_res_per_c_out)
 {
-    std::cout << "nl " << num_lands << " nr " << num_res << " kc " << kClusters << std::endl;
-    std::cout << point_indices_in_cluster_flat.size() << "  " << point_indices_.size()
-              << " " << res_indices_in_cluster_flat.size() << std::endl;
-    std::cout << "point_indices_in_cluster_sizes " << point_indices_in_cluster_sizes.size() 
-              << " res_indices_in_cluster_sizes " << res_indices_in_cluster_sizes.size() << "\n";
-
+    if (false) {
+        std::cout << "nl " << num_lands << " nr " << num_res << " kc " << kClusters << std::endl;
+        std::cout << point_indices_in_cluster_flat.size() << "  " << point_indices_.size()
+                << " " << res_indices_in_cluster_flat.size() << std::endl;
+        std::cout << "point_indices_in_cluster_sizes " << point_indices_in_cluster_sizes.size() 
+                << " res_indices_in_cluster_sizes " << res_indices_in_cluster_sizes.size() << "\n";
+    }
     // Reconstruct the nested vectors
     std::vector<std::vector<int>> point_indices_in_cluster_;
     int start = 0;
@@ -123,7 +124,6 @@ process_clusters(
             landmark_occurrences[point]++;
         }
     }
-    std::cout << "uncovered are " << std::count(landmark_occurrences.begin(), landmark_occurrences.end(), 0) << " landmarks, present in single " << std::count(landmark_occurrences.begin(), landmark_occurrences.end(), 1) << ", present in multiple " << std::count_if(landmark_occurrences.begin(), landmark_occurrences.end(), [](int val) { return val > 1; }) << std::endl;
 
     std::vector<int> point_indices_to_complete;
     std::vector<int> point_indices_completed;
@@ -136,18 +136,21 @@ process_clusters(
             point_indices_completed.push_back(i);
         }
     }
-    std::cout << "point_indices_to_complete " << point_indices_to_complete.size() << std::endl;
+    std::cout << "uncovered are " << std::count(landmark_occurrences.begin(), landmark_occurrences.end(), 0) 
+              << " landmarks, present in single " << std::count(landmark_occurrences.begin(), landmark_occurrences.end(), 1) 
+              << ", present in multiple " << std::count_if(landmark_occurrences.begin(), landmark_occurrences.end(), [](int val) { return val > 1; })
+              << "point_indices_to_complete " << point_indices_to_complete.size() << std::endl;
 
     std::vector<std::vector<int>> point_indices_already_covered(kClusters);
     int sum_points_covered = 0;
     for (int ci = 0; ci < kClusters; ci++) {
         std::set<int> unique_points_in_cluster(point_indices_in_cluster_[ci].begin(), point_indices_in_cluster_[ci].end());
-        std::cout << ci << " unique_points_in_cluster " << unique_points_in_cluster.size() << "\n";
         std::vector<int> intersection;
         std::set_intersection(unique_points_in_cluster.begin(), unique_points_in_cluster.end(), point_indices_completed.begin(), point_indices_completed.end(), std::back_inserter(intersection));
         point_indices_already_covered[ci] = intersection;
         // Wrong here
-        std::cout << ci << " point_indices_already_covered " << point_indices_already_covered[ci].size() << std::endl;
+        std::cout << ci << " unique_points_in_cluster " << unique_points_in_cluster.size()
+                  << " point_indices_already_covered " << point_indices_already_covered[ci].size() << std::endl;
         sum_points_covered += point_indices_already_covered[ci].size();
     }
     std::cout << "Together covered points " << point_indices_to_complete.size() + sum_points_covered << "  sum_points_covered: " << sum_points_covered << std::endl;
@@ -228,6 +231,7 @@ struct VolumePartitionOptions {
   float targetVolumeOfUnion = 1000.;  // Limit of a partition.
   float maxVolumeOfUnion = 1000.;  // Limit of a partition.
   int maxNumKfsInPart = 100;       // Limit of a partition.
+  int targetKfsInPart = 100;
 };
 
 float GetCostGain(const std::pair<int, int>& edge,
@@ -446,24 +450,57 @@ int RandomMerge(int number_merges,
      std::vector<std::set<int>>& lms_in_part,
      std::set<std::pair<int, int>>& invalidEdges,
      std::vector<float>& weightPerVtx,
-     std::vector<float>& weightPerVtxSelected,
+     //std::vector<float>& weightPerVtxSelected,
+     const std::vector<int>& old_vtxsToPart,
      const std::map<OrderedEdge, float>& edgeWeightMap,
      const VolumePartitionOptions& options) {
     int num_merges = 0;
     int num_vtx = vtxsToPart.size();
     int num_edges = edgeWeightMap.size();
+
     std::mt19937 mt{ static_cast<std::mt19937::result_type>(
 		std::chrono::steady_clock::now().time_since_epoch().count() ) };
-    std::uniform_int_distribution dist{ 0, num_edges};
-    while (num_merges < std::min(number_merges, static_cast<int>(0.5 * (num_vtx-1)))) {
+    std::uniform_int_distribution dist{ 0, num_edges-1 };
+    // build prefered set, permute, pick from until merges reached or empty
+    std::vector<int> preferedEdgeIds;
+    //std::cout << "old_vtxsToPart " << old_vtxsToPart.size() << "\n";
+    preferedEdgeIds.reserve(old_vtxsToPart.size() * 10);
+    if(!old_vtxsToPart.empty()) {
+        int id = 0;
+        for (const auto& ordered_edge : edgeWeightMap) {
+            // better go over edges -> go over prefered set. merge until numVtxs too large, permute order       
+            const int old_part_src = old_vtxsToPart[ordered_edge.first.srcIdx];
+            const int old_part_tgt = old_vtxsToPart[ordered_edge.first.tgtIdx];
+            if(old_part_src != old_part_tgt) {
+                preferedEdgeIds.push_back(id);
+            }
+            ++id;
+        }
+        std::cout << "preferedEdgeIds " << preferedEdgeIds.size() << " \n";
+    }
+    std::shuffle(preferedEdgeIds.begin(), preferedEdgeIds.end(), mt);
+    int prefered_edge_id = 0;
+    preferedEdgeIds.resize(std::min(preferedEdgeIds.size(), size_t(150)));
+    while (prefered_edge_id < preferedEdgeIds.size() || num_merges < std::min(number_merges, static_cast<int>(0.5 * (num_vtx-1)))) {
+
         // draw edge seed from time.
         auto elementId = edgeWeightMap.begin();
-        int id = dist(mt);
-        std::advance(elementId, id);
+
+        if(prefered_edge_id < preferedEdgeIds.size()) {
+            std::advance(elementId, preferedEdgeIds[prefered_edge_id++]);
+        }
+        else {
+            std::advance(elementId, dist(mt));
+        }
 
         const auto& [ordered_edge, weight] = *elementId; //edgeWeightMap[id];
+
+        const int old_part_src = old_vtxsToPart[ordered_edge.srcIdx];
+        const int old_part_tgt = old_vtxsToPart[ordered_edge.tgtIdx];
+
         const int rootVtxInPartA = FindRootInVtxToPartMap(vtxsToPart, ordered_edge.srcIdx);
         const int rootVtxInPartB = FindRootInVtxToPartMap(vtxsToPart, ordered_edge.tgtIdx);
+
         if (rootVtxInPartA == rootVtxInPartB) {continue;}
         const int rootVtxInPart = std::min(rootVtxInPartA, rootVtxInPartB);
         const int largestVtxInPart = std::max(rootVtxInPartA, rootVtxInPartB);
@@ -472,9 +509,12 @@ int RandomMerge(int number_merges,
         RemapToRootInVtxToPartMap(&vtxsToPart, edge.first, rootVtxInPart);
         RemapToRootInVtxToPartMap(&vtxsToPart, edge.second, rootVtxInPart);
         const int numVtxs = numVtxsInUnion[rootVtxInPartA] + numVtxsInUnion[rootVtxInPartB];
-        if (numVtxs > options.maxNumKfsInPart || invalidEdges.find(edge) != invalidEdges.end()) {
+        if (numVtxs > options.targetKfsInPart || invalidEdges.find(edge) != invalidEdges.end()) {
+        //if (numVtxs > options.maxNumKfsInPart || invalidEdges.find(edge) != invalidEdges.end()) {
             continue;
         }
+        // std::cout << "edge " << ordered_edge.srcIdx << "/" << ordered_edge.tgtIdx
+        //           << " Old parts " << old_part_src << " " << old_part_tgt << " num_merges " << num_merges << "\n";
 
         num_merges++;
         std::set<int> union_new_part;
@@ -493,8 +533,8 @@ int RandomMerge(int number_merges,
         const float intersectionVolumeEstimate = intersectionVolume;//edgeWeightVector[edgeId];
         weightPerVtx[rootVtxInPart] +=
             weightPerVtx[largestVtxInPart] - intersectionVolumeEstimate;
-        weightPerVtxSelected[rootVtxInPart] +=
-            weightPerVtxSelected[largestVtxInPart] + intersectionVolumeEstimate;
+        // weightPerVtxSelected[rootVtxInPart] +=
+        //     weightPerVtxSelected[largestVtxInPart] + intersectionVolumeEstimate; // WHY '+'. not used for anything
         invalidEdges.emplace(rootVtxInPart, largestVtxInPart);
       }
       return num_merges;
@@ -508,7 +548,8 @@ void cluster_covis(
     int random_pre_number_merges,
     const std::vector<int>& camera_indices_in,
     const std::vector<int>& landmark_indices_in,
-    std::vector<int>& res_to_cluster, std::vector<int>& res_to_cluster_sizes) {
+    std::vector<int>& res_to_cluster, std::vector<int>& res_to_cluster_sizes,
+    std::vector<int>& old_vtxsToPart) {
 
     const bool verbose = false;
     const int num_res = landmark_indices_in.size();
@@ -525,7 +566,8 @@ void cluster_covis(
     }
     VolumePartitionOptions options = {.targetVolumeOfUnion = 1.5f * static_cast<float>(num_lands) / static_cast<float>(kClusters), 
         .maxVolumeOfUnion = (4 * num_lands) / static_cast<float>(kClusters), // hard constraint can lead to invalid # clusters
-        .maxNumKfsInPart = static_cast<int>((2 * num_cams) / kClusters)};
+        .maxNumKfsInPart = static_cast<int>((2 * num_cams) / kClusters),
+        .targetKfsInPart = static_cast<int>(num_cams / kClusters)};
 
     // 0. check that vertex indices are in range 0-num_cams
     // 1. define graph 
@@ -560,7 +602,7 @@ void cluster_covis(
     }
 
    std::vector<float> weightPerVtx(num_cams, 0);
-   std::vector<float> weightPerVtxSelected(num_cams, 0);
+   //std::vector<float> weightPerVtxSelected(num_cams, 0);
    std::vector<std::map<int, float>> adjacentPartAndEdgeWeight(num_cams); // This is edgeweight used in pq. keep up to date.
 
    // The costs used in the heap based greedy strategy.
@@ -594,7 +636,8 @@ void cluster_covis(
      lms_in_part,
      invalidEdges, // neded to set or will automatically?
      weightPerVtx,
-     weightPerVtxSelected,
+     //weightPerVtxSelected,
+     old_vtxsToPart,
      edgeWeightMap,
      options);
 
@@ -636,7 +679,7 @@ void cluster_covis(
   while (!pq.empty() && (num_cams - merges > kClusters)) {
     const int edgeId = pq.top();
     const auto& [vtxA, vtxB] = edgeVector[edgeId];
-    const float intersectionVolumeEstimate = edgeWeightVector[edgeId];
+    float intersectionVolumeEstimate = edgeWeightVector[edgeId];
     pq.pop();
 
     if (pq.size() % 20 == 0) {
@@ -722,7 +765,7 @@ void cluster_covis(
         std::inserter(union_new_part, union_new_part.begin()));
     const int volumeOfUnion = union_new_part.size();
     // TODO:? better?
-    //intersectionVolumeEstimate = volumeOfUnion - lms_in_part[vtxA].size();
+    intersectionVolumeEstimate = volumeOfUnion - lms_in_part[vtxA].size();
 
     // std::cout << "vtxA,b lms in part, union " << vtxA << "-" << rootVtxInPartB << " : " 
     //     << lms_in_part[vtxA].size() << " " << lms_in_part[rootVtxInPartB].size() << " " << volumeOfUnion << "\n";
@@ -782,8 +825,8 @@ void cluster_covis(
                                &adjacentPartToWeight);
     }
 
-    weightPerVtxSelected[rootVtxInPart] +=
-        weightPerVtxSelected[largestVtxInPart] + intersectionVolumeEstimate;
+    // weightPerVtxSelected[rootVtxInPart] +=
+    //     weightPerVtxSelected[largestVtxInPart] + intersectionVolumeEstimate;
     weightPerVtx[rootVtxInPart] +=
         weightPerVtx[largestVtxInPart] - intersectionVolumeEstimate;
 
@@ -862,13 +905,16 @@ void cluster_covis(
 // I got vtxsToPart[bbId] : camid to part.
 // this is sufficient to map res to part (cam id contained: camera_indices_in)
 //std::vector<int> res_in_cluster(num_res);
-std::cout << " res size " << camera_indices_in.size() << " num_res " << num_res << "\n";
-std::vector<std::vector<int>> res_indices_in_cluster(kClusters);
+
+//std::cout << " res size " << camera_indices_in.size() << " num_res " << num_res << "\n";
+std::vector<std::vector<int>> res_indices_in_cluster(numParts);
 //res_to_cluster_sizes.clear();
 //res_to_cluster_sizes.resize(kClusters, 0);
+old_vtxsToPart.resize(vtxsToPart.size());
 for(int res_id = 0; res_id < num_res; ++res_id) {
     const int cam_id = camera_indices_in[res_id];
     const int part_id = vtxsToPart[cam_id];
+    old_vtxsToPart[cam_id] = part_id;
     //std::cout << res_id << " residual " << cam_id << " to " << part_id << "\n";  
     //res_to_cluster_sizes[part_id]++;
     //res_in_cluster[res_id] = vtxsToPart[cam_id]; // could also be output, simpler
