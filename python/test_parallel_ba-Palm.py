@@ -23,7 +23,7 @@ BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/ladybug/"
 #FILE_NAME = "problem-73-11032-pre.txt.bz2"
 FILE_NAME = "problem-138-19878-pre.txt.bz2"
 
-# BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/trafalgar/"
+BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/trafalgar/"
 # FILE_NAME = "problem-21-11315-pre.txt.bz2"
 FILE_NAME = "problem-257-65132-pre.txt.bz2"
 
@@ -679,7 +679,7 @@ def copy_selected_blocks(M, block_selection_, bs):
     return Mi
 
 def stop_criterion(delta, delta_i, i): # maybe lower at later stage?
-    eps = 1e-4 #1e-2 used in paper, tune. might allow smaller as faster?
+    eps = 1e-2 #1e-2 used in paper, tune. might allow smaller as faster?
     return (i+1) * delta_i / delta < eps
 
 def solvePowerIts(Ul, W, Vli, bS, m_):
@@ -707,7 +707,7 @@ def solvePowerIts(Ul, W, Vli, bS, m_):
 
 # test Loop over L0=x, L=y here. Likely best to do grid search to get an idea. model as exp(-poly(L,it))
 def solveByGDNesterov(Ul, W, Vli, bS, m):
-    Lip = 0.9 # 100 -> 1. 
+    Lip = 0.9 # 100 -> 1. # TODO: play, find out how to progress over time. 
     lambda0 = (1.+np.sqrt(5.)) / 2. # l=0 g=1, 0, .. L0=1 g = 0,..
 
     Uli = blockInverse(Ul, 9)
@@ -738,8 +738,8 @@ def solveByGDNesterov(Ul, W, Vli, bS, m):
          print(it, " gd cost ", costk)
 
        if stop_criterion(np.linalg.norm(xk, 2), np.linalg.norm(1/Lip * g, 2), it__):
-           return xk
-    return xk
+           return xk, it__
+    return xk, it__
 
 # more smart and new. After partitioning by camera non overlapping, we add
 # residuals and cameras to complete (certain) landamrks until each lm is covered in some part.
@@ -1599,7 +1599,7 @@ def local_bundle_adjust(
     # torch_points_2d = from_numpy(points_2d)
     n_cameras_ = int(x0_p_.shape[0])
     n_points_ = int(x0_l_.shape[0])
-    powerits = 100 # kind of any value works here? > =5?
+    powerits = 200 # kind of any value works here? > =5?
 
     it_ = 0
     funx0_st1 = lambda X0, X1, X2: \
@@ -1736,7 +1736,8 @@ def local_bundle_adjust(
         bS = (bp - W * Vli * bl).flatten()
 
         #delta_p = - solvePowerIts(Ul, W, Vli, bS, powerits)
-        delta_p = - solveByGDNesterov(Ul, W, Vli, bS, powerits)
+        delta_p, powerits_run = solveByGDNesterov(Ul, W, Vli, bS, powerits)
+        delta_p = -delta_p
 
         delta_l = -Vli * ((W.transpose() * delta_p).flatten() + bl)
         # delta_l = delta_l * 0 # test ok error in landmark update.
@@ -1808,7 +1809,7 @@ def local_bundle_adjust(
     print("LfkDiagonal ", LfkDiagonal, " L ", L)
 
     L_out = np.maximum(minimumL, np.minimum(L_in_cluster_ * 2, L)) # not clear if generally ok, or 2 or 4 should be used.
-    return costEnd, x0_p_.numpy(), x0_l_[covered_landmark_indices_,:].numpy(), L_out, L * JltJlDiag + 1e-12 * Vl
+    return costEnd, x0_p_.numpy(), x0_l_[covered_landmark_indices_,:].numpy(), L_out, L * JltJlDiag + 1e-12 * Vl, powerits_run
 
 
 # TODO: to run multiple iterations in distributed version we need to use f(x) + L/2|x -  z|
@@ -2386,7 +2387,7 @@ def updateCluster_palm(
     # put in unique points, adjust point_indices_in_cluster[ci] by id in unique_points_in_c_
     points_3d_in_c = points_3d_in_cluster_[unique_points_in_c_]
 
-    cost_, x0_p_c_, x0_l_c_, Lnew_c_, Vl_c_ = local_bundle_adjust(
+    cost_, x0_p_c_, x0_l_c_, Lnew_c_, Vl_c_, powerits_run = local_bundle_adjust(
         local_camera_indices_in_cluster, # LOCAL 1st res
         point_indices_in_c,   # LOCAL 1st res
         torch_points_2d_in_c, # 1st res
@@ -2410,6 +2411,7 @@ def updateCluster_palm(
             Vl_c_,
             covered_landmark_indices_in_cluster_,
             cameras_indices_in_c_,
+            powerits_run
     )
 
 # difference: more input, update directly.
@@ -2430,6 +2432,7 @@ def palm_f(x0_p_, camera_indices_in_cluster_, point_indices_in_cluster_,
             Vl_c_,
             update_point_indices_in_c_,
             update_cameras_indices_in_c_,
+            powerits_run
         ) = updateCluster_palm(
             x0_p_,
             camera_indices_in_cluster_[ci], # updated and all per res
@@ -2471,7 +2474,7 @@ def palm_f(x0_p_, camera_indices_in_cluster_, point_indices_in_cluster_,
 
         # print(ci, " 3d ", points_3d_in_cluster_[ci][landmark_occurences==1, :]) # indeed 1 changed rest is constant
         # print(ci, " vl ", vl.data.reshape(-1,9)[landmarks_only_in_cluster_,:])  # indeed diagonal
-    return (cost_, L_in_cluster_, Vl_in_cluster_, landmark_v_, x0_p_)
+    return (cost_, L_in_cluster_, Vl_in_cluster_, landmark_v_, x0_p_, powerits_run)
 
 
 def prox_f(x0_p_, camera_indices_in_cluster_, point_indices_in_cluster_, 
@@ -2612,6 +2615,58 @@ def RNA(G, F, g, f, it_, m_, Fe, fe, lamda):
     return (G, F, Fe, np.squeeze(extrapolation - h * extrapolationF))
 
 
+def RNA_P(G, F, g, f, it_, m_, Fe, fe, lamda):
+    crefVersion = True
+    lamda = 10.0
+    h = 1 - np.sqrt(1.1)
+    id_ = it_ % m_
+    if len(G) >= m_:
+        #print("it, it%m", it, " ", it % m)
+        G[id_] = np.squeeze(g)
+        F[id_] = np.squeeze(f)
+        Fe[id_] = np.squeeze(fe)
+    else:
+        G.append(np.squeeze(g))
+        F.append(np.squeeze(f))
+        Fe.append(np.squeeze(fe))
+    mg = len(G)
+    cref = np.zeros(mg)
+    if mg >= m_:
+        cref[id_] = 1
+    else:
+        cref[mg-1] = 1
+
+    Gs_ = np.concatenate(G).reshape(mg, -1).transpose()
+    Fs_ = np.concatenate(F).reshape(mg, -1).transpose()
+    Fes_ = np.concatenate(Fe).reshape(mg, -1).transpose()
+    #print("Fs ", Fs.shape)
+    FtF = Fs_.transpose().dot(Fs_) # why dot?
+    fTfNorm = np.linalg.norm(FtF, 2)
+    #print("FtF ", FtF.shape, " |FtF|_2=", fTfNorm)
+
+    FtF = FtF * (1. / fTfNorm) + lamda * np.eye(mg)
+    if crefVersion:
+        #print("cref ", cref, " ", cref.shape)
+        w = np.linalg.solve(FtF, lamda * cref)
+        z = np.linalg.solve(FtF, np.ones(mg))
+        #print("w ", w, " ", w.shape)
+        #print("z ", z, " ", z.shape)
+        #print(w.transpose().dot(np.ones(mg)))
+        c = w + z * (1 - w.transpose().dot(np.ones(mg))) / (z.transpose().dot(np.ones(mg)))
+        #print("c ", c, " ", c.shape)
+    else:
+        z = np.linalg.solve(FtF, np.ones(mg) / mg)
+        c = z / z.transpose().dot(np.ones(mg)) # sums to 1
+    extrapolation = Gs_.dot(c) #+ 0.1 * Fs_.dot(c)
+    extrapolationF = Fes_.dot(c)
+
+    print("c ", c, " ", c.shape, id_)
+
+    # shape utter non sense
+    #print("extrapolation ", extrapolation.shape, " ", g.shape)
+    return (G, F, Fe, np.squeeze(extrapolation - h * extrapolationF))
+
+
 def BFGS_direction(r, ps, qs, rhos, k, mem, mu):
     # r = -r # not needed with below
     # lookup k-1, k-mem entries. 
@@ -2688,9 +2743,12 @@ lastCost = 1e20
 lastCostDRE = 1e20
 old_primal_cost_v = 1e20
 gains = []
+powerits_runs = []
+acc_gains = []
 basic_version = True # accelerated or basic
 sequential = True
 linearize_at_last_solution = False # linearize at uk or v. Maybe check energy at u or v. Currently with energy check: always pick v (False here)
+extrapolate_parallel = True
 Gs = [] 
 Fs = []
 Fes = []
@@ -2719,6 +2777,9 @@ if reCluster: # maybe less often. verbose!
 # Swap version. Does do better than base but still.
 #99 ====== f(v)=  196989  Gain:  15  and  235806
 # Gains:  [242197, 88558, 47096, 18442, 12542, 4655, 3177, 3470, 1459, 1933, 646, 1179, 538, 857, 358, 664, 193, 693, 221, 467, 255, 285, 120, 178, 137, 133, 161, 117, 179, 122, 173, 99, 155, 151, 157, 114, 111, 98, 70, 83, 54, 50, 65, 51, 71, 47, 80, 47, 85, 51, 78, 65, 57, 46, 39, 37, 37, 36, 36, 35, 40, 38, 46, 43, 53, 53, 47, 62, 44, 51, 37, 39, 32, 36, 29, 29, 28, 26, 27, 24, 25, 22, 23, 21, 22, 19, 20, 18, 19, 18, 18, 17, 17, 16, 16, 15]
+# 
+# 1e-3 and 200 nest: 99 ====== f(v)=  196977
+# 1e-2, 200its       99 ====== f(v)=  196974  Gain:  9  and  231508
 # DRE:
 # f(x) + 1/2 (v^T Vlk * v - v^T 2 * Vlk (2x - sk) ) for x=u/v. Does not look right .. haeh
 # 
@@ -2825,6 +2886,8 @@ print(L_in_cluster)
 Vl_in_cluster = [0 for x in range(kClusters)] # dummy fill list
 landmark_s_in_cluster = [elem.copy() for elem in points_3d_in_cluster]
 landmark_v = points_3d_in_cluster[0].copy()
+x0_p_old = x0_p.copy()
+landmark_v_old = landmark_v.copy()
 
 if basic_version:
 
@@ -2908,7 +2971,8 @@ if basic_version:
                         L_in_cluster,
                         Vl_in_cluster,
                         landmark_v,
-                        x0_p_new
+                        x0_p_new,
+                        powerits_run
                     ) = palm_f(
                         x0_p, camera_indices_in_cluster, point_indices_in_cluster, points_2d_in_cluster, 
                         points_3d_in_cluster,
@@ -2922,7 +2986,8 @@ if basic_version:
                         L_in_cluster_2,
                         Vl_in_cluster_2,
                         landmark_v,
-                        x0_p_new
+                        x0_p_new,
+                        powerits_run
                     ) = palm_f(
                         x0_p, camera_indices_in_cluster_2, point_indices_in_cluster_2, points_2d_in_cluster_2, 
                         points_3d_in_cluster,
@@ -2950,12 +3015,13 @@ if basic_version:
                     L_in_cluster,
                     Vl_in_cluster,
                     landmark_v,
-                    x0_p_new
+                    x0_p_new,
+                    powerits_run
                 ) = palm_f(
                     x0_p, camera_indices_in_cluster, point_indices_in_cluster, points_2d_in_cluster, 
                     points_3d_in_cluster, 
                     additional_point_indices_in_cluster, additional_camera_indices_in_cluster, additional_points_2d_in_cluster, point_indices_already_covered_c, covered_landmark_indices_c,
-                    L_in_cluster, Vl_in_cluster, kClusters, innerIts=innerIts, sequential=True,
+                    L_in_cluster, Vl_in_cluster, kClusters, innerIts=innerIts, sequential = not extrapolate_parallel,
                     )
 
             primal_cost_v = 0
@@ -2969,11 +3035,12 @@ if basic_version:
             print( it, "====== f(v)= ", round(primal_cost_v), " Gain: ", round(old_primal_cost_v - primal_cost_v), " and ", round(np.sum(cost)))
             if it > 3:
                 gains.append(round(old_primal_cost_v - primal_cost_v))
+                powerits_runs.append(powerits_run)
                 print("Gains: ", gains)
+                print("powerIts: ", powerits_runs)
             old_primal_cost_v = primal_cost_v
 
-            extrapolate = False
-            if extrapolate:
+            if extrapolate_parallel:
                 # L_rna = 1 # max(L_in_cluster)
                 # delta_l = landmark_v - points_3d_in_cluster[0]
                 # delta_p = x0_p_new - x0_p
@@ -2984,10 +3051,52 @@ if basic_version:
                 # camera_ext = extr[:n_cameras * 9].reshape(n_cameras, 9)
                 # point_ext  = extr[n_cameras * 9:].reshape(n_points, 3)
 
-                # pure acc, maybe sqrt(1.1)
-                tau = np.sqrt(1.1)
-                point_ext  = points_3d_in_cluster[0] + tau * (landmark_v - points_3d_in_cluster[0])
-                camera_ext = x0_p + tau * (x0_p_new -x0_p)
+                # pure acc, maybe sqrt(1.1), 1.1 at 10 diminishing return / fail.
+                # only cam bad at 6 its. only lms bad at 10 its. 
+                # both: goes to 0 at 40 then worse.99 ====== f(v)=  197270  Gain:  9  and  231860. at least.
+                # Base is 99 ====== f(v)=  197303  Gain:  10  and  2319
+                # so 33 better -- lol.
+                # OTHER IDEA WORKS 99 ==== accelerated f(v)=  195087  basic  195121  gain  34
+                base_acceleration = False
+                if base_acceleration:
+                    tau = np.sqrt(1.1)
+                    point_ext  = landmark_v_old + tau * (landmark_v - landmark_v_old)
+                    camera_ext = x0_p_old + tau * (x0_p_new - x0_p_old)
+                    x0_p_old = x0_p.copy()
+                    landmark_v_old = landmark_v.copy()
+                else:
+                    baseRNA = False
+                    if baseRNA:
+                        xk = np.concatenate([x0_p_new.flatten(), landmark_v.flatten()])
+                        rna_delta  = xk - np.concatenate([x0_p_old.flatten(), landmark_v_old.flatten()])
+                        #rna_delta_delta = rna_delta - rna_delta_old
+                        Gs, Fs, Fes, x_extr = RNA_P(Gs, Fs, xk, rna_delta, it, rnaBufferSize, Fes, rna_delta, lamda = 1)
+                        camera_ext = x_extr[: 9 * n_cameras].reshape(n_cameras, 9)
+                        point_ext = x_extr[9*n_cameras :].reshape(n_points, 3)
+                    else:
+                        # other idea would be
+                        # wk+1 = rna_delta
+                        # Fk = [wk+1 - wk, ...] Ek = [xk - xk-1, ...]
+                        # gamma_k = argmin [wk+1 - Fk * gamma_k]
+                        # xk+1 = xk + wk+1 - (Ek+Fk) * gamma_k = 
+                        #
+                        xk  = np.concatenate([x0_p_old.flatten(), landmark_v_old.flatten()])
+                        wk1 = np.concatenate([x0_p_new.flatten(), landmark_v.flatten()]) - xk
+                        if it>0:
+                            fk  = wk1 - wk
+                            ek  = xk - xk_old
+                            Gs, Fs, Fes, update = RNA_P(Gs, Fs, ek, fk, it, rnaBufferSize, Fes, fk, lamda = 1)
+                            x_extr = xk + wk1 + update
+                            camera_ext = x_extr[: 9 * n_cameras].reshape(n_cameras, 9)
+                            point_ext = x_extr[9*n_cameras :].reshape(n_points, 3)
+                        else:
+                            point_ext  = landmark_v
+                            camera_ext = x0_p_new
+
+                        wk = wk1.copy()
+                        xk_old = xk.copy()
+                    x0_p_old = x0_p.copy()
+                    landmark_v_old = landmark_v.copy()
 
                 primal_cost_ext = 0
                 for ci in range(kClusters):
@@ -2998,6 +3107,9 @@ if basic_version:
                         points_2d_in_cluster[ci],
                         point_ext)
                 print( it, "==== accelerated f(v)= ", round(primal_cost_ext), " basic ", round(primal_cost_v), " gain ", round(primal_cost_v-primal_cost_ext) )
+                if it > 1:
+                    acc_gains.appen(round(primal_cost_v-primal_cost_ext))
+                    print("acc_gains ", acc_gains)
 
                 if primal_cost_ext < primal_cost_v:
                     for ci in range(kClusters):
