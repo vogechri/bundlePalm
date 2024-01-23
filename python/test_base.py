@@ -1575,6 +1575,7 @@ while it < iterations:
             # test just 'acceleration' also working. Not so well though / significantly worse.
             #extr = x0 - (1./np.sqrt(2)-1) * delta
             #extr = x0 + (np.sqrt(2)-1) * delta
+            extr = x0 + 0.1 * delta # 192910, better than RNA
 
         sit = sit + 1 # succesful iteration number
 
