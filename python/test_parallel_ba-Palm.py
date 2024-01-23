@@ -2614,11 +2614,16 @@ def RNA(G, F, g, f, it_, m_, Fe, fe, lamda):
     #print("extrapolation ", extrapolation.shape, " ", g.shape)
     return (G, F, Fe, np.squeeze(extrapolation - h * extrapolationF))
 
-
-def RNA_P(G, F, g, f, it_, m_, Fe, fe, lamda):
+#  1-sqrt(1.1) acc_gains  [-2878840,  -388527, -48999, -47218, -16841036, -13175, 1474, -267, -712, 624, 385, 489]
+#  1           acc_gains  [-10502717, -1429837, -248345, -227731, -43648159, -268979, -4113, 30, -4389, -3011, -1193]
+# -1           acc_gains  [  126490,  -400849, 12659, -29543, -3761281, 2648, 693, -2400, -2854, -2037, -3902, -1634, -943, -854, -1158, -2074]
+# 1-sqrt(1) @ l=0.1 50 ====== f(v)=  197768
+# h=0          50 ====== f(v)=  197808
+# lamda = 100, h = 1 - np.sqrt(1.1) 50 ==== accelerated f(v)=  197683  basic  197716  gain  33, 99 ====== f(v)=  194927
+def RNA_P(G, F, g, f, it_, m_, Fe, fe, lamda, h):
     crefVersion = True
-    lamda = 10.0
-    h = 1 - np.sqrt(1.1)
+    #lamda = 100.
+    #h = 1 - np.sqrt(1.1)
     id_ = it_ % m_
     if len(G) >= m_:
         #print("it, it%m", it, " ", it % m)
@@ -2646,14 +2651,9 @@ def RNA_P(G, F, g, f, it_, m_, Fe, fe, lamda):
 
     FtF = FtF * (1. / fTfNorm) + lamda * np.eye(mg)
     if crefVersion:
-        #print("cref ", cref, " ", cref.shape)
         w = np.linalg.solve(FtF, lamda * cref)
         z = np.linalg.solve(FtF, np.ones(mg))
-        #print("w ", w, " ", w.shape)
-        #print("z ", z, " ", z.shape)
-        #print(w.transpose().dot(np.ones(mg)))
         c = w + z * (1 - w.transpose().dot(np.ones(mg))) / (z.transpose().dot(np.ones(mg)))
-        #print("c ", c, " ", c.shape)
     else:
         z = np.linalg.solve(FtF, np.ones(mg) / mg)
         c = z / z.transpose().dot(np.ones(mg)) # sums to 1
@@ -3060,8 +3060,8 @@ if basic_version:
                 base_acceleration = False
                 if base_acceleration:
                     tau = np.sqrt(1.1)
-                    point_ext  = landmark_v_old + tau * (landmark_v - landmark_v_old)
-                    camera_ext = x0_p_old + tau * (x0_p_new - x0_p_old)
+                    point_ext_  = landmark_v_old + tau * (landmark_v - landmark_v_old)
+                    camera_ext_ = x0_p_old + tau * (x0_p_new - x0_p_old)
                     x0_p_old = x0_p.copy()
                     landmark_v_old = landmark_v.copy()
                 else:
@@ -3071,8 +3071,8 @@ if basic_version:
                         rna_delta  = xk - np.concatenate([x0_p_old.flatten(), landmark_v_old.flatten()])
                         #rna_delta_delta = rna_delta - rna_delta_old
                         Gs, Fs, Fes, x_extr = RNA_P(Gs, Fs, xk, rna_delta, it, rnaBufferSize, Fes, rna_delta, lamda = 1)
-                        camera_ext = x_extr[: 9 * n_cameras].reshape(n_cameras, 9)
-                        point_ext = x_extr[9*n_cameras :].reshape(n_points, 3)
+                        camera_ext_ = x_extr[: 9 * n_cameras].reshape(n_cameras, 9)
+                        point_ext_ = x_extr[9*n_cameras :].reshape(n_points, 3)
                     else:
                         # other idea would be
                         # wk+1 = rna_delta
@@ -3080,41 +3080,64 @@ if basic_version:
                         # gamma_k = argmin [wk+1 - Fk * gamma_k]
                         # xk+1 = xk + wk+1 - (Ek+Fk) * gamma_k = 
                         #
+                        xk1 = np.concatenate([x0_p_new.flatten(), landmark_v.flatten()])
                         xk  = np.concatenate([x0_p_old.flatten(), landmark_v_old.flatten()])
-                        wk1 = np.concatenate([x0_p_new.flatten(), landmark_v.flatten()]) - xk
-                        if it>0:
+                        wk1 = xk1 - xk
+                        if it > 0:
                             fk  = wk1 - wk
-                            ek  = xk - xk_old
-                            Gs, Fs, Fes, update = RNA_P(Gs, Fs, ek, fk, it, rnaBufferSize, Fes, fk, lamda = 1)
-                            x_extr = xk + wk1 + update
-                            camera_ext = x_extr[: 9 * n_cameras].reshape(n_cameras, 9)
-                            point_ext = x_extr[9*n_cameras :].reshape(n_points, 3)
+                            ek  = xk - xk_old # = wk
+                            # alpha = 1
+                            # Gs, Fs, Fes, update = RNA_P(Gs, Fs, ek, fk, it, rnaBufferSize, Fes, fk, lamda = 10, h = -alpha)
+                            # x_extr = xk + wk1 + update
+                            # x_extr = xk + alpha * wk1 + update # haeh ? from paper it is this? was awful.
+                            # reminds on some acceleration. lookup.
+                            # x_extr = xk + wk1 + ek + (np.sqrt(1.1) - 1.) * fk # avoids storing shit. 1- sqrt(1.1) also ok. maybe no fk at all?
+                            # could be like this or similar (without fk part, but without much worse, still beta = something might stil work)
+                            #beta = 1.0 # beta * wk # test different values. find scheme, hmm. 1: 195209. 1.1 & 0.9 are a lot worse. one could also update with accepted version if accepted?
+                            x_extr = xk1 + wk # wk is old delta. delayed update.
+
+                            camera_ext_ = x_extr[: 9 * n_cameras].reshape(n_cameras, 9)
+                            point_ext_ = x_extr[9*n_cameras :].reshape(n_points, 3)
+                            # 99 ==== accelerated f(v)=  194935  basic  194927  gain  -8
+                            # acc_gains  [-2555833, -256908, -42274, -36658, -16841313, -11901, 1473, -268, -710, 624, 384, 497, 161, 78, 55, -286, 84, -114, -1842, -1285, -910, -1685, -643, -899, -104, 14, 2, 20, 23, -44, 18, 29, 45, -7, -195, -2850992, -1084, -444, -801, -191, -71, -26, -2, -1, 12, -1, 19, 9, 33, 25, 39, 30, 42, -405, 83, -61, 65, 27, 72, -19, 81, -16, 75, -19, 27, 1, 42, 26, 71, -129, 62, -13, 73, -81, 59, -7, 76, -56, 64, 9, 50, 50, 49, -88, 45, -490, -66, 24, -199, 22, 36, -111, 2, 35, -26, -8, 7, -8]
+                            # 99 ==== accelerated f(v)=  194945, for flip
                         else:
-                            point_ext  = landmark_v
-                            camera_ext = x0_p_new
+                            point_ext_  = landmark_v
+                            camera_ext_ = x0_p_new
 
                         wk = wk1.copy()
                         xk_old = xk.copy()
                     x0_p_old = x0_p.copy()
                     landmark_v_old = landmark_v.copy()
 
-                primal_cost_ext = 0
-                for ci in range(kClusters):
-                    primal_cost_ext += primal_cost(
-                        camera_ext,
-                        camera_indices_in_cluster[ci],
-                        point_indices_in_cluster[ci],
-                        points_2d_in_cluster[ci],
-                        point_ext)
+                line_search_iterations = 3
+                for ls_it in range(line_search_iterations):
+                    tk = ls_it / (line_search_iterations-1)
+                    camera_ext = (1 - tk) * camera_ext_ + tk * x0_p_new
+                    point_ext = (1 - tk) * point_ext_ + tk * landmark_v
+                    primal_cost_ext = 0
+                    for ci in range(kClusters):
+                        primal_cost_ext += primal_cost(
+                            camera_ext,
+                            camera_indices_in_cluster[ci],
+                            point_indices_in_cluster[ci],
+                            points_2d_in_cluster[ci],
+                            point_ext)
+                    if primal_cost_ext <= primal_cost_v:
+                        break
+                # acc_gains  [-2752015, -272268, -43529, -41446, -43006, -14736, 1299, -292, -914, 613, 357, 497, 124, 60,  45, -506,  15, -172, -2061, -1350, -916, -1854, -653, -1999, -809, -80, 15, -21, 25, 2, -12, 33, 21, -44, -142, -62031, -1020, -418, -903, -200, -74, -24, -2, 1, -27, 16, 4, 0, 16, 13, 8, 46, 60, -125, 59, 14, -12, 18, -28, 38, -74, 38, -23, 55, -61, 50, -18, 65, -51, 58, -15, 71, -44, 62, -13, 66, -38, 61, -10, 70, -35, 38, -7, 44, -31, 57, -4, 69, -24, 62, 4, 70, 22, 38, 37, -165, -25, -10]
+                # with ls 99 ====== f(v)=  194821
+                # acc_gains  [0, 0, 14526, 0, 0, 275, 557, 0, 488, 122, 161, 55, 36, 40, 165, 6, 74, 41, 0, 0, 0, 0, 0, 0, 12, 0, 1, 11, 6, 4, 24, 23, 8, 0, 0, 0, 0, 0, 0, 2, 0, 0, 10, 0, 5, 19, 21, 38, 23, 38, 7, 50, 15, 45, 37, 30, 0, 87, 0, 58, 2, 88, 0, 62, 0, 84, 0, 65, 0, 61, 0, 10, 3, 41, 15, 54, 0, 65, 0, 109, 17, 13, 18, 0, 27, 0, 17, 0, 59, 0, 22, 0, 53, 0, 22, 0, 35, 0]
                 print( it, "==== accelerated f(v)= ", round(primal_cost_ext), " basic ", round(primal_cost_v), " gain ", round(primal_cost_v-primal_cost_ext) )
                 if it > 1:
-                    acc_gains.appen(round(primal_cost_v-primal_cost_ext))
+                    acc_gains.append(round(primal_cost_v-primal_cost_ext))
                     print("acc_gains ", acc_gains)
 
                 if primal_cost_ext < primal_cost_v:
                     for ci in range(kClusters):
                         points_3d_in_cluster[ci] = point_ext.copy()
                     x0_p = camera_ext.copy()
+                    #wk = x_extr - xk # update w accepted change
                 else:
                     for ci in range(kClusters):
                         points_3d_in_cluster[ci] = landmark_v.copy()
@@ -3142,8 +3165,6 @@ if basic_version:
                     for ci in range(kClusters):
                         points_3d_in_cluster[ci] = landmark_v.copy()
                     x0_p = x0_p_new.copy()
-
-
 
 else:
 
@@ -3244,12 +3265,12 @@ else:
         line_search_iterations = 3
         print(" ..... step length ", steplength, " bfgs step ", dk_stepLength, " ratio ", multiplier)
         for ls_it in range(line_search_iterations):
-            tk = (1 - ls_it) / (line_search_iterations-1) # i=2: 1, 0 | i=3: 1, 1/2, 1 | .. or multiplier * 
+            tk = ls_it / (line_search_iterations-1) # i=2: 1, 0 | i=3: 1, 1/2, 1 | .. or multiplier * 
             #---- |u-s|^2_D  12854 |u-v|^2_D  131 |2u-s-v|^2_D  13090 |u-v|^2  1234
             #10 / 0  ======== DRE BFGS ======  29010  ========= gain  513 ==== f(v)=  29336  f(u)=  28616  ~=  28615.853615225344
             #13 / 0  ======== DRE BFGS ======  28612  ========= gain  469 ==== f(v)=  28672  f(u)=  28494  ~=  28493.593312067547
             for ci in range(kClusters):
-                landmark_s_in_cluster_bfgs[ci] = (1-tk) * landmark_s_in_cluster_pre[ci] + tk * (landmark_s_in_cluster[ci] + multiplier * search_direction[ci])
+                landmark_s_in_cluster_bfgs[ci] = tk * landmark_s_in_cluster_pre[ci] + (1-tk) * (landmark_s_in_cluster[ci] + multiplier * search_direction[ci])
                 #print(" bfgs_r ", bfgs_r[ci * 3 * n_points: (ci+1) * 3 * n_points].reshape(n_points, 3))
                 #print(" search_direction[ci] ", search_direction[ci])
 

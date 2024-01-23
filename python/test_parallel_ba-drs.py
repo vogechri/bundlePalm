@@ -2050,12 +2050,12 @@ else:
         line_search_iterations = 3
         print(" ..... step length ", steplength, " bfgs step ", dk_stepLength, " ratio ", multiplier)
         for ls_it in range(line_search_iterations):
-            tk = (1 - ls_it) / (line_search_iterations-1) # i=2: 1, 0 | i=3: 1, 1/2, 1 | .. or multiplier * 
+            tk = ls_it / (line_search_iterations-1)
             #---- |u-s|^2_D  12854 |u-v|^2_D  131 |2u-s-v|^2_D  13090 |u-v|^2  1234
             #10 / 0  ======== DRE BFGS ======  29010  ========= gain  513 ==== f(v)=  29336  f(u)=  28616  ~=  28615.853615225344
             #13 / 0  ======== DRE BFGS ======  28612  ========= gain  469 ==== f(v)=  28672  f(u)=  28494  ~=  28493.593312067547
             for ci in range(kClusters):
-                landmark_s_in_cluster_bfgs[ci] = (1-tk) * landmark_s_in_cluster_pre[ci] + tk * (landmark_s_in_cluster[ci] + multiplier * search_direction[ci])
+                landmark_s_in_cluster_bfgs[ci] = tk * landmark_s_in_cluster_pre[ci] + (1-tk) * (landmark_s_in_cluster[ci] + multiplier * search_direction[ci])
                 #print(" bfgs_r ", bfgs_r[ci * 3 * n_points: (ci+1) * 3 * n_points].reshape(n_points, 3))
                 #print(" search_direction[ci] ", search_direction[ci])
 
