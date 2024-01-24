@@ -870,6 +870,45 @@ def solvePowerIts(Ul, W, Vli, bS, m):
           return xk
     return xk
 
+# solve Ul * xk - W * (Vli * (W.transpose() * xk)) = -bS
+# (I - Ul^-1 W * (Vli * (W.transpose()) * xk = Ul^-1 bS
+# A = (I - Ul^-1 W * (Vli * (W.transpose()), b = -Ul^-1 bS, minus outside
+# problem A spd.
+# Biconjugate Gradient Stabilized, must restart if r0|rk =0
+def solveBiCGStab(Ul, W, Vli, bS, m_):
+    # costk = np.sum( bS**2 )
+    # print("start gd cost ", costk)
+
+    Uli = blockInverse(Ul, 9)
+    b  = Uli * bS
+    xk = Uli * bS # start or 1 grad-step
+    rk = b - (xk - Uli * (W * (Vli * (W.transpose() * xk))))
+    pk = rk.copy()
+    r0 = rk.copy() # r0dot rk != 0 choose wisely? how?
+
+    for it__ in range(m_):
+        Apk = (pk - Uli * (W * (Vli * (W.transpose() * pk))))
+        r0rk = r0.dot(rk)
+        a = r0rk / r0.dot(Apk)
+        s = rk - a * Apk
+        Ask = (s - Uli * (W * (Vli * (W.transpose() * s))))
+        w = Ask.dot(s) / Ask.dot(Ask)
+        xk = xk + a * pk + w * s
+        if stop_criterion(np.linalg.norm(xk, 2), np.linalg.norm(a * pk + w * s, 2), it__):
+          return xk
+        rk = s - w * Ask
+        # if np.linalg.norm(rk, 2) < 1e-2:
+        #     return xk
+        b = a / w * r0.dot(rk) / r0rk
+        pk = rk + b * (pk - w * Apk)
+        if False:
+            # eq is Ul [I - Uli * W * Vli * W.transpose()] x = b
+            #costk = np.sum(((Ul - W * Vli * W.transpose()) * xk - bS) ** 2)
+            costk = xk.dot(Ul * xk - W * (Vli * (W.transpose() * xk)) - 2 * bS)
+            print(it__, " gd cost ", costk)
+
+    return xk
+
 # symmetric version, correct but how to find L?
 # S x = -b -> x^t(Sx+b) -> min, S = Ul - W * Vli * W.transpose()
 # matrix is 1/2 x^T [ Ul - W * Vli * W.transpose() ] x + b^T x ->min
@@ -921,6 +960,7 @@ def solveByGD(Ul, W, Vli, bS, m, gamma):
 # 1/2 x^t S x + x^t b is cost. |Sx-b|^2 = xt S*S 
 # But
 # 1/2 x^t U S x + x^t b -> min
+# 1/2 x^tx - 1/2 x^t U S x + x^t b -> min is a problem with derivative, U, S symmetric
 # 1/2 x^t x - 1/2 U S x + 1/2 x^t U S + b = x - 1/2 (U S x + S^t U ^T x) + b = x - U S x + b
 # 
 def solveByGDPower(Ul, W, Vli, bS, m, gamma):
@@ -987,7 +1027,7 @@ def solveByGDPower(Ul, W, Vli, bS, m, gamma):
 def solveByGDNesterov(Ul, W, Vli, bS, m, L):
     L = 0.9 # 100 -> 1. 
     #lambda0 = 1 #?
-    lambda0 = (1.+np.sqrt(5.)) / 2. # l=0 g=1, 0, .. L0=1 g = 0,..
+    lambda0 = (1. + np.sqrt(5.)) / 2. # l=0 g=1, 0, .. L0=1 g = 0,..
 
     #0    -> 0.66
     #0.01 -> 0.66
@@ -1413,6 +1453,7 @@ while it < iterations:
         delta_p = - inv_sparse(S) * bS
         # Ax = b <-> K A K x = K b, then return K x since K^-1 x is computed as solution of [K A K] x = K b
     else:
+        #delta_p = - solveBiCGStab(Ul, W, Vli, bS, powerits)
         #delta_p = - solveByGDPolak(Ul, W, Vli, bS, powerits, L, 0.9)
         delta_p = - solveByGDNesterov(Ul, W, Vli, bS, powerits, L)
         #delta_p = - solveByGDPower(Ul,W, Vli, bS, powerits, gamma/L)
