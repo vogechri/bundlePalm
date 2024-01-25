@@ -16,6 +16,7 @@ import math
 import ctypes
 from torch.autograd.functional import jacobian
 from torch import tensor, from_numpy, flatten
+import open3d as o3d
 
 # look at website. This is the smallest problem. guess: pytoch cpu is pure python?
 BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/ladybug/"
@@ -27,11 +28,28 @@ BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/trafalgar/"
 # FILE_NAME = "problem-21-11315-pre.txt.bz2"
 FILE_NAME = "problem-257-65132-pre.txt.bz2"
 
-# BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/dubrovnik/"
-# FILE_NAME = "problem-16-22106-pre.txt.bz2"
-# FILE_NAME = "problem-135-90642-pre.txt.bz2"
+BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/dubrovnik/"
+FILE_NAME = "problem-16-22106-pre.txt.bz2"
+FILE_NAME = "problem-135-90642-pre.txt.bz2"
+# base 702k , with far: 737k jeps=1e-4 
+# palm 717k at 20. with far: 35 f(v)=  749237 / 40  f(v)=  748k / 49  f(v)=  737821. WEIRDly fast at end
+# jeps1e4: 50: 712.
+# This is huge, even worse if keeping far points in.
+# conjecture far points in man cams, in different parts. why a problem?
+# far points constrains rotation HEAVILY. If lm in many parts partially -> 
+# rotation is constrained in all of them.
+#
+
+# huge issues in this problem already. test_base at 520072 after 20 its!
+# 173 base goes to 493669 with removal! after 20 its.
+# 173 palm goes to 49 ====== f(v)=  503570 with removal! Depends on partition
+# recluster 25 ====== f(v)=  558297, 6 clusters. acc  549363 50: 542k
+# large points removal: 517k. WTF? 
+# what else. plot.
 #FILE_NAME = "problem-173-111908-pre.txt.bz2"
+#
 #FILE_NAME = "problem-237-154414-pre.txt.bz2"
+# issues. here. maybe smaller as well? compare to base
 #FILE_NAME = "problem-356-226730-pre.txt.bz2" # large dub, play with ideas: cover, etc
 # point_indices_to_complete  (135668,)
 # 0  point_indices_already_covered  (7013,)
@@ -74,14 +92,37 @@ FILE_NAME = "problem-257-65132-pre.txt.bz2"
 # FILE_NAME = "problem-52-64053-pre.txt.bz2"
 #FILE_NAME = "problem-1778-993923-pre.txt.bz2"
 
-BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/final/"
+# ok now
+#BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/final/"
 # FILE_NAME = "problem-93-61203-pre.txt.bz2"
-FILE_NAME = "problem-394-100368-pre.txt.bz2" # this is a problem case failing simplistic parallel update scheme
+#FILE_NAME = "problem-394-100368-pre.txt.bz2" # this is a problem case failing simplistic parallel update scheme
 
 URL = BASE_URL + FILE_NAME
 
 if not os.path.isfile(FILE_NAME):
     urllib.request.urlretrieve(URL, FILE_NAME)
+
+def remove_large_points(points_3d, camera_indices, points_2d, point_indices):
+    remove_ids = np.arange(points_3d.shape[0])[np.sum(points_3d**2, 1) > 1e6]
+    points_3d = np.delete(points_3d, remove_ids, axis=0)
+    num_all_res = camera_indices.shape[0]
+    res_remove_ids = np.isin(point_indices, remove_ids)
+    camera_indices = camera_indices[~res_remove_ids]
+    points_2d = points_2d[~res_remove_ids]
+    point_indices = point_indices[~res_remove_ids]
+    unique_numbers = np.unique(point_indices)
+    # Step 2: Create a dictionary for mapping
+    mapping = {number: i for i, number in enumerate(unique_numbers)}    
+    # Step 3: Apply the mapping to the array
+    vfunc = np.vectorize(mapping.get)
+    point_indices = vfunc(point_indices)
+    print("Removed ", remove_ids.shape[0], " points")
+    # alot points far away. so likely present in many parts.
+    print("Removed ", num_all_res - camera_indices.shape[0], " residuals, ", \
+          (num_all_res - camera_indices.shape[0]) / remove_ids.shape[0], " observations in removed landmarks")
+    print(np.max(point_indices))
+    print(points_3d.shape)
+    return points_3d, camera_indices, points_2d, point_indices
 
 
 def read_bal_data(file_name):
@@ -107,6 +148,10 @@ def read_bal_data(file_name):
         for i in range(n_points_ * 3):
             points_3d_[i] = float(file.readline())
         points_3d_ = points_3d_.reshape((n_points_, -1))
+
+    # remove all residuals of points and all points with this property
+    # (points_3d_, camera_indices_, points_2d_, point_indices_) = \
+    #     remove_large_points(points_3d_, camera_indices_, points_2d_, point_indices_)
 
     return camera_params, points_3d_, camera_indices_, point_indices_, points_2d_
 
@@ -1698,7 +1743,7 @@ def local_bundle_adjust(
 
             JtJ = J_pose.transpose() * J_pose
             JtJDiag = diag_sparse(JtJ.diagonal())
-            #JtJDiag = diag_sparse(np.fmax(JtJ.diagonal(), 1e-3)) # sensible not clear maybe lower.
+            #JtJDiag = diag_sparse(np.fmax(JtJ.diagonal(), 1e-4)) # sensible not clear maybe lower.
             JltJl = J_land_o.transpose() * J_land_o + J_land_a.transpose() * J_land_a
             JltJl = J_land.transpose() * J_land
             if unused:
@@ -1716,8 +1761,13 @@ def local_bundle_adjust(
             # JtJDiag = diag_sparse(JtJ.diagonal()) # leads to increase of L slowing down everything
             #JltJlDiag = diag_sparse(JltJl.diagonal()) # absolutely not
 
-            J_eps = 1e-9
+            J_eps = 1e-4 # 1e-4 was better for far away points in base method (then 1e-6/1e-3).
             JltJlDiag = JltJl + J_eps * diag_sparse(np.ones(JltJl.shape[0]))
+            
+            # new test even better? need more tests.
+            # blockEigenvalueJltJl = blockEigenvalue(JltJl, 3) #+ diag_sparse(ones_at_uncovered_indices)
+            # JltJlDiag = JltJl + 1e-4 * blockEigenvalueJltJl
+
             JtJDiag   = JtJ + J_eps * diag_sparse(np.ones(JtJ.shape[0]))
 
             if verbose:
@@ -2830,7 +2880,7 @@ init_lib()
 baseline_clustering = False
 reCluster = False
 old_vtxsToPart = 0
-pre_merges = int(0.0 * n_cameras) # play to get 'best' cluster
+pre_merges = int(0.01 * n_cameras) # play to get 'best' cluster. Depends quite a lot
 if reCluster: # maybe less often. verbose!
     pre_merges = int(0.4 * n_cameras) # random merges 20%? Also try explicitly different. 
     # remember old edges cut, sample from those (first/only)
@@ -2961,6 +3011,31 @@ landmark_v = points_3d_in_cluster[0].copy()
 x0_p_old = x0_p.copy()
 landmark_v_old = landmark_v.copy()
 primal_cost_vs = [1e15 for elem in range(kClusters)]
+
+def printPoints(points_3d):
+    import open3d as o3d
+    pcd = o3d.geometry.PointCloud()
+    print(points_3d.shape)
+    pcd.points = o3d.utility.Vector3dVector(points_3d)
+    print(pcd)
+    o3d.visualization.draw_geometries([pcd])    # Visualize point cloud 
+
+def rerender(vis, geometry, landmarks, save_image):
+    geometry.points = o3d.utility.Vector3dVector(landmarks) #?
+    vis.update_geometry(geometry)
+    vis.poll_events()
+    vis.update_renderer()
+    if save_image:
+        vis.capture_screen_image("temp_%04d.jpg" % i)
+    #vis.destroy_window()
+
+o3d.utility.set_verbosity_level(o3d.utility.VerbosityLevel.Debug)
+vis = o3d.visualization.Visualizer()
+vis.create_window()
+geometry = o3d.geometry.PointCloud()
+geometry.points = o3d.utility.Vector3dVector(landmark_v)
+vis.add_geometry(geometry)
+save_image = False
 
 if basic_version:
 
@@ -3099,6 +3174,9 @@ if basic_version:
                     additional_point_indices_in_cluster, additional_camera_indices_in_cluster, additional_points_2d_in_cluster, point_indices_already_covered_c, covered_landmark_indices_c,
                     L_in_cluster, Vl_in_cluster, kClusters, innerIts=innerIts, sequential = not extrapolate_parallel,
                     )
+
+            #printPoints(landmark_v)
+            rerender(vis, geometry, landmark_v, save_image)
 
             primal_cost_v = 0
             primal_cost_vs_old = [primal_cost_vs[ci] for ci in range(kClusters)]
@@ -3583,7 +3661,7 @@ else:
                 #print("A landmark_s_in_cluster", landmark_s_in_cluster)
                 break
 # here bfgs is better, but dre has better cost for the drs solution.
-
+vis.destroy_window()
 import matplotlib.pyplot as plt
 if len(costs) > 5:
     costs = costs[4:] # drop too high start
@@ -3597,7 +3675,7 @@ plt.legend()
 # reCluster = False
 
 plt.savefig("mygraph.png")
-plt.show()
+#plt.show()
 
 # later add gains
 # costs

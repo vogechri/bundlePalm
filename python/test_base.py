@@ -13,6 +13,7 @@ from numpy.linalg import inv as inv_dense
 # idea reimplement projection with torch to get a jacobian -> numpy then 
 import torch
 import math
+import open3d as o3d
 from torch.autograd.functional import jacobian
 from torch import tensor, from_numpy
 
@@ -31,21 +32,24 @@ BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/dubrovnik/"
 #FILE_NAME = "problem-16-22106-pre.txt.bz2"
 FILE_NAME = "problem-356-226730-pre.txt.bz2"
 #FILE_NAME = "problem-237-154414-pre.txt.bz2"
-FILE_NAME = "problem-173-111908-pre.txt.bz2" # ex where power its are worse
+FILE_NAME = "problem-173-111908-pre.txt.bz2" # ex where power its are worse ->493669
 
+# test problem with / without removal of far points.
+# ~702k, with far: 737k jeps=1e-4
+FILE_NAME = "problem-135-90642-pre.txt.bz2"
 
 #BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/venice/"
 #FILE_NAME = "problem-52-64053-pre.txt.bz2"
 #FILE_NAME = "problem-1778-993923-pre.txt.bz2"
 
-BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/final/"
-FILE_NAME = "problem-93-61203-pre.txt.bz2"
-FILE_NAME = "problem-871-527480-pre.txt.bz2"
-#FILE_NAME = "problem-394-100368-pre.txt.bz2"
+# BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/final/"
+# FILE_NAME = "problem-93-61203-pre.txt.bz2"
+# FILE_NAME = "problem-871-527480-pre.txt.bz2"
+# #FILE_NAME = "problem-394-100368-pre.txt.bz2"
 
-BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/trafalgar/"
-# FILE_NAME = "problem-21-11315-pre.txt.bz2"
-FILE_NAME = "problem-257-65132-pre.txt.bz2"
+# BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/trafalgar/"
+# # FILE_NAME = "problem-21-11315-pre.txt.bz2"
+# FILE_NAME = "problem-257-65132-pre.txt.bz2"
 #
 # solver -> super slow cholesky is more accurate. Why? float-?double or need more iterations?
 # better stopping crit?
@@ -71,6 +75,28 @@ old_c = 0
 if not os.path.isfile(FILE_NAME):
     urllib.request.urlretrieve(URL, FILE_NAME)
 
+def remove_large_points(points_3d, camera_indices, points_2d, point_indices):
+    remove_ids = np.arange(points_3d.shape[0])[np.sum(points_3d**2, 1) > 1e6]
+    points_3d = np.delete(points_3d, remove_ids, axis=0)
+    num_all_res = camera_indices.shape[0]
+    res_remove_ids = np.isin(point_indices, remove_ids)
+    camera_indices = camera_indices[~res_remove_ids]
+    points_2d = points_2d[~res_remove_ids]
+    point_indices = point_indices[~res_remove_ids]
+    unique_numbers = np.unique(point_indices)
+    # Step 2: Create a dictionary for mapping
+    mapping = {number: i for i, number in enumerate(unique_numbers)}    
+    # Step 3: Apply the mapping to the array
+    vfunc = np.vectorize(mapping.get)
+    point_indices = vfunc(point_indices)
+    print("Removed ", remove_ids.shape[0], " points")
+    # alot points far away. so likely present in many parts.
+    print("Removed ", num_all_res - camera_indices.shape[0], " residuals, ", \
+          (num_all_res - camera_indices.shape[0]) / remove_ids.shape[0], " observations in removed landmarks")
+    print(np.max(point_indices))
+    print(points_3d.shape)
+    return points_3d, camera_indices, points_2d, point_indices
+
 def read_bal_data(file_name):
     with bz2.open(file_name, "rt") as file:
         n_cameras, n_points, n_observations = map(
@@ -95,6 +121,10 @@ def read_bal_data(file_name):
         for i in range(n_points * 3):
             points_3d[i] = float(file.readline())
         points_3d = points_3d.reshape((n_points, -1))
+
+    # remove all residuals of points and all points with this property
+    (points_3d, camera_indices, points_2d, point_indices) = \
+        remove_large_points(points_3d, camera_indices, points_2d, point_indices)
 
     return camera_params, points_3d, camera_indices, point_indices, points_2d
 
@@ -1310,6 +1340,36 @@ if read_output:
     point_params  = x0_t[n_cameras*9:].reshape(n_points,3)
 
 
+def rerender(vis, geometry, landmarks, save_image):
+    geometry.points = o3d.utility.Vector3dVector(landmarks) # ?
+    vis.update_geometry(geometry)
+    vis.poll_events()
+    vis.update_renderer()
+    if save_image:
+        vis.capture_screen_image("temp_%04d.jpg" % i)
+    #vis.destroy_window()
+
+o3d.utility.set_verbosity_level(o3d.utility.VerbosityLevel.Debug)
+vis = o3d.visualization.Visualizer()
+vis.create_window()
+geometry = o3d.geometry.PointCloud()
+#geometry.points = o3d.utility.Vector3dVector(points_3d[0:65000,:])
+#geometry.points = o3d.utility.Vector3dVector(points_3d[70500:,:])
+#print(points_3d[70480:70485:,:])
+#points_3d[70483,:] = np.array([0,0,0]) # bad points to vis. does anything?
+#print(points_3d[70483,:])
+
+#points_3d[temp > 1e6,:] = np.array([0,0,0])
+#am = np.argsort(temp)
+#print(am, " ", points_3d[am,:] )
+#exit()
+#geometry.points = o3d.utility.Vector3dVector(points_3d[65000:66500:,:])
+geometry.points = o3d.utility.Vector3dVector(points_3d)
+vis.add_geometry(geometry)
+#o3d.visualization.draw_geometries([geometry])    # Visualize point cloud 
+save_image = False
+#exit()
+
 # parameter bfgs
 bfgs_mem = 6 # 2:Cost @50:  -12.87175888983266, 6: cost @ 50: 12.871757400143322
 bfgs_mu = 1.0
@@ -1375,14 +1435,16 @@ while it < iterations:
         #JtJDiag = diag_sparse(np.fmax(JtJ.diagonal(), 1e0))
         JltJl = J_land.transpose() * J_land
         #JltJlDiag = diag_sparse(JltJl.diagonal())
-        JltJlDiag = diag_sparse(np.fmax(JltJl.diagonal(), 1e-3)) # todo: does this help == lower total energy? no but |delta_l| is much smaller
+        JltJlDiag = diag_sparse(np.fmax(JltJl.diagonal(), 1e-4)) # todo: does this help == lower total energy? no but |delta_l| is much smaller
 
         # awful
         #JtJDiag = diag_sparse(np.ones(9 * n_cameras))
         #JltJlDiag = diag_sparse(np.ones(3 * n_points))
 
-        # for both? 
-        J_eps = 1e-9
+        # maybe for both this or for both above diag idea (like in papers).
+        # from 1e-9 to 1e-4 -> lower energy for problem-135-90642
+        #J_eps = 1e-4 # could even depend on L? NO.
+        J_eps = 1e-4
         JltJlDiag = JltJl + J_eps * diag_sparse(np.ones(JltJl.shape[0]))
         JtJDiag   = JtJ + J_eps * diag_sparse(np.ones(JtJ.shape[0]))
 
@@ -1657,6 +1719,8 @@ while it < iterations:
     if tr_check < eta_2:
         L = L * 2
 
+    rerender(vis, geometry, point_params[0:30000,:], save_image)
+    
     if write_output:
         camera_params.numpy().tofile("camera_params.dat")
         point_params.numpy().tofile("point_params.dat")

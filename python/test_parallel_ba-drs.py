@@ -22,20 +22,42 @@ BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/ladybug/"
 FILE_NAME = "problem-49-7776-pre.txt.bz2"
 FILE_NAME = "problem-73-11032-pre.txt.bz2"
 
-#BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/dubrovnik/"
+BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/dubrovnik/"
 # FILE_NAME = "problem-16-22106-pre.txt.bz2"
 #FILE_NAME = "problem-356-226730-pre.txt.bz2" # large dub, play with ideas: cover, etc
 #FILE_NAME = "problem-237-154414-pre.txt.bz2"
+FILE_NAME = "problem-173-111908-pre.txt.bz2"
 
-BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/trafalgar/"
+#BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/trafalgar/"
 # FILE_NAME = "problem-21-11315-pre.txt.bz2"
-FILE_NAME = "problem-257-65132-pre.txt.bz2"
+#FILE_NAME = "problem-257-65132-pre.txt.bz2"
 
 URL = BASE_URL + FILE_NAME
 
 if not os.path.isfile(FILE_NAME):
     urllib.request.urlretrieve(URL, FILE_NAME)
 
+def remove_large_points(points_3d, camera_indices, points_2d, point_indices):
+    remove_ids = np.arange(points_3d.shape[0])[np.sum(points_3d**2, 1) > 1e6]
+    points_3d = np.delete(points_3d, remove_ids, axis=0)
+    num_all_res = camera_indices.shape[0]
+    res_remove_ids = np.isin(point_indices, remove_ids)
+    camera_indices = camera_indices[~res_remove_ids]
+    points_2d = points_2d[~res_remove_ids]
+    point_indices = point_indices[~res_remove_ids]
+    unique_numbers = np.unique(point_indices)
+    # Step 2: Create a dictionary for mapping
+    mapping = {number: i for i, number in enumerate(unique_numbers)}    
+    # Step 3: Apply the mapping to the array
+    vfunc = np.vectorize(mapping.get)
+    point_indices = vfunc(point_indices)
+    print("Removed ", remove_ids.shape[0], " points")
+    # alot points far away. so likely present in many parts.
+    print("Removed ", num_all_res - camera_indices.shape[0], " residuals, ", \
+          (num_all_res - camera_indices.shape[0]) / remove_ids.shape[0], " observations in removed landmarks")
+    print(np.max(point_indices))
+    print(points_3d.shape)
+    return points_3d, camera_indices, points_2d, point_indices
 
 def read_bal_data(file_name):
     with bz2.open(file_name, "rt") as file:
@@ -60,6 +82,9 @@ def read_bal_data(file_name):
         for i in range(n_points_ * 3):
             points_3d_[i] = float(file.readline())
         points_3d_ = points_3d_.reshape((n_points_, -1))
+
+    (points_3d_, camera_indices_, points_2d_, point_indices_) = \
+        remove_large_points(points_3d_, camera_indices_, points_2d_, point_indices_)
 
     return camera_params, points_3d_, camera_indices_, point_indices_, points_2d_
 
@@ -111,11 +136,14 @@ def init_lib():
                                     ctypes.c_void_p]
 
     lib.cluster_covis.restype = None
-    lib.cluster_covis.argtypes = [ctypes.c_int, ctypes.c_void_p, ctypes.c_void_p,
-                                  ctypes.c_void_p, ctypes.c_void_p] # out]
+    lib.cluster_covis.argtypes = [ctypes.c_int, ctypes.c_int, ctypes.c_void_p, ctypes.c_void_p,
+                                  ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p] # out]
+
 
 def cluster_covis_lib(kClusters, camera_indices__, point_indices__):
     c_kClusters_ = ctypes.c_int(kClusters)
+    pre_merges_ = 0
+    c_pre_merges_ = ctypes.c_int(pre_merges_)
 
     camera_indices_list = camera_indices__.tolist()
     point_indices_list = point_indices__.tolist()
@@ -129,10 +157,20 @@ def cluster_covis_lib(kClusters, camera_indices__, point_indices__):
     res_to_cluster_c_out = lib.new_vector()
     res_to_cluster_c_sizes = lib.new_vector_of_size(kClusters)
 
-    lib.cluster_covis(c_kClusters_, c_cam_indices_cpp, c_point_indices_cpp, res_to_cluster_c_out, res_to_cluster_c_sizes)
+    old_vtxsToPart_ = 0
+    if (isinstance(old_vtxsToPart_, list)):
+        c_old_vtxsToPart_ptr = (ctypes.c_int * len(old_vtxsToPart_))(*old_vtxsToPart_)
+        old_vtxsToPart_cpp = lib.new_vector_by_copy(c_old_vtxsToPart_ptr, len(c_old_vtxsToPart_ptr))
+    else:
+        old_vtxsToPart_cpp = lib.new_vector()
+
+    lib.cluster_covis(c_kClusters_, c_pre_merges_, c_cam_indices_cpp, c_point_indices_cpp, res_to_cluster_c_out, res_to_cluster_c_sizes, old_vtxsToPart_cpp)
+
+    #old_vtxsToPart_ = fillPythonVecSimple(old_vtxsToPart_cpp).tolist()
+    kClusters = lib.vector_size(res_to_cluster_c_sizes)
 
     res_indices_in_cluster__ = fillPythonVec(res_to_cluster_c_out, res_to_cluster_c_sizes, kClusters)
-    return res_indices_in_cluster__
+    return res_indices_in_cluster__, kClusters
     # copy data, free c++ mem
 
 def AngleAxisRotatePoint(angleAxis, pt):
@@ -839,7 +877,8 @@ def cluster_by_camera_smarter(
             res_indices_in_cluster_.append(res_indices_in_cluster.copy())
             print("cams in ",c," " , np.unique(camera_indices_[res_indices_in_cluster]))
     else:
-        res_indices_in_cluster_ = cluster_covis_lib(kClusters_, camera_indices_, point_indices_)
+        res_indices_in_cluster_, kClusters_ = cluster_covis_lib(kClusters_, camera_indices_, point_indices_)
+        kClusters = kClusters_
         camera_indices_in_cluster_ = []
         point_indices_in_cluster_ = []
         points_2d_in_cluster_ = []
@@ -866,6 +905,7 @@ def cluster_by_camera_smarter(
         cluster_to_camera_,
         points_3d_in_cluster_,
         L_in_cluster_,
+        kClusters
     )
 
 
@@ -1853,6 +1893,7 @@ else:
         cluster_to_camera,
         points_3d_in_cluster,
         L_in_cluster,
+        kClusters,
     ) = cluster_by_camera_smarter(
         camera_indices, points_3d, points_2d, point_indices, kClusters, startL, init_cam_id=0, init_lm_id=0
     )
