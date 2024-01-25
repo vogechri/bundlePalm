@@ -27,6 +27,7 @@ BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/dubrovnik/"
 #FILE_NAME = "problem-356-226730-pre.txt.bz2" # large dub, play with ideas: cover, etc
 #FILE_NAME = "problem-237-154414-pre.txt.bz2"
 FILE_NAME = "problem-173-111908-pre.txt.bz2"
+FILE_NAME = "problem-135-90642-pre.txt.bz2"
 
 #BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/trafalgar/"
 # FILE_NAME = "problem-21-11315-pre.txt.bz2"
@@ -1155,7 +1156,7 @@ def bundle_adjust(
     points_3d_in,
     landmark_s_, # taylor expand at point_3d_in -> prox on landmark_s_ - points_3d = lambda (multiplier)
     Vl_in_c_,
-    Lc_,
+    L_in_cluster_,
     successfull_its_=1,
 ):
     # print("landmarks_only_in_cluster_  ", landmarks_only_in_cluster_, " ", np.sum(landmarks_only_in_cluster_), " vs ", np.sum(1 - landmarks_only_in_cluster_) )
@@ -1163,7 +1164,8 @@ def bundle_adjust(
     blockEigMult = 1e-4 # 1e-3 was used before
     normal_case_ = True # No L * JltJl at all. Does not work
     # define x0_t, x0_p, x0_l, L # todo: missing Lb: inner L for bundle, Lc: to fix duplicates
-    L = Lc_
+    L = L_in_cluster_
+    minimumL = 1e-6
     updateJacobian = True
     # holds all! landmarks, only use fraction likely no matter not present in cams anyway.
     x0_l_ = points_3d_in.flatten()
@@ -1551,7 +1553,8 @@ def bundle_adjust(
 
         return costEnd, x0_p_, xTest, L, diag_present + Rho, delta_l.reshape(n_points_, 3)
 
-    return costEnd, x0_p_, x0_l_, L, Rho, delta_l.reshape(n_points_, 3)
+    L_out = np.maximum(minimumL, np.minimum(L_in_cluster_ * 2, L)) # not clear if generally ok, or 2 or 4 should be used.
+    return costEnd, x0_p_, x0_l_, L_out, Rho, delta_l.reshape(n_points_, 3)
 
     # recall solution wo. splitting is 
     # solve Vl x + bS + Vd () 
