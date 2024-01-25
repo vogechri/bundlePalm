@@ -3143,7 +3143,7 @@ if basic_version:
                         point_indices_in_cluster[arg_gain[0]],
                         points_2d_in_cluster[arg_gain[0]],
                         sol_land)
-                    print("Debugging ", cost_self, " ", localCost_in_cluster[arg_gain[0]], " cost_0 ", cost_0 )
+                    print("Debugging ", cost_self, " ", localCostGain_in_cluster[arg_gain[0]], " cost_0 ", cost_0 )
 
                 else:
                     print("Should not happen gains ", local_gains)
@@ -3230,14 +3230,19 @@ if basic_version:
                     x0_p_old = x0_p.copy()
                     landmark_v_old = landmark_v.copy()
                 else:
-                    baseRNA = False # does work now -- with x2 steps :)
+                    baseRNA = True # does work now -- with x2 steps :)
                     if baseRNA:
                         xk1 = np.concatenate([x0_p_new.flatten(), landmark_v.flatten()])
+                        xk = np.concatenate([x0_p_old.flatten(), landmark_v_old.flatten()]) # x2 step
+                        wk1 = xk1 - xk # delta k + delta k-1
+                        # original only this:
                         rna_delta  = xk1 - np.concatenate([x0_p_old.flatten(), landmark_v_old.flatten()]) # delta(k) + delta(k-1) step! Best is delta(k-1) + delta(k-2)
-                        #rna_delta_delta = rna_delta - rna_delta_old
+                        if it > 0:
+                            rna_delta = wk
                         Gs, Fs, Fes, x_extr = RNA_P(Gs, Fs, xk1, rna_delta, it, rnaBufferSize, Fes, rna_delta, lamda = 1, h = -1)
                         camera_ext_ = x_extr[: 9 * n_cameras].reshape(n_cameras, 9)
                         point_ext_ = x_extr[9*n_cameras :].reshape(n_points, 3)
+                        wk = wk1.copy()
                     else:
                         # other idea would be
                         # wk+1 = rna_delta

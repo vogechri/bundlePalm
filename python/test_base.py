@@ -1605,7 +1605,7 @@ while it < iterations:
         else: # works for small steps / continuously a bit
             lamdaRNA = 1 # likely just using '- h * lambda' to get a benefit.
             # deltaL does not appear to matter much
-            deltaL = L * np.hstack((JtJDiag * delta_p, JltJlDiag * delta_l)) # ? no L * is same as lambdaRna * L?
+            deltaL = L * np.hstack((JtJDiag * delta_p, JltJlDiag * delta_l)) # ~ nabla f(x0+delta)
             deltaL = L * np.hstack((delta_p, delta_l)) # much difference over not 'L * '. maybe linesearch
             #deltaL = L * np.hstack((bp,bl)) # also not working gradient direction
             delta = np.hstack((delta_p, delta_l))
