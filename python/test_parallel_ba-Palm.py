@@ -1861,7 +1861,7 @@ def local_bundle_adjust(
     print("LfkDiagonal ", LfkDiagonal, " L ", L)
 
     L_out = np.maximum(minimumL, np.minimum(L_in_cluster_ * 2, L)) # not clear if generally ok, or 2 or 4 should be used.
-    return costEnd, x0_p_.numpy(), x0_l_[covered_landmark_indices_,:].numpy(), L_out, L * JltJlDiag + 1e-12 * Vl, powerits_run, delta_old_, costEnd - costStart
+    return costEnd, x0_p_.numpy(), x0_l_[covered_landmark_indices_,:].numpy(), L_out, L * JltJlDiag + 1e-12 * Vl, powerits_run, delta_old_, costStart - costEnd 
 
 
 # TODO: to run multiple iterations in distributed version we need to use f(x) + L/2|x -  z|
