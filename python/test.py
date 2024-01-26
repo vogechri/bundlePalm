@@ -170,7 +170,7 @@ def process_cluster_lib(num_lands_, num_res_, kClusters__, point_indices_in_clus
     covered_landmark_indices_c_out = lib.new_vector()
     covered_landmark_indices_c_sizes = lib.new_vector_of_size(kClusters)
 
-    num_res_per_c_out = lib.new_vector()
+    res_to_cluster_by_landmark_out = lib.new_vector()
 
     lib.process_clusters(c_num_lands_, c_num_res_, c_kClusters_,
                         c_point_indices_in_cluster_flat_cpp, c_point_indices_in_cluster_sizes_cpp,
@@ -179,7 +179,7 @@ def process_cluster_lib(num_lands_, num_res_, kClusters__, point_indices_in_clus
                         res_toadd_out, res_toadd_sizes_out,
                         point_indices_already_covered_out, point_indices_already_covered_sizes,
                         covered_landmark_indices_c_out, covered_landmark_indices_c_sizes,
-                        num_res_per_c_out)
+                        res_to_cluster_by_landmark_out)
 
     #print("lib.vector_get(res_toadd_sizes_out, i) ", 0, " : ", lib.vector_get(res_toadd_sizes_out, 0))
     res_toadd_to_c_ = fillPythonVec(res_toadd_out, res_toadd_sizes_out, kClusters)

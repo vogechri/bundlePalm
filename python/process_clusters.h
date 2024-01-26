@@ -36,7 +36,7 @@ process_clusters(
     std::vector<int>& res_toadd_out, std::vector<int>& res_toadd_sizes,
     std::vector<int>& point_indices_already_covered_out, std::vector<int>& point_indices_already_covered_sizes,
     std::vector<int>& covered_landmark_indices_c_out, std::vector<int>& covered_landmark_indices_c_sizes, 
-    std::vector<int>& num_res_per_c_out);
+    std::vector<int>& res_to_cluster_by_landmark_out);
 
 // simplify removing inputs
 // extern "C"

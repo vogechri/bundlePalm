@@ -92,7 +92,7 @@ process_clusters(
     std::vector<int>& res_toadd_out, std::vector<int>& res_toadd_sizes,
     std::vector<int>& point_indices_already_covered_out, std::vector<int>& point_indices_already_covered_sizes,
     std::vector<int>& covered_landmark_indices_c_out, std::vector<int>& covered_landmark_indices_c_sizes, 
-    std::vector<int>& num_res_per_c_out)
+    std::vector<int>& res_to_cluster_by_landmark_out)
 {
     if (false) {
         std::cout << "nl " << num_lands << " nr " << num_res << " kc " << kClusters << std::endl;
@@ -221,10 +221,31 @@ process_clusters(
 
     fill_vec_and_size(point_indices_already_covered_out, point_indices_already_covered_sizes, point_indices_already_covered);
     fill_vec_and_size(res_toadd_out, res_toadd_sizes, res_toadd_to_c);
-    fill_vec(num_res_per_c_out, num_res_per_c);
     fill_vec_and_size(covered_landmark_indices_c_out, covered_landmark_indices_c_sizes, covered_landmark_indices_c);
 
-    return;
+    // so all point indices in cluster are covered_landmark_indices_c AND point_indices_already_covered_out
+    // must union on these.
+    // res_of_all_covered_landmarks shoudl be returned,
+    // per cluster go over points set int to part : landmark to cluster
+    // go over res add res following landmark to cluster.
+    // landmark_res_in_cluster can be used in python: res -> cluster id
+    std::vector<int> res_to_cluster_by_landmark(num_res, -1);
+    std::vector<int> landmark_to_cluster(num_lands, -1);
+    for (int ci = 0; ci < kClusters; ci++) {
+        for (int i : covered_landmark_indices_c[ci]) {
+          landmark_to_cluster[i] = ci;
+        }
+        for (int i : point_indices_already_covered[ci]) {
+          landmark_to_cluster[i] = ci;
+        }
+    }
+    for (int res_id=0; res_id < point_indices_.size(); res_id++) {
+        const int lm_id = point_indices_[res_id];
+        res_to_cluster_by_landmark[res_id] = landmark_to_cluster[lm_id];
+    }
+
+  fill_vec(res_to_cluster_by_landmark_out, res_to_cluster_by_landmark);
+  return;
 }
 
 struct VolumePartitionOptions {
@@ -523,6 +544,10 @@ int RandomMerge(int number_merges,
 
 // same sa volume:
 // cams are cams, # landmakrs seen by cam are volume, union is number of lms seen by boths sets of cams.
+// TODO: input landmark ids that must be in same cluster.
+// go over cam ids per lm and connect them in advance.
+// Then the lm cannot occur in any other cluster. and both move together.
+// Else one observing cam is fixed when optimizing the lm -- maybe a blocker.
 extern "C" 
 void cluster_covis(
     int kClusters,

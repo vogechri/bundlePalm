@@ -219,7 +219,7 @@ def process_cluster_lib(num_lands_, num_res_, kClusters__, point_indices_in_clus
     covered_landmark_indices_c_out = lib.new_vector()
     covered_landmark_indices_c_sizes = lib.new_vector_of_size(kClusters__)
 
-    num_res_per_c_out = lib.new_vector()
+    res_to_cluster_by_landmark_out = lib.new_vector()
 
     lib.process_clusters(c_num_lands_, c_num_res_, c_kClusters_,
                         c_point_indices_in_cluster_flat_cpp, c_point_indices_in_cluster_sizes_cpp,
@@ -228,7 +228,7 @@ def process_cluster_lib(num_lands_, num_res_, kClusters__, point_indices_in_clus
                         res_toadd_out, res_toadd_sizes_out,
                         point_indices_already_covered_out, point_indices_already_covered_sizes,
                         covered_landmark_indices_c_out, covered_landmark_indices_c_sizes,
-                        num_res_per_c_out)
+                        res_to_cluster_by_landmark_out)
 
     # print("lib.vector_get(res_toadd_sizes_out, i) ", 0, " : ", lib.vector_get(res_toadd_sizes_out, 0))
 
@@ -983,7 +983,7 @@ def cluster_by_landmark(
     num_lands = np.unique(point_indices_).shape[0] #points_3d_.shape[0]
     print("number of residuum: ", num_res)
 
-    res_indices_in_cluster_, kClusters, old_vtxsToPart = cluster_covis_lib(kClusters_, pre_merges, camera_indices_, point_indices_, old_vtxsToPart)
+    res_indices_in_cluster_, kClusters = cluster_covis_lib(kClusters_, camera_indices_, point_indices_)
     kClusters_ = kClusters
     camera_indices_in_cluster_ = []
     point_indices_in_cluster_ = []
@@ -996,40 +996,23 @@ def cluster_by_landmark(
         point_indices_in_cluster_.append(point_indices_[res_indices_in_c_])
         cluster_to_camera_.append(np.unique(camera_indices_[res_indices_in_c_]))
 
-    res_toadd_to_c_, point_indices_already_covered_, covered_landmark_indices_c_, num_res_per_c_ = \
+    res_toadd_to_c_, point_indices_already_covered_, covered_landmark_indices_c_, res_to_cluster_by_landmark_ = \
         process_cluster_lib(num_lands, num_res, kClusters, point_indices_in_cluster_, res_indices_in_cluster_, point_indices)
     
     # we only case about covered_landmark_indices_c_
-    # 1. distribute residuals by occurence of above per cluster
-    # 2. landmarks per cluster are exclusive, whole cams per cluster 
+    # 1. distribute residuals by occurence of above per cluster: res_to_cluster_by_landmark_: res -> cluster covers all landmarks exculsively. to test.
+    # 2. landmarks per cluster are exclusive, but use whole cams per cluster (simpler)
     # 3. need indices of cameras utilized in cluster and stepsizes per cam in cluster
-    # 
-
+    # point_indices_already_covered_ : here exclusively covered by cluster
     for ci in range(kClusters):
-        print(ci, " adding " , res_toadd_to_c_[ci].shape, " residuals to ", \
-            point_indices_in_cluster_[ci].shape, " original residuals")
-    
-    additional_point_indices_in_cluster_ = [0 for _ in range(kClusters)] # variables to add, just unique (additional cameras -> not needed)
-    additional_camera_indices_in_cluster_ = [0 for _ in range(kClusters)] # index into var per res
-    additional_points_2d_in_cluster_ = [0 for _ in range(kClusters)] # essentially rhs for res
-    # point_indices_already_covered: landmarks to be updated, present in main res only not in additional res (since complete)
-    # covered_landmark_indices_c_: landmarks to be updated in additional!!! set of res since completely contained in cluster
-
-    for ci in range(kClusters):
-        #print("camera_indices_ ", camera_indices_.shape)
-        con_res = res_toadd_to_c_[ci]
-        #print("camera_indices_ ", con_res.shape)
-        new_cam_indices_ = np.unique(camera_indices_[con_res])
-        #print(ci, " new cam indices ", new_cam_indices_, " " , new_cam_indices_.shape)
-        #print(ci, " old cam indices ", np.unique(camera_indices_in_cluster_[ci]), " " , np.unique(camera_indices_in_cluster_[ci]).shape)
-        new_cam_indices_ = np.setdiff1d(new_cam_indices_, np.unique(camera_indices_in_cluster_[ci])) # not needed since disjoint anyway
-        #print(ci, " new cam indices ", new_cam_indices_, " " , new_cam_indices_.shape)
-        additional_camera_indices_in_cluster_[ci] = camera_indices_[con_res]
-        additional_points_2d_in_cluster_[ci] = points_2d_[con_res]
-        covered_landmark_indices_c_[ci] = np.array(covered_landmark_indices_c_[ci]) #?
-        additional_point_indices_in_cluster_[ci] = point_indices_[con_res]
         point_indices_already_covered_[ci] = np.union1d(point_indices_already_covered_[ci], covered_landmark_indices_c_[ci])
-        print("===== Cluster ", ci , " covers ", point_indices_already_covered_[ci].shape, "landmarks ", " of ", num_lands)
+        ids_of_res_in_cluster = res_to_cluster_by_landmark_ == ci
+        camera_indices_in_cluster_[ci] = camera_indices_[ids_of_res_in_cluster]
+        points_2d_in_cluster_[ci] = points_2d_[ids_of_res_in_cluster]
+        point_indices_in_cluster_[ci] = point_indices_[ids_of_res_in_cluster]
+        print("===== Cluster ", ci , " covers ", points_2d_in_cluster_[ci].shape, "residuals ",
+              np.unique(point_indices_in_cluster_[ci]).shape, " of ", num_lands, " landmarks ",
+              np.unique(camera_indices_in_cluster_[ci]).shape, " of ", num_cams, "cameras ")
 
     # check if indices are disjoint / local vs global / sums up to n_points
     sum_cams_cover = 0
@@ -1046,9 +1029,7 @@ def cluster_by_landmark(
         camera_indices_in_cluster_,
         point_indices_in_cluster_,
         points_2d_in_cluster_,
-        cluster_to_camera_,
-        additional_point_indices_in_cluster_, additional_camera_indices_in_cluster_, additional_points_2d_in_cluster_, point_indices_already_covered_, covered_landmark_indices_c_,
-        old_vtxsToPart, kClusters
+        kClusters
     )
 
 
@@ -1353,6 +1334,9 @@ def bundle_adjust(
             J_eps = 1e-9
             JtJDiag = JtJ + J_eps * diag_sparse(np.ones(JtJ.shape[0]))
 
+            #blockEigenvalueJtJ = blockEigenvalue(JtJ, 9)
+            #print(" min/max JtJ.diagonal() ", np.min(JtJ.diagonal()), " ", np.max(JtJ.diagonal()), " adjusted ", np.min(JtJDiag.diagonal()), " ", np.max(JtJDiag.diagonal()), " ", np.min(blockEigenvalueJtJ.diagonal()) ," ", np.max(blockEigenvalueJtJ.diagonal()) )
+
             #JtJDiag = diag_sparse(np.fmax(JtJ.diagonal(), 1e1)) # sensible not clear maybe lower.
             JltJl = J_land.transpose() * J_land
             blockEigenvalueJltJl = blockEigenvalue(JltJl, 3)
@@ -1362,7 +1346,7 @@ def bundle_adjust(
             #     stepSize.data = np.maximum(0.05 * stepSize.data, blockEigenvalueJltJl.data) # else diagSparse of it
             
             # todo 0.5 appars to be ok still & faster. lower leads to hickups and slow down
-            stepSize = 1. * (blockEigMult * blockEigenvalueJltJl + 2 * JltJl.copy()) # Todo '2 *' 1 by convex
+            stepSize = 1. * (blockEigMult * blockEigenvalueJltJl + 2 * JltJl.copy()) # Todo '2 *' vs 1 by convex
             #stepSize = 1. * (blockEigMult * blockEigenvalueJltJl + 1 * JltJl.copy()) # this already suffices
             #stepSize = 1. * (1e-0 * diag_sparse(np.ones(n_points_*3)) + 1.0 * JltJl.copy()) # not so good
 

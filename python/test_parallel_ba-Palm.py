@@ -39,7 +39,10 @@ FILE_NAME = "problem-135-90642-pre.txt.bz2"
 # conjecture far points in man cams, in different parts. why a problem?
 # far points constrains rotation HEAVILY. If lm in many parts partially -> 
 # rotation is constrained in all of them.
-#
+# assume cam and landmark in different parts. moving the cam is hard if landmark is fixed and vice versi
+# so both should be in same part. 
+# I SHOULD have constrained clustering. landmark indices that should be in same part ->
+# expand and pre-align into 1 cluster? 
 
 # huge issues in this problem already. test_base at 520072 after 20 its!
 # 173 base goes to 493669 with removal! after 20 its.
@@ -1170,7 +1173,7 @@ def process_cluster_lib(num_lands_, num_res_, kClusters__, point_indices_in_clus
     covered_landmark_indices_c_out = lib.new_vector()
     covered_landmark_indices_c_sizes = lib.new_vector_of_size(kClusters__)
 
-    num_res_per_c_out = lib.new_vector()
+    res_to_cluster_by_landmark_out = lib.new_vector()
 
     lib.process_clusters(c_num_lands_, c_num_res_, c_kClusters_,
                         c_point_indices_in_cluster_flat_cpp, c_point_indices_in_cluster_sizes_cpp,
@@ -1179,7 +1182,7 @@ def process_cluster_lib(num_lands_, num_res_, kClusters__, point_indices_in_clus
                         res_toadd_out, res_toadd_sizes_out,
                         point_indices_already_covered_out, point_indices_already_covered_sizes,
                         covered_landmark_indices_c_out, covered_landmark_indices_c_sizes,
-                        num_res_per_c_out)
+                        res_to_cluster_by_landmark_out)
 
     # print("lib.vector_get(res_toadd_sizes_out, i) ", 0, " : ", lib.vector_get(res_toadd_sizes_out, 0))
 
@@ -1329,7 +1332,7 @@ def cluster_by_camera_gpt(
             #res_indices_in_cluster_.append(res_indices_in_cluster.copy())
 
 
-    res_toadd_to_c_, point_indices_already_covered_, covered_landmark_indices_c_, num_res_per_c_ = \
+    res_toadd_to_c_, point_indices_already_covered_, covered_landmark_indices_c_, res_to_cluster_by_landmark_ = \
         process_cluster_lib(num_lands, num_res, kClusters, point_indices_in_cluster_, res_indices_in_cluster_, point_indices)
 
     # (res_toadd_to_c_, point_indices_already_covered_, covered_landmark_indices_c_, num_res_per_c) = \
@@ -3197,7 +3200,7 @@ if basic_version:
             # sequential update if parallel failed.
             # TODO: likely must run lone job if the rejected one is rejected again, or in general.
             # Also harming acceleration. likely not woking at all.
-            if old_primal_cost_v < primal_cost_v:
+            if True and old_primal_cost_v < primal_cost_v: # set False to ensure it is doing good not bad.
                 sol_cam  = x0_p.copy()
                 sol_land = points_3d_in_cluster[0].copy()
                 # from 0 to 1 compared to all 0 (old) to all 1 (accepted).
@@ -3205,30 +3208,19 @@ if basic_version:
                 print("Fix gains per part ", local_gains)
                 arg_gain = np.flip(np.argsort(local_gains))
                 print("gains arg_gain ", arg_gain)
-                if (local_gains[arg_gain[0]] > 0):
-                    sol_land[covered_landmark_indices_c[arg_gain[0]]] = landmark_v[covered_landmark_indices_c[arg_gain[0]]].copy()
-                    sol_cam[camera_indices_in_cluster[arg_gain[0]]] = x0_p_new[camera_indices_in_cluster[arg_gain[0]]].copy()
 
-                    cost_0 = 0
-                    for ci in range(kClusters):
-                        cost_0 += primal_cost(
-                            sol_cam,
-                            camera_indices_in_cluster[ci],
-                            point_indices_in_cluster[ci],
-                            points_2d_in_cluster[ci],
-                            sol_land)
-
-                    cost_self = primal_cost(
+                cost_0 = 0
+                for ci in range(kClusters):
+                    cost_0 += primal_cost(
                         sol_cam,
-                        camera_indices_in_cluster[arg_gain[0]],
-                        point_indices_in_cluster[arg_gain[0]],
-                        points_2d_in_cluster[arg_gain[0]],
+                        camera_indices_in_cluster[ci],
+                        point_indices_in_cluster[ci],
+                        points_2d_in_cluster[ci],
                         sol_land)
-                    print("Debugging ", cost_self, " ", localCostGain_in_cluster[arg_gain[0]], " cost_0 ", cost_0 )
 
-                else:
+                if (local_gains[arg_gain[0]] > 0):
                     print("Should not happen gains ", local_gains)
-                for i in arg_gain[1:].tolist():
+                for i in arg_gain[0:].tolist():
                     # if (gains[arg_gain[i]] <0): # do not care / stop here. not sure if makes sense
                     #     break
                     sol_land[covered_landmark_indices_c[i]] = landmark_v[covered_landmark_indices_c[i]].copy()
@@ -3378,7 +3370,7 @@ if basic_version:
                     x0_p_old = x0_p.copy() # older
                     landmark_v_old = points_3d_in_cluster[ci].copy() # older
 
-                new_line_search = False
+                new_line_search = False # FALSE! much better. maybe delete other part.
                 if new_line_search: # appears wrong except for the restart idea. But this is to be tackled from new sequential update.
                     # Idea pick best per part. not only overall!
                     # init from OLD solution. not new.
