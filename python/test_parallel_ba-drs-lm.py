@@ -232,12 +232,12 @@ def process_cluster_lib(num_lands_, num_res_, kClusters__, point_indices_in_clus
 
     # print("lib.vector_get(res_toadd_sizes_out, i) ", 0, " : ", lib.vector_get(res_toadd_sizes_out, 0))
 
-    res_toadd_to_c_ = fillPythonVec(res_toadd_out, res_toadd_sizes_out, kClusters__)
+    #res_toadd_to_c_ = fillPythonVec(res_toadd_out, res_toadd_sizes_out, kClusters__)
     point_indices_already_covered_ = fillPythonVec(point_indices_already_covered_out, point_indices_already_covered_sizes, kClusters__)
     covered_landmark_indices_c_ = fillPythonVec(covered_landmark_indices_c_out, covered_landmark_indices_c_sizes, kClusters__)
-    num_res_per_c_ = fillPythonVecSimple(res_toadd_out)
+    res_to_cluster_by_landmark_out_ = fillPythonVecSimple(res_to_cluster_by_landmark_out)
 
-    return res_toadd_to_c_, point_indices_already_covered_, covered_landmark_indices_c_, num_res_per_c_
+    return res_to_cluster_by_landmark_out_, point_indices_already_covered_, covered_landmark_indices_c_
 
 def AngleAxisRotatePoint(angleAxis, pt):
     theta2 = (angleAxis * angleAxis).sum(dim=1)
@@ -996,8 +996,8 @@ def cluster_by_landmark(
         point_indices_in_cluster_.append(point_indices_[res_indices_in_c_])
         cluster_to_camera_.append(np.unique(camera_indices_[res_indices_in_c_]))
 
-    res_toadd_to_c_, point_indices_already_covered_, covered_landmark_indices_c_, res_to_cluster_by_landmark_ = \
-        process_cluster_lib(num_lands, num_res, kClusters, point_indices_in_cluster_, res_indices_in_cluster_, point_indices)
+    res_to_cluster_by_landmark_, point_indices_already_covered_, covered_landmark_indices_c_ = \
+        process_cluster_lib(num_lands, num_res, kClusters, point_indices_in_cluster_, res_indices_in_cluster_, point_indices_)
     
     # we only case about covered_landmark_indices_c_
     # 1. distribute residuals by occurence of above per cluster: res_to_cluster_by_landmark_: res -> cluster covers all landmarks exculsively. to test.
@@ -1724,15 +1724,15 @@ def bundle_adjust(
     # as max eigenvalue per landmark 3x3, or just sum row/col -> blockEigen, and 
 
 def updateCluster(
-    x0_p_,
+    poses_in_cluster_,
     camera_indices_in_cluster_,
     point_indices_in_cluster_,
     points_2d_in_cluster_,
-    points_3d_in_cluster_,
-    landmark_s_in_cluster_,
+    landmarks_,
+    poses_s_in_cluster_,
     Vl_in_cluster_,
     L_in_cluster_,
-    landmark_occurences,
+    pose_occurences,
     its_,
 ):
     cameras_indices_in_c_ = np.unique(camera_indices_in_cluster_)
@@ -1793,88 +1793,58 @@ def updateCluster(
         delta_l_c_
     )
 
-def prox_f(x0_p_, camera_indices_in_cluster_, point_indices_in_cluster_, 
-           points_2d_in_cluster_, points_3d_in_cluster_, landmark_s_in_cluster_, 
-           L_in_cluster_, Vl_in_cluster_, kClusters, innerIts, sequential) :
+def prox_f(camera_indices_in_cluster_, point_indices_in_cluster_, points_2d_in_cluster_,
+    poses_in_cluster_, landmarks_, poses_s_in_cluster_, L_in_cluster_, Vl_in_cluster_, kClusters, innerIts=1, sequential=True) :
     cost_ = np.zeros(kClusters)
-    delta_l_in_cluster_ = [0 for elem in range(kClusters)]
 
-    num_landmarks = points_3d_in_cluster_[0].shape[0]
-    landmark_occurences = np.zeros(num_landmarks)
+    num_poses = poses_in_cluster_[0].shape[0]
+    pose_occurences = np.zeros(num_poses)
     for ci in range(kClusters):
-        unique_points_in_c_ = np.unique(point_indices_in_cluster_[ci])
-        landmark_occurences[unique_points_in_c_] +=1
+        unique_poses_in_c_ = np.unique(camera_indices_in_cluster_[ci])
+        pose_occurences[unique_poses_in_c_] +=1
 
     # for ci in range(kClusters):
     #     print(ci, " 3d " ,points_3d_in_cluster_[ci][landmark_occurences==1, :])
 
-    if sequential:
-        for ci in range(kClusters):
-
-            delta_l_in_cluster_[ci] = np.zeros(points_3d_in_cluster_[ci].shape)
-
-            (
-                cost_c_,
-                x0_p_c_,
-                x0_l_c_,
-                Lnew_c_,
-                Vl_c_,
-                unique_points_in_c_,
-                cameras_indices_in_c_,
-                delta_l_c_,
-            ) = updateCluster(
-                x0_p_,
-                camera_indices_in_cluster_[ci],
-                point_indices_in_cluster_[ci],
-                points_2d_in_cluster_[ci],
-                points_3d_in_cluster_[ci],
-                landmark_s_in_cluster_[ci],
-                Vl_in_cluster_[ci],
-                L_in_cluster_[ci],
-                landmark_occurences,
-                its_=innerIts,
-            )
-            cost_[ci] = cost_c_
-            L_in_cluster_[ci] = Lnew_c_
-            Vl_in_cluster_[ci] = Vl_c_
-            points_3d_in_cluster_[ci][unique_points_in_c_, :] = x0_l_c_
-            x0_p_[cameras_indices_in_c_] = x0_p_c_
-            delta_l_in_cluster_[ci][unique_points_in_c_, :] = delta_l_c_
-    else:
-        # not not ,prefer="threads" ?
-        # results = Parallel(n_jobs=8,prefer="threads")(delayed(getJacSin)(i, i + step, camera_indices, point_indices, x0_t_cam, x0_t_land, torch_points_2d) for i in np.arange(0, full, step))
-        results = Parallel(n_jobs=3)(
-            delayed(updateCluster)(
-                x0_p_,
-                camera_indices_in_cluster_[ci],
-                point_indices_in_cluster_[ci],
-                points_2d_in_cluster_[ci],
-                points_3d_in_cluster_[ci],
-                landmark_s_in_cluster_[ci],
-                Vl_in_cluster_[ci],
-                L_in_cluster_[ci],
-                landmark_occurences,
-                its_=innerIts,
-            )
-            for ci in range(kClusters)
+    for ci in range(kClusters):
+        (
+            cost_c_,
+            x0_p_c_,
+            x0_l_c_,
+            Lnew_c_,
+            Vl_c_,
+            unique_poses_in_c_,
+            landmark_indices_in_c_
+        ) = updateCluster(
+            poses_in_cluster_[ci],
+            camera_indices_in_cluster_[ci],
+            point_indices_in_cluster_[ci],
+            points_2d_in_cluster_[ci],
+            landmarks_,
+            poses_s_in_cluster_[ci],
+            Vl_in_cluster_[ci],
+            L_in_cluster_[ci],
+            pose_occurences, # haeh?
+            its_=innerIts,
         )
-        for ci in range(kClusters):
-            cost_[ci] = results[ci][0]
-            L_in_cluster_[ci] = results[ci][3]
-            Vl_in_cluster_[ci] = results[ci][4]
-            points_3d_in_cluster_[ci][results[ci][5], :] = results[ci][2]
-            x0_p_[results[ci][6]] = results[ci][1]
+        cost_[ci] = cost_c_
+        L_in_cluster_[ci] = Lnew_c_
+        Vl_in_cluster_[ci] = Vl_c_
+        poses_in_cluster_[ci][unique_poses_in_c_, :] = x0_p_c_
+        landmarks_[landmark_indices_in_c_] = x0_l_c_
 
     for ci in range(kClusters):
-        vl = Vl_in_cluster_[ci]
-        unique_points_in_c_ = np.unique(point_indices_in_cluster_[ci])
-        landmarks_only_in_cluster_ = landmark_occurences[unique_points_in_c_] == 1
-        globalSingleLandmarksA_in_c[ci] = landmarks_only_in_cluster_.copy()
-        globalSingleLandmarksB_in_c[ci] = landmark_occurences==1
+        #vl = Vl_in_cluster_[ci]
+        unique_poses_in_c_ = np.unique(camera_indices_in_cluster_[ci])
+        poses_only_in_cluster_ = pose_occurences[unique_poses_in_c_] == 1
+        #globalSingleLandmarksA_in_c[ci] = poses_only_in_cluster_.copy()
+        #globalSingleLandmarksB_in_c[ci] = poses_only_in_cluster_==1
 
         # print(ci, " 3d ", points_3d_in_cluster_[ci][landmark_occurences==1, :]) # indeed 1 changed rest is constant
         # print(ci, " vl ", vl.data.reshape(-1,9)[landmarks_only_in_cluster_,:])  # indeed diagonal
-    return (cost_, L_in_cluster_, Vl_in_cluster_, points_3d_in_cluster_, x0_p_, delta_l_in_cluster_, globalSingleLandmarksA_in_c, globalSingleLandmarksB_in_c)
+    #return (cost_, L_in_cluster_, Vl_in_cluster_, points_3d_in_cluster_, x0_p_, delta_l_in_cluster_, globalSingleLandmarksA_in_c, globalSingleLandmarksB_in_c)
+    return (cost, L_in_cluster_, Vl_in_cluster_, poses_in_cluster_, landmarks_)
+
 
 # fill lists G and F, with g and f = g - old g, sets of size m, 
 # at position it % m, c^t compute F^tF c + lamda (c - 1/k)^2, sum c=1
@@ -2071,27 +2041,25 @@ else:
     ) = cluster_by_landmark(
         camera_indices, points_2d, point_indices, kClusters, pre_merges=0)
 
-    # test this should return something
-    (
-        cost,
-        L_in_cluster,
-        Vl_in_cluster,
-        points_3d_in_cluster,
-        x0_p,
-        delta_l_in_cluster,
-        globalSingleLandmarksA_in_c,
-        globalSingleLandmarksB_in_c
-    ) = prox_f(
-        x0_p, camera_indices_in_cluster, point_indices_in_cluster, points_2d_in_cluster, 
-        points_3d_in_cluster, landmark_s_in_cluster, L_in_cluster, Vl_in_cluster, kClusters, innerIts=innerIts, sequential=True,
-        )
-
-
-
 print(L_in_cluster)
 Vl_in_cluster = [0 for x in range(kClusters)] # dummy fill list
-landmark_s_in_cluster = [elem.copy() for elem in points_3d_in_cluster]
-landmark_v = points_3d_in_cluster[0].copy()
+#poses = cameras.copy()
+poses_s_in_cluster = [cameras.copy() for _ in range(kClusters)]
+poses_in_cluster = [cameras.copy() for _ in range(kClusters)]
+landmarks = points_3d.copy()
+
+# test this should return something
+(
+    cost,
+    L_in_cluster,
+    Vl_in_cluster,
+    poses_in_cluster,
+    landmarks
+) = prox_f(
+    camera_indices_in_cluster, point_indices_in_cluster, points_2d_in_cluster,
+    poses_in_cluster, landmarks, poses_s_in_cluster, L_in_cluster, Vl_in_cluster, kClusters, innerIts=innerIts, sequential=True,
+    )
+
 
 if basic_version:
 
@@ -2107,7 +2075,7 @@ if basic_version:
             globalSingleLandmarksA_in_c,
             globalSingleLandmarksB_in_c
         ) = prox_f(
-            x0_p, camera_indices_in_cluster, point_indices_in_cluster, points_2d_in_cluster, 
+            x0_p, camera_indices_in_cluster, point_indices_in_cluster, points_2d_in_cluster,
             points_3d_in_cluster, landmark_s_in_cluster, L_in_cluster, Vl_in_cluster, kClusters, innerIts=innerIts, sequential=True,
             )
         end = time.time()
