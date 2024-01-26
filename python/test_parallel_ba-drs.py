@@ -1172,7 +1172,7 @@ def cost_DRE(
         v_u2_s = u2_s - landmark_v_.flatten()
         sum_u_s += u_s.dot(V_land * u_s)
         sum_u_v += u_v.dot(V_land * u_v)
-        sum_u_v_ =+ u_v.dot(u_v)
+        sum_u_v_ += u_v.dot(u_v)
         sum_2u_s_v += v_u2_s.dot(V_land * v_u2_s)
         if i == 0:
             Vl_all = V_land
@@ -1302,7 +1302,7 @@ def bundle_adjust(
     # torch_points_2d = from_numpy(points_2d)
     n_cameras_ = int(x0_p_.shape[0] / 9)
     n_points_ = int(x0_l_.shape[0] / 3)
-    powerits = 20 # kind of any value works here? > =5?
+    powerits = 100 # kind of any value works here? > =5?
     tr_eta_1 = 0.8
     tr_eta_2 = 0.25
 
@@ -1331,7 +1331,7 @@ def bundle_adjust(
             JtJ = J_pose.transpose() * J_pose
             JtJDiag = diag_sparse(JtJ.diagonal())
 
-            J_eps = 1e-9
+            J_eps = 1e-6
             JtJDiag = JtJ + J_eps * diag_sparse(np.ones(JtJ.shape[0]))
 
             #blockEigenvalueJtJ = blockEigenvalue(JtJ, 9)

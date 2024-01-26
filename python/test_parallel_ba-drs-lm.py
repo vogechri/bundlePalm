@@ -20,14 +20,14 @@ from torch import tensor, from_numpy
 # look at website. This is the smallest problem. guess: pytoch cpu is pure python?
 BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/ladybug/"
 FILE_NAME = "problem-49-7776-pre.txt.bz2"
-FILE_NAME = "problem-73-11032-pre.txt.bz2"
+#FILE_NAME = "problem-73-11032-pre.txt.bz2"
 
-BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/dubrovnik/"
+#BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/dubrovnik/"
 # FILE_NAME = "problem-16-22106-pre.txt.bz2"
 #FILE_NAME = "problem-356-226730-pre.txt.bz2" # large dub, play with ideas: cover, etc
 #FILE_NAME = "problem-237-154414-pre.txt.bz2"
-FILE_NAME = "problem-173-111908-pre.txt.bz2"
-FILE_NAME = "problem-135-90642-pre.txt.bz2"
+#FILE_NAME = "problem-173-111908-pre.txt.bz2"
+#FILE_NAME = "problem-135-90642-pre.txt.bz2"
 
 #BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/trafalgar/"
 # FILE_NAME = "problem-21-11315-pre.txt.bz2"
@@ -40,24 +40,25 @@ if not os.path.isfile(FILE_NAME):
 
 def remove_large_points(points_3d, camera_indices, points_2d, point_indices):
     remove_ids = np.arange(points_3d.shape[0])[np.sum(points_3d**2, 1) > 1e6]
-    points_3d = np.delete(points_3d, remove_ids, axis=0)
-    num_all_res = camera_indices.shape[0]
-    res_remove_ids = np.isin(point_indices, remove_ids)
-    camera_indices = camera_indices[~res_remove_ids]
-    points_2d = points_2d[~res_remove_ids]
-    point_indices = point_indices[~res_remove_ids]
-    unique_numbers = np.unique(point_indices)
-    # Step 2: Create a dictionary for mapping
-    mapping = {number: i for i, number in enumerate(unique_numbers)}    
-    # Step 3: Apply the mapping to the array
-    vfunc = np.vectorize(mapping.get)
-    point_indices = vfunc(point_indices)
-    print("Removed ", remove_ids.shape[0], " points")
-    # alot points far away. so likely present in many parts.
-    print("Removed ", num_all_res - camera_indices.shape[0], " residuals, ", \
-          (num_all_res - camera_indices.shape[0]) / remove_ids.shape[0], " observations in removed landmarks")
-    print(np.max(point_indices))
-    print(points_3d.shape)
+    if remove_ids.shape[0] >0:
+        points_3d = np.delete(points_3d, remove_ids, axis=0)
+        num_all_res = camera_indices.shape[0]
+        res_remove_ids = np.isin(point_indices, remove_ids)
+        camera_indices = camera_indices[~res_remove_ids]
+        points_2d = points_2d[~res_remove_ids]
+        point_indices = point_indices[~res_remove_ids]
+        unique_numbers = np.unique(point_indices)
+        # Step 2: Create a dictionary for mapping
+        mapping = {number: i for i, number in enumerate(unique_numbers)}    
+        # Step 3: Apply the mapping to the array
+        vfunc = np.vectorize(mapping.get)
+        point_indices = vfunc(point_indices)
+        print("Removed ", remove_ids.shape[0], " points")
+        # alot points far away. so likely present in many parts.
+        print("Removed ", num_all_res - camera_indices.shape[0], " residuals, ", \
+            (num_all_res - camera_indices.shape[0]) / remove_ids.shape[0], " observations in removed landmarks")
+        print(np.max(point_indices))
+        print(points_3d.shape)
     return points_3d, camera_indices, points_2d, point_indices
 
 def read_bal_data(file_name):
@@ -372,287 +373,6 @@ def getJacSin(
     # print("res", res.shape) # 200,2, so N, x/y
     return (jac[0], jac[1], res)
 
-
-### could be removed / not used
-def torchResiduum(x0T, n_cameras_, n_points_, camera_indices_, point_indices_, p2d_):
-    # x0T = from_numpy(x0)
-    # p2d = from_numpy(points_2d) # outside is better?
-    # p2d.requires_grad_(False)
-    camera_params = x0T[: n_cameras_ * 9].reshape(n_cameras_, 9)
-    point_params = x0T[n_cameras_ * 9 :].reshape(n_points_, 3)
-    angle_axis = camera_params[:, :3]
-
-    # likely better to create per point/cam representation 1st. no slower
-    # rot_matrix = AngleAxisToRotationMatrix(angle_axis) #
-    # points_cam = rot_matrix[camera_indices_, :, 0] * point_params[point_indices_,0].view(-1,1) + rot_matrix[camera_indices_, :, 1] * point_params[point_indices_,1].view(-1,1) + rot_matrix[camera_indices_, :, 2] * point_params[point_indices_,2].view(-1,1)
-
-    points_cam = AngleAxisRotatePoint(
-        angle_axis[camera_indices_, :], point_params[point_indices_, :]
-    )
-
-    points_cam = points_cam + camera_params[camera_indices_, 3:6]
-    points_projX = -points_cam[:, 0] / points_cam[:, 2]
-    points_projY = -points_cam[:, 1] / points_cam[:, 2]
-
-    f = camera_params[camera_indices_, 6]
-    k1 = camera_params[camera_indices_, 7]
-    k2 = camera_params[camera_indices_, 8]
-    # f.requires_grad_(False) # not leaf?!
-    # k1.requires_grad_(False)
-    # k2.requires_grad_(False)
-    r2 = points_projX * points_projX + points_projY * points_projY
-    distortion = 1.0 + r2 * (k1 + k2 * r2)
-    points_reprojX = -points_projX * distortion * f
-    points_reprojY = -points_projY * distortion * f
-    resX = (points_reprojX - p2d_[:, 0]).reshape((p2d_.shape[0], 1))
-    resY = (points_reprojY - p2d_[:, 1]).reshape((p2d_.shape[0], 1))
-    residual = torch.cat([resX[:,], resY[:,]], dim=1)
-    return residual
-
-
-def getJac(
-    start_,
-    end_,
-    camera_indices_,
-    point_indices_,
-    camera_params_,
-    point_params_,
-    torch_points_2d_,
-):
-    end_ = min(end_, camera_indices.shape[0])
-    n_cameras_ = camera_params_.shape[0]
-    n_points_ = point_params_.shape[0]
-    funx0_t = lambda X0: torchResiduum(
-        X0,
-        n_cameras_,
-        n_points_,
-        camera_indices_[start_:end_],
-        point_indices_[start_:end_],
-        torch_points_2d_[start_:end_],
-    )
-    x0_t_ = torch.hstack((camera_params_.flatten(), point_params_.flatten()))
-    jac = jacobian(
-        funx0_t, x0_t_, create_graph=False, vectorize=True, strategy="reverse-mode"
-    )  # forward-mode
-    print(start_, " ", end_, " : ")
-    return jac
-
-
-def buildMatrix(step, full, results_, camera_indices_, point_indices_, varset=0):
-    data = []
-    indptr = []
-    indices = []
-    if varset == 0:
-        v_indices = camera_indices_
-        sz = 9
-    if varset == 1:
-        v_indices = point_indices_
-        sz = 3
-    dataIndexSet = []
-
-    for j in range(step):
-        dataIndexSet.append(
-            j * 2 * step * sz + 0 * sz * step + j * sz + np.arange(0, sz)
-        )
-    for j in range(step):
-        dataIndexSet.append(
-            j * 2 * step * sz + 1 * sz * step + j * sz + np.arange(0, sz)
-        )
-    dataIndices = np.concatenate(dataIndexSet)
-
-    for i in np.arange(0, full, step):  # i, i + step: (0, 400), etc
-        start_ = i
-        end_ = min(i + step, v_indices.shape[0])
-        # numLocalRows = results_[int(i/step)][varset].shape[0]
-        # results_ hold res as resId, x/y, cam/point id, 9 or 3. only current cam if holds data!
-        # print(i/step, " ", start, "-", end)
-        # print(results_[int(i/step)][varset].shape) # 200,2,200,9 | 43,2,43,9
-        # print(np.arange(start*sz, end*sz, sz).shape) # 200 | 43
-        # print(np.array([sz * camera_indices[start:end] + j for j in range(sz)]).transpose().flatten().shape) # 1800 | 387
-
-        # bottleneck? how to improve though? maybe 1 x one y and combine later.
-        # can have index set?
-        if end_ != i + step:  # else uber slow
-            for j in range(end_ - start_):
-                data.append(
-                    results_[int(i / step)][varset][j, 0, j, :]
-                    .flatten()
-                    .detach()
-                    .numpy()
-                )
-            for j in range(end_ - start_):
-                data.append(
-                    results_[int(i / step)][varset][j, 1, j, :]
-                    .flatten()
-                    .detach()
-                    .numpy()
-                )
-                # print(data[-1].shape) # 18, so x/y x/y ... now first all x res then all y res.
-        else:
-            # print(i/step, " ", dataIndices.shape)
-            data.append(
-                results_[int(i / step)][varset].flatten()[dataIndices].detach().numpy()
-            )
-        # data is a list of ALL 9 arrays.
-        # indptr and indices are not, last part is not of same size
-
-        # assume data holds 1st all res for x then res for y, see below. Is this correct depends of result is indexed.
-        # (end-start)*sz*2 elements (x/y).
-        # in 2 parts -> 2(e-s)*sz/2 per part.
-        # part starts in 0, 2*(e-s), 4*(e-s), .. = 2*start (start = k*(e-s))
-        # 2*start*sz -
-        # 2*s*sz -- 2(e)*sz in 2 parts ->
-        # 2(e-s)*sz overall, 2(e-s)*sz/2 per part ->
-        # 2(e-s)*sz/2 + 2*s*sz = (e-s)*sz + 2*s*sz = (e + s)*sz
-        # so sz blocks of data pre res.
-        indptr.append(np.arange(2 * start_ * sz, 2 * end_ * sz, sz).flatten())
-        # indptr.append(np.arange((2*start+1)*sz, (sz*end+1)*sz, sz))
-        # x&y: operate on same cam variables
-        # first all x res, then all y res here.
-        indices.append(
-            np.array([sz * v_indices[start_:end_] + j for j in range(sz)])
-            .transpose()
-            .flatten()
-        )
-        indices.append(
-            np.array([sz * v_indices[start_:end_] + j for j in range(sz)])
-            .transpose()
-            .flatten()
-        )
-
-        # n = 9 * n_cameras + 3 * n_points
-        # m = 2 * points_2d.shape[0]
-        # crs_pose = csr_array((np.array(data).flatten(), np.array(indices).flatten(), np.array(indptr).flatten()), shape=(2*full, 9 * n_cameras)).toarray()
-    indptr.append(np.array([sz + indptr[-1][-1]]))  # closing
-    if False:
-        print("indptr ", np.concatenate(indptr))
-        print("indptr len ", len(indptr))
-        print("---------")
-        print(
-            "data ",
-            np.concatenate(data).shape,
-            " ",
-            min(np.concatenate(data)),
-            " ",
-            max(np.concatenate(data)),
-        )
-        print(
-            "indptr ",
-            np.concatenate(indptr).shape,
-            " ",
-            min(np.concatenate(indptr)),
-            " ",
-            max(np.concatenate(indptr)),
-        )
-        print(
-            "indices ",
-            np.concatenate(indices).shape,
-            " ",
-            min(np.concatenate(indices)),
-            " ",
-            max(np.concatenate(indices)),
-        )
-
-    # toarray is slow and does what? nothing? makes a dense matrix .. OMG
-    datavals = np.concatenate(data)
-    # debug: set all inner parameters to 0
-    if False and varset == 0:
-        # datavals[0:end:9] = 0
-        # datavals[1:end:9] = 0
-        # datavals[2:end:9] = 0
-
-        # datavals[3:end:9] = 0
-        # datavals[4:end:9] = 0
-        # datavals[5:end:9] = 0
-
-        datavals[6:end:9] = 0
-        datavals[7:end:9] = 0
-        datavals[8:end:9] = 0
-    crs_pose = csr_array((datavals, np.concatenate(indices), np.concatenate(indptr)))
-    J_pose = csr_matrix(crs_pose)
-    return J_pose
-
-
-def buildResiduum(step, full, results_, varset=2):
-    data = []
-    for i in np.arange(0, full, step):  # i, i + step: (0, 400), etc
-        # start = i
-        # end = min(i + step, camera_indices_.shape[0])
-        # results_ hold res as resId, x/y, cam/point id, 9 or 3. only current cam if holds data!
-        # print(i/step, " ", start, "-", end)
-        # print(results_[int(i/step)][varset].shape) # 200,2,200,9 | 43,2,43,9
-        # print(np.arange(start*sz, end*sz, sz).shape) # 200 | 43
-        # print(np.array([sz * camera_indices[start:end] + j for j in range(sz)]).transpose().flatten().shape) # 1800 | 387
-        # print("res shape", results_[int(i/step)][varset][:,0].flatten().numpy().shape())
-        # print("res ", results_[int(i/step)][varset][0].numpy())
-        # for j in range(end-start):
-        #    data.append(results_[int(i/step)][varset][0,:].flatten().numpy())
-        # for j in range(end-start):
-        #    data.append(results_[int(i/step)][varset][1,:].flatten().numpy())
-        data.append(results_[int(i / step)][varset][:, 0].flatten().numpy())
-        data.append(results_[int(i / step)][varset][:, 1].flatten().numpy())
-
-    # print("---------")
-    # print(np.concatenate(data).shape)
-    res = np.concatenate(data)
-    # print(res)
-    return res
-
-
-# fx0 + J delta x, J is Jp|Jl * xp|xl
-def ComputeDerivativeMatrices(
-    x0_t_cam, x0_t_land, camera_indices_, point_indices_, torch_points_2d
-):
-    start_ = time.time()
-    step = 250
-    full = camera_indices_.shape[0]
-    # camera_params = x0_t[:n_cameras*9].reshape(n_cameras,9)
-    # point_params  = x0_t[n_cameras*9:].reshape(n_points,3)
-    # funx0_st1 = lambda X0, X1, X2: torchSingleResiduum(X0.view(-1,9), X1.view(-1,3), X2.view(-1,2))
-    # results = Parallel(n_jobs=8,prefer="threads")(delayed(getJac)(i, i + step) for i in np.arange(0, full, step))
-
-    # parallel version
-    # results = Parallel(n_jobs=8,prefer="threads")(delayed(getJacSin)(i, i + step, camera_indices_, point_indices_, x0_t_cam, x0_t_land, torch_points_2d) for i in np.arange(0, full, step))
-    # not parallel
-    results_ = []
-    for i in np.arange(0, full, step):
-        result = getJacSin(
-            i,
-            i + step,
-            camera_indices_,
-            point_indices_,
-            x0_t_cam,
-            x0_t_land,
-            torch_points_2d,
-        )
-        # result = getJac(i, i + step, camera_indices_, point_indices_, x0_t_cam, x0_t_land, torch_points_2d) # awfully slow
-        results_.append(result)
-
-    end_ = time.time()
-    print("Parallel ", len(results_), " ", step, " its take ", end_ - start_, "s")
-    # print(results_[0][0].shape, " x ", results_[0][1].shape)
-    # now compose sparse! jacobian
-    # define sparsity pattern and add data
-    # results_ hold res as resId, x/y, cam/point id, 9 or 3
-
-    start = time.time()  # bottleneck now
-    J_pose = buildMatrix(
-        step, full, results_, camera_indices_, point_indices_, varset=0
-    )
-    end = time.time()
-    # print(" build Matrix & residuum took ", end-start, "s")
-    start = time.time()  # bottleneck now
-    J_land = buildMatrix(
-        step, full, results_, camera_indices_, point_indices_, varset=1
-    )  # slow
-    fx0 = buildResiduum(step, full, results_, varset=2)  # takes 1%
-    end = time.time()
-    # print(" build Matrix & residuum took ", end-start, "s")
-
-    # print(J_pose.shape)
-    return (J_pose, J_land, fx0)
-
-
 # bs : blocksize, eg 9 -> 9x9 or 3 -> 3x3 per block
 def blockInverse(M, bs):
     Mi = M.copy()
@@ -688,9 +408,6 @@ def ComputeDerivativeMatricesNew(x0_t_cam, x0_t_land, camera_indices_, point_ind
     resX = funx0_st1(torch_cams, torch_lands, torch_points_2d[:,:]).flatten()
     lossX = torch.sum(resX)
     lossX.backward()
-    # print(torch_cams.grad.shape)
-    # print(torch_lands.grad.shape)
-    #print(torch_cams.grad)
 
     cam_grad_x = torch_cams.grad.detach().numpy().copy()
     #cam_grad_x.detach()
@@ -768,9 +485,6 @@ def buildResiduumNew(resX, resY) :
     data = []
     data.append(resX.flatten().numpy())
     data.append(resY.flatten().numpy())
-    # print("build res")
-    # print(resX.flatten().numpy())
-    # print(resY.flatten().numpy())
     res = np.concatenate(data)
     return res
 
@@ -1042,15 +756,17 @@ def cluster_by_landmark(
 # just to check, problem last uk is not present.
 # or 2u+ - s - u to get delta. then add to v. or use real uk instead.
 #
-def average_landmarks_new(
-    point_indices_in_cluster_, points_3d_in_cluster_, landmark_s_in_cluster_, L_in_cluster_, VL_in_cluster_, landmark_v_, delta_l_in_cluster
+# poses_v, _ = average_cameras_new(
+#     camera_indices_in_cluster, poses_in_cluster, poses_s_in_cluster, L_in_cluster, Ul_in_cluster) # old_poses for costs?
+def average_cameras_new(
+    camera_indices_in_cluster_, poses_in_cluster, poses_s_in_cluster, L_in_cluster_, UL_in_cluster_#, pose_v_
 ):
-    num_points = points_3d_in_cluster_[0].shape[0]
-    sum_Ds_2u = np.zeros(num_points * 3)
+    num_cameras = poses_in_cluster[0].shape[0]
+    sum_Ds_2u = np.zeros(num_cameras * 9)
     sum_constant_term = 0
     for i in range(len(L_in_cluster_)):
         # Lc = L_in_cluster_[i]
-        point_indices_ = np.unique(point_indices_in_cluster_[i])
+        camera_indices_ = np.unique(camera_indices_in_cluster[i])
         # mean_points[point_indices_,:] = mean_points[point_indices_,:] + points_3d_in_cluster_[i][point_indices_,:] * Lc
         # num_clusters[point_indices_] = num_clusters[point_indices_] + Lc
         # fill Vl with 0s 3x3 blocks? somehow ..
@@ -1058,32 +774,30 @@ def average_landmarks_new(
         #
         # data can remain, indptr can remain, indices must be adjusted / new
         # point_indices_
+        #print(UL_in_cluster_[i].data.shape, " ", camera_indices_.shape)
+
         indices = np.repeat(
-            np.array([3 * point_indices_ + j for j in range(3)]).transpose(), 3, axis=0
+            np.array([9 * camera_indices_ + j for j in range(9)]).transpose(), 9, axis=0
         ).flatten()
         # indices.append(np.array([3 * point_indices_ + j for j in range(3)]).transpose().flatten())
         # indptr is to be set to have empty lines by 0 3 3 -> no entries in row 3. 0:0-3, row 1:3-3
 
         indptr = [np.array([0])]
         j = 0
-        for q in range(num_points):
+        for q in range(num_cameras):
             # print(q, " ", j, " ", point_indices_.shape[0], " ", np.array([9*j+3, 9*j+6, 9*j+9]) )
-            if j < point_indices_.shape[0] and point_indices_[j] == q:
-                indptr.append(np.array([9 * j + 3, 9 * j + 6, 9 * j + 9]).flatten())
+            if j < camera_indices_.shape[0] and camera_indices_[j] == q:
+                indptr.append(np.array([81 * j + 9, 81 * j + 18, 81 * j + 27, 
+                                        81 * j + 36, 81 * j + 45, 81 * j + 54, 
+                                        81 * j + 63, 81 * j + 72, 81 * j + 81]).flatten())
                 j = j + 1
-            else:
-                indptr.append(np.array([9 * j, 9 * j, 9 * j]).flatten())
-        # print(indptr)
+            else: # 9x9 block of "0's" not present in data
+                indptr.append(np.array([81 * j, 81 * j, 81 * j, 81 * j, 
+                                        81 * j, 81 * j, 81 * j, 81 * j, 81 * j]).flatten())
         indptr = np.concatenate(indptr)
-
-        # print(indices)
-        # print(VL_in_cluster_[i].indptr)
-        # print(indptr)
-
-        # print(indices.shape,  " ", VL_in_cluster_[i].data.shape, " ", VL_in_cluster_[i].indptr.shape, " ", indptr.shape, " ", 3*num_points, " ", 3 * np.max(point_indices_) )
-        V_land = csr_matrix(
-            (VL_in_cluster_[i].data, indices, indptr),
-            shape=(3 * num_points, 3 * num_points),
+        U_pose = csr_matrix(
+            (UL_in_cluster_[i].data, indices, indptr),
+            shape=(9 * num_cameras, 9 * num_cameras),
         )
         # print(mean_points.shape, " " , V_land.shape, points_3d_in_cluster_[i].shape)
         # print cost after/before.
@@ -1094,22 +808,21 @@ def average_landmarks_new(
         # print(i, "averaging vl ", V_land.data.reshape(-1,9)[globalSingleLandmarksA_in_c[i],:])  # indeed diagonal
 
         # TODO change 3, claim  2u+-s = 2 * (s+u)/2 - s  -  2 * (vli/2 .. ), so subtract u to get delta only
-        u2_s = (2 * points_3d_in_cluster_[i].flatten() - landmark_s_in_cluster_[i].flatten())
+        u2_s = (2 * poses_in_cluster[i].flatten() - poses_s_in_cluster[i].flatten())
         #u2_s = (2 * points_3d_in_cluster_[i].flatten() - landmark_s_in_cluster_[i].flatten()) - (points_3d_in_cluster_[i].flatten() - delta_l_in_cluster[i].flatten())
 
-        sum_Ds_2u += V_land * u2_s # has 0's for those not present
+        sum_Ds_2u += U_pose * u2_s # has 0's for those not present
 
         # print(i, "averaging u2_s ", u2_s.reshape(-1,3)[globalSingleLandmarksB_in_c[i], :]) # indeed 1 changed rest is constant
 
-        sum_constant_term += points_3d_in_cluster_[i].flatten().dot(V_land * (points_3d_in_cluster_[i].flatten() + u2_s - landmark_s_in_cluster_[i].flatten()))
+        sum_constant_term += poses_in_cluster[i].flatten().dot(U_pose * (poses_in_cluster[i].flatten() + u2_s - poses_s_in_cluster[i].flatten()))
         if i == 0:
-            Vl_all = V_land
+            Up_all = U_pose
         else:
-            Vl_all += V_land
-    Vli_all = blockInverse(Vl_all, 3)
+            Up_all += U_pose
+    Upi_all = blockInverse(Up_all, 9)
     # TODO change 1
-    landmark_v_out = Vli_all * sum_Ds_2u
-    #landmark_v_out = landmark_v_.flatten() + Vli_all * sum_Ds_2u
+    pose_v_out = Upi_all * sum_Ds_2u
     verbose = False
     if verbose:
         cost_input  = 0.5 * (landmark_v_.flatten().dot(Vl_all * landmark_v_.flatten() - 2 * sum_Ds_2u) + sum_constant_term)
@@ -1120,7 +833,7 @@ def average_landmarks_new(
         print("========== update v: ", round(cost_input), " -> ", round(cost_output), " gain: ", round(cost_input - cost_output) )
         #print("======================== update v: ", round(cost_simpler_in), " -> ", round(cost_simpler_out), " gain: ", round(cost_simpler_in - cost_simpler_out) )
 
-    return landmark_v_out.reshape(num_points, 3), Vl_all
+    return pose_v_out.reshape(num_cameras, 9), Up_all
     # Then use this for fixing landmarks / updating. enven use VLi / Vl instead? argmin_x sum_y=lm_in_cluster (x-y) VL (x-y) of last Vl.
     # ==> x^t sum Vl x - 2 x sum (Vl y) + const =>  x = (sum Vl)^-1 [sum (Vl*y)].
     # above should lead to better? solutions at least. At next local updates we work with Vl?
@@ -1134,45 +847,49 @@ def average_landmarks_new(
 #                     rho_k/2 <3u_k - v_k - 2s_k, u_k - v_k>
 #                     rho_k/2 {v^tv - vT[2uk-sk] + uk^T[3uk-2sk]}
 def cost_DRE(
-    point_indices_in_cluster_, points_3d_in_cluster_, landmark_s_in_cluster_, L_in_cluster_, VL_in_cluster_, landmark_v_
+    #camera_indices_in_cluster, poses_in_cluster, poses_s_in_cluster, L_in_cluster, Ul_in_cluster, pose_v
+    camera_indices_in_cluster_,  poses_in_cluster_, poses_s_in_cluster_, L_in_cluster_, Ul_in_cluster_, pose_v_
 ):
-    num_points = points_3d_in_cluster_[0].shape[0]
-    sum_Ds_2u = np.zeros(num_points * 3)
+    num_cams =  poses_in_cluster_[0].shape[0]
+    sum_Ds_2u = np.zeros(num_cams * 9)
     sum_constant_term = 0
     sum_u_s =0
     sum_u_v = 0
     sum_u_v_ = 0
     sum_2u_s_v = 0
     for i in range(len(L_in_cluster_)):
-        point_indices_ = np.unique(point_indices_in_cluster_[i])
+        point_indices_ = np.unique(camera_indices_in_cluster_[i])
         indices = np.repeat(
-            np.array([3 * point_indices_ + j for j in range(3)]).transpose(), 3, axis=0
+            np.array([9 * point_indices_ + j for j in range(9)]).transpose(), 9, axis=0
         ).flatten()
 
         indptr = [np.array([0])]
         j = 0
-        for q in range(num_points):
+        for q in range(num_cams):
             if j < point_indices_.shape[0] and point_indices_[j] == q:
-                indptr.append(np.array([9 * j + 3, 9 * j + 6, 9 * j + 9]).flatten())
+                indptr.append(np.array([81 * j + 9, 81 * j + 18, 81 * j + 27, 
+                                        81 * j + 36, 81 * j + 45, 81 * j + 54, 
+                                        81 * j + 63, 81 * j + 72, 81 * j + 81]).flatten())
                 j = j + 1
             else:
-                indptr.append(np.array([9 * j, 9 * j, 9 * j]).flatten())
+                indptr.append(np.array([81 * j, 81 * j, 81 * j, 81 * j, 
+                                        81 * j, 81 * j, 81 * j, 81 * j, 81 * j]).flatten())
         indptr = np.concatenate(indptr)
 
         V_land = csr_matrix(
-            (VL_in_cluster_[i].data, indices, indptr),
-            shape=(3 * num_points, 3 * num_points),
+            (Ul_in_cluster_[i].data, indices, indptr),
+            shape=(9 * num_cams, 9 * num_cams),
         )
-        u2_s = (2 * points_3d_in_cluster_[i].flatten() - landmark_s_in_cluster_[i].flatten())
+        u2_s = (2 *  poses_in_cluster_[i].flatten() - poses_s_in_cluster_[i].flatten())
         sum_Ds_2u += V_land * u2_s # has 0's for those not present
-        sum_constant_term += points_3d_in_cluster_[i].flatten().dot(V_land * (points_3d_in_cluster_[i].flatten() + u2_s - landmark_s_in_cluster_[i].flatten()))
+        sum_constant_term +=  poses_in_cluster_[i].flatten().dot(V_land * (poses_in_cluster_[i].flatten() + u2_s - poses_s_in_cluster_[i].flatten()))
 
-        u_s = points_3d_in_cluster_[i].flatten() - landmark_s_in_cluster_[i].flatten()
-        u_v = points_3d_in_cluster_[i].flatten() - landmark_v_.flatten()
-        v_u2_s = u2_s - landmark_v_.flatten()
+        u_s =  poses_in_cluster_[i].flatten() - poses_s_in_cluster_[i].flatten()
+        u_v =  poses_in_cluster_[i].flatten() - pose_v_.flatten()
+        v_u2_s = u2_s - pose_v_.flatten()
         sum_u_s += u_s.dot(V_land * u_s)
         sum_u_v += u_v.dot(V_land * u_v)
-        sum_u_v_ =+ u_v.dot(u_v)
+        sum_u_v_ += u_v.dot(u_v)
         sum_2u_s_v += v_u2_s.dot(V_land * v_u2_s)
         if i == 0:
             Vl_all = V_land
@@ -1182,27 +899,9 @@ def cost_DRE(
     # TODO: I use a different Vl to compute the cost here than in the update of prox u.
     #       Since I want to work with a new Vl already. Problem.
     # i want |u-s|_D |u-v|_D, also |v-2u-s|_D
-    cost_input  = 0.5 * (landmark_v_.flatten().dot(Vl_all * landmark_v_.flatten() - 2 * sum_Ds_2u) + sum_constant_term)
+    cost_input  = 0.5 * (pose_v_.flatten().dot(Vl_all * pose_v_.flatten() - 2 * sum_Ds_2u) + sum_constant_term)
     print("---- |u-s|^2_D ", round(sum_u_s), "|u-v|^2_D ", round(sum_u_v), "|2u-s-v|^2_D ", round(sum_2u_s_v), "|u-v|^2 ", round(sum_u_v_))
     return cost_input
-
-
-def average_landmarks(point_indices_in_cluster_, points_3d_in_cluster_, L_in_cluster_):
-    mean_points = np.zeros(points_3d_in_cluster_[0].shape)
-    num_clusters = np.zeros(points_3d_in_cluster_[0].shape[0])
-    kClusters_ = len(L_in_cluster_)
-    for i in range(kClusters_):
-        Lc = L_in_cluster_[i]
-        point_indices_ = np.unique(point_indices_in_cluster_[i])
-        mean_points[point_indices_, :] = (
-            mean_points[point_indices_, :]
-            + points_3d_in_cluster_[i][point_indices_, :] * Lc
-        )
-        num_clusters[point_indices_] = num_clusters[point_indices_] + Lc
-    mean_points[:, 0] = mean_points[:, 0] / num_clusters
-    mean_points[:, 1] = mean_points[:, 1] / num_clusters
-    mean_points[:, 2] = mean_points[:, 2] / num_clusters
-    return mean_points
 
 # TODO: shorten
 def primal_cost(
@@ -1226,10 +925,8 @@ def primal_cost(
     for i in range(point_indices_in_cluster_.shape[0]):
         point_indices_in_c[i] = inverse_point_indices[point_indices_in_c[i]]
 
-    min_cam_index_in_c = np.min(camera_indices_in_cluster_)
     points_3d_in_c = points_3d_in_cluster_[unique_points_in_c_]
 
-    #camera_indices_ = camera_indices_in_cluster_ - min_cam_index_in_c
     camera_indices_ = np.zeros(camera_indices_in_cluster_.shape[0], dtype=int)
     for i in range(cameras_indices_in_c_.shape[0]):
         camera_indices_[camera_indices_in_cluster_ == cameras_indices_in_c_[i]] = i
@@ -1258,47 +955,45 @@ def primal_cost(
     costEnd = np.sum(fx1.numpy() ** 2)
     return costEnd
 
-# TODO: to run multiple iterations in distributed version we need to use f(x) + L/2|x -  z|
-# where z is the mean of the landmarks. likely L can be set via descent lemma or better as diag Vl
-# there is the notion of whether to start from x or z.
-# using landmarks_only_in_cluster_: issue is s + v-u is now wrong, but since unique lms only ok. when extrapolating set to 0. 
-# 10  ======== DRE ======  29051  ========= gain  483 ==== f(v)=  28898  f(u)=  29207
-# 21  ======== DRE ======  27571  ========= gain  44 ==== f(v)=  27532  f(u)=  27571
-# 30  ======== DRE ======  27286  ========= gain  25 ==== f(v)=  27268  f(u)=  27275
-# 38  ======== DRE ======  27169  ========= gain  14 ==== f(v)=  27157  f(u)=  27159
-# without not much, still some its.
-# 21  ======== DRE ======  27795  ========= gain  58 ==== f(v)=  27752  f(u)=  27799
-# 30  ======== DRE ======  27415  ========= gain  34 ==== f(v)=  27399  f(u)=  27405
-# 38  ======== DRE ======  27260  ========= gain  20 ==== f(v)=  27249  f(u)=  27250
-# TODO: strict change: only increase phi -> DRS makes sense.
-# use blockeig for that. (or just diag and max).
+
+# cost_, x0_p_c_, x0_l_c_, Lnew_c_, Vl_c_ = bundle_adjust(
+#     local_landmark_indices_in_cluster, # these are indexing into landmarks_in_c, a subset of all landmarks, directly.
+#     pose_indices_in_c,
+#     poses_only_in_cluster_, # input those poses not present anywhere else to relax hold on those.
+#     torch_points_2d_in_c,
+#     landmarks_in_c,
+#     poses_in_c,
+#     poses_s_in_c,
+#     Vl_in_cluster_, # these are for those poses in cluster only. 
+#     L_in_cluster_,
+#     its_,
+# )
+
 def bundle_adjust(
-    camera_indices_,
     point_indices_,
-    landmarks_only_in_cluster_,
+    camera_indices_,
+    poses_only_in_cluster_,
     torch_points_2d,
-    cameras_in,
     points_3d_in,
-    landmark_s_, # taylor expand at point_3d_in -> prox on landmark_s_ - points_3d = lambda (multiplier)
-    Vl_in_c_,
+    cameras_in,
+    cameras_s_, # taylor expand at point_3d_in -> prox on landmark_s_ - points_3d = lambda (multiplier)
+    Ul_in_c_,
     L_in_cluster_,
     successfull_its_=1,
 ):
     # print("landmarks_only_in_cluster_  ", landmarks_only_in_cluster_, " ", np.sum(landmarks_only_in_cluster_), " vs ", np.sum(1 - landmarks_only_in_cluster_) )
-    newForUnique = True
+    newForUnique = False
     blockEigMult = 1e-4 # 1e-3 was used before
-    normal_case_ = True # No L * JltJl at all. Does not work
-    # define x0_t, x0_p, x0_l, L # todo: missing Lb: inner L for bundle, Lc: to fix duplicates
     L = L_in_cluster_
     minimumL = 1e-6
     updateJacobian = True
     # holds all! landmarks, only use fraction likely no matter not present in cams anyway.
     x0_l_ = points_3d_in.flatten()
-    s_l_ = landmark_s_.flatten()
     # holds all cameras, only use fraction, camera_indices_ can be adjusted - min index
     x0_p_ = cameras_in.flatten()
     x0 = np.hstack((x0_p_, x0_l_))
     x0_t = from_numpy(x0)
+    s_p_ = cameras_s_.flatten()
     # torch_points_2d = from_numpy(points_2d)
     n_cameras_ = int(x0_p_.shape[0] / 9)
     n_points_ = int(x0_l_.shape[0] / 3)
@@ -1312,97 +1007,60 @@ def bundle_adjust(
 
     #stepSize = diag_sparse(np.zeros(n_points_))
     # make diagonal again.
-    if issparse(Vl_in_c_):
-        stepSize = diag_sparse(Vl_in_c_.diagonal())
+    if issparse(Ul_in_c_): # only increase -- if needed.
+        stepSize = diag_sparse(Ul_in_c_.diagonal())
 
     steSizeTouched = False
 
     while it_ < successfull_its_:
-        # to torch here ?
 
         if updateJacobian:  # not needed if rejected
             #
-            x0_t_cam = x0_t[: n_cameras_ * 9].reshape(n_cameras_, 9) # not needed?
+            x0_t_cam = x0_t[: n_cameras_ * 9].reshape(n_cameras_, 9)
             x0_t_land = x0_t[n_cameras_ * 9 :].reshape(n_points_, 3)
-            J_pose, J_land, fx0 = ComputeDerivativeMatricesNew(
-                x0_t_cam, x0_t_land, camera_indices_, point_indices_, torch_points_2d
-            )
+            J_pose, J_land, fx0 = ComputeDerivativeMatricesNew (
+                x0_t_cam, x0_t_land, camera_indices_, point_indices_, torch_points_2d )
 
             JtJ = J_pose.transpose() * J_pose
-            JtJDiag = diag_sparse(JtJ.diagonal())
+            #JtJDiag = diag_sparse(np.fmax(JtJ.diagonal(), 1e-4))
 
-            J_eps = 1e-9
-            JtJDiag = JtJ + J_eps * diag_sparse(np.ones(JtJ.shape[0]))
-
-            #blockEigenvalueJtJ = blockEigenvalue(JtJ, 9)
-            #print(" min/max JtJ.diagonal() ", np.min(JtJ.diagonal()), " ", np.max(JtJ.diagonal()), " adjusted ", np.min(JtJDiag.diagonal()), " ", np.max(JtJDiag.diagonal()), " ", np.min(blockEigenvalueJtJ.diagonal()) ," ", np.max(blockEigenvalueJtJ.diagonal()) )
-
-            #JtJDiag = diag_sparse(np.fmax(JtJ.diagonal(), 1e1)) # sensible not clear maybe lower.
-            JltJl = J_land.transpose() * J_land
-            blockEigenvalueJltJl = blockEigenvalue(JltJl, 3)
+            blockEigenvalueJtJ = blockEigenvalue(JtJ, 9)
+            stepSize = 1. * (blockEigMult * blockEigenvalueJtJ + 2 * JtJ.copy()) # Todo '2 *' vs 1 by convex
             # if not issparse(Vl_in_c_) and it_ < 1:
             #     stepSize = blockEigenvalueJltJl
             # else: # increase where needed -- this here is WAY too slow?
             #     stepSize.data = np.maximum(0.05 * stepSize.data, blockEigenvalueJltJl.data) # else diagSparse of it
-            
-            # todo 0.5 appars to be ok still & faster. lower leads to hickups and slow down
-            stepSize = 1. * (blockEigMult * blockEigenvalueJltJl + 2 * JltJl.copy()) # Todo '2 *' vs 1 by convex
-            #stepSize = 1. * (blockEigMult * blockEigenvalueJltJl + 1 * JltJl.copy()) # this already suffices
-            #stepSize = 1. * (1e-0 * diag_sparse(np.ones(n_points_*3)) + 1.0 * JltJl.copy()) # not so good
 
-            # problem blockinverse assume data is set in full 3x3
-            # Problem: gets stuck. guess. a new, very large value for a coordinate hits a previously low one.
-            # averaging leaves a gap here, if gap is too large we fail.
-            # should still be caverable by (pre!)-computing deriv in advance. Then jump is limited by inc in L.
-            #JltJlDiag = diag_sparse(np.fmax(JltJl.diagonal(), 1e1)) # startL defines this. 
-            maxDiag = np.max(JltJl.diagonal())
-            # here larger x, eg 5: 1ex leasd  to stallment, small to v,u divergence.
-            #JltJlDiag = diag_sparse(np.fmax(JltJl.diagonal(), np.minimum(maxDiag, 1e5 * np.maximum(1., 1./L)))) # startL defines this. 
-            # theoretic value is 2 * diag. [modula change to diag]. Here we use 1/2 diag. but No dependence on L.
-            JltJlDiag = np.maximum(1, 0.5 / L) * diag_sparse(np.fmax(JltJl.diagonal(), 1e1)) # this should ensure (small L) condition.
-            # improvement: only for constrained variables.
-            # improvement: acceleration, maybe needs ALL variables to be effective.
-
-            JltJlDiag = stepSize.copy() # max 1, 1/L, line-search dre fails -> increase
-
+            JltJl = J_land.transpose() * J_land
+            J_eps = 1e-4
+            JltJlDiag = JltJl + J_eps * diag_sparse(np.ones(JltJl.shape[0]))
+          
+            JtJDiag = stepSize.copy() # max 1, 1/L, line-search dre fails -> increase
             if newForUnique:
-                JltJlDiag = copy_selected_blocks(JltJlDiag, landmarks_only_in_cluster_, 3)
-                if normal_case_:
-                    JltJlDiag = JltJlDiag + L * blockEigMult * blockEigenvalueJltJl
-                else: # usual version of L
-                    JltJlDiag = JltJlDiag + 1e-4 * blockEigenvalueJltJl
-                #JltJlDiag = JltJlDiag + L * diag_sparse(JltJl.diagonal()) # original
-                #JltJlDiag = 1/L * JltJlDiag + diag_sparse(JltJl.diagonal()) #diag_sparse(np.fmax(JltJl.diagonal(), 1e0))
+                JtJDiag = copy_selected_blocks(JtJDiag, poses_only_in_cluster_, 3)
+                JtJDiag = JtJDiag + L * blockEigMult * blockEigenvalueJtJ
 
-            # theory states roughly JltJlDiag * max(1,1/L) should be used. This does not converge u,v are coupled but no progress is made on primal.
-            # should use descent lemma to define this 'L' not TR? pose L can be anything
-            # Above to slow with 1/L.
-            # maybe use Dl/L instead, Dl=1 init, check descent lemma and lower Dl if possible (increase if not)
-            # but Dl is fulfilled with L. So would lower Dl just like, or? 
             # maybe better: 3x3 matrix sqrt(|M|_1 |M|inf) as diag. Yet this removes effect of 'L' getting small = large steps.
             # do i need to keep memory to ensure it remains >? or pre compute grad (and store)?
-            print(" min/max JltJl.diagonal() ", np.min(JltJl.diagonal()), " ", maxDiag, " adjusted ", np.min(JltJlDiag.diagonal()), " ", np.max(JltJlDiag.diagonal()))
+            print(" min/max JtJ.diagonal() ", np.min(JtJ.diagonal()), " ", np.max(JtJ.diagonal()), " adjusted ", np.min(JtJDiag.diagonal()), " ", np.max(JtJDiag.diagonal()))
             #print("JltJlDiag.shape ", JltJlDiag.shape, JltJlDiag.shape[0]/3)
 
-            # based on unique_pointindices_ make diag_1L that is 1 at points 
-            # only present within this part.
+            JtJDiag = 1/L * JtJDiag # max 1, 1/L, line-search dre fails -> increase
 
-            # 0.2 was working
-            if normal_case_:
-                JltJlDiag = 1/L * JltJlDiag # max 1, 1/L, line-search dre fails -> increase
+            print("JtJ ", JtJ.shape, " ", JtJ.data.shape, " ", stepSize.shape, " ", stepSize.data.shape, " ", JtJDiag.shape, " ",  JtJDiag.data.shape )
 
             W = J_pose.transpose() * J_land
             bp = J_pose.transpose() * fx0
             bl = J_land.transpose() * fx0
 
-            prox_rhs = x0_l_ - s_l_
+            prox_rhs = x0_p_ - s_p_
             if newForUnique: # alternative turn off completely, use 2u-s -> return (u-s)/2 to average u+k = uk + delta uk
                 landmarks_in_many_cluster_ = np.invert(landmarks_only_in_cluster_)
                 diag_present = diag_sparse( np.repeat((np.ones(n_points_) * landmarks_in_many_cluster_).reshape(-1,1), 3).flatten() )
                 prox_rhs = 1 * diag_present * prox_rhs
 
             costStart = np.sum(fx0**2)
-            penaltyStartConst = prox_rhs.dot(JltJlDiag * prox_rhs)
+            penaltyStartConst = prox_rhs.dot(JtJDiag * prox_rhs)
 
         # start_ = time.time()
         Vl = JltJl + L * JltJlDiag
@@ -1415,13 +1073,14 @@ def bundle_adjust(
         # added cost is, 2 L * (delta_v^T JltJlDiag * (x0_l_ - s_l_) + L * (s_l_ - x0_l_)^T  JltJlDiag * (s_l_ - x0_l_)
 
         Vli = blockInverse(Vl, 3)
-        bl_s = bl + L * JltJlDiag * prox_rhs # TODO: + or -. '+', see above
-        bS = (bp - W * Vli * bl_s).flatten()
+        bp_s = bp + L * JtJDiag * prox_rhs # TODO: + or -. '+', see above
+        bS = (bp_s - W * Vli * bl).flatten()
 
         delta_p = -solvePowerIts(Ul, W, Vli, bS, powerits)
-        delta_l = -Vli * ((W.transpose() * delta_p).flatten() + bl_s)
-        penaltyL = L * (delta_l + prox_rhs).dot(JltJlDiag * (delta_l + prox_rhs))
-        penaltyP = L * delta_p.dot(JtJDiag * delta_p)
+        delta_l = -Vli * ((W.transpose() * delta_p).flatten() + bl)
+
+        penaltyL = L * (delta_l).dot(JltJlDiag * delta_l)
+        penaltyP = L * (delta_p + prox_rhs).dot(JtJDiag * (delta_p + prox_rhs))
         # end_ = time.time()
         # print("Lm step took ", end - start, "s")
 
@@ -1487,27 +1146,15 @@ def bundle_adjust(
             #stepSize = stepSize * 2
             # other idea, initially we only add 1/2^k eg 0.125, times the needed value and inc if necessary, maybe do not add anything if not needed.
 
-            if normal_case_:
-                blockEigenvalueJltJl.data *= 2 # appears slow but safe
-                #stepSize.data = np.maximum(stepSize.data, blockEigenvalueJltJl.data) # else diagSparse of it
-                stepSize = blockEigMult * blockEigenvalueJltJl + JltJl.copy()
+            blockEigenvalueJtJ.data *= 2 # appears slow but safe
+            #stepSize.data = np.maximum(stepSize.data, blockEigenvalueJltJl.data) # else diagSparse of it
+            stepSize = blockEigMult * blockEigenvalueJtJ + JtJ.copy()
 
-                JltJlDiag = 1/L * stepSize.copy()
-                penaltyStartConst = (prox_rhs - delta_l).dot(JltJlDiag * (prox_rhs - delta_l))
-                #penaltyStartConst *= 2
-            else:
-                L = L * 2
+            JtJDiag = 1/L * stepSize.copy()
+            penaltyStartConst = (prox_rhs - delta_p).dot(JtJDiag * (prox_rhs - delta_p))
+
         if LfkSafe and not steSizeTouched:
             L = L / 2
-
-        # if LfkDiagonal < -2 and steSizeTouched:
-        #     LfkDiagonal = -2
-        # if LfkDiagonal < -2 and not steSizeTouched: # can we increase convergence in those cases? Problme if this fluctuates of course. Maybe only do if above did not enter
-        #     steSizeTouched = True
-        #     print(" |||||||  Lfk estimate ", LfkDiagonal, " -nabla^Tdelta=" , -bp.dot(delta_p) - bl.dot(delta_l), " |||||||")
-        #     stepSize.data = stepSize.data / 1.5
-        #     JltJlDiag = 1/L * stepSize.copy()
-        #     penaltyStartConst = (x0_l_ - delta_l - s_l_).dot(JltJlDiag * (x0_l_ - delta_l - s_l_))
 
         # version with penalty check for ADMM convergence / descent lemma. Problem: slower?
         if costStart + penaltyStart < costEnd + penaltyL or LfkViolated:
@@ -1524,186 +1171,32 @@ def bundle_adjust(
             it_ = it_ + 1
             updateJacobian = True
 
-        # Descent lemma print # descent lemma for landmarks only?
-        # f(x) <= f(y) + <nabla f(y), x-y> + Lf/2 |x-y|^2
-        # e.g. update from y to x, nabla f(y) = Jac * res(y) = b
-        # x=y+delta, f(x) <= f(y) + <nabla f(y), x-y> + Lf/2 |x-y|^2
-        #       <=>  f(x) - f(y) <= <nabla f(y), delta> + Lf/2 |delta|^2
-        #       <=> [f(x) - f(y) - b^T delta] / delta^2 <= Lf/2, defines Lf
-        # 2 * (costEnd - costStart - b^t (delta) / |delta|^2)
-        # ok delta ~ - nabla -> b^Tdelta > 0. Even delta = - JtJ^-1 b.
-        # Hence - b^T JtJ^-1 b. Since J^tJ>=0 it follows b^Tdelta < 0. Ok see below.
-        # Note that nabla f = b and delta = - J^tJ ^-2 b -> b = JtJ delta
-        # Hence f(x) <= f(y) + delta^T [l/2 D^tD + J^tJ] delta. for all x=delta+y.
-        # Also J^tJ = K^tK + q * D^tD with D = diag(K) and q by TR.
-        # So (ignore 1/2) (l-q) D^TD > J^TJ. Maybe set l = 2q, where q is our TR choice.
-        # At least should not diverge
-        if False:
-            Lfk = \
-                2 * (costEnd - costStart - bp.dot(delta_p) - bl.dot(delta_l)) \
-                / (delta_l.dot(delta_l) + delta_p.dot(delta_p))
-            # Not the same we have diag in there: Lf/2 delta^t D delta.
-            # so divide by this to receive update for Lf. This is given below.
-            # Do i need the same for only landmarks/dupe lms?
-            LfkX = \
-                2 * (costStart - costEnd - nablaXp.dot(delta_p) - nablaXl.dot(delta_l)) \
-                / (delta_l.dot(delta_l) + delta_p.dot(delta_p))
-        # TODO descent lemma with L * JltJlDiag only for landmarks.
-        # test joint.
-        # We use diagonal matrix L * JtJDiag, JltJlDiag instead of scalar L:
-        # we now get -- if accepted update < 2 always
-        # nablaXp = L * JtJDiag * delta_p  # actual gradient
-        # nablaXl = L * JltJlDiag * delta_l  # actual gradient
-        # LfkDiagonal = \
-        #     2 * (costEnd - costStart - bp.dot(delta_p) - bl.dot(delta_l)) \
-        #     / (delta_l.dot( nablaXl) + delta_p.dot( nablaXp ))
-        # this becomes x: new, y: old
-        # descent lemma is now, y + delta = x, delta = x-y
-        # f(x) <= f(y) + <nabla(f(y) x-y> + Lf/2 nablaf(x)^T (x-y)
-        # f(x) <= f(y) + <nabla(f(y) + Lf/2 nablaf(x)^T, x-y> must hold.
-        # find Lf s.t. this holds. 
-        #print("Lfk estimate ", Lfk, " and ", LfkX, " or ", LfkDiagonal)
-        # relation to check f(x) > f(y) + penaltyL to accept step is:
-        # f(x) > f(y) + delta^t Diag delta = f(y) + <nabla f(x), x-y>
-        # this implies descent lemma ALWAYS fulfilled.
-
         print(" ------- Lfk distance ", LfkDistance, " -nabla^Tdelta=" , -bp.dot(delta_p) - bl.dot(delta_l),  " tr_check ", tr_check, " -------- ")
-        # update TR -- 
-        #if costStart + penaltyStart > costEnd + penaltyL
-        #tr_check = (costStart - costEnd) / (costStart - costQuad)
-        if False or it_ < successfull_its_ and L > 1e-6: # lowering leads to, see below averaging affected, can trigger multiple increases
-            #print( "A JltJlDiag-bun ", JltJlDiag.data.reshape(-1,9)[landmarks_only_in_cluster_,:])
-            if tr_check > tr_eta_1: # and L > 0.1: # needs a limit else with my L * Vl, or 1/L in diag?
-                L = L / 2
-                JltJlDiag = 2 * JltJlDiag
-            if tr_check < tr_eta_2 or LfkDiagonal > 2: # tr check becomes descent lemma, might need > 1?
-                L = L * 2
-                JltJlDiag = 1/2 * JltJlDiag
-
-        if LfkViolated: # violated -- should revert update.
-            print("=========================== SHOULD NOT ENTER ==========================")
-            stepSize = stepSize * 2
-            JltJlDiag = 1/L * stepSize.copy()
 
     x0_p_ = x0_p_.reshape(n_cameras_, 9)
     x0_l_ = x0_l_.reshape(n_points_, 3)
 
-    # maybe only if likely that is differs? Still insufficient.
-    # needs to estimate L as well. only if accept. no effect.
+    # idea use latest for better control ?
     getBetterStepSize = False # this is used as approx of f in update of v and thus s. maybe change there u-v should be small. 
     if getBetterStepSize: # needs to set L correctly
         J_pose, J_land, fx0 = ComputeDerivativeMatricesNew(
             x0_t_cam, x0_t_land, camera_indices_, point_indices_, torch_points_2d
         )
         JltJl = J_land.transpose() * J_land
-        #JltJlDiag = diag_sparse(np.fmax(JltJl.diagonal(), 1e1)) # should be same as above
-        #JltJlDiag = np.maximum(1, 0.5 / L) * diag_sparse(np.fmax(JltJl.diagonal(), 1e1)) # this should ensure (small L) condition.
-        #stepSize = blockEigenvalue(JltJl, 3)
         stepSize.data = np.maximum(stepSize.data, blockEigenvalue(JltJl, 3).data) # else diagSparse of it
         JltJlDiag = 1/L * stepSize.copy() # max 1, 1/L, line-search dre fails -> increase
 
-    # in the averaging step we do 
-    # min_v 1/2 sum_k (v - (2uk-sk)) Vlk (v - (2uk-sk)) with solution (sum_k(Vlk))^-1 * sum_k Vlk (2uk-sk)
-    # <=> min_v 1/2 sum_k v^T Vlk v - v^T sum_k Vlk (2uk-sk) + const
-    # {1} 
-    #    
-    # the delta_l update here (and even without! paralellism) is
-    # bl = J_land.transpose() * fx0
-    # bl_s = bl + L * JltJlDiag * (x0_l_ - s_l_) <=>
-    # bl_s = bl +           Vl  * (x0_l_ - s_l_)
-    # delta_l = - Vli * ((W.transpose() * delta_p).flatten() + bl_s)
-    # solves what. then add xo_l to it (delta_v -> v)
-    # recall x0_l + delta_l = 'v'
-    # 1/2 delta_l^T Vl delta_l + delta_l^T [ (W.transpose() * delta_p) + bl_S]
-    # insert x0_l + delta_l = v, recall x0_l is constant/known
-    # 1/2 v^T Vl v + v^T [ (W.transpose() * delta_p) + bl_S] + 
-    # 1/2 x0_l^T Vl x0_l + v^T Vl x0_l + x0_l^T [ (W.transpose() * delta_p) + bl_S]
-    # remove constant parts
-    # 1/2 v^T Vl v + v^T [ (W.transpose() * delta_p) + bl_S + Vl x0_l]
-    # {2}
-    # 1/2 v^T Vl v + v^T [ (W.transpose() * delta_p) + bl] + v^T Vl * (2 * x0_l_ - s_l_)] 
-    # WEIRD: this is the same as {1} but + v^t b and +! v^T Vl * (2 * x0_l_ - s_l_)] not '-'!
-    # Again. Correct u in non-split BA would be to sum over k for {2} and solve it. !Wo x-s term!
-    # back to {1}
-    # in {1} we have u+ for uk, so u+ = u + delta. we can insert 
-    # min_v 1/2 sum_k v^T Vlk v - v^T sum_k Vlk (2(x0+delta) - sk)
-    # 
-    # So idea would be do {2} style updates wo. any s anywhere.
-    # interpret as stochastic BA with updates on local parts. 
-    # update for l done with sarah style updates.
-    # how does this turn out for local updates. I do! need some adjustment from non considered parts.
-    # actually the last gradient for these. Last + something.
-    # 
-    # delta_l = -Vli * ((W.transpose() * delta_p).flatten() + bl_s)
-    # Compute insert solution here here we use Vli = (2*Vl)^-1
-    # u+ = u - Vli/2 [(W.transpose() * delta_p).flatten() + bl_s]
-    # u+ = u - Vli/2 [(W.transpose() * delta_p).flatten() + bl + Vl * (u - s)]
-    # u+ = u - Vli/2 [(W.transpose() * delta_p).flatten() + bl] - 1/2(u - s)
-    # u+ = (s+u)/2 - Vli/2 [(W.transpose() * delta_p).flatten() + bl] or 
-    # u+ = u - (x-s)/2 - Vli/2 [(W.transpose() * delta_p).flatten() + bl] with x=u or v
-    # 
-    # v is prox on Vl/2 |v- 2u+ + s |^2 = 
-    # 2u+-s = 2 * (s+u)/2 - s - 2 * (vli/2 .. )
-    # 2u+-s = u - Vli [(W.transpose() * delta_p).flatten() + bl]
-    #       = u + delta original for each k.
-    # 
-    # averaging over this is
-    # (sum_k Vlk)^-1 { sum_k Vlk uk - [(W.transpose() * delta_p).flatten() + bl]k }
-    # (sum_k Vlk)^-1 { sum_k Vlk uk} + real delta
-    # why not v + real data instead of this mix of u's?
-    # simulation: replace 2u+-s by 2u+ - s -u + v
-    # or 2u+ - s - u to get delta. then add to v. or use real uk instead.
-    # TODO! 
-
-    # My tries to use Vl + eps * diag instead of 2Vl has issues, see above
-    # we average over 2u-s not u, so, if we the add to the rhs Vl + eps * diag * (u-s) 
-    # as L * JltJlDiag * (x0_l_ - s_l_) and invert with JltJl + L * JltJlDiag
-    # with 0s in l we do not want to constrain we must return ..
-    # shorter: we use 2u+ - s to compute average, return u + delta (desired solution)
-    # we get 2u+-s as new solution. 
-    # So we must return (u + delta + s)/2 to get 2 * (u + delta + s)/2 - s = u + delta as new v.
-    # 
-    # compute  we need to return   
-    # Compute insert solution here here we use Vli = (2*Vl)^-1
-    # u+ = u - Vli/2 [(W.transpose() * delta_p).flatten() + bl_s]
-    # u+ = u - Vli/2 [(W.transpose() * delta_p).flatten() + bl + Vl * (u - s)]
-
-    if normal_case_:
-        Rho = L * JltJlDiag + 1e-12 * Vl
-    else:
-        Rho = JltJlDiag + 1e-12 * Vl
+    Rho = L * JtJDiag + 1e-12 * Ul
 
     # TODO change 2
     if newForUnique:
-        #print( "B JltJlDiag-bun ", JltJlDiag.data.reshape(-1,9)[landmarks_only_in_cluster_,:])
-        #landmarks_in_many_cluster_ = np.invert(landmarks_only_in_cluster_)
-        #print("landmarks_only_in_cluster_  ", landmarks_only_in_cluster_, " ", np.sum(landmarks_only_in_cluster_), " vs ", np.sum(1 - landmarks_only_in_cluster_) )
-        #print("landmarks_in_many_cluster_  ", landmarks_in_many_cluster_, " ", np.sum(landmarks_in_many_cluster_), " vs ", np.sum(1 - landmarks_in_many_cluster_) )
-        # print(np.repeat((np.ones(n_points_) * landmarks_in_many_cluster_)[..., np.newaxis], 3, axis=1).shape)
-        # print(np.repeat((np.ones(n_points_) * landmarks_in_many_cluster_)[..., np.newaxis], 3, axis=1))
-        #print("1. ", (np.ones(n_points_) * landmarks_in_many_cluster_))
-        #print("2. ", np.repeat((np.ones(n_points_) * landmarks_in_many_cluster_).reshape(1,-1), 3))
         diag_present = 0.5 * diag_sparse( np.repeat((np.ones(n_points_) * landmarks_only_in_cluster_).reshape(-1,1), 3).flatten() )
-        #diag_present = copy_selected_blocks(0.5 * diag_sparse(np.ones(n_points_*3)), landmarks_in_many_cluster_, 1)
-        #print("diag_present ", diag_present.shape, " " , np.sum(diag_present.data==0.5), " " , np.sum(diag_present.data!=0.5) )
-        #print( "Y ", (L * JltJlDiag).data.reshape(-1,9)[landmarks_only_in_cluster_,:])
-
         # see above, compensate for averaging
         xTest = x0_l_ - (diag_present*(x0_l_.flatten() - s_l_)).reshape(-1,3)
-        # print("xt ", xTest[landmarks_only_in_cluster_,:])
-        # print("x0 ", x0_l_[landmarks_only_in_cluster_,:])
-
-        #test = diag_present + L * JltJlDiag + 1e-12 * Vl
-        #print( "C vl-bun ", test.data.reshape(-1,9)[landmarks_only_in_cluster_,:]) # is diag mat off line basically 0
-
-        # do for all, remove rhs completely
-        # diag_presentB = 0.5 * diag_sparse( np.repeat((np.ones(n_points_)).reshape(-1,1), 3).flatten() )
-        # xTest = x0_l_ - (diag_presentB*(x0_l_.flatten() - s_l_)).reshape(-1,3)
-
-        return costEnd, x0_p_, xTest, L, diag_present + Rho, delta_l.reshape(n_points_, 3)
+        return costEnd, x0_p_, xTest, L, diag_present + Rho
 
     L_out = np.maximum(minimumL, np.minimum(L_in_cluster_ * 2, L)) # not clear if generally ok, or 2 or 4 should be used.
-    return costEnd, x0_p_, x0_l_, L_out, Rho, delta_l.reshape(n_points_, 3)
+    return costEnd, x0_p_, x0_l_, L_out, Rho
 
     # recall solution wo. splitting is 
     # solve Vl x + bS + Vd () 
@@ -1714,9 +1207,6 @@ def bundle_adjust(
     # return Vlk and bk = ((Wk.transpose() * delta_p) + bl_sk): 4 times #landmarks floats.
     # and compute the update, summing each and solving v = (sumk vlk)^-1 (sum_k bk).
     # would be cool if we could do n iterations locally -- with a gain.
-    # much less cams then lms. do the inverse?
-    # send only parts each time?single lms = worst?
-    # i need to send v anyway and lms as well. above is 4x more.
     # this shows one core can do all this in parallel / local network can -> problem is parallelizable trivially
     # large network, better send minimal information. problem still send landmarks.
     # and diagonal? would be good if can work n steps locally.
@@ -1726,7 +1216,7 @@ def bundle_adjust(
 def updateCluster(
     poses_in_cluster_,
     camera_indices_in_cluster_,
-    point_indices_in_cluster_,
+    landmark_indices_in_cluster_,
     points_2d_in_cluster_,
     landmarks_,
     poses_s_in_cluster_,
@@ -1735,49 +1225,43 @@ def updateCluster(
     pose_occurences,
     its_,
 ):
-    cameras_indices_in_c_ = np.unique(camera_indices_in_cluster_)
-    cameras_in_c = x0_p_[cameras_indices_in_c_]
-    #local_camera_indices_in_cluster = camera_indices_in_cluster_ - min_cam_index_in_c
-    # alternative 
-    local_camera_indices_in_cluster = np.zeros(camera_indices_in_cluster_.shape[0], dtype=int)
-    for i in range(cameras_indices_in_c_.shape[0]):
-        local_camera_indices_in_cluster[camera_indices_in_cluster_ == cameras_indices_in_c_[i]] = i
+    landmark_indices_in_c_ = np.unique(landmark_indices_in_cluster_)
+    landmarks_in_c = landmarks_[landmark_indices_in_c_]
+    local_landmark_indices_in_cluster = np.zeros(landmark_indices_in_cluster_.shape[0], dtype=int)
+    for i in range(landmark_indices_in_c_.shape[0]):
+        local_landmark_indices_in_cluster[landmark_indices_in_cluster_ == landmark_indices_in_c_[i]] = i
 
-    # torch_points_2d_in_c = torch_points_2d[points_2d_in_cluster[ci], :]
     torch_points_2d_in_c = from_numpy(points_2d_in_cluster_)
     torch_points_2d_in_c.requires_grad_(False)
 
     # take point_indices_in_cluster[ci] unique:
-    unique_points_in_c_ = np.unique(point_indices_in_cluster_)
+    unique_poses_in_c_ = np.unique(camera_indices_in_cluster_)
     # unique_points_in_c_[i] -> i, map each pi : point_indices_in_cluster[ci] to position in unique_points_in_c_[i]
-    inverse_point_indices = -np.ones(np.max(unique_points_in_c_) + 1)  # all -1
-    for i in range(unique_points_in_c_.shape[0]):
-        inverse_point_indices[unique_points_in_c_[i]] = i
+    inverse_pose_indices = -np.ones(np.max(unique_poses_in_c_) + 1)  # all -1
+    for i in range(unique_poses_in_c_.shape[0]):
+        inverse_pose_indices[unique_poses_in_c_[i]] = i
 
-    landmarks_only_in_cluster_ = landmark_occurences[unique_points_in_c_] == 1
+    poses_only_in_cluster_ = pose_occurences[unique_poses_in_c_] == 1
     #print("Unique landmarks  ", landmark_occurences, " ", landmark_occurences.shape, " ", np.min(landmark_occurences), " ", np.max(landmark_occurences))
     #print("Unique landmarks  ", landmarks_only_in_cluster_, " ", np.sum(landmarks_only_in_cluster_), " vs ", np.sum(1 - landmarks_only_in_cluster_) )
 
-    point_indices_in_c = (
-        point_indices_in_cluster_.copy()
-    )  # np.zeros(point_indices_in_cluster_.shape)
-    for i in range(point_indices_in_cluster_.shape[0]):
-        point_indices_in_c[i] = inverse_point_indices[point_indices_in_c[i]]
+    pose_indices_in_c = camera_indices_in_cluster_.copy()  # np.zeros(point_indices_in_cluster_.shape)
+    for i in range(camera_indices_in_cluster_.shape[0]):
+        pose_indices_in_c[i] = inverse_pose_indices[pose_indices_in_c[i]]
 
     # put in unique points, adjust point_indices_in_cluster[ci] by id in unique_points_in_c_
-    min_cam_index_in_c = np.min(camera_indices_in_cluster_)
-    points_3d_in_c = points_3d_in_cluster_[unique_points_in_c_]
-    landmark_s_in_c = landmark_s_in_cluster_[unique_points_in_c_]
+    poses_in_c = poses_in_cluster_[unique_poses_in_c_]
+    poses_s_in_c = poses_s_in_cluster_[unique_poses_in_c_] # same as landmarks
 
-    cost_, x0_p_c_, x0_l_c_, Lnew_c_, Vl_c_, delta_l_c_ = bundle_adjust(
-        local_camera_indices_in_cluster,
-        point_indices_in_c,
-        landmarks_only_in_cluster_, # input those lms not present anywhere else to relax hold on those.
+    cost_, x0_p_c_, x0_l_c_, Lnew_c_, Vl_c_ = bundle_adjust(
+        local_landmark_indices_in_cluster, # these are indexing into landmarks_in_c, a subset of all landmarks, directly.
+        pose_indices_in_c,
+        poses_only_in_cluster_, # input those poses not present anywhere else to relax hold on those.
         torch_points_2d_in_c,
-        cameras_in_c,
-        points_3d_in_c,
-        landmark_s_in_c,
-        Vl_in_cluster_,
+        landmarks_in_c,
+        poses_in_c,
+        poses_s_in_c,
+        Vl_in_cluster_, # these are for those poses in cluster only. 
         L_in_cluster_,
         its_,
     )
@@ -1785,12 +1269,11 @@ def updateCluster(
     return (
         cost_,
         x0_p_c_,
-        x0_l_c_,
+        x0_l_c_, # out side globa lm [landmark_indices_in_c_] = x0_l_c_
         Lnew_c_,
         Vl_c_,
-        unique_points_in_c_,
-        cameras_indices_in_c_,
-        delta_l_c_
+        unique_poses_in_c_,
+        landmark_indices_in_c_
     )
 
 def prox_f(camera_indices_in_cluster_, point_indices_in_cluster_, points_2d_in_cluster_,
@@ -1983,7 +1466,7 @@ x0_p = x0_p.reshape(n_cameras, 9)
 
 # 1. take problem and split, sort indices by camera, define local global map and test it.
 startL = 1
-kClusters = 5
+kClusters = 3
 innerIts = 1  # change to get an update, not 1 iteration
 its = 60
 cost = np.zeros(kClusters)
@@ -2017,22 +1500,11 @@ if False:
         cluster_to_camera,
         points_3d_in_cluster,
         L_in_cluster,
-    ) = cluster_by_camera(
-        camera_indices, points_3d, points_2d, point_indices, kClusters, startL
-    )
-else:
-    (
-        camera_indices_in_cluster,
-        point_indices_in_cluster,
-        points_2d_in_cluster,
-        cluster_to_camera,
-        points_3d_in_cluster,
-        L_in_cluster,
         kClusters,
     ) = cluster_by_camera_smarter(
         camera_indices, points_3d, points_2d, point_indices, kClusters, startL, init_cam_id=0, init_lm_id=0
     )
-
+else:
     (
         camera_indices_in_cluster,
         point_indices_in_cluster,
@@ -2041,25 +1513,18 @@ else:
     ) = cluster_by_landmark(
         camera_indices, points_2d, point_indices, kClusters, pre_merges=0)
 
+#points_3d_in_cluster_ = []
+L_in_cluster = []
+for _ in range(kClusters):
+    #points_3d_in_cluster_.append(points_3d_.copy())
+    L_in_cluster.append(startL)
+
 print(L_in_cluster)
-Vl_in_cluster = [0 for x in range(kClusters)] # dummy fill list
+Ul_in_cluster = [0 for x in range(kClusters)] # dummy fill list
 #poses = cameras.copy()
 poses_s_in_cluster = [cameras.copy() for _ in range(kClusters)]
 poses_in_cluster = [cameras.copy() for _ in range(kClusters)]
 landmarks = points_3d.copy()
-
-# test this should return something
-(
-    cost,
-    L_in_cluster,
-    Vl_in_cluster,
-    poses_in_cluster,
-    landmarks
-) = prox_f(
-    camera_indices_in_cluster, point_indices_in_cluster, points_2d_in_cluster,
-    poses_in_cluster, landmarks, poses_s_in_cluster, L_in_cluster, Vl_in_cluster, kClusters, innerIts=innerIts, sequential=True,
-    )
-
 
 if basic_version:
 
@@ -2068,15 +1533,12 @@ if basic_version:
         (
             cost,
             L_in_cluster,
-            Vl_in_cluster,
-            points_3d_in_cluster,
-            x0_p,
-            delta_l_in_cluster,
-            globalSingleLandmarksA_in_c,
-            globalSingleLandmarksB_in_c
+            Ul_in_cluster,
+            poses_in_cluster,
+            landmarks
         ) = prox_f(
-            x0_p, camera_indices_in_cluster, point_indices_in_cluster, points_2d_in_cluster,
-            points_3d_in_cluster, landmark_s_in_cluster, L_in_cluster, Vl_in_cluster, kClusters, innerIts=innerIts, sequential=True,
+            camera_indices_in_cluster, point_indices_in_cluster, points_2d_in_cluster,
+            poses_in_cluster, landmarks, poses_s_in_cluster, L_in_cluster, Ul_in_cluster, kClusters, innerIts=innerIts, sequential=True,
             )
         end = time.time()
 
@@ -2085,16 +1547,15 @@ if basic_version:
         currentCost = np.sum(cost)
         print(it, " ", round(currentCost), " gain ", round(lastCost - currentCost), ". ============= sum fk update takes ", end - start," s",)
 
-        landmark_v, _ = average_landmarks_new(
-            point_indices_in_cluster, points_3d_in_cluster, landmark_s_in_cluster, L_in_cluster, Vl_in_cluster, landmark_v, delta_l_in_cluster
-        )
+        poses_v, _ = average_cameras_new(
+            camera_indices_in_cluster, poses_in_cluster, poses_s_in_cluster, L_in_cluster, Ul_in_cluster) # old_poses for costs?
 
         #DRE cost BEFORE s update
-        dre = cost_DRE(point_indices_in_cluster, points_3d_in_cluster, landmark_s_in_cluster, L_in_cluster, Vl_in_cluster, landmark_v) + currentCost
+        dre = cost_DRE(camera_indices_in_cluster, poses_in_cluster, poses_s_in_cluster, L_in_cluster, Ul_in_cluster, poses_v) + currentCost
 
         tau = 1 # 2 is best ? does not generalize?!
         for ci in range(kClusters):
-            landmark_s_in_cluster[ci] = landmark_s_in_cluster[ci] + tau * (landmark_v - points_3d_in_cluster[ci]) # update s = s + v - u.
+            poses_s_in_cluster[ci] = poses_s_in_cluster[ci] + tau * (poses_v - poses_in_cluster[ci]) # update s = s + v - u.
 
         #DRE cost AFTER s update
         #dre = cost_DRE(point_indices_in_cluster, points_3d_in_cluster, landmark_s_in_cluster, L_in_cluster, Vl_in_cluster, landmark_v) + currentCost
@@ -2102,19 +1563,19 @@ if basic_version:
         primal_cost_v = 0
         for ci in range(kClusters):
             primal_cost_v += primal_cost(
-                x0_p,
+                poses_v,
                 camera_indices_in_cluster[ci],
                 point_indices_in_cluster[ci],
                 points_2d_in_cluster[ci],
-                landmark_v) #points_3d_in_cluster[ci]) # v not u
+                landmarks) #points_3d_in_cluster[ci]) # v not u
         primal_cost_u = 0
         for ci in range(kClusters):
             primal_cost_u += primal_cost(
-                x0_p,
+                poses_in_cluster[ci],
                 camera_indices_in_cluster[ci],
                 point_indices_in_cluster[ci],
                 points_2d_in_cluster[ci],
-                points_3d_in_cluster[ci]) # v not u
+                landmarks) # v not u
 
         print( it, " ======== DRE ====== ", round(dre) , " ========= gain " , \
             round(lastCostDRE - dre), "==== f(v)= ", round(primal_cost_v), " f(u)= ", round(primal_cost_u))
@@ -2127,14 +1588,8 @@ if basic_version:
 
         # fill variables for update: linearize at u or v.
         for ci in range(kClusters):
-            # point_indices = np.unique(point_indices_in_cluster[ci])
-            # print ("output.shape ", output.shape, " ", points_3d_in_cluster[ci].shape, " ", point_indices_in_cluster[ci].shape, " ", point_indices.shape )
-            # points_3d_in_cluster[ci][point_indices,:] = output[point_indices,:]
             if not linearize_at_last_solution: # linearize at v / average solution, same issue I suppose. Yes. solution is too return the new gradient, s.t. update of v is wrt to current situation.
-                # this was doing it twice accidentally
-                #landmark_s_in_cluster[ci] = landmark_s_in_cluster[ci] + landmark_v - points_3d_in_cluster[ci] # update s = s + v - u.
-                points_3d_in_cluster[ci]  = landmark_v.copy() # init at v, above at u
-                #points_3d_in_cluster[ci]  = landmark_s_in_cluster[ci].copy() # penalty is 0 but init position is WRONG
+                poses_in_cluster[ci]  = poses_v.copy() # init at v, above at u
 
 else:
 
