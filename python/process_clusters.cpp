@@ -304,7 +304,7 @@ std::pair<int, float> GetBestCostGainForPart(
                                             volumeOfUnions,
                                             totalVolume,
                                             options.targetVolumeOfUnion);
-    if (bestCostGain < costOfNewEdge) {
+    if (bestCostGain < costOfNewEdge) { // bias to small indxs?
       bestCostGain = costOfNewEdge;
       bestPartId = adjPartId;
     }
@@ -348,12 +348,16 @@ void RedoAdjacentPartToWeight(
     // take unordered edges and use this cost / memory?
     float newWeight = weight;
     const int adjPartIdx = FindRootInVtxToPartMap(vtxsToPart, adjvtxIdx);
-    if (adjPartIdx != vtxIdx) {
+    if (adjPartIdx == vtxIdx) {
+        continue;
+    }
 #ifdef inheritInvalidEdgeness_
     if (invalidEdges->find({std::min(vtxIdx, adjvtxIdx), std::max(vtxIdx, adjvtxIdx)}) != invalidEdges->end()) {
-      invalidEdges->emplace(std::min(vtxIdx, adjPartIdx),
-                            std::max(vtxIdx, adjPartIdx));
-        newWeight = std::numeric_limits<float>::max(); 
+      invalidEdges->emplace(std::min(vtxIdx, adjPartIdx), std::max(vtxIdx, adjPartIdx));
+      newWeight = std::numeric_limits<float>::max();
+      // overwrite and continue. faster?
+      adjacentPartToWeight->insert_or_assign(adjPartIdx, newWeight);
+      continue;
     }
 #endif
       auto itr = adjacentPartToWeight->try_emplace(adjPartIdx, newWeight);
@@ -361,7 +365,7 @@ void RedoAdjacentPartToWeight(
 #ifdef explicitWeight_
 #ifdef sumWeight_
         itr.first->second += newWeight;  // better compute [maybe just top 3 max?]
-#else
+#else // slow
         std::set<int> union_new_part;
         std::set_union(lms_in_part[vtxIdx].begin(), lms_in_part[vtxIdx].end(), 
             lms_in_part[adjPartIdx].begin(), lms_in_part[adjPartIdx].end(),
@@ -373,7 +377,6 @@ void RedoAdjacentPartToWeight(
         itr.first->second = std::max(itr.first->second, newWeight);
 #endif
       }
-    }
   }
 };
 
@@ -420,28 +423,6 @@ void PlotStatistics(const std::vector<int>& vtxsToPart,
             << " vertices\n";
 }
 
-struct OrderedEdge {
-int srcIdx;
-int tgtIdx;
-
-OrderedEdge() : srcIdx(-1), tgtIdx(-1) {}
-OrderedEdge(int idx1, int idx2) {srcIdx = std::min(idx1, idx2);tgtIdx = std::max(idx1, idx2);};
-
-bool operator<(const OrderedEdge& other) const{
-    if (srcIdx < other.srcIdx) {
-        return true;
-    } else if (srcIdx == other.srcIdx) {
-        return tgtIdx < other.tgtIdx;
-    } else {
-        return false;
-    }
-}
-bool operator==(const OrderedEdge& other) const {
-    return srcIdx == other.srcIdx && tgtIdx == other.tgtIdx;
-};
-};
-
-
 // idea, draw edge, maybe based on weight (more likely to draw), maybe just pairs? not already merged ones?
 int RandomMerge(int number_merges,
      std::vector<float>& volumeOfUnions,
@@ -452,7 +433,7 @@ int RandomMerge(int number_merges,
      std::vector<float>& weightPerVtx,
      //std::vector<float>& weightPerVtxSelected,
      const std::vector<int>& old_vtxsToPart,
-     const std::map<OrderedEdge, float>& edgeWeightMap,
+     const std::map<std::pair<int,int>, float>& edgeWeightMap,
      const VolumePartitionOptions& options) {
     int num_merges = 0;
     int num_vtx = vtxsToPart.size();
@@ -469,8 +450,8 @@ int RandomMerge(int number_merges,
         int id = 0;
         for (const auto& ordered_edge : edgeWeightMap) {
             // better go over edges -> go over prefered set. merge until numVtxs too large, permute order       
-            const int old_part_src = old_vtxsToPart[ordered_edge.first.srcIdx];
-            const int old_part_tgt = old_vtxsToPart[ordered_edge.first.tgtIdx];
+            const int old_part_src = old_vtxsToPart[ordered_edge.first.first];
+            const int old_part_tgt = old_vtxsToPart[ordered_edge.first.second];
             if(old_part_src != old_part_tgt) {
                 preferedEdgeIds.push_back(id);
             }
@@ -495,11 +476,11 @@ int RandomMerge(int number_merges,
 
         const auto& [ordered_edge, weight] = *elementId; //edgeWeightMap[id];
 
-        const int old_part_src = old_vtxsToPart[ordered_edge.srcIdx];
-        const int old_part_tgt = old_vtxsToPart[ordered_edge.tgtIdx];
+        const int old_part_src = old_vtxsToPart[ordered_edge.first];
+        const int old_part_tgt = old_vtxsToPart[ordered_edge.second];
 
-        const int rootVtxInPartA = FindRootInVtxToPartMap(vtxsToPart, ordered_edge.srcIdx);
-        const int rootVtxInPartB = FindRootInVtxToPartMap(vtxsToPart, ordered_edge.tgtIdx);
+        const int rootVtxInPartA = FindRootInVtxToPartMap(vtxsToPart, ordered_edge.first);
+        const int rootVtxInPartB = FindRootInVtxToPartMap(vtxsToPart, ordered_edge.second);
 
         if (rootVtxInPartA == rootVtxInPartB) {continue;}
         const int rootVtxInPart = std::min(rootVtxInPartA, rootVtxInPartB);
@@ -544,13 +525,15 @@ int RandomMerge(int number_merges,
 // cams are cams, # landmakrs seen by cam are volume, union is number of lms seen by boths sets of cams.
 extern "C" 
 void cluster_covis(
-    int kClusters, 
+    int kClusters,
     int random_pre_number_merges,
+    int maxVolPerPart, // = kClusters if landmarks are clustered.
     const std::vector<int>& camera_indices_in,
     const std::vector<int>& landmark_indices_in,
     std::vector<int>& res_to_cluster, std::vector<int>& res_to_cluster_sizes,
     std::vector<int>& old_vtxsToPart) {
 
+    const bool skip_vol_constraint = true; // might be slow, not 'worth' it
     const bool verbose = false;
     const int num_res = landmark_indices_in.size();
     const int num_cams = std::set<double>( camera_indices_in.begin(), camera_indices_in.end() ).size();
@@ -565,7 +548,7 @@ void cluster_covis(
     std::cout << " landmark_indices_in  " << landmark_indices_in.size() << "\n";
     }
     VolumePartitionOptions options = {.targetVolumeOfUnion = 1.5f * static_cast<float>(num_lands) / static_cast<float>(kClusters), 
-        .maxVolumeOfUnion = (4 * num_lands) / static_cast<float>(kClusters), // hard constraint can lead to invalid # clusters
+        .maxVolumeOfUnion = (std::min(maxVolPerPart, kClusters) * num_lands) / static_cast<float>(kClusters), // hard constraint can lead to invalid # clusters
         .maxNumKfsInPart = static_cast<int>((2 * num_cams) / kClusters),
         .targetKfsInPart = static_cast<int>(num_cams / kClusters)};
 
@@ -589,14 +572,11 @@ void cluster_covis(
     }
 
     // edge if cam share lm. weight = number of lms shared.
-    std::map<OrderedEdge, float> edgeWeightMap;
+    std::map<std::pair<int,int>, float> edgeWeightMap; // slow |landmarks| * |cams| ^2 or worse |cams| * |landmarks| ^2.
     for (const std::set<int>& cams_of_lm : cams_from_lm) {
-        //std::cout << "cams of lm: " << cams_of_lm.size() << "\n";
-        for(const int cam1 :cams_of_lm) {
-            for(const int cam2 :cams_of_lm) {
-                if (cam1 != cam2){
-                    edgeWeightMap[{cam1, cam2}] += 0.5f;
-                }
+        for (auto c1_itr = cams_of_lm.cbegin(); c1_itr != cams_of_lm.cend(); c1_itr++) {
+            for (auto c2_itr = std::next(c1_itr); c2_itr != cams_of_lm.end(); c2_itr++) {
+                    edgeWeightMap[{*c1_itr, *c2_itr}] += 1.f;
             }
         }
     }
@@ -607,11 +587,11 @@ void cluster_covis(
 
    // The costs used in the heap based greedy strategy.
    for (const auto& [edge, weight] : edgeWeightMap) {
-     if (edge.srcIdx != edge.tgtIdx) {
-      weightPerVtx[edge.srcIdx] += weight;
-      weightPerVtx[edge.tgtIdx] += weight;
-      adjacentPartAndEdgeWeight[edge.srcIdx].insert({edge.tgtIdx, weight});
-      adjacentPartAndEdgeWeight[edge.tgtIdx].insert({edge.srcIdx, weight});
+     if (edge.first != edge.second) {
+      weightPerVtx[edge.first] += weight;
+      weightPerVtx[edge.second] += weight;
+      adjacentPartAndEdgeWeight[edge.first].insert({edge.second, weight});
+      adjacentPartAndEdgeWeight[edge.second].insert({edge.first, weight});
     }
   }
 
@@ -674,6 +654,17 @@ void cluster_covis(
   // stochastic: perform random merges at start, 10% / 20% of cameras ?
   // always group
 
+  // random method: sample k existing part ids.
+  // compute score. Some can be invalid update invalid, meybe set of active parts, remove deleted one sample iterator.
+  // keep track of best (5) candidates?
+  // merge
+  // reuse best 5 again. Faster. cluster cams to get COVERDED landmarks.
+  // those define the cut.
+  // for sake of simplicity dist ALL cams to all clusters at first.
+  // differs from palm only in cams can move aspect and are averaged later.
+
+  std::vector<int> partReEvaluatedAtMerge(num_cams, -1);
+
   int merges = num_random_merged;
   int fullComputes = 0;
   while (!pq.empty() && (num_cams - merges > kClusters)) {
@@ -700,56 +691,72 @@ void cluster_covis(
     }
     if (vtxA == rootVtxInPartB) {
        //std::cout << "vtxA == rootVtxInPartB " << vtxA << " == " <<  rootVtxInPartB << "\n";
-      continue;  // Already merged, we built a new edge for the surving partId.
+      continue;  // Already merged, we built a new edge for the surviving partId.
     }
+
     const int numVtxsInCover = // num cameras in cover
         numVtxsInUnion[vtxA] + numVtxsInUnion[rootVtxInPartB];
     // Merge would have a part consist of too many vertices.
+    bool edgeInvalid = false;
     if (numVtxsInCover > options.maxNumKfsInPart) {
         //std::cout << "numVtxsInCover > options.maxNumKfsInPart " << numVtxsInCover << " > " << options.maxNumKfsInPart << "\n";
       invalidEdges.emplace(std::min(vtxA, rootVtxInPartB),
                            std::max(vtxA, rootVtxInPartB));
+      edgeInvalid = true;
+    }
+       
+    // slow: this is done too often and pushed back. must go over all adjacent parts.
+    std::map<int, float> adjacentPartToWeight;
+    bool consideredAtCurrentState = false;
+    if(partReEvaluatedAtMerge[rootVtxInPartA] != merges) { // else reevaluated recently, best cost.
+        partReEvaluatedAtMerge[rootVtxInPartA] = merges;
+
+        RedoAdjacentPartToWeight(adjacentPartAndEdgeWeight[vtxA],
+                                vtxA,
+                                vtxsToPart,
+                                lms_in_part,
+                                &invalidEdges,
+                                &adjacentPartToWeight);
+        adjacentPartAndEdgeWeight[vtxA] = adjacentPartToWeight;
+    } else {
+        adjacentPartToWeight = adjacentPartAndEdgeWeight[vtxA];
+        consideredAtCurrentState = true;
     }
 
-    std::map<int, float> adjacentPartToWeight;
-    RedoAdjacentPartToWeight(adjacentPartAndEdgeWeight[vtxA],
-                             vtxA,
-                             vtxsToPart,
-                             lms_in_part,
-                             &invalidEdges,
-                             &adjacentPartToWeight);
-    adjacentPartAndEdgeWeight[vtxA] = adjacentPartToWeight;
-
-    // Recompte best cost again. check cost and part to be the same.
+    // Recompute best cost again. check cost and part to be the same.
     const auto [vtxABestAdjPartId, vtxABestCostGain] =
         GetBestCostGainForPart(adjacentPartAndEdgeWeight[vtxA],
-                               invalidEdges,
-                               vtxA,
-                               weightPerVtx,
-                               vtxsToPart,
-                               numVtxsInUnion,
-                               volumeOfUnions,
-                               totalVolume,
-                               options);
+                            invalidEdges,
+                            vtxA,
+                            weightPerVtx,
+                            vtxsToPart,
+                            numVtxsInUnion,
+                            volumeOfUnions,
+                            totalVolume,
+                            options);
 
     if (vtxABestCostGain > costVector[edgeId]) {  // very rare.
-      std::cout << "\n Better cost at different vtx" << vtxABestCostGain << ">"
-                << costVector[edgeId] << " " << vtxABestAdjPartId
-                << "!=" << rootVtxInPartB << "\r";
+        std::cout << "\n Better cost at different vtx" << vtxABestCostGain << ">"
+                    << costVector[edgeId] << " " << vtxABestAdjPartId
+                    << "!=" << rootVtxInPartB << "\r";
     }
 
     if (vtxABestAdjPartId < 0 || vtxABestAdjPartId == vtxA) {
-      //std::cout << "vtxABestAdjPartId < 0  || vtxABestAdjPartId == vtxA, vtxABestAdjPartId:" << vtxABestAdjPartId << " vtxA " << vtxA << "\n";
-      continue;  // latter exists since both a->b and b->a can exist.
+        //std::cout << "vtxABestAdjPartId < 0  || vtxABestAdjPartId == vtxA, vtxABestAdjPartId:" << vtxABestAdjPartId << " vtxA " << vtxA << "\n";
+        continue;  // latter exists since both a->b and b->a can exist.
     }
 
     if (vtxABestAdjPartId >= 0 && (vtxABestCostGain != costVector[edgeId] ||
-                                   vtxABestAdjPartId != rootVtxInPartB)) {
-      edgeVector[edgeId] = {vtxA, vtxABestAdjPartId};
-      edgeWeightVector[edgeId] = adjacentPartToWeight[vtxABestAdjPartId];
-      costVector[edgeId] = vtxABestCostGain;
-      pq.push(edgeId);
-      continue;
+                                vtxABestAdjPartId != rootVtxInPartB)) {
+        edgeVector[edgeId] = {vtxA, vtxABestAdjPartId};
+        edgeWeightVector[edgeId] = adjacentPartToWeight[vtxABestAdjPartId];
+        costVector[edgeId] = vtxABestCostGain;
+        // Do i need to push if part was looked at at merge?
+        // unclear why cost would change if updated wo merge in between. if not we push same edge multiple times?
+        // it can change. 
+        // if (!consideredAtCurrentState || edgeInvalid || adjacentPartToWeight[vtxABestAdjPartId] != vtxABestCostGain)
+        pq.push(edgeId);
+        continue;
     }
 
     const int rootVtxInPart = std::min(vtxA, rootVtxInPartB);

@@ -16,7 +16,8 @@ import math
 import ctypes
 from torch.autograd.functional import jacobian
 from torch import tensor, from_numpy, flatten
-import open3d as o3d
+
+#import open3d as o3d
 
 # look at website. This is the smallest problem. guess: pytoch cpu is pure python?
 BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/ladybug/"
@@ -150,8 +151,8 @@ def read_bal_data(file_name):
         points_3d_ = points_3d_.reshape((n_points_, -1))
 
     # remove all residuals of points and all points with this property
-    # (points_3d_, camera_indices_, points_2d_, point_indices_) = \
-    #     remove_large_points(points_3d_, camera_indices_, points_2d_, point_indices_)
+    (points_3d_, camera_indices_, points_2d_, point_indices_) = \
+        remove_large_points(points_3d_, camera_indices_, points_2d_, point_indices_)
 
     return camera_params, points_3d_, camera_indices_, point_indices_, points_2d_
 
@@ -1113,9 +1114,6 @@ def init_lib():
     lib.delete_vector.restype = None
     lib.delete_vector.argtypes = [ctypes.c_void_p]
     lib.process_clusters_test.restype = None
-    #lib.process_clusters_test.argtypes = [ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_void_p]
-    #lib.process_clusters_test(c_num_lands, c_num_res, c_kClusters, c_res_indices_in_cluster_flat_cpp)
-    #lib.delete_vector(c_res_indices_in_cluster_flat_cpp)
 
     lib.process_clusters.restype = None #[ctypes.c_void_p, ctypes.c_void_p]
     lib.process_clusters.argtypes = [ctypes.c_int, ctypes.c_int, ctypes.c_int,
@@ -1127,7 +1125,7 @@ def init_lib():
                                     ctypes.c_void_p]
 
     lib.cluster_covis.restype = None
-    lib.cluster_covis.argtypes = [ctypes.c_int, ctypes.c_int, ctypes.c_void_p, ctypes.c_void_p,
+    lib.cluster_covis.argtypes = [ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_void_p, ctypes.c_void_p,
                                   ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p] # out]
 
 def process_cluster_lib(num_lands_, num_res_, kClusters__, point_indices_in_cluster__, res_indices_in_cluster__, point_indices__):
@@ -1195,6 +1193,8 @@ def process_cluster_lib(num_lands_, num_res_, kClusters__, point_indices_in_clus
 def cluster_covis_lib(kClusters, pre_merges_, camera_indices__, point_indices__, old_vtxsToPart_=0):
     c_kClusters_ = ctypes.c_int(kClusters)
     c_pre_merges_ = ctypes.c_int(pre_merges_)
+    c_max_vol_part = 4
+    c_max_vol_part_ = ctypes.c_int(c_max_vol_part)
 
     camera_indices_list = camera_indices__.tolist()
     point_indices_list = point_indices__.tolist()
@@ -1214,7 +1214,7 @@ def cluster_covis_lib(kClusters, pre_merges_, camera_indices__, point_indices__,
     else:
         old_vtxsToPart_cpp = lib.new_vector()
 
-    lib.cluster_covis(c_kClusters_, c_pre_merges_, c_cam_indices_cpp, c_point_indices_cpp, res_to_cluster_c_out, res_to_cluster_c_sizes, old_vtxsToPart_cpp)
+    lib.cluster_covis(c_kClusters_, c_pre_merges_, c_max_vol_part_, c_cam_indices_cpp, c_point_indices_cpp, res_to_cluster_c_out, res_to_cluster_c_sizes, old_vtxsToPart_cpp)
 
     old_vtxsToPart_ = fillPythonVecSimple(old_vtxsToPart_cpp).tolist()
     kClusters = lib.vector_size(res_to_cluster_c_sizes)
@@ -3029,13 +3029,15 @@ def rerender(vis, geometry, landmarks, save_image):
         vis.capture_screen_image("temp_%04d.jpg" % i)
     #vis.destroy_window()
 
-o3d.utility.set_verbosity_level(o3d.utility.VerbosityLevel.Debug)
-vis = o3d.visualization.Visualizer()
-vis.create_window()
-geometry = o3d.geometry.PointCloud()
-geometry.points = o3d.utility.Vector3dVector(landmark_v)
-vis.add_geometry(geometry)
-save_image = False
+plot3d = False
+if plot3d:
+    o3d.utility.set_verbosity_level(o3d.utility.VerbosityLevel.Debug)
+    vis = o3d.visualization.Visualizer()
+    vis.create_window()
+    geometry = o3d.geometry.PointCloud()
+    geometry.points = o3d.utility.Vector3dVector(landmark_v)
+    vis.add_geometry(geometry)
+    save_image = False
 
 if basic_version:
 
@@ -3175,8 +3177,9 @@ if basic_version:
                     L_in_cluster, Vl_in_cluster, kClusters, innerIts=innerIts, sequential = not extrapolate_parallel,
                     )
 
-            #printPoints(landmark_v)
-            rerender(vis, geometry, landmark_v, save_image)
+            if plot3d:
+                #printPoints(landmark_v)
+                rerender(vis, geometry, landmark_v, save_image)
 
             primal_cost_v = 0
             primal_cost_vs_old = [primal_cost_vs[ci] for ci in range(kClusters)]
@@ -3661,7 +3664,9 @@ else:
                 #print("A landmark_s_in_cluster", landmark_s_in_cluster)
                 break
 # here bfgs is better, but dre has better cost for the drs solution.
-vis.destroy_window()
+if plot3d:
+    vis.destroy_window()
+
 import matplotlib.pyplot as plt
 if len(costs) > 5:
     costs = costs[4:] # drop too high start

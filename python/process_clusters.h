@@ -18,6 +18,7 @@ extern "C"
 void cluster_covis(
     int kClusters,
     int random_pre_number_merges,
+    int maxVolPerPart,
     const std::vector<int>& camera_indices_in, 
     const std::vector<int>& landmark_indices_in,
     std::vector<int>& res_to_cluster, std::vector<int>& res_to_cluster_sizes, std::vector<int>& old_vtxsToPart);

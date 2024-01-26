@@ -122,7 +122,7 @@ def init_lib():
                                     ctypes.c_void_p]
 
     lib.cluster_covis.restype = None
-    lib.cluster_covis.argtypes = [ctypes.c_int, ctypes.c_int, ctypes.c_void_p, ctypes.c_void_p,
+    lib.cluster_covis.argtypes = [ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_void_p, ctypes.c_void_p,
                                   ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p] # out]
 
 
@@ -192,6 +192,8 @@ def process_cluster_lib(num_lands_, num_res_, kClusters__, point_indices_in_clus
 def cluster_covis_lib(kClusters, pre_merges_, camera_indices__, point_indices__, old_vtxsToPart_=0):
     c_kClusters_ = ctypes.c_int(kClusters)
     c_pre_merges_ = ctypes.c_int(pre_merges_)
+    c_max_vol_part = 4
+    c_max_vol_part_ = ctypes.c_int(c_max_vol_part)
 
     camera_indices_list = camera_indices__.tolist()
     point_indices_list = point_indices__.tolist()
@@ -211,7 +213,7 @@ def cluster_covis_lib(kClusters, pre_merges_, camera_indices__, point_indices__,
     else:
         old_vtxsToPart_cpp = lib.new_vector()
 
-    lib.cluster_covis(c_kClusters_, c_pre_merges_, c_cam_indices_cpp, c_point_indices_cpp, res_to_cluster_c_out, res_to_cluster_c_sizes, old_vtxsToPart_cpp)
+    lib.cluster_covis(c_kClusters_, c_pre_merges_, c_max_vol_part_, c_cam_indices_cpp, c_point_indices_cpp, res_to_cluster_c_out, res_to_cluster_c_sizes, old_vtxsToPart_cpp)
 
     old_vtxsToPart_ = fillPythonVecSimple(old_vtxsToPart_cpp).tolist()
     kClusters = lib.vector_size(res_to_cluster_c_sizes)
@@ -219,6 +221,40 @@ def cluster_covis_lib(kClusters, pre_merges_, camera_indices__, point_indices__,
     res_indices_in_cluster__ = fillPythonVec(res_to_cluster_c_out, res_to_cluster_c_sizes, kClusters)
     return res_indices_in_cluster__, kClusters, old_vtxsToPart_
     # copy data, free c++ mem
+
+def cluster_covis_lib_flip(kClusters, pre_merges_, camera_indices__, point_indices__, old_vtxsToPart_=0):
+    c_kClusters_ = ctypes.c_int(kClusters)
+    c_pre_merges_ = ctypes.c_int(pre_merges_)
+    c_max_vol_part = kClusters
+    c_max_vol_part_ = ctypes.c_int(c_max_vol_part)
+
+    camera_indices_list = camera_indices__.tolist()
+    point_indices_list = point_indices__.tolist()
+
+    #c_point_indices_ptr = (ctypes.c_int * len(point_indices__))(*point_indices__)
+    c_point_indices_ptr = (ctypes.c_int * len(point_indices_list))(*point_indices_list)
+    c_point_indices_cpp = lib.new_vector_by_copy(c_point_indices_ptr, len(c_point_indices_ptr))
+    c_cam_indices_ptr = (ctypes.c_int * len(camera_indices_list))(*camera_indices_list)
+    c_cam_indices_cpp = lib.new_vector_by_copy(c_cam_indices_ptr, len(c_cam_indices_ptr))
+
+    res_to_cluster_c_out = lib.new_vector()
+    res_to_cluster_c_sizes = lib.new_vector_of_size(kClusters)
+
+    if (isinstance(old_vtxsToPart_, list)):
+        c_old_vtxsToPart_ptr = (ctypes.c_int * len(old_vtxsToPart_))(*old_vtxsToPart_)
+        old_vtxsToPart_cpp = lib.new_vector_by_copy(c_old_vtxsToPart_ptr, len(c_old_vtxsToPart_ptr))
+    else:
+        old_vtxsToPart_cpp = lib.new_vector()
+
+    lib.cluster_covis(c_kClusters_, c_pre_merges_, c_max_vol_part_, c_point_indices_cpp, c_cam_indices_cpp, res_to_cluster_c_out, res_to_cluster_c_sizes, old_vtxsToPart_cpp)
+
+    old_vtxsToPart_ = fillPythonVecSimple(old_vtxsToPart_cpp).tolist()
+    kClusters = lib.vector_size(res_to_cluster_c_sizes)
+
+    res_indices_in_cluster__ = fillPythonVec(res_to_cluster_c_out, res_to_cluster_c_sizes, kClusters)
+    return res_indices_in_cluster__, kClusters, old_vtxsToPart_
+    # copy data, free c++ mem
+
 
 cameras, points_3d, camera_indices, point_indices, points_2d = read_bal_data(FILE_NAME)
 n_cameras = cameras.shape[0]
@@ -233,7 +269,7 @@ print("n_cameras: {}".format(n_cameras))
 print("n_points: {}".format(n_points))
 print("Total number of parameters: {}".format(n))
 print("Total number of residuals: {}".format(m))
-kClusters = 3 # 6 cluster also not bad at all !
+kClusters = 6 # 6 cluster also not bad at all !
 
 # Load the shared library
 #lib = ctypes.CDLL("/path/to/your/library.so")
@@ -242,7 +278,7 @@ lib = ctypes.CDLL("./libprocess_clusters.so")
 init_lib()
 #res_indices_in_cluster_ = cluster_covis_lib(kClusters, camera_indices, point_indices)
 
-pre_merges = 20
+pre_merges = 0
 camera_indices_ = camera_indices
 points_3d_  = points_3d
 points_2d_  = points_2d
@@ -322,7 +358,8 @@ for c in range(kClusters_):
 
 # from lib
 if True:
-    res_indices_in_cluster_, kClusters_, old_vtx_to_part = cluster_covis_lib(kClusters, pre_merges, camera_indices, point_indices)
+    #res_indices_in_cluster_, kClusters_, old_vtx_to_part = cluster_covis_lib(kClusters, pre_merges, camera_indices, point_indices)
+    res_indices_in_cluster_, kClusters_, old_vtx_to_part = cluster_covis_lib_flip(kClusters, pre_merges, camera_indices, point_indices)
     kClusters = kClusters_
     camera_indices_in_cluster_ = []
     point_indices_in_cluster_ = []

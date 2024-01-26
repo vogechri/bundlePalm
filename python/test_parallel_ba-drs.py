@@ -84,6 +84,7 @@ def read_bal_data(file_name):
             points_3d_[i] = float(file.readline())
         points_3d_ = points_3d_.reshape((n_points_, -1))
 
+    # currently must do for drs. turn off to fix issues? better debug
     (points_3d_, camera_indices_, points_2d_, point_indices_) = \
         remove_large_points(points_3d_, camera_indices_, points_2d_, point_indices_)
 
@@ -137,7 +138,7 @@ def init_lib():
                                     ctypes.c_void_p]
 
     lib.cluster_covis.restype = None
-    lib.cluster_covis.argtypes = [ctypes.c_int, ctypes.c_int, ctypes.c_void_p, ctypes.c_void_p,
+    lib.cluster_covis.argtypes = [ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_void_p, ctypes.c_void_p,
                                   ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p] # out]
 
 
@@ -145,6 +146,8 @@ def cluster_covis_lib(kClusters, camera_indices__, point_indices__):
     c_kClusters_ = ctypes.c_int(kClusters)
     pre_merges_ = 0
     c_pre_merges_ = ctypes.c_int(pre_merges_)
+    c_max_vol_part = 4
+    c_max_vol_part_ = ctypes.c_int(c_max_vol_part)
 
     camera_indices_list = camera_indices__.tolist()
     point_indices_list = point_indices__.tolist()
@@ -165,7 +168,7 @@ def cluster_covis_lib(kClusters, camera_indices__, point_indices__):
     else:
         old_vtxsToPart_cpp = lib.new_vector()
 
-    lib.cluster_covis(c_kClusters_, c_pre_merges_, c_cam_indices_cpp, c_point_indices_cpp, res_to_cluster_c_out, res_to_cluster_c_sizes, old_vtxsToPart_cpp)
+    lib.cluster_covis(c_kClusters_, c_pre_merges_, c_max_vol_part_, c_cam_indices_cpp, c_point_indices_cpp, res_to_cluster_c_out, res_to_cluster_c_sizes, old_vtxsToPart_cpp)
 
     #old_vtxsToPart_ = fillPythonVecSimple(old_vtxsToPart_cpp).tolist()
     kClusters = lib.vector_size(res_to_cluster_c_sizes)
@@ -173,6 +176,68 @@ def cluster_covis_lib(kClusters, camera_indices__, point_indices__):
     res_indices_in_cluster__ = fillPythonVec(res_to_cluster_c_out, res_to_cluster_c_sizes, kClusters)
     return res_indices_in_cluster__, kClusters
     # copy data, free c++ mem
+
+def process_cluster_lib(num_lands_, num_res_, kClusters__, point_indices_in_cluster__, res_indices_in_cluster__, point_indices__):
+    # Flatten the nested lists and get the sizes of the sublists
+    point_indices_in_cluster_flat = [item for sublist in point_indices_in_cluster__ for item in sublist]
+    point_indices_in_cluster_sizes = [len(sublist) for sublist in point_indices_in_cluster__]
+
+    res_indices_in_cluster_flat = [item for sublist in res_indices_in_cluster__ for item in sublist]
+    res_indices_in_cluster_sizes = [len(sublist) for sublist in res_indices_in_cluster__]
+
+    # Convert the input arguments to C types
+    c_num_lands_ = ctypes.c_int(num_lands_)
+    c_num_res_ = ctypes.c_int(num_res_)
+    c_kClusters_ = ctypes.c_int(kClusters__)
+
+    c_point_indices_in_cluster_flat_ptr = (ctypes.c_int * len(point_indices_in_cluster_flat))(*point_indices_in_cluster_flat)
+    c_point_indices_in_cluster_sizes_ptr = (ctypes.c_int * len(point_indices_in_cluster_sizes))(*point_indices_in_cluster_sizes)
+
+    c_point_indices_ptr = (ctypes.c_int * len(point_indices__))(*point_indices__)
+
+    c_res_indices_in_cluster_flat_ptr = (ctypes.c_int * len(res_indices_in_cluster_flat))(*res_indices_in_cluster_flat)
+    c_res_indices_in_cluster_sizes_ptr = (ctypes.c_int * len(res_indices_in_cluster_sizes))(*res_indices_in_cluster_sizes)
+
+    #c_res_indices_in_cluster_flat = lib.new_vector_of_size(len(c_res_indices_in_cluster_flat))
+    c_point_indices_in_cluster_flat_cpp = lib.new_vector_by_copy(c_point_indices_in_cluster_flat_ptr, len(c_point_indices_in_cluster_flat_ptr))
+    c_point_indices_in_cluster_sizes_cpp = lib.new_vector_by_copy(c_point_indices_in_cluster_sizes_ptr, len(c_point_indices_in_cluster_sizes_ptr))
+    c_point_indices_cpp = lib.new_vector_by_copy(c_point_indices_ptr, len(c_point_indices_ptr))
+    c_res_indices_in_cluster_flat_cpp = lib.new_vector_by_copy(c_res_indices_in_cluster_flat_ptr, len(c_res_indices_in_cluster_flat_ptr))
+    c_res_indices_in_cluster_sizes_cpp = lib.new_vector_by_copy(c_res_indices_in_cluster_sizes_ptr, len(c_res_indices_in_cluster_sizes_ptr))
+
+    #lib.vector_set(c_res_indices_in_cluster_flat, i, value)
+
+    res_toadd_out = lib.new_vector()
+    res_toadd_sizes_out = lib.new_vector_of_size(kClusters__)
+
+    point_indices_already_covered_out = lib.new_vector_of_size(kClusters__)
+    point_indices_already_covered_sizes = lib.new_vector_of_size(kClusters__)
+
+    # print("point_indices_already_covered_outsiez ", lib.vector_size(point_indices_already_covered_out))
+    # print("point_indices_already_covered_sizes siez ", lib.vector_size(point_indices_already_covered_sizes))
+
+    covered_landmark_indices_c_out = lib.new_vector()
+    covered_landmark_indices_c_sizes = lib.new_vector_of_size(kClusters__)
+
+    num_res_per_c_out = lib.new_vector()
+
+    lib.process_clusters(c_num_lands_, c_num_res_, c_kClusters_,
+                        c_point_indices_in_cluster_flat_cpp, c_point_indices_in_cluster_sizes_cpp,
+                        c_point_indices_cpp,
+                        c_res_indices_in_cluster_flat_cpp,c_res_indices_in_cluster_sizes_cpp,
+                        res_toadd_out, res_toadd_sizes_out,
+                        point_indices_already_covered_out, point_indices_already_covered_sizes,
+                        covered_landmark_indices_c_out, covered_landmark_indices_c_sizes,
+                        num_res_per_c_out)
+
+    # print("lib.vector_get(res_toadd_sizes_out, i) ", 0, " : ", lib.vector_get(res_toadd_sizes_out, 0))
+
+    res_toadd_to_c_ = fillPythonVec(res_toadd_out, res_toadd_sizes_out, kClusters__)
+    point_indices_already_covered_ = fillPythonVec(point_indices_already_covered_out, point_indices_already_covered_sizes, kClusters__)
+    covered_landmark_indices_c_ = fillPythonVec(covered_landmark_indices_c_out, covered_landmark_indices_c_sizes, kClusters__)
+    num_res_per_c_ = fillPythonVecSimple(res_toadd_out)
+
+    return res_toadd_to_c_, point_indices_already_covered_, covered_landmark_indices_c_, num_res_per_c_
 
 def AngleAxisRotatePoint(angleAxis, pt):
     theta2 = (angleAxis * angleAxis).sum(dim=1)
@@ -910,6 +975,83 @@ def cluster_by_camera_smarter(
     )
 
 
+def cluster_by_landmark(
+    camera_indices_, points_2d_, point_indices_, kClusters_, pre_merges, old_vtxsToPart=0
+):
+    num_res = camera_indices_.shape[0]
+    num_cams = np.unique(camera_indices_).shape[0]
+    num_lands = np.unique(point_indices_).shape[0] #points_3d_.shape[0]
+    print("number of residuum: ", num_res)
+
+    res_indices_in_cluster_, kClusters, old_vtxsToPart = cluster_covis_lib(kClusters_, pre_merges, camera_indices_, point_indices_, old_vtxsToPart)
+    kClusters_ = kClusters
+    camera_indices_in_cluster_ = []
+    point_indices_in_cluster_ = []
+    points_2d_in_cluster_ = []
+    cluster_to_camera_ = []
+    for c in range(kClusters_):
+        res_indices_in_c_ = np.sort(res_indices_in_cluster_[c])
+        points_2d_in_cluster_.append(points_2d_[res_indices_in_c_])
+        camera_indices_in_cluster_.append(camera_indices_[res_indices_in_c_])
+        point_indices_in_cluster_.append(point_indices_[res_indices_in_c_])
+        cluster_to_camera_.append(np.unique(camera_indices_[res_indices_in_c_]))
+
+    res_toadd_to_c_, point_indices_already_covered_, covered_landmark_indices_c_, num_res_per_c_ = \
+        process_cluster_lib(num_lands, num_res, kClusters, point_indices_in_cluster_, res_indices_in_cluster_, point_indices)
+    
+    # we only case about covered_landmark_indices_c_
+    # 1. distribute residuals by occurence of above per cluster
+    # 2. landmarks per cluster are exclusive, whole cams per cluster 
+    # 3. need indices of cameras utilized in cluster and stepsizes per cam in cluster
+    # 
+
+    for ci in range(kClusters):
+        print(ci, " adding " , res_toadd_to_c_[ci].shape, " residuals to ", \
+            point_indices_in_cluster_[ci].shape, " original residuals")
+    
+    additional_point_indices_in_cluster_ = [0 for _ in range(kClusters)] # variables to add, just unique (additional cameras -> not needed)
+    additional_camera_indices_in_cluster_ = [0 for _ in range(kClusters)] # index into var per res
+    additional_points_2d_in_cluster_ = [0 for _ in range(kClusters)] # essentially rhs for res
+    # point_indices_already_covered: landmarks to be updated, present in main res only not in additional res (since complete)
+    # covered_landmark_indices_c_: landmarks to be updated in additional!!! set of res since completely contained in cluster
+
+    for ci in range(kClusters):
+        #print("camera_indices_ ", camera_indices_.shape)
+        con_res = res_toadd_to_c_[ci]
+        #print("camera_indices_ ", con_res.shape)
+        new_cam_indices_ = np.unique(camera_indices_[con_res])
+        #print(ci, " new cam indices ", new_cam_indices_, " " , new_cam_indices_.shape)
+        #print(ci, " old cam indices ", np.unique(camera_indices_in_cluster_[ci]), " " , np.unique(camera_indices_in_cluster_[ci]).shape)
+        new_cam_indices_ = np.setdiff1d(new_cam_indices_, np.unique(camera_indices_in_cluster_[ci])) # not needed since disjoint anyway
+        #print(ci, " new cam indices ", new_cam_indices_, " " , new_cam_indices_.shape)
+        additional_camera_indices_in_cluster_[ci] = camera_indices_[con_res]
+        additional_points_2d_in_cluster_[ci] = points_2d_[con_res]
+        covered_landmark_indices_c_[ci] = np.array(covered_landmark_indices_c_[ci]) #?
+        additional_point_indices_in_cluster_[ci] = point_indices_[con_res]
+        point_indices_already_covered_[ci] = np.union1d(point_indices_already_covered_[ci], covered_landmark_indices_c_[ci])
+        print("===== Cluster ", ci , " covers ", point_indices_already_covered_[ci].shape, "landmarks ", " of ", num_lands)
+
+    # check if indices are disjoint / local vs global / sums up to n_points
+    sum_cams_cover = 0
+    sum_landmarks_cover = 0
+    for ci in range(kClusters):
+        sum_cams_cover += np.unique(camera_indices_in_cluster_[ci]).shape[0]
+        sum_landmarks_cover += np.unique(point_indices_already_covered_[ci]).shape[0]
+    if sum_landmarks_cover < num_lands or sum_cams_cover < num_cams:
+        print("sum_cams_cover ", sum_cams_cover, " / ", num_cams)
+        print("sum_landmarks_cover ", sum_landmarks_cover, " / ", num_lands)
+        return
+
+    return (
+        camera_indices_in_cluster_,
+        point_indices_in_cluster_,
+        points_2d_in_cluster_,
+        cluster_to_camera_,
+        additional_point_indices_in_cluster_, additional_camera_indices_in_cluster_, additional_points_2d_in_cluster_, point_indices_already_covered_, covered_landmark_indices_c_,
+        old_vtxsToPart, kClusters
+    )
+
+
 # Afterwards landmarks only present in 1 cluster should equal points_3d_in_cluster_ afterwards.
 # For those input s = old_lm. out put is 2 new - old.
 # s is updated as s+ = s + 2new - old - new = s + new - old = new: ok.
@@ -1147,6 +1289,8 @@ def primal_cost(
 # 21  ======== DRE ======  27795  ========= gain  58 ==== f(v)=  27752  f(u)=  27799
 # 30  ======== DRE ======  27415  ========= gain  34 ==== f(v)=  27399  f(u)=  27405
 # 38  ======== DRE ======  27260  ========= gain  20 ==== f(v)=  27249  f(u)=  27250
+# TODO: strict change: only increase phi -> DRS makes sense.
+# use blockeig for that. (or just diag and max).
 def bundle_adjust(
     camera_indices_,
     point_indices_,
@@ -1218,7 +1362,8 @@ def bundle_adjust(
             #     stepSize.data = np.maximum(0.05 * stepSize.data, blockEigenvalueJltJl.data) # else diagSparse of it
             
             # todo 0.5 appars to be ok still & faster. lower leads to hickups and slow down
-            stepSize = 1. * (blockEigMult * blockEigenvalueJltJl + JltJl.copy()) # this already suffices
+            stepSize = 1. * (blockEigMult * blockEigenvalueJltJl + 2 * JltJl.copy()) # Todo '2 *' 1 by convex
+            #stepSize = 1. * (blockEigMult * blockEigenvalueJltJl + 1 * JltJl.copy()) # this already suffices
             #stepSize = 1. * (1e-0 * diag_sparse(np.ones(n_points_*3)) + 1.0 * JltJl.copy()) # not so good
 
             # problem blockinverse assume data is set in full 3x3
@@ -1253,7 +1398,7 @@ def bundle_adjust(
             # maybe better: 3x3 matrix sqrt(|M|_1 |M|inf) as diag. Yet this removes effect of 'L' getting small = large steps.
             # do i need to keep memory to ensure it remains >? or pre compute grad (and store)?
             print(" min/max JltJl.diagonal() ", np.min(JltJl.diagonal()), " ", maxDiag, " adjusted ", np.min(JltJlDiag.diagonal()), " ", np.max(JltJlDiag.diagonal()))
-            print("JltJlDiag.shape ", JltJlDiag.shape, JltJlDiag.shape[0]/3)
+            #print("JltJlDiag.shape ", JltJlDiag.shape, JltJlDiag.shape[0]/3)
 
             # based on unique_pointindices_ make diag_1L that is 1 at points 
             # only present within this part.
@@ -1319,22 +1464,42 @@ def bundle_adjust(
 
         tr_check = (costStart + penaltyStart - costEnd - penaltyL) / (costStart + penaltyStart - costQuad - penaltyL)
 
-        # descent lemms test again.
-        nablaXp = L * JtJDiag * delta_p  # actual gradient. discussable
-        nablaXp = JtJDiag * delta_p  # actual gradient. discussable TODO
-        nablaXl = L * JltJlDiag * delta_l  # actual gradient
-        LfkDiagonal = \
-            2 * (costEnd - costStart - bp.dot(delta_p) - bl.dot(delta_l)) \
-            / (delta_l.dot(nablaXl) + delta_p.dot(nablaXp))
+        old_descent_lemma = False
+        if old_descent_lemma:
+            # old descent lemma test.
+            #nablaXp = L * JtJDiag * delta_p  # actual gradient. discussable
+            nablaXp = JtJDiag * delta_p  # actual gradient. discussable TODO
+            nablaXl = L * JltJlDiag * delta_l  # actual gradient
+            # before
+            LfkDiagonal = \
+                2 * (costEnd - costStart - bp.dot(delta_p) - bl.dot(delta_l)) \
+                / (delta_l.dot(nablaXl) + delta_p.dot(nablaXp))
+            LfkDistance  = costEnd - (costStart + bp.dot(delta_p) + bl.dot(delta_l) + (descent_rhs_l + descent_rhs_p) / 2)
+            LfkViolated = LfkDistance > 0
+            LfkSafe = (costEnd - costStart - bp.dot(delta_p) - bl.dot(delta_l)) < 0 # for any phi ok.
+        else:
+            # after:
+            # f(x) <= f(y) + <nabla(f(y) x-y> + Lf/2 |x-y|^2
+            # we demand stepsize phi >= 2 Lf. Then even
+            # f(x) <= f(y) + <nabla(f(y) x-y> + phi/4 |x-y|^2 
+            # (f(x) - f(y) - <nabla(f(y) x-y>) * 4 / |x-y|^2  <= phi
+            nablaXp = JtJDiag * delta_p    # actual gradient: J^t fx0 = bp|bl , no L. grad at f(x) is L * JtJDiag * delta_p - s
+            nablaXl = L * JltJlDiag * delta_l  # actual gradient is b. L since JltJlDiag multiplied by 1/L. 
+            descent_rhs_l = L * delta_l.dot(JltJlDiag * delta_l)
+            descent_rhs_p = delta_p.dot(JtJDiag * delta_p)
+
+            LfkDistance  = costEnd - (costStart + bp.dot(delta_p) + bl.dot(delta_l) + (descent_rhs_l + descent_rhs_p) / 4)
+            LfkViolated = LfkDistance > 0
+            LfkSafe = (costEnd - costStart - bp.dot(delta_p) - bl.dot(delta_l)) < 0 # for any phi ok.
 
         if tr_check < tr_eta_2:
-            print(" //////  tr_check " , tr_check, " Lfk estimate ", LfkDiagonal, " -nabla^Tdelta=" , -bp.dot(delta_p) - bl.dot(delta_l), " /////")
+            print(" //////  tr_check " , tr_check, " Lfk distance ", LfkDistance, " -nabla^Tdelta=" , -bp.dot(delta_p) - bl.dot(delta_l), " /////")
             L = L * 2
             JltJlDiag = 1/2 * JltJlDiag
 
-        if tr_check >= tr_eta_2 and LfkDiagonal > 2: # violated -- should revert update.
+        if tr_check >= tr_eta_2 and LfkViolated: # violated -- should revert update.
             steSizeTouched = True
-            print(" |||||||  Lfk estimate ", LfkDiagonal, " -nabla^Tdelta=" , -bp.dot(delta_p) - bl.dot(delta_l), " |||||||")
+            print(" |||||||  Lfk distance ", LfkDistance, " -nabla^Tdelta=" , -bp.dot(delta_p) - bl.dot(delta_l), " |||||||")
             #stepSize = stepSize * 2
             # other idea, initially we only add 1/2^k eg 0.125, times the needed value and inc if necessary, maybe do not add anything if not needed.
 
@@ -1348,7 +1513,7 @@ def bundle_adjust(
                 #penaltyStartConst *= 2
             else:
                 L = L * 2
-        if LfkDiagonal < -2 and not steSizeTouched:
+        if LfkSafe and not steSizeTouched:
             L = L / 2
 
         # if LfkDiagonal < -2 and steSizeTouched:
@@ -1361,7 +1526,7 @@ def bundle_adjust(
         #     penaltyStartConst = (x0_l_ - delta_l - s_l_).dot(JltJlDiag * (x0_l_ - delta_l - s_l_))
 
         # version with penalty check for ADMM convergence / descent lemma. Problem: slower?
-        if costStart + penaltyStart < costEnd + penaltyL or LfkDiagonal > 2: # or LfkDiagonal < -2:
+        if costStart + penaltyStart < costEnd + penaltyL or LfkViolated:
             # revert -- or linesearch
             x0_p_ = x0_p_ - delta_p
             x0_l_ = x0_l_ - delta_l
@@ -1418,11 +1583,11 @@ def bundle_adjust(
         # f(x) > f(y) + delta^t Diag delta = f(y) + <nabla f(x), x-y>
         # this implies descent lemma ALWAYS fulfilled.
 
-        print(" ------- Lfk estimate ", LfkDiagonal, " -nabla^Tdelta=" , -bp.dot(delta_p) - bl.dot(delta_l),  " tr_check ", tr_check, " -------- ")
+        print(" ------- Lfk distance ", LfkDistance, " -nabla^Tdelta=" , -bp.dot(delta_p) - bl.dot(delta_l),  " tr_check ", tr_check, " -------- ")
         # update TR -- 
         #if costStart + penaltyStart > costEnd + penaltyL
         #tr_check = (costStart - costEnd) / (costStart - costQuad)
-        if True or it_ < successfull_its_ and L > 1e-6: # lowering leads to, see below averaging affected, can trigger multiple increases
+        if False or it_ < successfull_its_ and L > 1e-6: # lowering leads to, see below averaging affected, can trigger multiple increases
             #print( "A JltJlDiag-bun ", JltJlDiag.data.reshape(-1,9)[landmarks_only_in_cluster_,:])
             if tr_check > tr_eta_1: # and L > 0.1: # needs a limit else with my L * Vl, or 1/L in diag?
                 L = L / 2
@@ -1431,7 +1596,7 @@ def bundle_adjust(
                 L = L * 2
                 JltJlDiag = 1/2 * JltJlDiag
 
-        if LfkDiagonal > 2: # violated -- should revert update.
+        if LfkViolated: # violated -- should revert update.
             print("=========================== SHOULD NOT ENTER ==========================")
             stepSize = stepSize * 2
             JltJlDiag = 1/L * stepSize.copy()
@@ -1821,6 +1986,19 @@ n_points = points_3d.shape[0]
 n = 9 * n_cameras + 3 * n_points
 m = 2 * points_2d.shape[0]
 
+write_output = False #True
+read_output =  False
+if read_output:
+    camera_params_np = np.fromfile("camera_params_drs.dat", dtype=np.float64)
+    point_params_np = np.fromfile("point_params_drs.dat", dtype=np.float64)
+    x0_p = camera_params_np.reshape(-1)
+    x0_l = point_params_np.reshape(-1)
+    #x0 = np.concatenate([x0_p, x0_l])
+    x0 = np.hstack((x0_p, x0_l))
+    x0_t = from_numpy(x0)
+    cameras   = x0_p.reshape(n_cameras,9)
+    points_3d = x0_l.reshape(n_points,3)
+
 np.set_printoptions(formatter={"float": "{: 0.2f}".format})
 
 print("n_cameras: {}".format(n_cameras))
@@ -1853,13 +2031,13 @@ x0_p = x0_p.reshape(n_cameras, 9)
 startL = 1
 kClusters = 5
 innerIts = 1  # change to get an update, not 1 iteration
-its = 100
+its = 60
 cost = np.zeros(kClusters)
 lastCost = 1e20
 lastCostDRE = 1e20
 basic_version = True # accelerated or basic
 sequential = True
-linearize_at_last_solution = False # linearize at uk or v. maybe best to check energy. at u or v. DRE:
+linearize_at_last_solution = True # linearize at uk or v. maybe best to check energy. at u or v. DRE:
 lib = ctypes.CDLL("./libprocess_clusters.so")
 init_lib()
 
@@ -2201,3 +2379,7 @@ else:
 #     f(x) < f(y) + <nabla fy , x-y> + (x-y)^ Vl (x-y). Vl is making this strongly convex by design. s.t. this descent lemma holds. Even by design.
 # or  f(x) < f(y) + <nabla fy , x-y> + (x-y)^ JJl (x-y). New solution < old + penalty + <nabla fy, delta>
 # <=> f(x) < f(y) + <nabla fy + nabla fx, x-y>
+
+if write_output:
+    x0_p.tofile("camera_params_drs.dat")
+    landmark_v.tofile("point_params_drs.dat")
