@@ -20,14 +20,14 @@ from torch import tensor, from_numpy
 # look at website. This is the smallest problem. guess: pytoch cpu is pure python?
 BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/ladybug/"
 FILE_NAME = "problem-49-7776-pre.txt.bz2"
-FILE_NAME = "problem-73-11032-pre.txt.bz2"
+#FILE_NAME = "problem-73-11032-pre.txt.bz2"
 
-BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/dubrovnik/"
+#BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/dubrovnik/"
 # FILE_NAME = "problem-16-22106-pre.txt.bz2"
 #FILE_NAME = "problem-356-226730-pre.txt.bz2" # large dub, play with ideas: cover, etc
 #FILE_NAME = "problem-237-154414-pre.txt.bz2"
-FILE_NAME = "problem-173-111908-pre.txt.bz2"
-FILE_NAME = "problem-135-90642-pre.txt.bz2"
+#FILE_NAME = "problem-173-111908-pre.txt.bz2"
+#FILE_NAME = "problem-135-90642-pre.txt.bz2"
 
 #BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/trafalgar/"
 # FILE_NAME = "problem-21-11315-pre.txt.bz2"
@@ -40,24 +40,25 @@ if not os.path.isfile(FILE_NAME):
 
 def remove_large_points(points_3d, camera_indices, points_2d, point_indices):
     remove_ids = np.arange(points_3d.shape[0])[np.sum(points_3d**2, 1) > 1e6]
-    points_3d = np.delete(points_3d, remove_ids, axis=0)
-    num_all_res = camera_indices.shape[0]
-    res_remove_ids = np.isin(point_indices, remove_ids)
-    camera_indices = camera_indices[~res_remove_ids]
-    points_2d = points_2d[~res_remove_ids]
-    point_indices = point_indices[~res_remove_ids]
-    unique_numbers = np.unique(point_indices)
-    # Step 2: Create a dictionary for mapping
-    mapping = {number: i for i, number in enumerate(unique_numbers)}    
-    # Step 3: Apply the mapping to the array
-    vfunc = np.vectorize(mapping.get)
-    point_indices = vfunc(point_indices)
-    print("Removed ", remove_ids.shape[0], " points")
-    # alot points far away. so likely present in many parts.
-    print("Removed ", num_all_res - camera_indices.shape[0], " residuals, ", \
-          (num_all_res - camera_indices.shape[0]) / remove_ids.shape[0], " observations in removed landmarks")
-    print(np.max(point_indices))
-    print(points_3d.shape)
+    if remove_ids.shape[0] >0:
+        points_3d = np.delete(points_3d, remove_ids, axis=0)
+        num_all_res = camera_indices.shape[0]
+        res_remove_ids = np.isin(point_indices, remove_ids)
+        camera_indices = camera_indices[~res_remove_ids]
+        points_2d = points_2d[~res_remove_ids]
+        point_indices = point_indices[~res_remove_ids]
+        unique_numbers = np.unique(point_indices)
+        # Step 2: Create a dictionary for mapping
+        mapping = {number: i for i, number in enumerate(unique_numbers)}    
+        # Step 3: Apply the mapping to the array
+        vfunc = np.vectorize(mapping.get)
+        point_indices = vfunc(point_indices)
+        print("Removed ", remove_ids.shape[0], " points")
+        # alot points far away. so likely present in many parts.
+        print("Removed ", num_all_res - camera_indices.shape[0], " residuals, ", \
+            (num_all_res - camera_indices.shape[0]) / remove_ids.shape[0], " observations in removed landmarks")
+        print(np.max(point_indices))
+        print(points_3d.shape)
     return points_3d, camera_indices, points_2d, point_indices
 
 def read_bal_data(file_name):
@@ -1286,7 +1287,7 @@ def bundle_adjust(
 ):
     # print("landmarks_only_in_cluster_  ", landmarks_only_in_cluster_, " ", np.sum(landmarks_only_in_cluster_), " vs ", np.sum(1 - landmarks_only_in_cluster_) )
     newForUnique = True
-    blockEigMult = 1e-4 # 1e-3 was used before
+    blockEigMult = 1e-3 # 1e-3 was used before less hicups smaller 1e-3. recall last val ..
     normal_case_ = True # No L * JltJl at all. Does not work
     # define x0_t, x0_p, x0_l, L # todo: missing Lb: inner L for bundle, Lc: to fix duplicates
     L = L_in_cluster_
@@ -1331,7 +1332,7 @@ def bundle_adjust(
             JtJ = J_pose.transpose() * J_pose
             JtJDiag = diag_sparse(JtJ.diagonal())
 
-            J_eps = 1e-6
+            J_eps = 1e-3
             JtJDiag = JtJ + J_eps * diag_sparse(np.ones(JtJ.shape[0]))
 
             #blockEigenvalueJtJ = blockEigenvalue(JtJ, 9)
@@ -1345,8 +1346,8 @@ def bundle_adjust(
             # else: # increase where needed -- this here is WAY too slow?
             #     stepSize.data = np.maximum(0.05 * stepSize.data, blockEigenvalueJltJl.data) # else diagSparse of it
             
-            # todo 0.5 appars to be ok still & faster. lower leads to hickups and slow down
-            stepSize = 1. * (blockEigMult * blockEigenvalueJltJl + 2 * JltJl.copy()) # Todo '2 *' vs 1 by convex
+            # '2 *' smallest example dies with < 2 ok with 2.
+            stepSize = 1. * (blockEigMult * blockEigenvalueJltJl + 2 * JltJl.copy()) # Todo '2 *' vs 1 by convex.
             #stepSize = 1. * (blockEigMult * blockEigenvalueJltJl + 1 * JltJl.copy()) # this already suffices
             #stepSize = 1. * (1e-0 * diag_sparse(np.ones(n_points_*3)) + 1.0 * JltJl.copy()) # not so good
 
@@ -1458,14 +1459,14 @@ def bundle_adjust(
             LfkDiagonal = \
                 2 * (costEnd - costStart - bp.dot(delta_p) - bl.dot(delta_l)) \
                 / (delta_l.dot(nablaXl) + delta_p.dot(nablaXp))
-            LfkDistance  = costEnd - (costStart + bp.dot(delta_p) + bl.dot(delta_l) + (descent_rhs_l + descent_rhs_p) / 2)
+            LfkDistance  = costEnd - (costStart + bp.dot(delta_p) + bl.dot(delta_l) + (delta_l.dot(nablaXl) + delta_p.dot(nablaXp)) / 2)
             LfkViolated = LfkDistance > 0
             LfkSafe = (costEnd - costStart - bp.dot(delta_p) - bl.dot(delta_l)) < 0 # for any phi ok.
         else:
             # after:
             # f(x) <= f(y) + <nabla(f(y) x-y> + Lf/2 |x-y|^2
             # we demand stepsize phi >= 2 Lf. Then even
-            # f(x) <= f(y) + <nabla(f(y) x-y> + phi/4 |x-y|^2 
+            # f(x) <= f(y) + <nabla(f(y) x-y> + phi/4 |x-y|^2
             # (f(x) - f(y) - <nabla(f(y) x-y>) * 4 / |x-y|^2  <= phi
             nablaXp = JtJDiag * delta_p    # actual gradient: J^t fx0 = bp|bl , no L. grad at f(x) is L * JtJDiag * delta_p - s
             nablaXl = L * JltJlDiag * delta_l  # actual gradient is b. L since JltJlDiag multiplied by 1/L. 
@@ -1481,6 +1482,33 @@ def bundle_adjust(
             L = L * 2
             JltJlDiag = 1/2 * JltJlDiag
 
+        # this does not appear reasonable? Why ?
+        # min/max JltJl.diagonal()  0.48732507383147355   2602001.263707982  adjusted  0.00026905443442882594   1760044.7675515271
+        # 0 it. cost 0      5260  cost + penalty  11253  === using L =  0.0009765625
+        # 0 it. cost 0/new  7625  cost + penalty  10164
+        # 0 it. cost 1      7620       + penalty  10158
+        # |||||||  Lfk distance  1126.6561766159084  -nabla^Tdelta= -1012.0812235578704  |||||||
+        # 0 it. cost 0      5260  cost + penalty  10958  === using L =  0.0009765625
+        # 0 it. cost 0/new  5357  cost + penalty  8286
+        # 0 it. cost 1      5355       + penalty  8285
+        # |||||||  Lfk distance  45.14171106927188  -nabla^Tdelta= -43.21166233974194  |||||||
+        # 0 it. cost 0      5260  cost + penalty  8651  === using L =  0.0009765625
+        # 0 it. cost 0/new  5396  cost + penalty  8316
+        # 0 it. cost 1      5394       + penalty  8314
+        # |||||||  Lfk distance  55.70731270660599  -nabla^Tdelta= -59.383690725574006  |||||||
+        # 0 it. cost 0      5260  cost + penalty  9170  === using L =  0.0009765625
+        # 0 it. cost 0/new  5442  cost + penalty  8351
+        # 0 it. cost 1      5441       + penalty  8350
+        # |||||||  Lfk distance  53.50728240446642  -nabla^Tdelta= -77.02651948746075  |||||||
+        # 0 it. cost 0      5260  cost + penalty  10323  === using L =  0.0009765625
+        # 0 it. cost 0/new  5496  cost + penalty  8391
+        # 0 it. cost 1      5497       + penalty  8392
+        # |||||||  Lfk distance  18.302929448717805  -nabla^Tdelta= -96.69554505439876  |||||||
+        # 0 it. cost 0      5260  cost + penalty  12785  === using L =  0.0009765625
+        # 0 it. cost 0/new  5559  cost + penalty  8437
+        # 0 it. cost 1      5563       + penalty  8441
+
+        # todo: store last blockEigenvalueJltJl multiplier in/out current L used but not really.
         if tr_check >= tr_eta_2 and LfkViolated: # violated -- should revert update.
             steSizeTouched = True
             print(" |||||||  Lfk distance ", LfkDistance, " -nabla^Tdelta=" , -bp.dot(delta_p) - bl.dot(delta_l), " |||||||")
@@ -1488,13 +1516,15 @@ def bundle_adjust(
             # other idea, initially we only add 1/2^k eg 0.125, times the needed value and inc if necessary, maybe do not add anything if not needed.
 
             if normal_case_:
-                blockEigenvalueJltJl.data *= 2 # appears slow but safe
-                #stepSize.data = np.maximum(stepSize.data, blockEigenvalueJltJl.data) # else diagSparse of it
-                stepSize = blockEigMult * blockEigenvalueJltJl + JltJl.copy()
+                if True: # just adjusted: blockEigenvalueJltJl * L above s.t. it depends on L
+                    blockEigenvalueJltJl.data *= 2 # appears slow but safe
+                    #stepSize.data = np.maximum(stepSize.data, blockEigenvalueJltJl.data) # else diagSparse of it
+                    stepSize = blockEigMult * blockEigenvalueJltJl + JltJl.copy()
 
-                JltJlDiag = 1/L * stepSize.copy()
-                penaltyStartConst = (prox_rhs - delta_l).dot(JltJlDiag * (prox_rhs - delta_l))
-                #penaltyStartConst *= 2
+                    JltJlDiag = 1/L * stepSize.copy()
+                    penaltyStartConst = prox_rhs.dot(JltJlDiag * prox_rhs)
+                else:
+                    L = L * 2
             else:
                 L = L * 2
         if LfkSafe and not steSizeTouched:
@@ -2329,7 +2359,7 @@ else:
                 for ci in range(kClusters):
                     landmark_s_in_cluster[ci] = landmark_s_in_cluster_bfgs[ci].copy()
                     points_3d_in_cluster[ci] = points_3d_in_cluster_bfgs[ci].copy()
-                    Vl_in_cluster_bfgs[ci] = Vl_in_cluster_bfgs[ci].copy()
+                    Vl_in_cluster[ci] = Vl_in_cluster_bfgs[ci].copy()
                 L_in_cluster = L_in_cluster_bfgs.copy()
                 landmark_v = landmark_v_bfgs.copy()
                 lastCostDRE_bfgs = dre_bfgs.copy()

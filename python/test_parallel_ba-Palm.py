@@ -108,24 +108,25 @@ if not os.path.isfile(FILE_NAME):
 
 def remove_large_points(points_3d, camera_indices, points_2d, point_indices):
     remove_ids = np.arange(points_3d.shape[0])[np.sum(points_3d**2, 1) > 1e6]
-    points_3d = np.delete(points_3d, remove_ids, axis=0)
-    num_all_res = camera_indices.shape[0]
-    res_remove_ids = np.isin(point_indices, remove_ids)
-    camera_indices = camera_indices[~res_remove_ids]
-    points_2d = points_2d[~res_remove_ids]
-    point_indices = point_indices[~res_remove_ids]
-    unique_numbers = np.unique(point_indices)
-    # Step 2: Create a dictionary for mapping
-    mapping = {number: i for i, number in enumerate(unique_numbers)}    
-    # Step 3: Apply the mapping to the array
-    vfunc = np.vectorize(mapping.get)
-    point_indices = vfunc(point_indices)
-    print("Removed ", remove_ids.shape[0], " points")
-    # alot points far away. so likely present in many parts.
-    print("Removed ", num_all_res - camera_indices.shape[0], " residuals, ", \
-          (num_all_res - camera_indices.shape[0]) / remove_ids.shape[0], " observations in removed landmarks")
-    print(np.max(point_indices))
-    print(points_3d.shape)
+    if remove_ids.shape[0] >0:
+        points_3d = np.delete(points_3d, remove_ids, axis=0)
+        num_all_res = camera_indices.shape[0]
+        res_remove_ids = np.isin(point_indices, remove_ids)
+        camera_indices = camera_indices[~res_remove_ids]
+        points_2d = points_2d[~res_remove_ids]
+        point_indices = point_indices[~res_remove_ids]
+        unique_numbers = np.unique(point_indices)
+        # Step 2: Create a dictionary for mapping
+        mapping = {number: i for i, number in enumerate(unique_numbers)}    
+        # Step 3: Apply the mapping to the array
+        vfunc = np.vectorize(mapping.get)
+        point_indices = vfunc(point_indices)
+        print("Removed ", remove_ids.shape[0], " points")
+        # alot points far away. so likely present in many parts.
+        print("Removed ", num_all_res - camera_indices.shape[0], " residuals, ", \
+            (num_all_res - camera_indices.shape[0]) / remove_ids.shape[0], " observations in removed landmarks")
+        print(np.max(point_indices))
+        print(points_3d.shape)
     return points_3d, camera_indices, points_2d, point_indices
 
 
