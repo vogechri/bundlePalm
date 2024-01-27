@@ -3345,6 +3345,7 @@ if basic_version:
                             # so a sum of deltas works well. About 2 delta of size. so alpha=0 in RNA. or sum ci xi = 0 then sum ci xi + deltai = sum delta i
                             # so original rna, on top of xk1 and * 2? nope.
                             # rna does deriv to 0: sum_i ci d_fxi -> min. 
+                            # this is xk + delta k + delta k-1 + delta k-2.
                             x_extr = xk1 + wk #+ alpha * (xk1 - xk05) # wk is delta k-1 + delta k-2. works best ?
 
                             # if it > 1:
