@@ -26,7 +26,7 @@ BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/dubrovnik/"
 FILE_NAME = "problem-16-22106-pre.txt.bz2"
 #FILE_NAME = "problem-356-226730-pre.txt.bz2" # large dub, play with ideas: cover, etc
 #FILE_NAME = "problem-237-154414-pre.txt.bz2"
-#FILE_NAME = "problem-173-111908-pre.txt.bz2"
+FILE_NAME = "problem-173-111908-pre.txt.bz2"
 #FILE_NAME = "problem-135-90642-pre.txt.bz2"
 
 #BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/trafalgar/"
@@ -1049,6 +1049,7 @@ def average_landmarks_new(
     num_points = points_3d_in_cluster_[0].shape[0]
     sum_Ds_2u = np.zeros(num_points * 3)
     sum_constant_term = 0
+    V_cluster_zeros = []
     for i in range(len(L_in_cluster_)):
         # Lc = L_in_cluster_[i]
         point_indices_ = np.unique(point_indices_in_cluster_[i])
@@ -1086,6 +1087,7 @@ def average_landmarks_new(
             (VL_in_cluster_[i].data, indices, indptr),
             shape=(3 * num_points, 3 * num_points),
         )
+        V_cluster_zeros.append(V_land)
         # print(mean_points.shape, " " , V_land.shape, points_3d_in_cluster_[i].shape)
         # print cost after/before.
         # cost old v is where ? (v-2u+s)^T V_land (v-2u+s) = v^T V_land v + 2 v^T V_land (-2u+s) + (2u-s)^T V_land (2u-s)
@@ -1121,7 +1123,7 @@ def average_landmarks_new(
         print("========== update v: ", round(cost_input), " -> ", round(cost_output), " gain: ", round(cost_input - cost_output) )
         #print("======================== update v: ", round(cost_simpler_in), " -> ", round(cost_simpler_out), " gain: ", round(cost_simpler_in - cost_simpler_out) )
 
-    return landmark_v_out.reshape(num_points, 3), Vl_all
+    return landmark_v_out.reshape(num_points, 3), Vl_all, V_cluster_zeros
     # Then use this for fixing landmarks / updating. enven use VLi / Vl instead? argmin_x sum_y=lm_in_cluster (x-y) VL (x-y) of last Vl.
     # ==> x^t sum Vl x - 2 x sum (Vl y) + const =>  x = (sum Vl)^-1 [sum (Vl*y)].
     # above should lead to better? solutions at least. At next local updates we work with Vl?
@@ -1509,7 +1511,7 @@ def bundle_adjust(
         # 0 it. cost 1      5563       + penalty  8441
 
         # todo: store last blockEigenvalueJltJl multiplier in/out current L used but not really.
-        if tr_check >= tr_eta_2 and LfkViolated: # violated -- should revert update.
+        if tr_check >= tr_eta_2 and LfkViolated and not steSizeTouched or (steSizeTouched and costStart + penaltyStart < costEnd + penaltyL): # violated -- should revert update.
             steSizeTouched = True
             print(" |||||||  Lfk distance ", LfkDistance, " -nabla^Tdelta=" , -bp.dot(delta_p) - bl.dot(delta_l), " |||||||")
             #stepSize = stepSize * 2
@@ -1527,6 +1529,10 @@ def bundle_adjust(
                     L = L * 2
             else:
                 L = L * 2
+        else:
+            LfkViolated = False # hack, also above , or (steSizeTouched and costStart + penaltyStart < costEnd + penaltyL) is hack
+            # replace by following: track cost, if next has lower cost -> continue. if next has higher cost return current.
+            
         if LfkSafe and not steSizeTouched:
             L = L / 2
 
@@ -1909,11 +1915,11 @@ def prox_f(x0_p_, camera_indices_in_cluster_, point_indices_in_cluster_,
 # fill lists G and F, with g and f = g - old g, sets of size m, 
 # at position it % m, c^t compute F^tF c + lamda (c - 1/k)^2, sum c=1
 # g = x0, f = delta. Actullay xnew = xold + delta.
-def RNA(G, F, g, f, it_, m_, Fe, fe, lamda):
-    lamda = 0.05 # reasonable 0.01-0.1
-    crefVersion = True
-    lamda = 0.05 # cref version needs larger 
-    h = -1 #-0.1 # 2 / (L+mu) -- should 1/diag * F^t F * c
+def RNA(G, F, g, f, it_, m_, Fe, fe, res_pcg, lamda=0.05, h=-1):
+    #lamda = 0.05 # reasonable 0.01-0.1
+    crefVersion = True #False
+    #lamda = 0.05 # cref version needs larger 
+    #h = -1 #-0.1 # 2 / (L+mu) -- should 1/diag * F^t F * c
     id_ = it_ % m_
     if len(G) >= m_:
         #print("it, it%m", it, " ", it % m)
@@ -1935,7 +1941,10 @@ def RNA(G, F, g, f, it_, m_, Fe, fe, lamda):
     Fs_ = np.concatenate(F).reshape(mg, -1).transpose()
     Fes_ = np.concatenate(Fe).reshape(mg, -1).transpose()
     #print("Fs ", Fs.shape)
-    FtF = Fs_.transpose().dot(Fs_) # why dot?
+
+    #FtF = Fs_.transpose().dot(Fs_) # why dot?
+    FtF = Fs_.transpose().dot(res_pcg * Fs_) # why dot?
+
     fTfNorm = np.linalg.norm(FtF, 2)
     #print("FtF ", FtF.shape, " |FtF|_2=", fTfNorm)
 
@@ -2049,8 +2058,9 @@ its = 60
 cost = np.zeros(kClusters)
 lastCost = 1e20
 lastCostDRE = 1e20
-basic_version = True # accelerated or basic
+basic_version = False # accelerated or basic
 sequential = True
+# 173 true is better ?! maybe cluster?
 linearize_at_last_solution = True # linearize at uk or v. maybe best to check energy. at u or v. DRE:
 lib = ctypes.CDLL("./libprocess_clusters.so")
 init_lib()
@@ -2122,7 +2132,7 @@ if basic_version:
         currentCost = np.sum(cost)
         print(it, " ", round(currentCost), " gain ", round(lastCost - currentCost), ". ============= sum fk update takes ", end - start," s",)
 
-        landmark_v, _ = average_landmarks_new(
+        landmark_v, _, _ = average_landmarks_new(
             point_indices_in_cluster, points_3d_in_cluster, landmark_s_in_cluster, L_in_cluster, Vl_in_cluster, landmark_v, delta_l_in_cluster
         )
 
@@ -2185,7 +2195,7 @@ else:
     landmark_s_in_cluster_bfgs = [0 for x in range(kClusters)] # dummy fill list
     steplength = [0 for x in range(kClusters)]
     lastCostDRE_bfgs = lastCostDRE
-    Gs = [] 
+    Gs = []
     Fs = []
     Fes = []
     rnaBufferSize = 6
@@ -2202,14 +2212,14 @@ else:
         globalSingleLandmarksA_in_c,
         globalSingleLandmarksB_in_c
     ) = prox_f(
-        x0_p, camera_indices_in_cluster, point_indices_in_cluster, points_2d_in_cluster, 
+        x0_p, camera_indices_in_cluster, point_indices_in_cluster, points_2d_in_cluster,
         points_3d_in_cluster, landmark_s_in_cluster, L_in_cluster, Vl_in_cluster, kClusters, innerIts=innerIts, sequential=True,
         )
     end = time.time()
     currentCost = np.sum(cost)
     print(-1, " ", round(currentCost), " gain ", round(lastCost - currentCost), ". ============= sum fk update takes ", end - start," s",)
 
-    landmark_v, Vl_all = average_landmarks_new( # v update
+    landmark_v, Vl_all, V_cluster_zeros = average_landmarks_new( # v update
         point_indices_in_cluster, points_3d_in_cluster, landmark_s_in_cluster, L_in_cluster, Vl_in_cluster, landmark_v, delta_l_in_cluster
     )
 
@@ -2273,7 +2283,25 @@ else:
             multiplier = steplength / dk_stepLength
         else:
             L_rna = max(L_in_cluster)
-            Gs, Fs, Fes, dk = RNA(Gs, Fs, rna_s, L_rna * bfgs_r, it, rnaBufferSize, Fes, bfgs_r, lamda = 1)
+
+            U_diag = np.zeros(rna_s.shape)
+            for ci in range(kClusters):
+                U_diag[ci * 3 * n_points: (ci+1) * 3 * n_points] = blockEigenvalue(V_cluster_zeros[ci], 3).diagonal()
+            U_diag = diag_sparse(U_diag)
+            #0.001 * lambdaScale
+            #59 / 0  ======== DRE BFGS ======  510799  ========= gain  52 ==== f(v)=  510791  f(u)=  510825  ~=  510808.95759023685
+            #U_diag = np.ones(rna_s.shape)
+            #U_diag = diag_sparse(U_diag)
+
+            # inverse from some reason
+            # same performance so no clear if needed at all. likely not :)
+            # temp = U_diag.diagonal()[:]
+            # temp[temp < 1e-4] = 1e10
+            # U_diag.diagonal()[:] = 1. / temp[:]
+            # U_diag.diagonal()[temp >= 1e10] = 0
+
+            lambdaScale = np.sqrt(np.mean(U_diag.diagonal())) # sqrt?
+            Gs, Fs, Fes, dk = RNA(Gs, Fs, rna_s, L_rna * bfgs_r, it, rnaBufferSize, Fes, bfgs_r, res_pcg=U_diag, lamda = 0.001 * lambdaScale, h =-1)
             dk = dk - (rna_s - bfgs_r)
             dk_stepLength = np.linalg.norm(dk, 2)
             multiplier = 1
@@ -2287,7 +2315,8 @@ else:
         line_search_iterations = 3
         print(" ..... step length ", steplength, " bfgs step ", dk_stepLength, " ratio ", multiplier)
         for ls_it in range(line_search_iterations):
-            tk = ls_it / (line_search_iterations-1)
+            tk = ls_it / max(1,line_search_iterations-1)
+            #tk = 1 #  512254  ========= gain  78 ==== f(v)=  512198  f(u)=  512375
             #---- |u-s|^2_D  12854 |u-v|^2_D  131 |2u-s-v|^2_D  13090 |u-v|^2  1234
             #10 / 0  ======== DRE BFGS ======  29010  ========= gain  513 ==== f(v)=  29336  f(u)=  28616  ~=  28615.853615225344
             #13 / 0  ======== DRE BFGS ======  28612  ========= gain  469 ==== f(v)=  28672  f(u)=  28494  ~=  28493.593312067547
@@ -2315,7 +2344,7 @@ else:
                 )
             #print("2. x0_p", "points_3d_in_cluster", points_3d_in_cluster)
             currentCost_bfgs = np.sum(cost_bfgs)
-            landmark_v_bfgs, Vl_all = average_landmarks_new( # v update
+            landmark_v_bfgs, Vl_all, V_cluster_zeros = average_landmarks_new( # v update
                 point_indices_in_cluster, points_3d_in_cluster_bfgs, landmark_s_in_cluster_bfgs, L_in_cluster_bfgs, Vl_in_cluster_bfgs, landmark_v, delta_l_in_cluster
                 )
             #print("3. x0_p", x0_p, "points_3d_in_cluster", points_3d_in_cluster)
@@ -2359,7 +2388,10 @@ else:
             if dre_bfgs <= lastCostDRE_bfgs or ls_it == line_search_iterations-1 : # not correct yet, must be <= last - c/gamma |u-v|
                 for ci in range(kClusters):
                     landmark_s_in_cluster[ci] = landmark_s_in_cluster_bfgs[ci].copy()
-                    points_3d_in_cluster[ci] = points_3d_in_cluster_bfgs[ci].copy()
+                    if linearize_at_last_solution:
+                        points_3d_in_cluster[ci] = points_3d_in_cluster_bfgs[ci].copy()
+                    else:
+                        points_3d_in_cluster[ci] = landmark_v_bfgs.copy()
                     Vl_in_cluster[ci] = Vl_in_cluster_bfgs[ci].copy()
                 L_in_cluster = L_in_cluster_bfgs.copy()
                 landmark_v = landmark_v_bfgs.copy()

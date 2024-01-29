@@ -27,7 +27,7 @@ BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/dubrovnik/"
 FILE_NAME = "problem-16-22106-pre.txt.bz2"
 #FILE_NAME = "problem-356-226730-pre.txt.bz2" # large dub, play with ideas: cover, etc
 #FILE_NAME = "problem-237-154414-pre.txt.bz2"
-#FILE_NAME = "problem-173-111908-pre.txt.bz2"
+FILE_NAME = "problem-173-111908-pre.txt.bz2"
 #FILE_NAME = "problem-135-90642-pre.txt.bz2"
 
 #BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/trafalgar/"
@@ -765,7 +765,7 @@ def average_cameras_new(
     num_cameras = poses_in_cluster[0].shape[0]
     sum_Ds_2u = np.zeros(num_cameras * 9)
     sum_constant_term = 0
-    UL_zeros_in_cluster_ = [0 for i in range(len(poses_s_in_cluster))]
+    UL_zeros_in_cluster_ = []
     for i in range(len(L_in_cluster_)):
         # Lc = L_in_cluster_[i]
         camera_indices_ = np.unique(camera_indices_in_cluster_[i])
@@ -1345,7 +1345,7 @@ def prox_f(camera_indices_in_cluster_, point_indices_in_cluster_, points_2d_in_c
 # fill lists G and F, with g and f = g - old g, sets of size m, 
 # at position it % m, c^t compute F^tF c + lamda (c - 1/k)^2, sum c=1
 # g = x0, f = delta. Actullay xnew = xold + delta.
-def RNA(G, F, g, f, it_, m_, Fe, fe, lamda, h):
+def RNA(G, F, g, f, it_, m_, Fe, fe, lamda, h, res_pcg):
     #lamda = 0.05 # reasonable 0.01-0.1
     crefVersion = True
     #lamda = 0.05 # cref version needs larger 
@@ -1371,7 +1371,10 @@ def RNA(G, F, g, f, it_, m_, Fe, fe, lamda, h):
     Fs_ = np.concatenate(F).reshape(mg, -1).transpose()
     Fes_ = np.concatenate(Fe).reshape(mg, -1).transpose()
     #print("Fs ", Fs.shape)
-    FtF = Fs_.transpose().dot(Fs_) # why dot?
+
+    #FtF = Fs_.transpose().dot(Fs_)
+    FtF = Fs_.transpose().dot(res_pcg * Fs_) # why dot?
+
     fTfNorm = np.linalg.norm(FtF, 2)
     #print("FtF ", FtF.shape, " |FtF|_2=", fTfNorm)
 
@@ -1484,7 +1487,7 @@ its = 30
 cost = np.zeros(kClusters)
 lastCost = 1e20
 lastCostDRE = 1e20
-basic_version = True # accelerated or basic
+basic_version = False # accelerated or basic
 sequential = True
 linearize_at_last_solution = True # linearize at uk or v. maybe best to check energy. at u or v. DRE:
 lib = ctypes.CDLL("./libprocess_clusters.so")
@@ -1636,7 +1639,7 @@ else:
         # get line search direction and update bfgs data
         # operate with np concatenate to get large vector and reshape search_direction here?
 
-        RNA_or_bfgs = False #True
+        RNA_or_bfgs = True
         if RNA_or_bfgs:
             use_bfgs = False # maybe full u,v?
             bfgs_r = np.zeros(kClusters * 9 * n_cameras)
@@ -1655,7 +1658,7 @@ else:
                 # recall best working was maybe similar to problem this was on v! directly.
                 # sk+1 + (dk + dk-1) or so.
 
-            print("Debug info bfgs_r=u-v: ", bfgs_r, " |bfgs_r| ", np.linalg.norm(bfgs_r, 2))
+            print("Debug info bfgs_r=u-v: |bfgs_r| ", np.linalg.norm(bfgs_r, 2))
 
             if use_bfgs:
                 dk = BFGS_direction(bfgs_r, bfgs_ps, bfgs_qs, bfgs_rhos, it, bfgs_mem, bfgs_mu)
@@ -1681,7 +1684,14 @@ else:
                 # print("dk", dk, " ", bfgs_r, " |bfgs_r| ", np.linalg.norm(bfgs_r, 2), " |dk| ", np.linalg.norm(dk, 2), " |rna_s| ", np.linalg.norm(rna_s, 2))
                 # print("dk - bfgs_r - rna_s ", dk - bfgs_r - rna_s, " |dk - bfgs_r - rna_s| ", np.linalg.norm(dk - bfgs_r - rna_s, 2))
 
-                Gs, Fs, Fes, dk = RNA(Gs, Fs, rna_s, bfgs_r, it, rnaBufferSize, Fes, bfgs_r, lamda = 0.25, h = -1)
+                U_diag = np.zeros(rna_s.shape)
+                for ci in range(kClusters):
+                    U_diag[ci * 9 * n_cameras: (ci+1) * 9 * n_cameras] = blockEigenvalue(U_cluster_zeros[ci], 9).diagonal()
+                U_diag = diag_sparse(U_diag)
+                #U_diag = np.ones(rna_s.shape)
+                #U_diag = diag_sparse(U_diag)
+
+                Gs, Fs, Fes, dk = RNA(Gs, Fs, rna_s, bfgs_r, it, rnaBufferSize, Fes, bfgs_r, lamda = 0.25, h = -1, res_pcg=U_diag)
                 # this works
                 #dk = rna_s + bfgs_r
                 # Ui_all = blockInverse(U_all, 9)
@@ -1694,7 +1704,7 @@ else:
                     dk = dk - (rna_s - bfgs_r)
                 else:
                     dk = dk - rna_s
-                print("Stepsizes taken dk", dk, " ", bfgs_r, " |bfgs_r| ", np.linalg.norm(bfgs_r, 2), " |dk| ", np.linalg.norm(dk, 2))
+                print("Stepsizes taken dk |bfgs_r| ", np.linalg.norm(bfgs_r, 2), " |dk| ", np.linalg.norm(dk, 2))
                 dk_stepLength = np.linalg.norm(dk, 2)
                 multiplier = 1
 

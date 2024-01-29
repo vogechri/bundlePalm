@@ -2778,6 +2778,8 @@ def RNA_P(G, F, g, f, it_, m_, Fe, fe, lamda, h):
     Fs_ = np.concatenate(F).reshape(mg, -1).transpose()
     Fes_ = np.concatenate(Fe).reshape(mg, -1).transpose()
     #print("Fs ", Fs.shape)
+
+    # change this to use a diagonal matrix, idea is to use the impact of each residual on the cost.
     FtF = Fs_.transpose().dot(Fs_) # why dot?
     fTfNorm = np.linalg.norm(FtF, 2)
     #print("FtF ", FtF.shape, " |FtF|_2=", fTfNorm)
@@ -3342,7 +3344,7 @@ if basic_version:
                         wk = wk1.copy()
 
                     use_bfgs = False
-                    if use_bfgs:
+                    elif use_bfgs:
                         xk05 = np.concatenate([x0_p.flatten(), points_3d_in_cluster[0].flatten()])
                         xk1 = np.concatenate([x0_p_new.flatten(), landmark_v.flatten()])
                         xk  = np.concatenate([x0_p_old.flatten(), landmark_v_old.flatten()]) # past
