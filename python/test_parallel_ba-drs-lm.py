@@ -23,8 +23,8 @@ BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/ladybug/"
 FILE_NAME = "problem-49-7776-pre.txt.bz2"
 #FILE_NAME = "problem-73-11032-pre.txt.bz2"
 
-#BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/dubrovnik/"
-# FILE_NAME = "problem-16-22106-pre.txt.bz2"
+BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/dubrovnik/"
+FILE_NAME = "problem-16-22106-pre.txt.bz2"
 #FILE_NAME = "problem-356-226730-pre.txt.bz2" # large dub, play with ideas: cover, etc
 #FILE_NAME = "problem-237-154414-pre.txt.bz2"
 #FILE_NAME = "problem-173-111908-pre.txt.bz2"
@@ -1030,12 +1030,12 @@ def bundle_adjust(
 
             blockEigenvalueJtJ = blockEigenvalue(JtJ, 9)
             # TODO does work with 1.. ?
-            #stepSize = 1. * (blockEigMult * blockEigenvalueJtJ + 1.4 * JtJ.copy()) # Todo '2 *' vs 1 by convex. 
+            stepSize = 1. * (blockEigMult * blockEigenvalueJtJ + 1.4 * JtJ.copy()) # Todo '2 *' vs 1 by convex. 
             #stepSize = 1. * (1e-1 * diag_sparse(np.ones(JtJ.shape[0])) + 1.1 * JtJ.copy()) # not at all working
             # both of these are faster (accelerated only? or anyways?)
             # todo: maybe adjust factor on JtJ instead? or check extrapolation of s wrt. cost / penalty.
             # faster for normal, non accelerated runs
-            stepSize = diag_sparse(np.fmax(blockEigMult * JtJ.diagonal(), 1e-2)) + 1.1 * JtJ.copy() # stable 27.9 non-acc. with unstable but faster.
+            #stepSize = diag_sparse(np.fmax(blockEigMult * JtJ.diagonal(), 1e-2)) + 1.1 * JtJ.copy() # stable 27.9 non-acc. with unstable but faster.
             #stepSize = diag_sparse(np.fmax(blockEigMult * JtJ.diagonal(), 1e-1)) + 2.0 * JtJ.copy()# stable 28.1 non-acc. with unstable but faster.
             # this is what dre test is for, no? maybe cannot compare if we alter RELATIVE weight of step size.
 
@@ -1484,7 +1484,7 @@ its = 30
 cost = np.zeros(kClusters)
 lastCost = 1e20
 lastCostDRE = 1e20
-basic_version = False # accelerated or basic
+basic_version = True # accelerated or basic
 sequential = True
 linearize_at_last_solution = True # linearize at uk or v. maybe best to check energy. at u or v. DRE:
 lib = ctypes.CDLL("./libprocess_clusters.so")
@@ -1727,6 +1727,17 @@ else:
 
                 delta_s_old_ = delta_s_.copy()
 
+                # momentum simple, same for v? about same
+                #beta_nesterov = (it-1) / (it+2) # 0.7
+                #beta_nesterov = 0.7
+                #dk = s_new - s_cur + beta_nesterov * prev_dk
+                #vk = s_new - s_cur + 0.7 * prev_vk
+                # other idea is 
+
+            # other idea: treat delta as momentum gradient.
+            # later do rms prop?
+            prev_dk = dk.copy()
+
             #dk = s_new - s_cur + 5 * delta_s # all of this is worse for mult = 1 .. 4
             dk_stepLength = np.linalg.norm(dk, 2)
             multiplier = steplength / dk_stepLength
@@ -1750,10 +1761,10 @@ else:
 
             # prox on line search s:
             #print("1. x0_p", "points_3d_in_cluster", points_3d_in_cluster)
-            if False and not linearize_at_last_solution: # linearize at v / average solution, same issue I suppose. Yes. solution is too return the new gradient, s.t. update of v is wrt to current situation.
-                poses_in_cluster_bfgs = [poses_v.copy() for _ in range(kClusters)]
-            else:
+            if True or linearize_at_last_solution: # linearize at v / average solution, same issue I suppose. Yes. solution is too return the new gradient, s.t. update of v is wrt to current situation.
                 poses_in_cluster_bfgs = [elem.copy() for elem in poses_in_cluster]
+            else: # does not work well here.
+                poses_in_cluster_bfgs = [poses_v.copy() for _ in range(kClusters)]
 
             L_in_cluster_bfgs = L_in_cluster.copy()
             Ul_in_cluster_bfgs = [elem.copy() for elem in Ul_in_cluster]

@@ -13,30 +13,30 @@ from numpy.linalg import inv as inv_dense
 # idea reimplement projection with torch to get a jacobian -> numpy then 
 import torch
 import math
-import open3d as o3d
+# import open3d as o3d
 from torch.autograd.functional import jacobian
 from torch import tensor, from_numpy
 
 # look at website. This is the smallest problem. guess: pytoch cpu is pure python? 
 BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/ladybug/"
-#FILE_NAME = "problem-49-7776-pre.txt.bz2"
+FILE_NAME = "problem-49-7776-pre.txt.bz2"
 #FILE_NAME = "problem-73-11032-pre.txt.bz2"
-FILE_NAME = "problem-138-19878-pre.txt.bz2"
-FILE_NAME = "problem-646-73584-pre.txt.bz2"
+#FILE_NAME = "problem-138-19878-pre.txt.bz2"
+#FILE_NAME = "problem-646-73584-pre.txt.bz2"
 
-BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/trafalgar/"
+#BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/trafalgar/"
 # FILE_NAME = "problem-21-11315-pre.txt.bz2"
-FILE_NAME = "problem-257-65132-pre.txt.bz2"
+#FILE_NAME = "problem-257-65132-pre.txt.bz2"
 
 BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/dubrovnik/"
-#FILE_NAME = "problem-16-22106-pre.txt.bz2"
-FILE_NAME = "problem-356-226730-pre.txt.bz2"
-#FILE_NAME = "problem-237-154414-pre.txt.bz2"
+FILE_NAME = "problem-16-22106-pre.txt.bz2"
+# FILE_NAME = "problem-356-226730-pre.txt.bz2"
+# #FILE_NAME = "problem-237-154414-pre.txt.bz2"
 FILE_NAME = "problem-173-111908-pre.txt.bz2" # ex where power its are worse ->493669
 
-# test problem with / without removal of far points.
-# ~702k, with far: 737k jeps=1e-4
-FILE_NAME = "problem-135-90642-pre.txt.bz2"
+# # test problem with / without removal of far points.
+# # ~702k, with far: 737k jeps=1e-4
+# FILE_NAME = "problem-135-90642-pre.txt.bz2"
 
 #BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/venice/"
 #FILE_NAME = "problem-52-64053-pre.txt.bz2"
@@ -1285,7 +1285,7 @@ def is_topk(a, k=1):
 # k iteration number, mem: memory, mu: initial approx mu=1 usually
 # maybe q current residual (of computed update) , qs:gradient/residual difference, ps: target/update of target, eg s^+ - s -> H(s,y) * q
 # differs from drs version significantly.
-def BFGS_direction(r, pk, qk, ps, qs, rhos, k, mem, mu):
+def BFGS_direction(r, pk, qk, ps, qs, rhos, k, mem, mu, Hessian):
     # r = -r # not needed with below
     # lookup k-1, k-mem entries. 
     alpha = np.zeros([mem,1])
@@ -1300,6 +1300,10 @@ def BFGS_direction(r, pk, qk, ps, qs, rhos, k, mem, mu):
         print(j, " 1st. al ", alpha[j], " rh ", rhos[j], " qs " , np.linalg.norm(qs[j],2), " ps " , np.linalg.norm(ps[j],2) )
 
     dk = mu * r
+    if False: # no help at all
+        r1 = Hessian[0] * r[:n_cameras*9] #+ Hessian[2] * r[n_cameras*9:]
+        r2 = Hessian[1] * r[n_cameras*9:] #+ Hessian[2].transpose() * r[:n_cameras*9]
+        dk = np.hstack((r1, r2), dtype=np.float64)
 
     for i in range(np.maximum(k-mem, 0), k):
         #print("2i", i) # k-1, .. k-mem usually
@@ -1327,7 +1331,7 @@ def BFGS_direction(r, pk, qk, ps, qs, rhos, k, mem, mu):
 
     return (dk, ps, qs, rhos)
 
-write_output = False #True
+write_output = True
 read_output = False
 if read_output:
     camera_params_np = np.fromfile("camera_params.dat", dtype=np.float64)
@@ -1350,26 +1354,29 @@ def rerender(vis, geometry, landmarks, save_image):
         vis.capture_screen_image("temp_%04d.jpg" % i)
     #vis.destroy_window()
 
-o3d.utility.set_verbosity_level(o3d.utility.VerbosityLevel.Debug)
-vis = o3d.visualization.Visualizer()
-vis.create_window()
-geometry = o3d.geometry.PointCloud()
-#geometry.points = o3d.utility.Vector3dVector(points_3d[0:65000,:])
-#geometry.points = o3d.utility.Vector3dVector(points_3d[70500:,:])
-#print(points_3d[70480:70485:,:])
-#points_3d[70483,:] = np.array([0,0,0]) # bad points to vis. does anything?
-#print(points_3d[70483,:])
+o3d_defined = False
+if o3d_defined:
+    o3d.utility.set_verbosity_level(o3d.utility.VerbosityLevel.Debug)
+    vis = o3d.visualization.Visualizer()
+    vis.create_window()
+    geometry = o3d.geometry.PointCloud()
 
-#points_3d[temp > 1e6,:] = np.array([0,0,0])
-#am = np.argsort(temp)
-#print(am, " ", points_3d[am,:] )
-#exit()
-#geometry.points = o3d.utility.Vector3dVector(points_3d[65000:66500:,:])
-geometry.points = o3d.utility.Vector3dVector(points_3d)
-vis.add_geometry(geometry)
-#o3d.visualization.draw_geometries([geometry])    # Visualize point cloud 
-save_image = False
-#exit()
+    #geometry.points = o3d.utility.Vector3dVector(points_3d[0:65000,:])
+    #geometry.points = o3d.utility.Vector3dVector(points_3d[70500:,:])
+    #print(points_3d[70480:70485:,:])
+    #points_3d[70483,:] = np.array([0,0,0]) # bad points to vis. does anything?
+    #print(points_3d[70483,:])
+
+    #points_3d[temp > 1e6,:] = np.array([0,0,0])
+    #am = np.argsort(temp)
+    #print(am, " ", points_3d[am,:] )
+    #exit()
+    #geometry.points = o3d.utility.Vector3dVector(points_3d[65000:66500:,:])
+    geometry.points = o3d.utility.Vector3dVector(points_3d)
+    vis.add_geometry(geometry)
+    #o3d.visualization.draw_geometries([geometry])    # Visualize point cloud 
+    save_image = False
+    #exit()
 
 # parameter bfgs
 bfgs_mem = 6 # 2:Cost @50:  -12.87175888983266, 6: cost @ 50: 12.871757400143322
@@ -1383,7 +1390,7 @@ bfgs_rhos = np.zeros([bfgs_mem, 1])
 useExtInCost = True # with using extrapolation, does it lead to lower cost, how much? -- must use with TR as well?
 L0 = 1.0 #e-3
 L = L0
-iterations = 100
+iterations = 50
 verbose = False
 debug = False
 useInvSolver = False
@@ -1625,7 +1632,10 @@ while it < iterations:
 
                 # todo: maybe this gets disturbed by few super large landmark deltas / unconstrained landmarks.
                 # mega todo: of course we cannot fill the buffer before we accept in this case.
-                dk, bfgs_ps, bfgs_qs, bfgs_rhos = BFGS_direction(bfgs_r, pk, qk, bfgs_ps, bfgs_qs, bfgs_rhos, sit-1, bfgs_mem, bfgs_mu)
+
+                #Vli = blockInverse(Vl, 3) # with these steps are tiny, with Ul gigantic
+                #Uli = blockInverse(Ul, 9)
+                dk, bfgs_ps, bfgs_qs, bfgs_rhos = BFGS_direction(bfgs_r, pk, qk, bfgs_ps, bfgs_qs, bfgs_rhos, sit-1, bfgs_mem, bfgs_mu, [Ul,Vl,W])
                 #print(sit-1, " it |pk - dk|^2 " , np.linalg.norm(pk - dk, 2))
                 # DeltaDiag = diag_sparse(np.concatenate([np.squeeze(JtJ.diagonal()), np.squeeze(JltJl.diagonal())] ))
                 # DeltaDiag = blockInverse(DeltaDiag, 1)
@@ -1676,10 +1686,20 @@ while it < iterations:
             Gs, Fs, Fes, extr, old_c = RNA(Gs, Fs, x0, deltaL, sit, rnaBufferSize, Fes, delta, lamda = lamdaRNA, old_c = old_c)
             #_, _, _, extr, _ = RNA(Gs, Fs, x0, deltaL, sit+1, rnaBufferSize, Fes, delta, lamda = lamdaRNA, old_c = old_c) # better with hmm
 
-            # test just 'acceleration' also working. Not so well though / significantly worse.
+            # test just 'acceleration' also working.
             #extr = x0 - (1./np.sqrt(2)-1) * delta
             #extr = x0 + (np.sqrt(2)-1) * delta
-            extr = x0 + 0.1 * delta # 192910, better than RNA
+            extr = x0 + 0.1 * delta # 192910, better than RNA. THIS, lol
+
+            # nesterov/polyak, not so well here.
+            heavyBall = False
+            if heavyBall:
+                if sit > 0:
+                    beta_nesterov = (sit-1) / (sit+2)
+                    delta_v = delta + 0.1 * beta_nesterov * delta_v
+                else:
+                    delta_v = delta
+                extr = x0 - delta + delta_v
 
         sit = sit + 1 # succesful iteration number
 
@@ -1696,8 +1716,9 @@ while it < iterations:
         print(it, "it. cost ext   ", round(costExt), "      with penalty ", round(costExtPenalty))
         #L = max(L0, L/2)
         # unsure about exact check. Does one ever work, why does the other lead to issues.
-        if useExtInCost and costExtPenalty < costEndPenalty: #costStart: # todo: + penalty again
-        #if useExtInCost and costExt < costEnd and costExtPenalty < costStart: # todo: + penalty again
+        # TODO:
+        #if useExtInCost and costExtPenalty < costEndPenalty: #costStart: # todo: + penalty again
+        if useExtInCost and costExt < costEnd and costExtPenalty < costStart: # todo: + penalty again
             x0 = extr
             x0_p = x0[:9 * n_cameras]
             x0_l = x0[9 * n_cameras:]
@@ -1720,8 +1741,9 @@ while it < iterations:
     if tr_check < eta_2:
         L = L * 2
 
-    rerender(vis, geometry, point_params[0:30000,:], save_image)
+    if o3d_defined:
+        rerender(vis, geometry, point_params[0:30000,:], save_image)
     
     if write_output:
-        camera_params.numpy().tofile("camera_params.dat")
-        point_params.numpy().tofile("point_params.dat")
+        camera_params.numpy().tofile("camera_params_base.dat")
+        point_params.numpy().tofile("point_params_base.dat")

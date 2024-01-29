@@ -22,8 +22,8 @@ BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/ladybug/"
 FILE_NAME = "problem-49-7776-pre.txt.bz2"
 #FILE_NAME = "problem-73-11032-pre.txt.bz2"
 
-#BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/dubrovnik/"
-# FILE_NAME = "problem-16-22106-pre.txt.bz2"
+BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/dubrovnik/"
+FILE_NAME = "problem-16-22106-pre.txt.bz2"
 #FILE_NAME = "problem-356-226730-pre.txt.bz2" # large dub, play with ideas: cover, etc
 #FILE_NAME = "problem-237-154414-pre.txt.bz2"
 #FILE_NAME = "problem-173-111908-pre.txt.bz2"
@@ -2261,6 +2261,7 @@ else:
 
         use_bfgs = False # maybe full u,v?
         if use_bfgs:
+            # ok what happens if we replace mu by the hessian we have? Vl_all or even the Vl we have.
             dk = BFGS_direction(bfgs_r, bfgs_ps, bfgs_qs, bfgs_rhos, it, bfgs_mem, bfgs_mu)
             dk_stepLength = np.linalg.norm(dk, 2)
             # step length by using Vl, also above computing steplength!
