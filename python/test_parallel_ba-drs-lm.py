@@ -982,12 +982,12 @@ def bundle_adjust(
     cameras_s_, # taylor expand at point_3d_in -> prox on landmark_s_ - points_3d = lambda (multiplier)
     Ul_in_c_,
     L_in_cluster_,
+    LipJ, # start with 1.0. externally increase if dre increases
     successfull_its_=1,
 ):
     # print("landmarks_only_in_cluster_  ", landmarks_only_in_cluster_, " ", np.sum(landmarks_only_in_cluster_), " vs ", np.sum(1 - landmarks_only_in_cluster_) )
     newForUnique = False
     blockEigMult = 1e-3 # 1e-3 was used before
-    J_scale = 1.0
     L = L_in_cluster_
     minimumL = 1e-6
     updateJacobian = True
@@ -1031,7 +1031,7 @@ def bundle_adjust(
 
             blockEigenvalueJtJ = blockEigenvalue(JtJ, 9)
             # TODO does work with 1.. ?
-            stepSize = 1. * (blockEigMult * blockEigenvalueJtJ + J_scale * JtJ.copy()) # Todo '2 *' vs 1 by convex. 
+            stepSize = 1. * (blockEigMult * blockEigenvalueJtJ + LipJ * JtJ.copy()) # Todo '2 *' vs 1 by convex. 
             # stepSize = 1. * (blockEigMult * blockEigenvalueJtJ + 1.4 * JtJ.copy()) # Todo '2 *' vs 1 by convex. 
             #stepSize = 1. * (1e-1 * diag_sparse(np.ones(JtJ.shape[0])) + 1.1 * JtJ.copy()) # not at all working
             # both of these are faster (accelerated only? or anyways?)
@@ -1155,7 +1155,7 @@ def bundle_adjust(
 
         if tr_check >= tr_eta_2 and LfkViolated: # violated -- should revert update.
             steSizeTouched = True
-            print(" |||||||  Lfk distance ", LfkDistance, " -nabla^Tdelta=" , -bp.dot(delta_p) - bl.dot(delta_l), " |||||||")
+            print(" |||||||  Lfk distance ", LfkDistance, " -nabla^Tdelta=" , -bp.dot(delta_p) - bl.dot(delta_l), " LipJ ", LipJ, " |||||||")
             #stepSize = stepSize * 2
             # other idea, initially we only add 1/2^k eg 0.125, times the needed value and inc if necessary, maybe do not add anything if not needed.
 
@@ -1165,7 +1165,7 @@ def bundle_adjust(
 
             # try this, should memorize if works (exists scale s.t. fulfilled)
             # rather if dre is violated increase this.
-            #J_scale += 0.2
+            #LipJ += 0.2 EXTERNALLY -- we do not know if dre increases.
             #stepSize = 1. * (blockEigMult * blockEigenvalueJtJ + J_scale * JtJ.copy()) # Todo '2 *' vs 1 by convex. 
             
             JtJDiag = 1/L * stepSize.copy()
@@ -1243,6 +1243,7 @@ def updateCluster(
     Vl_in_cluster_,
     L_in_cluster_,
     pose_occurences,
+    LipJ,
     its_,
 ):
     landmark_indices_in_c_ = np.unique(landmark_indices_in_cluster_)
@@ -1283,6 +1284,7 @@ def updateCluster(
         poses_s_in_c,
         Vl_in_cluster_, # these are for those poses in cluster only. 
         L_in_cluster_,
+        LipJ,
         its_,
     )
 
@@ -1297,7 +1299,8 @@ def updateCluster(
     )
 
 def prox_f(camera_indices_in_cluster_, point_indices_in_cluster_, points_2d_in_cluster_,
-    poses_in_cluster_, landmarks_, poses_s_in_cluster_, L_in_cluster_, Vl_in_cluster_, kClusters, innerIts=1, sequential=True) :
+    poses_in_cluster_, landmarks_, poses_s_in_cluster_, L_in_cluster_, Vl_in_cluster_, 
+    kClusters, LipJ, innerIts=1, sequential=True) :
     cost_ = np.zeros(kClusters)
 
     num_poses = poses_in_cluster_[0].shape[0]
@@ -1328,6 +1331,7 @@ def prox_f(camera_indices_in_cluster_, point_indices_in_cluster_, points_2d_in_c
             Vl_in_cluster_[ci],
             L_in_cluster_[ci],
             pose_occurences, # haeh?
+            LipJ[ci],
             its_=innerIts,
         )
         cost_[ci] = cost_c_
@@ -1499,6 +1503,7 @@ sequential = True
 linearize_at_last_solution = True # linearize at uk or v. maybe best to check energy. at u or v. DRE:
 lib = ctypes.CDLL("./libprocess_clusters.so")
 init_lib()
+LipJ = np.ones(kClusters)
 
 # f(x) + 1/2 (v^T Vlk * v - v^T 2 * Vlk (2x - sk) ) for x=u/v. Does not look right .. haeh
 # 
@@ -1542,7 +1547,8 @@ if basic_version:
             landmarks
         ) = prox_f(
             camera_indices_in_cluster, point_indices_in_cluster, points_2d_in_cluster,
-            poses_in_cluster, landmarks, poses_s_in_cluster, L_in_cluster, Ul_in_cluster, kClusters, innerIts=innerIts, sequential=True,
+            poses_in_cluster, landmarks, poses_s_in_cluster, L_in_cluster, Ul_in_cluster, 
+            kClusters, LipJ, innerIts=innerIts, sequential=True,
             )
         end = time.time()
 
@@ -1584,6 +1590,9 @@ if basic_version:
         print( it, " ======== DRE ====== ", round(dre) , " ========= gain " , \
             round(lastCostDRE - dre), "==== f(v)= ", round(primal_cost_v), " f(u)= ", round(primal_cost_u))
 
+        if lastCostDRE < dre:
+            LipJ += 0.2 * np.ones(kClusters)
+
         lastCost = currentCost
         # print(" output shapes ", x0_p_c.shape, " ", x0_l_c.shape, " takes ", end-start , " s")
         if False and lastCostDRE - dre < 1:
@@ -1622,7 +1631,8 @@ else:
         landmarks
     ) = prox_f(
         camera_indices_in_cluster, point_indices_in_cluster, points_2d_in_cluster,
-        poses_in_cluster, landmarks, poses_s_in_cluster, L_in_cluster, Ul_in_cluster, kClusters, innerIts=innerIts, sequential=True,
+        poses_in_cluster, landmarks, poses_s_in_cluster, L_in_cluster, Ul_in_cluster, 
+        kClusters, LipJ, innerIts=innerIts, sequential=True,
         )
     end = time.time()
     currentCost = np.sum(cost)
@@ -1792,7 +1802,8 @@ else:
                 landmarks_bfgs,
             ) = prox_f(
                 camera_indices_in_cluster, point_indices_in_cluster, points_2d_in_cluster, 
-                poses_in_cluster_bfgs, landmarks.copy(), poses_s_in_cluster_bfgs, L_in_cluster_bfgs, Ul_in_cluster_bfgs, kClusters, innerIts=innerIts, sequential=True,
+                poses_in_cluster_bfgs, landmarks.copy(), poses_s_in_cluster_bfgs, L_in_cluster_bfgs, 
+                Ul_in_cluster_bfgs, kClusters, LipJ, innerIts=innerIts, sequential=True,
                 )
             
             #print("2. x0_p", "points_3d_in_cluster", points_3d_in_cluster)
@@ -1834,6 +1845,9 @@ else:
 
             print( it, "/", ls_it, " ======== DRE BFGS ====== ", round(dre_bfgs) , " ========= gain " , \
                 round(lastCostDRE_bfgs - dre_bfgs), "==== f(v)= ", round(primal_cost_v), " f(u)= ", round(primal_cost_u), " ~= ", currentCost_bfgs)
+
+            if lastCostDRE_bfgs < dre_bfgs and ls_it == line_search_iterations-1:
+                LipJ += 0.2 * np.ones(kClusters)
 
             # accept / reject, reject all but drs and see
             # if ls_it == line_search_iterations-1 :
