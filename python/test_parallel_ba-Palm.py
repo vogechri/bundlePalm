@@ -54,7 +54,7 @@ FILE_NAME = "problem-16-22106-pre.txt.bz2"
 # 6cluster, it 96 ====== f(v)=  514801. Try again new clustering
 #              39 ====== f(v)=  512339, 51 ==== accelerated f(v)=  510986 | different clustering.
 # 149 ====== f(v)=  501696
-FILE_NAME = "problem-173-111908-pre.txt.bz2"
+#FILE_NAME = "problem-173-111908-pre.txt.bz2"
 # with x2 extrapolation 2 * delta 6 line searches:
 #26 ====== f(v)=  506172  Gain:  138  and  732184  cost per ci  [98575, 70440, 87981, 61002, 118754, 69419]
 
@@ -2869,8 +2869,8 @@ x0_p = x0_p.reshape(n_cameras, 9)
 # s := landmark_s_in_cluster
 # v := output, temporary
 
-write_output = True
-read_output =  True
+write_output = False
+read_output =  False
 if read_output:
     #camera_params_np = np.fromfile("camera_params.dat", dtype=np.float64)
     #point_params_np = np.fromfile("point_params.dat", dtype=np.float64)
@@ -3330,6 +3330,7 @@ if basic_version:
                     landmark_v_old = landmark_v.copy()
                 else:
                     baseRNA = False # does work now -- with x2 steps :)
+                    use_bfgs = False
                     if baseRNA:
                         xk1 = np.concatenate([x0_p_new.flatten(), landmark_v.flatten()])
                         xk = np.concatenate([x0_p_old.flatten(), landmark_v_old.flatten()]) # x2 step
@@ -3342,8 +3343,6 @@ if basic_version:
                         camera_ext_ = x_extr[: 9 * n_cameras].reshape(n_cameras, 9)
                         point_ext_ = x_extr[9*n_cameras :].reshape(n_points, 3)
                         wk = wk1.copy()
-
-                    use_bfgs = False
                     elif use_bfgs:
                         xk05 = np.concatenate([x0_p.flatten(), points_3d_in_cluster[0].flatten()])
                         xk1 = np.concatenate([x0_p_new.flatten(), landmark_v.flatten()])
@@ -3366,7 +3365,6 @@ if basic_version:
                         bfgs_ps[it % bfgs_mem] = bfgs_r
                         bfgs_qs[it % bfgs_mem] = -(xk1 - xk05 - (xk05 - xk)) # - or + ?
                         bfgs_rhos[it % bfgs_mem] = np.maximum(0., 1./ bfgs_qs[it % bfgs_mem].dot(bfgs_ps[it % bfgs_mem]))
-
                     else:
                         # other idea would be
                         # wk+1 = rna_delta

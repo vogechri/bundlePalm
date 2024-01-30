@@ -23,7 +23,7 @@ FILE_NAME = "problem-49-7776-pre.txt.bz2"
 #FILE_NAME = "problem-73-11032-pre.txt.bz2"
 
 BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/dubrovnik/"
-FILE_NAME = "problem-16-22106-pre.txt.bz2"
+#FILE_NAME = "problem-16-22106-pre.txt.bz2"
 #FILE_NAME = "problem-356-226730-pre.txt.bz2" # large dub, play with ideas: cover, etc
 #FILE_NAME = "problem-237-154414-pre.txt.bz2"
 FILE_NAME = "problem-173-111908-pre.txt.bz2"
@@ -1135,7 +1135,13 @@ def average_landmarks_new(
 #                     rho_k/2 <u_k - v_k, u_k - v_k> - rho_k <s_k - u_k, u_k - v_k>
 #                     rho_k/2 <u_k - v_k - 2s_k + 2u_k, u_k - v_k>
 #                     rho_k/2 <3u_k - v_k - 2s_k, u_k - v_k>
-#                     rho_k/2 {v^tv - vT[2uk-sk] + uk^T[3uk-2sk]}
+#                     rho_k/2 {v^tv -  vT[2uk-sk] + uk^T[3uk-2sk]}
+#                     rho_k/2 {v^tv - 2vT[2uk-sk] + uk^T[3uk-2sk]} # different
+# 2nd try: 
+#                     rho_k/2 <3u_k - v_k - 2s_k, u_k - v_k>
+# SOO dumb. compute per part, help to select?! u or v
+# insert v for uk -> R/2 (-v^tv + v^t sk + 3v^tv - 2 v^ts) = R/2 (2v^tv - v^ts)
+# insert v=u above -> '0'
 def cost_DRE(
     point_indices_in_cluster_, points_3d_in_cluster_, landmark_s_in_cluster_, L_in_cluster_, VL_in_cluster_, landmark_v_
 ):
@@ -1146,6 +1152,7 @@ def cost_DRE(
     sum_u_v = 0
     sum_u_v_ = 0
     sum_2u_s_v = 0
+    dre_per_part = []
     for i in range(len(L_in_cluster_)):
         point_indices_ = np.unique(point_indices_in_cluster_[i])
         indices = np.repeat(
@@ -1177,6 +1184,19 @@ def cost_DRE(
         sum_u_v += u_v.dot(V_land * u_v)
         sum_u_v_ += u_v.dot(u_v)
         sum_2u_s_v += v_u2_s.dot(V_land * v_u2_s)
+
+        # rho_k/2 {vT[4uk-2sk-vk] + uk^T[3uk-2sk]}
+        # rho_k/2 <3u_k - v_k - 2s_k, u_k - v_k>
+        # same as my dre cost here.
+        #local_cost = 0.5 * (u_v.dot(V_land * (u2_s + u_v - landmark_s_in_cluster_[i].flatten())))
+
+        # different omg
+        # rho_k/2 |u_k - v_k|^2 - rho_k <s_k - u_k, u_k - v_k>
+        # rho_k/2 |u_k - v_k|^2 - rho_k/2 <2(s_k - u_k), u_k - v_k>
+        # rho_k/2 <u_k - v_k - 2(s_k - u_k), u_k - v_k>
+        local_cost = 0.5 * u_v.dot(V_land * (u_v + 2 * u_s))
+        dre_per_part.append(local_cost.copy())
+
         if i == 0:
             Vl_all = V_land
         else:
@@ -1187,7 +1207,9 @@ def cost_DRE(
     # i want |u-s|_D |u-v|_D, also |v-2u-s|_D
     cost_input  = 0.5 * (landmark_v_.flatten().dot(Vl_all * landmark_v_.flatten() - 2 * sum_Ds_2u) + sum_constant_term)
     print("---- |u-s|^2_D ", round(sum_u_s), "|u-v|^2_D ", round(sum_u_v), "|2u-s-v|^2_D ", round(sum_2u_s_v), "|u-v|^2 ", round(sum_u_v_))
-    return cost_input
+    # print("dre_per_part ",dre_per_part)
+    #print(np.sum(np.array(dre_per_part)), " ", cost_input)
+    return cost_input, dre_per_part
 
 
 def average_landmarks(point_indices_in_cluster_, points_3d_in_cluster_, L_in_cluster_):
@@ -1349,8 +1371,8 @@ def bundle_adjust(
             #     stepSize.data = np.maximum(0.05 * stepSize.data, blockEigenvalueJltJl.data) # else diagSparse of it
             
             # '2 *' smallest example dies with < 2 ok with 2.
-            stepSize = 1. * (blockEigMult * blockEigenvalueJltJl + 2 * JltJl.copy()) # Todo '2 *' vs 1 by convex.
-            #stepSize = 1. * (blockEigMult * blockEigenvalueJltJl + 1 * JltJl.copy()) # this already suffices
+            #stepSize = 1. * (blockEigMult * blockEigenvalueJltJl + 2 * JltJl.copy()) # Todo '2 *' vs 1 by convex.
+            stepSize = 1. * (blockEigMult * blockEigenvalueJltJl + 1 * JltJl.copy()) # this already suffices
             #stepSize = 1. * (1e-0 * diag_sparse(np.ones(n_points_*3)) + 1.0 * JltJl.copy()) # not so good
 
             # problem blockinverse assume data is set in full 3x3
@@ -1519,9 +1541,9 @@ def bundle_adjust(
 
             if normal_case_:
                 if True: # just adjusted: blockEigenvalueJltJl * L above s.t. it depends on L
+                    stepSize += blockEigMult * blockEigenvalueJltJl
                     blockEigenvalueJltJl.data *= 2 # appears slow but safe
                     #stepSize.data = np.maximum(stepSize.data, blockEigenvalueJltJl.data) # else diagSparse of it
-                    stepSize = blockEigMult * blockEigenvalueJltJl + JltJl.copy()
 
                     JltJlDiag = 1/L * stepSize.copy()
                     penaltyStartConst = prox_rhs.dot(JltJlDiag * prox_rhs)
@@ -1971,7 +1993,7 @@ def RNA(G, F, g, f, it_, m_, Fe, fe, res_pcg, lamda=0.05, h=-1):
     return (G, F, Fe, np.squeeze(extrapolation - h * extrapolationF))
 
 
-def BFGS_direction(r, ps, qs, rhos, k, mem, mu):
+def BFGS_direction(r, ps, qs, rhos, k, mem, mu, U_diag):
     # r = -r # not needed with below
     # lookup k-1, k-mem entries. 
     alpha = np.zeros([mem,1])
@@ -1987,7 +2009,8 @@ def BFGS_direction(r, ps, qs, rhos, k, mem, mu):
         if (rhos[j]>0):
             print(j, " 1st. al ", alpha[j], " rh ", rhos[j], " qs " , np.linalg.norm(qs[j],2), " ps " , np.linalg.norm(ps[j],2) )
 
-    dk_ = mu * r
+    #dk_ = mu * r
+    dk_ = U_diag * r
 
     for i in range(np.maximum(k-mem, 0), k):
         #print("2i", i) # k-1, .. k-mem usually
@@ -2065,6 +2088,7 @@ linearize_at_last_solution = True # linearize at uk or v. maybe best to check en
 lib = ctypes.CDLL("./libprocess_clusters.so")
 init_lib()
 
+# for part k: given Vk, uk and v,  
 # f(x) + 1/2 (v^T Vlk * v - v^T 2 * Vlk (2x - sk) ) for x=u/v. Does not look right .. haeh
 # 
 # The Lagrangian is sum_k f_k (x_k^t) - <mu^t_k, x_k^t - Bk z^t> + rho_k/2 | Bk z^t-x_k^t |^2
@@ -2075,6 +2099,7 @@ init_lib()
 # Hence it is fv' * fv versus fu' * fu + rho_k|u_k - v_k|^2 - rho_k <s_k - u_k, u_k - v_k> in DRS variables.
 # how did this turn into my dre cost? 
 # insert v -> only fk(v) remains. insert u: 
+# local cost is fv^2 + (v-s) Vl (v-s) or fu^2 + (u-s) Vl (u-s)
 
 globalSingleLandmarksA_in_c = [0 for x in range(kClusters)]
 globalSingleLandmarksB_in_c = [0 for x in range(kClusters)]
@@ -2137,18 +2162,20 @@ if basic_version:
         )
 
         #DRE cost BEFORE s update
-        dre = cost_DRE(point_indices_in_cluster, points_3d_in_cluster, landmark_s_in_cluster, L_in_cluster, Vl_in_cluster, landmark_v) + currentCost
+        #dre, dre_per_part = cost_DRE(point_indices_in_cluster, points_3d_in_cluster, landmark_s_in_cluster, L_in_cluster, Vl_in_cluster, landmark_v)
 
         tau = 1 # 2 is best ? does not generalize?!
         for ci in range(kClusters):
             landmark_s_in_cluster[ci] = landmark_s_in_cluster[ci] + tau * (landmark_v - points_3d_in_cluster[ci]) # update s = s + v - u.
 
         #DRE cost AFTER s update
-        #dre = cost_DRE(point_indices_in_cluster, points_3d_in_cluster, landmark_s_in_cluster, L_in_cluster, Vl_in_cluster, landmark_v) + currentCost
+        dre, dre_per_part = cost_DRE(point_indices_in_cluster, points_3d_in_cluster, landmark_s_in_cluster, L_in_cluster, Vl_in_cluster, landmark_v)
+        dre += currentCost
 
-        primal_cost_v = 0
+        primal_cost_us = [0 for _ in range(kClusters)]
+        primal_cost_vs = [0 for _ in range(kClusters)]
         for ci in range(kClusters):
-            primal_cost_v += primal_cost(
+            primal_cost_vs[ci] = primal_cost(
                 x0_p,
                 camera_indices_in_cluster[ci],
                 point_indices_in_cluster[ci],
@@ -2156,12 +2183,14 @@ if basic_version:
                 landmark_v) #points_3d_in_cluster[ci]) # v not u
         primal_cost_u = 0
         for ci in range(kClusters):
-            primal_cost_u += primal_cost(
+            primal_cost_us[ci] = primal_cost(
                 x0_p,
                 camera_indices_in_cluster[ci],
                 point_indices_in_cluster[ci],
                 points_2d_in_cluster[ci],
                 points_3d_in_cluster[ci]) # v not u
+        primal_cost_v = np.sum(np.array(primal_cost_vs))
+        primal_cost_u = np.sum(np.array(primal_cost_us))
 
         print( it, " ======== DRE ====== ", round(dre) , " ========= gain " , \
             round(lastCostDRE - dre), "==== f(v)= ", round(primal_cost_v), " f(u)= ", round(primal_cost_u))
@@ -2178,10 +2207,13 @@ if basic_version:
             # print ("output.shape ", output.shape, " ", points_3d_in_cluster[ci].shape, " ", point_indices_in_cluster[ci].shape, " ", point_indices.shape )
             # points_3d_in_cluster[ci][point_indices,:] = output[point_indices,:]
             if not linearize_at_last_solution: # linearize at v / average solution, same issue I suppose. Yes. solution is too return the new gradient, s.t. update of v is wrt to current situation.
-                # this was doing it twice accidentally
-                #landmark_s_in_cluster[ci] = landmark_s_in_cluster[ci] + landmark_v - points_3d_in_cluster[ci] # update s = s + v - u.
-                points_3d_in_cluster[ci]  = landmark_v.copy() # init at v, above at u
-                #points_3d_in_cluster[ci]  = landmark_s_in_cluster[ci].copy() # penalty is 0 but init position is WRONG
+                # points_3d_in_cluster[ci]  = landmark_v.copy() # init at v, above at u
+                #compare cost of part and dre_per_part to pick best option
+                if primal_cost_vs[ci] < primal_cost_us[ci] + dre_per_part[ci]:
+                    print(primal_cost_vs[ci], " < ", primal_cost_us[ci], " + ", dre_per_part[ci])
+                    points_3d_in_cluster[ci] = landmark_v.copy()
+                else:
+                    print(primal_cost_vs[ci], " > ", primal_cost_us[ci], " + ", dre_per_part[ci])
 
 else:
 
@@ -2271,17 +2303,40 @@ else:
 
         use_bfgs = False # maybe full u,v?
         if use_bfgs:
-            # ok what happens if we replace mu by the hessian we have? Vl_all or even the Vl we have.
-            dk = BFGS_direction(bfgs_r, bfgs_ps, bfgs_qs, bfgs_rhos, it, bfgs_mem, bfgs_mu)
-            dk_stepLength = np.linalg.norm(dk, 2)
-            # step length by using Vl, also above computing steplength!
-            #dk_stepLength = 0
-            for ci in range(kClusters): #bfgs_r = u-v
-                bfgs_r[ci * 3 * n_points: (ci+1) * 3 * n_points] = landmark_v.flatten() - points_3d_in_cluster[ci].flatten()
-                #dk_stepLength += (bfgs_r[ci * 3 * n_points: (ci+1) * 3 * n_points]).dot(Vl_all * (bfgs_r[ci * 3 * n_points: (ci+1) * 3 * n_points]))
-            #dk_stepLength = np.sqrt(dk_stepLength)
-            multiplier = steplength / dk_stepLength
-        else:
+            if False: # awful
+
+                U_diag = np.zeros(rna_s.shape)
+                for ci in range(kClusters):
+                    U_diag[ci * 3 * n_points: (ci+1) * 3 * n_points] = blockEigenvalue(V_cluster_zeros[ci], 3).diagonal()
+                U_diag = diag_sparse(U_diag)
+                temp = U_diag.diagonal()[:]
+                temp[temp < 1e-4] = 1e10
+                U_diag.diagonal()[:] = 1. / temp[:]
+                U_diag.diagonal()[temp >= 1e10] = 0
+
+                # ok what happens if we replace mu by the hessian we have? Vl_all or even the Vl we have.
+                dk = BFGS_direction(bfgs_r, bfgs_ps, bfgs_qs, bfgs_rhos, it, bfgs_mem, bfgs_mu, U_diag)
+                dk_stepLength = np.linalg.norm(dk, 2)
+                # step length by using Vl, also above computing steplength!
+                #dk_stepLength = 0
+                # for ci in range(kClusters): #bfgs_r = u-v
+                #     bfgs_r[ci * 3 * n_points: (ci+1) * 3 * n_points] = landmark_v.flatten() - points_3d_in_cluster[ci].flatten()
+                    #dk_stepLength += (bfgs_r[ci * 3 * n_points: (ci+1) * 3 * n_points]).dot(Vl_all * (bfgs_r[ci * 3 * n_points: (ci+1) * 3 * n_points]))
+                #dk_stepLength = np.sqrt(dk_stepLength)
+                multiplier = steplength / dk_stepLength
+
+            else: # nesterov
+                xk1 = rna_s
+                xk05= rna_s - bfgs_r
+                if it > 0:
+                    beta_nesterov = (it-1) / (it+2)
+                    delta_v = xk1 - xk05 + beta_nesterov * delta_v
+                else:
+                    delta_v = xk1 - xk05 # for momentum
+                dk = delta_v.copy()
+                dk_stepLength = np.linalg.norm(dk, 2)
+                multiplier = 1
+        else: # RNA works, yet not good enough
             L_rna = max(L_in_cluster)
 
             U_diag = np.zeros(rna_s.shape)
@@ -2339,7 +2394,7 @@ else:
                 globalSingleLandmarksA_in_c,
                 globalSingleLandmarksB_in_c
             ) = prox_f(
-                x0_p.copy(), camera_indices_in_cluster, point_indices_in_cluster, points_2d_in_cluster, 
+                x0_p.copy(), camera_indices_in_cluster, point_indices_in_cluster, points_2d_in_cluster,
                 points_3d_in_cluster_bfgs, landmark_s_in_cluster_bfgs, L_in_cluster_bfgs, Vl_in_cluster_bfgs, kClusters, innerIts=innerIts, sequential=True,
                 )
             #print("2. x0_p", "points_3d_in_cluster", points_3d_in_cluster)
@@ -2350,8 +2405,8 @@ else:
             #print("3. x0_p", x0_p, "points_3d_in_cluster", points_3d_in_cluster)
             # update buffers
             if ls_it == 0: # todo: the one we accept put here, no?
-                #bfgs_ps[it % bfgs_mem] = -dk * multiplier
-                bfgs_ps[it % bfgs_mem] = -bfgs_r # this is not so much overshooting as dk
+                bfgs_ps[it % bfgs_mem] = -dk #* multiplier
+                #bfgs_ps[it % bfgs_mem] = -bfgs_r # this is not so much overshooting as dk
                 bfgs_rr = np.zeros(kClusters * 3 * n_points)
                 for ci in range(kClusters):
                     bfgs_rr[ci * 3 * n_points: (ci+1) * 3 * n_points] = landmark_v_bfgs.flatten() - points_3d_in_cluster_bfgs[ci].flatten() # flatten?
@@ -2359,13 +2414,14 @@ else:
                 bfgs_rhos[it % bfgs_mem] = np.maximum(0., 1./ bfgs_qs[it % bfgs_mem].dot(bfgs_ps[it % bfgs_mem]))
 
             # eval cost
-            dre_bfgs = cost_DRE(point_indices_in_cluster, points_3d_in_cluster_bfgs, landmark_s_in_cluster_bfgs, L_in_cluster_bfgs, Vl_in_cluster_bfgs, landmark_v_bfgs)
+            dre_bfgs, dre_per_part = cost_DRE(point_indices_in_cluster, points_3d_in_cluster_bfgs, landmark_s_in_cluster_bfgs, L_in_cluster_bfgs, Vl_in_cluster_bfgs, landmark_v_bfgs)
             dre_bfgs += currentCost_bfgs
 
             # debugging cost block ################
-            primal_cost_v = 0
+            primal_cost_us = [0 for _ in range(kClusters)]
+            primal_cost_vs = [0 for _ in range(kClusters)]
             for ci in range(kClusters):
-                primal_cost_v += primal_cost(
+                primal_cost_vs[ci] = primal_cost(
                     x0_p_bfgs,
                     camera_indices_in_cluster[ci],
                     point_indices_in_cluster[ci],
@@ -2373,12 +2429,14 @@ else:
                     landmark_v_bfgs) #points_3d_in_cluster[ci]) # v not u
             primal_cost_u = 0
             for ci in range(kClusters):
-                primal_cost_u += primal_cost(
+                primal_cost_us[ci] += primal_cost(
                     x0_p_bfgs,
                     camera_indices_in_cluster[ci],
                     point_indices_in_cluster[ci],
                     points_2d_in_cluster[ci],
                     points_3d_in_cluster_bfgs[ci])
+            primal_cost_v = np.sum(np.array(primal_cost_vs))
+            primal_cost_u = np.sum(np.array(primal_cost_us))
 
             print( it, "/", ls_it, " ======== DRE BFGS ====== ", round(dre_bfgs) , " ========= gain " , \
                 round(lastCostDRE_bfgs - dre_bfgs), "==== f(v)= ", round(primal_cost_v), " f(u)= ", round(primal_cost_u), " ~= ", currentCost_bfgs)
@@ -2388,10 +2446,16 @@ else:
             if dre_bfgs <= lastCostDRE_bfgs or ls_it == line_search_iterations-1 : # not correct yet, must be <= last - c/gamma |u-v|
                 for ci in range(kClusters):
                     landmark_s_in_cluster[ci] = landmark_s_in_cluster_bfgs[ci].copy()
-                    if linearize_at_last_solution:
+                    if True or linearize_at_last_solution: # here appears to be needed
                         points_3d_in_cluster[ci] = points_3d_in_cluster_bfgs[ci].copy()
                     else:
-                        points_3d_in_cluster[ci] = landmark_v_bfgs.copy()
+                        #compare cost of part and dre_per_part to pick best option
+                        if primal_cost_vs[ci] < primal_cost_us[ci] + dre_per_part[ci]:
+                            print(primal_cost_vs[ci], " < ", primal_cost_us[ci], " + ", dre_per_part[ci])
+                            points_3d_in_cluster[ci] = landmark_v_bfgs.copy()
+                        else:
+                            print(primal_cost_vs[ci], " > ", primal_cost_us[ci], " + ", dre_per_part[ci])
+                            points_3d_in_cluster[ci] = points_3d_in_cluster_bfgs[ci].copy()
                     Vl_in_cluster[ci] = Vl_in_cluster_bfgs[ci].copy()
                 L_in_cluster = L_in_cluster_bfgs.copy()
                 landmark_v = landmark_v_bfgs.copy()
