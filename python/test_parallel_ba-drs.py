@@ -1506,32 +1506,6 @@ def bundle_adjust(
             L = L * 2
             JltJlDiag = 1/2 * JltJlDiag
 
-        # this does not appear reasonable? Why ?
-        # min/max JltJl.diagonal()  0.48732507383147355   2602001.263707982  adjusted  0.00026905443442882594   1760044.7675515271
-        # 0 it. cost 0      5260  cost + penalty  11253  === using L =  0.0009765625
-        # 0 it. cost 0/new  7625  cost + penalty  10164
-        # 0 it. cost 1      7620       + penalty  10158
-        # |||||||  Lfk distance  1126.6561766159084  -nabla^Tdelta= -1012.0812235578704  |||||||
-        # 0 it. cost 0      5260  cost + penalty  10958  === using L =  0.0009765625
-        # 0 it. cost 0/new  5357  cost + penalty  8286
-        # 0 it. cost 1      5355       + penalty  8285
-        # |||||||  Lfk distance  45.14171106927188  -nabla^Tdelta= -43.21166233974194  |||||||
-        # 0 it. cost 0      5260  cost + penalty  8651  === using L =  0.0009765625
-        # 0 it. cost 0/new  5396  cost + penalty  8316
-        # 0 it. cost 1      5394       + penalty  8314
-        # |||||||  Lfk distance  55.70731270660599  -nabla^Tdelta= -59.383690725574006  |||||||
-        # 0 it. cost 0      5260  cost + penalty  9170  === using L =  0.0009765625
-        # 0 it. cost 0/new  5442  cost + penalty  8351
-        # 0 it. cost 1      5441       + penalty  8350
-        # |||||||  Lfk distance  53.50728240446642  -nabla^Tdelta= -77.02651948746075  |||||||
-        # 0 it. cost 0      5260  cost + penalty  10323  === using L =  0.0009765625
-        # 0 it. cost 0/new  5496  cost + penalty  8391
-        # 0 it. cost 1      5497       + penalty  8392
-        # |||||||  Lfk distance  18.302929448717805  -nabla^Tdelta= -96.69554505439876  |||||||
-        # 0 it. cost 0      5260  cost + penalty  12785  === using L =  0.0009765625
-        # 0 it. cost 0/new  5559  cost + penalty  8437
-        # 0 it. cost 1      5563       + penalty  8441
-
         # todo: store last blockEigenvalueJltJl multiplier in/out current L used but not really.
         if tr_check >= tr_eta_2 and LfkViolated and not steSizeTouched or (steSizeTouched and costStart + penaltyStart < costEnd + penaltyL): # violated -- should revert update.
             steSizeTouched = True
@@ -2077,7 +2051,7 @@ x0_p = x0_p.reshape(n_cameras, 9)
 startL = 1
 kClusters = 5
 innerIts = 1  # change to get an update, not 1 iteration
-its = 60
+its = 120
 cost = np.zeros(kClusters)
 lastCost = 1e20
 lastCostDRE = 1e20
@@ -2301,7 +2275,7 @@ else:
             #bfgs_r[ci * 3 * n_points: (ci+1) * 3 * n_points] = (landmark_s_in_cluster_pre[ci] - landmark_s_in_cluster[ci]).flatten() # with tau NO likely due to + h * nab
             rna_s[ci * 3 * n_points: (ci+1) * 3 * n_points] = landmark_s_in_cluster_pre[ci].flatten()
 
-        use_bfgs = False # maybe full u,v?
+        use_bfgs = True # maybe full u,v?
         if use_bfgs:
             if False: # awful
 

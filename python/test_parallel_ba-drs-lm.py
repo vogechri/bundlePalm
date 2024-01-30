@@ -987,6 +987,7 @@ def bundle_adjust(
     # print("landmarks_only_in_cluster_  ", landmarks_only_in_cluster_, " ", np.sum(landmarks_only_in_cluster_), " vs ", np.sum(1 - landmarks_only_in_cluster_) )
     newForUnique = False
     blockEigMult = 1e-3 # 1e-3 was used before
+    J_scale = 1.0
     L = L_in_cluster_
     minimumL = 1e-6
     updateJacobian = True
@@ -1000,7 +1001,7 @@ def bundle_adjust(
     # torch_points_2d = from_numpy(points_2d)
     n_cameras_ = int(x0_p_.shape[0] / 9)
     n_points_ = int(x0_l_.shape[0] / 3)
-    powerits = 20 # kind of any value works here? > =5?
+    powerits = 40 # kind of any value works here? > =5?
     tr_eta_1 = 0.8
     tr_eta_2 = 0.25
 
@@ -1030,7 +1031,8 @@ def bundle_adjust(
 
             blockEigenvalueJtJ = blockEigenvalue(JtJ, 9)
             # TODO does work with 1.. ?
-            stepSize = 1. * (blockEigMult * blockEigenvalueJtJ + 1.4 * JtJ.copy()) # Todo '2 *' vs 1 by convex. 
+            stepSize = 1. * (blockEigMult * blockEigenvalueJtJ + J_scale * JtJ.copy()) # Todo '2 *' vs 1 by convex. 
+            # stepSize = 1. * (blockEigMult * blockEigenvalueJtJ + 1.4 * JtJ.copy()) # Todo '2 *' vs 1 by convex. 
             #stepSize = 1. * (1e-1 * diag_sparse(np.ones(JtJ.shape[0])) + 1.1 * JtJ.copy()) # not at all working
             # both of these are faster (accelerated only? or anyways?)
             # todo: maybe adjust factor on JtJ instead? or check extrapolation of s wrt. cost / penalty.
@@ -1149,7 +1151,7 @@ def bundle_adjust(
         if tr_check < tr_eta_2:
             print(" //////  tr_check " , tr_check, " Lfk distance ", LfkDistance, " -nabla^Tdelta=" , -bp.dot(delta_p) - bl.dot(delta_l), " /////")
             L = L * 2
-            JltJlDiag = 1/2 * JltJlDiag
+            JtJDiag = 1/2 * JtJDiag
 
         if tr_check >= tr_eta_2 and LfkViolated: # violated -- should revert update.
             steSizeTouched = True
@@ -1157,10 +1159,15 @@ def bundle_adjust(
             #stepSize = stepSize * 2
             # other idea, initially we only add 1/2^k eg 0.125, times the needed value and inc if necessary, maybe do not add anything if not needed.
 
+            # indeed reliable to get over.
+            stepSize += blockEigMult * blockEigenvalueJtJ
             blockEigenvalueJtJ.data *= 2 # appears slow but safe
-            #stepSize.data = np.maximum(stepSize.data, blockEigenvalueJltJl.data) # else diagSparse of it
-            stepSize = blockEigMult * blockEigenvalueJtJ + JtJ.copy()
 
+            # try this, should memorize if works (exists scale s.t. fulfilled)
+            # rather if dre is violated increase this.
+            #J_scale += 0.2
+            #stepSize = 1. * (blockEigMult * blockEigenvalueJtJ + J_scale * JtJ.copy()) # Todo '2 *' vs 1 by convex. 
+            
             JtJDiag = 1/L * stepSize.copy()
             penaltyStartConst = prox_rhs.dot(JtJDiag * prox_rhs)
 
@@ -1723,7 +1730,7 @@ else:
                 s_cur[ci * 9 * n_cameras: (ci+1) * 9 * n_cameras] = poses_s_in_cluster[ci].flatten()
 
             if it <= 0: # s_prev is known
-                dk = s_new - s_cur + delta_s
+                dk = s_new - s_cur #+ delta_s
             else:
                 delta_s_ = s_new - s_prev
                 dk = s_new - s_cur + delta_s_
@@ -1738,9 +1745,9 @@ else:
                 delta_s_old_ = delta_s_.copy()
 
                 # momentum simple, same for v? about same
-                #beta_nesterov = (it-1) / (it+2) # 0.7
+                beta_nesterov = (it-1) / (it+2) # 0.7
                 #beta_nesterov = 0.7
-                #dk = s_new - s_cur + beta_nesterov * prev_dk
+                dk = s_new - s_cur + beta_nesterov * prev_dk
                 #vk = s_new - s_cur + 0.7 * prev_vk
                 # other idea is 
 
