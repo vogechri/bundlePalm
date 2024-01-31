@@ -834,6 +834,41 @@ def solvePowerIts(Ul, W, Vli, bS, m_):
            return xk
     return xk
 
+# test Loop over L0=x, L=y here. Likely best to do grid search to get an idea. model as exp(-poly(L,it))
+def solveByGDNesterov(Ul, W, Vli, bS, m):
+    Lip = 0.9 # 100 -> 1. # TODO: play, find out how to progress over time.
+    lambda0 = (1.+np.sqrt(5.)) / 2. # l=0 g=1, 0, .. L0=1 g = 0,..
+
+    Uli = blockInverse(Ul, 9)
+    ubs = - Uli * bS
+    xk = - ubs
+    y0 = - ubs
+
+    verbose = False
+    if verbose:
+        costk = xk.dot(Ul * xk - W * (Vli * (W.transpose() * xk)) - 2 * bS)
+        print("-1 gd cost ", costk)
+
+    for it__ in range(m):
+        lambda1 = (1 + np.sqrt(1 + 4 * lambda0**2)) / 2
+        gamma = (1-lambda0) / lambda1
+        lambda0 = lambda1
+
+        #( I - Uli * W * Vli * W.transpose())
+        g = xk - Uli*(W*(Vli*(W.transpose() * xk))) + ubs
+        yk = xk - 1/Lip * g
+        xk = (1-gamma) * yk + gamma * y0
+        y0 = yk
+
+        if verbose:
+            # test:
+            # eq is Ul [I - Uli * W * Vli * W.transpose()] x = b
+            costk = xk.dot(Ul * xk - W * (Vli * (W.transpose() * xk)) - 2 * bS)
+            print(it, " gd cost ", costk)
+
+        if stop_criterion(np.linalg.norm(xk, 2), np.linalg.norm(1/Lip * g, 2), it__):
+            return xk, it__
+    return xk, it__
 
 def cluster_by_camera(
     camera_indices_, points_3d_, points_2d_, point_indices_, kClusters_, startL_
@@ -1315,8 +1350,8 @@ def bundle_adjust(
     blockEigMult = 1e-3 # 1e-3 was used before less hicups smaller 1e-3. recall last val ..
     normal_case_ = True # No L * JltJl at all. Does not work
     # define x0_t, x0_p, x0_l, L # todo: missing Lb: inner L for bundle, Lc: to fix duplicates
-    L = L_in_cluster_
     minimumL = 1e-6
+    L = max(minimumL, L_in_cluster_)
     updateJacobian = True
     # holds all! landmarks, only use fraction likely no matter not present in cams anyway.
     x0_l_ = points_3d_in.flatten()
@@ -1379,7 +1414,10 @@ def bundle_adjust(
             #     stepSize.data = np.maximum(0.05 * stepSize.data, blockEigenvalueJltJl.data) # else diagSparse of it
             
             # '2 *' smallest example dies with < 2 ok with 2.
-            stepSize = 1. * (blockEigMult * blockEigenvalueJltJl + 2 * JltJl.copy()) # Todo '2 *' vs 1 by convex.
+            # 'hangs at this value.' Check new variant with recomputing Jacobian at end.
+            #68 / 0  ======== DRE BFGS ======  501664  ========= gain  247 ==== f(v)=  502614  f(u)=  500821  ~=  500704.09297090676
+            #81 / 0  ======== DRE BFGS ======  501076  ========= gain  139 ==== f(v)=  502339  f(u)=  499758  ~=  499713.50253538677
+            stepSize = 1. * (blockEigMult * blockEigenvalueJltJl + 1 * JltJl.copy()) # Todo '2 *' vs 1 by convex.
             #stepSize = 1. * (blockEigMult * blockEigenvalueJltJl + LipJ * JltJl.copy()) # hmm
             
             #stepSize = 1. * (1e-0 * diag_sparse(np.ones(n_points_*3)) + 1.0 * JltJl.copy()) # not so good
@@ -1453,7 +1491,9 @@ def bundle_adjust(
         bl_s = bl + L * JltJlDiag * prox_rhs # TODO: + or -. '+', see above
         bS = (bp - W * Vli * bl_s).flatten()
 
-        delta_p = -solvePowerIts(Ul, W, Vli, bS, powerits)
+        #delta_p = -solvePowerIts(Ul, W, Vli, bS, powerits)
+        delta_p, powerits_run = solveByGDNesterov(Ul, W, Vli, bS, powerits)
+        delta_p = -delta_p
         delta_l = -Vli * ((W.transpose() * delta_p).flatten() + bl_s)
         penaltyL = L * (delta_l + prox_rhs).dot(JltJlDiag * (delta_l + prox_rhs))
         penaltyP = L * delta_p.dot(JtJDiag * delta_p)
@@ -1483,7 +1523,7 @@ def bundle_adjust(
 
         tr_check = (costStart + penaltyStart - costEnd - penaltyL) / (costStart + penaltyStart - costQuad - penaltyL)
 
-        old_descent_lemma = False
+        old_descent_lemma = True # appears not to bring value with 4x
         if old_descent_lemma:
             # old descent lemma test.
             #nablaXp = L * JtJDiag * delta_p  # actual gradient. discussable
@@ -1538,7 +1578,7 @@ def bundle_adjust(
         else:
             LfkViolated = False # hack, also above , or (steSizeTouched and costStart + penaltyStart < costEnd + penaltyL) is hack
             # replace by following: track cost, if next has lower cost -> continue. if next has higher cost return current.
-            
+
         if LfkSafe and not steSizeTouched:
             L = L / 2
 
@@ -1630,19 +1670,27 @@ def bundle_adjust(
     x0_p_ = x0_p_.reshape(n_cameras_, 9)
     x0_l_ = x0_l_.reshape(n_points_, 3)
 
-    # maybe only if likely that is differs? Still insufficient.
-    # needs to estimate L as well. only if accept. no effect.
-    getBetterStepSize = False # this is used as approx of f in update of v and thus s. maybe change there u-v should be small. 
+    # 173 with more stable, still dre can increase later many more of 'accept' first line search.
+    # still not much faster.
+    getBetterStepSize = True # this is used as approx of f in update of v and thus s. maybe change there u-v should be small. 
     if getBetterStepSize: # needs to set L correctly
         J_pose, J_land, fx0 = ComputeDerivativeMatricesNew(
             x0_t_cam, x0_t_land, camera_indices_, point_indices_, torch_points_2d
         )
         JltJl = J_land.transpose() * J_land
-        #JltJlDiag = diag_sparse(np.fmax(JltJl.diagonal(), 1e1)) # should be same as above
-        #JltJlDiag = np.maximum(1, 0.5 / L) * diag_sparse(np.fmax(JltJl.diagonal(), 1e1)) # this should ensure (small L) condition.
-        #stepSize = blockEigenvalue(JltJl, 3)
-        stepSize.data = np.maximum(stepSize.data, blockEigenvalue(JltJl, 3).data) # else diagSparse of it
+        # #JltJlDiag = diag_sparse(np.fmax(JltJl.diagonal(), 1e1)) # should be same as above
+        # #JltJlDiag = np.maximum(1, 0.5 / L) * diag_sparse(np.fmax(JltJl.diagonal(), 1e1)) # this should ensure (small L) condition.
+        # #stepSize = blockEigenvalue(JltJl, 3)
+        # stepSize.data = np.maximum(stepSize.data, blockEigenvalue(JltJl, 3).data) # else diagSparse of it
+
+        # fairly good. x2 tested. x1 ?
+        # stepSize = 1. * (blockEigMult * blockEigenvalueJltJl + 2 * JltJl.copy())
+        stepSize = 1. * (blockEigMult * blockEigenvalueJltJl + JltJl.copy()) # obviously the same as above, right.
         JltJlDiag = 1/L * stepSize.copy() # max 1, 1/L, line-search dre fails -> increase
+
+        # Also ok, but slower. Haeh? numerically unstable. at some point dre estimate wrong -> collapse.
+        # JltJlDiag = 2/L * JltJl.copy() # could use as precomputed
+
 
     # in the averaging step we do 
     # min_v 1/2 sum_k (v - (2uk-sk)) Vlk (v - (2uk-sk)) with solution (sum_k(Vlk))^-1 * sum_k Vlk (2uk-sk)
@@ -2023,8 +2071,11 @@ m = 2 * points_2d.shape[0]
 write_output = False #True
 read_output =  False
 if read_output:
-    camera_params_np = np.fromfile("camera_params_drs.dat", dtype=np.float64)
-    point_params_np = np.fromfile("point_params_drs.dat", dtype=np.float64)
+    # camera_params_np = np.fromfile("camera_params_drs.dat", dtype=np.float64)
+    # point_params_np = np.fromfile("point_params_drs.dat", dtype=np.float64)
+    camera_params_np = np.fromfile("camera_params_base.dat", dtype=np.float64)
+    point_params_np = np.fromfile("point_params_base.dat", dtype=np.float64)
+
     x0_p = camera_params_np.reshape(-1)
     x0_l = point_params_np.reshape(-1)
     #x0 = np.concatenate([x0_p, x0_l])
@@ -2072,6 +2123,7 @@ lastCostDRE = 1e20
 basic_version = False # accelerated or basic
 sequential = True
 # 173 true is better ?! maybe cluster?
+# might be violating lipshitz condition from last Jacobian if disabled.
 linearize_at_last_solution = True # linearize at uk or v. maybe best to check energy. at u or v. DRE:
 lib = ctypes.CDLL("./libprocess_clusters.so")
 init_lib()
