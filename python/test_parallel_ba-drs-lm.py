@@ -1061,7 +1061,7 @@ def bundle_adjust(
 
         if updateJacobian:  # not needed if rejected
             #
-            x0_t_cam = x0_t_[: n_cameras_ * 9].reshape(n_cameras_, 9)
+            x0_t_cam  = x0_t_[: n_cameras_ * 9].reshape(n_cameras_, 9)
             x0_t_land = x0_t_[n_cameras_ * 9 :].reshape(n_points_, 3)
             J_pose, J_land, fx0 = ComputeDerivativeMatricesNew (
                 x0_t_cam, x0_t_land, camera_indices_, point_indices_, torch_points_2d )
@@ -1073,6 +1073,7 @@ def bundle_adjust(
             blockEigenvalueJtJ = blockEigenvalue(JtJ, 9)
             # TODO does work with 1.. ?
             stepSize = 1. * (blockEigMult * blockEigenvalueJtJ + LipJ * JtJ.copy()) # Todo '2 *' vs 1 by convex.
+
             # stepSize = 1. * (blockEigMult * blockEigenvalueJtJ + 1.4 * JtJ.copy()) # Todo '2 *' vs 1 by convex.
             #stepSize = 1. * (1e-1 * diag_sparse(np.ones(JtJ.shape[0])) + 1.1 * JtJ.copy()) # not at all working
             # both of these are faster (accelerated only? or anyways?)
@@ -1086,6 +1087,10 @@ def bundle_adjust(
             #     stepSize = blockEigenvalueJltJl
             # else: # increase where needed -- this here is WAY too slow?
             #     stepSize.data = np.maximum(0.05 * stepSize.data, blockEigenvalueJltJl.data) # else diagSparse of it
+
+            # shoudl not depend on eigenvalue of block. the small ones should be increased, since we invert the matrix.
+            #stepSize = LipJ * JtJ.copy() + J_eps2 * diag_sparse(np.ones(JtJ.shape[0])) # ?
+            #stepSize = LipJ * JtJ.copy() + diag_sparse(np.fmax(JtJ.diagonal(), 1e-4))
 
             JltJl = J_land.transpose() * J_land
             JltJlDiag = JltJl + J_eps * diag_sparse(np.ones(JltJl.shape[0]))
@@ -1163,7 +1168,7 @@ def bundle_adjust(
 
         tr_check = (costStart + penaltyStart - costEnd - penaltyL) / (costStart + penaltyStart - costQuad - penaltyL)
 
-        old_descent_lemma = False
+        old_descent_lemma = True
         if old_descent_lemma:
             # old descent lemma test.
             #nablaXp = L * JtJDiag * delta_p  # actual gradient. discussable
@@ -1204,7 +1209,8 @@ def bundle_adjust(
 
             # indeed reliable to get over.
             stepSize += blockEigMult * blockEigenvalueJtJ
-            blockEigenvalueJtJ.data *= 2 # appears slow but safe
+            blockEigMult *= 2
+            #blockEigenvalueJtJ.data *= 2 # appears slow but safe
 
             # try this, should memorize if works (exists scale s.t. fulfilled)
             # rather if dre is violated increase this.
@@ -1247,6 +1253,9 @@ def bundle_adjust(
         #stepSize.data = np.maximum(stepSize.data, blockEigenvalue(JltJl, 3).data) # else diagSparse of it
 
         stepSize = 1. * (blockEigMult * blockEigenvalueJtJ + LipJ * JtJ.copy())
+
+        #stepSize = LipJ * JtJ.copy() + J_eps2 * diag_sparse(np.ones(JtJ.shape[0])) # ?
+        #stepSize = LipJ * JtJ.copy() + diag_sparse(np.fmax(JtJ.diagonal(), 1e-4))
         JtJDiag = 1/L * stepSize.copy() # max 1, 1/L, line-search dre fails -> increase
 
     Rho = L * JtJDiag #+ 1e-12 * Ul
@@ -1757,7 +1766,7 @@ else:
                 lambdaScale = np.sqrt(np.mean(U_diag.diagonal()))
 
                 Gs, Fs, Fes, dk = RNA(Gs, Fs, rna_s, bfgs_r, it, rnaBufferSize, Fes, bfgs_r,
-                                      lamda = 0.25 * lambdaScale, h = -1, res_pcg = U_diag)
+                                      lamda = 0.001 * lambdaScale, h = -1, res_pcg = U_diag)
                 # dk = rna_s + bfgs_r
                 # Ui_all = blockInverse(U_all, 9)
                 # for ci in range(kClusters):

@@ -1414,7 +1414,7 @@ def bundle_adjust(
             #(Jl | Jp) (l,p)^T = Jl l + Jp p and |(Jl | Jp) (l,p)^T|^2 = l^t Jl^t Jl l + p^t Jp^t Jp p + 2 p^t Jp^t Jl l.
             # So 2 JtJ  + 2 JltJl shuold majorize |J^t x|^2 for all x.
             # why relevant here.
-            JtJDiag = 2 * JtJ + J_eps * diag_sparse(np.ones(JtJ.shape[0]))
+            JtJDiag = 1 * JtJ + J_eps * diag_sparse(np.ones(JtJ.shape[0]))
 
             #blockEigenvalueJtJ = blockEigenvalue(JtJ, 9)
             #print(" min/max JtJ.diagonal() ", np.min(JtJ.diagonal()), " ", np.max(JtJ.diagonal()), " adjusted ", np.min(JtJDiag.diagonal()), " ", np.max(JtJDiag.diagonal()), " ", np.min(blockEigenvalueJtJ.diagonal()) ," ", np.max(blockEigenvalueJtJ.diagonal()) )
@@ -1580,7 +1580,8 @@ def bundle_adjust(
             if normal_case_:
                 if True: # just adjusted: blockEigenvalueJltJl * L above s.t. it depends on L
                     stepSize += blockEigMult * blockEigenvalueJltJl
-                    blockEigenvalueJltJl.data *= 2 # appears slow but safe
+                    blockEigMult *= 2
+                    #blockEigenvalueJltJl.data *= 2 # appears slow but safe
                     #stepSize.data = np.maximum(stepSize.data, blockEigenvalueJltJl.data) # else diagSparse of it
 
                     JltJlDiag = 1/L * stepSize.copy()
@@ -1773,9 +1774,9 @@ def bundle_adjust(
     # u+ = u - Vli/2 [(W.transpose() * delta_p).flatten() + bl + Vl * (u - s)]
 
     if normal_case_:
-        Rho = L * JltJlDiag + 1e-12 * Vl
+        Rho = L * JltJlDiag #+ 1e-12 * Vl
     else:
-        Rho = JltJlDiag + 1e-12 * Vl
+        Rho = JltJlDiag #+ 1e-12 * Vl
 
     # TODO change 2
     if newForUnique:
