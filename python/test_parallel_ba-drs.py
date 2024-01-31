@@ -1139,7 +1139,7 @@ def average_landmarks_new(
 
         # print(i, "averaging u2_s ", u2_s.reshape(-1,3)[globalSingleLandmarksB_in_c[i], :]) # indeed 1 changed rest is constant
 
-        sum_constant_term += points_3d_in_cluster_[i].flatten().dot(V_land * (points_3d_in_cluster_[i].flatten() + u2_s - landmark_s_in_cluster_[i].flatten()))
+        #sum_constant_term += points_3d_in_cluster_[i].flatten().dot(V_land * (points_3d_in_cluster_[i].flatten() + u2_s - landmark_s_in_cluster_[i].flatten()))
         if i == 0:
             Vl_all = V_land
         else:
@@ -1187,6 +1187,7 @@ def cost_DRE(
     sum_u_v = 0
     sum_u_v_ = 0
     sum_2u_s_v = 0
+    cost_dre = 0
     dre_per_part = []
     for i in range(len(L_in_cluster_)):
         point_indices_ = np.unique(point_indices_in_cluster_[i])
@@ -1209,8 +1210,8 @@ def cost_DRE(
             shape=(3 * num_points, 3 * num_points),
         )
         u2_s = (2 * points_3d_in_cluster_[i].flatten() - landmark_s_in_cluster_[i].flatten())
-        sum_Ds_2u += V_land * u2_s # has 0's for those not present
-        sum_constant_term += points_3d_in_cluster_[i].flatten().dot(V_land * (points_3d_in_cluster_[i].flatten() + u2_s - landmark_s_in_cluster_[i].flatten()))
+        #sum_Ds_2u += V_land * u2_s # has 0's for those not present
+        #sum_constant_term += points_3d_in_cluster_[i].flatten().dot(V_land * (points_3d_in_cluster_[i].flatten() + u2_s - landmark_s_in_cluster_[i].flatten()))
 
         u_s = points_3d_in_cluster_[i].flatten() - landmark_s_in_cluster_[i].flatten()
         u_v = points_3d_in_cluster_[i].flatten() - landmark_v_.flatten()
@@ -1230,6 +1231,17 @@ def cost_DRE(
         # rho_k/2 |u_k - v_k|^2 - rho_k/2 <2(s_k - u_k), u_k - v_k>
         # rho_k/2 <u_k - v_k - 2(s_k - u_k), u_k - v_k>
         local_cost = 0.5 * u_v.dot(V_land * (u_v + 2 * u_s))
+        #dre_per_part.append(local_cost.copy())
+
+        # rho_k/2 |u_k - v_k|^2 - rho_k <s_k - u_k, u_k - v_k>
+        # rho_k/2 ( uu + vv - 2uv -2su + 2uu + 2sv - 2uv)
+        # rho_k/2 ( 3uu + vv - 4uv - 2su + 2sv)
+        # v only
+        # rho_k/2 ( vv + v(2s-4u)   - 2su + 3uu)
+        # deriv
+        # rho_k (2v + 2s-4u) = 0
+
+        cost_dre += local_cost
         dre_per_part.append(local_cost.copy())
 
         if i == 0:
@@ -1240,11 +1252,13 @@ def cost_DRE(
     # TODO: I use a different Vl to compute the cost here than in the update of prox u.
     #       Since I want to work with a new Vl already. Problem.
     # i want |u-s|_D |u-v|_D, also |v-2u-s|_D
-    cost_input  = 0.5 * (landmark_v_.flatten().dot(Vl_all * landmark_v_.flatten() - 2 * sum_Ds_2u) + sum_constant_term)
-    print("---- |u-s|^2_D ", round(sum_u_s), "|u-v|^2_D ", round(sum_u_v), "|2u-s-v|^2_D ", round(sum_2u_s_v), "|u-v|^2 ", round(sum_u_v_))
+    #cost_input  = 0.5 * (landmark_v_.flatten().dot(Vl_all * landmark_v_.flatten() - 2 * sum_Ds_2u) + sum_constant_term)
+    
+    print("---- |u-s|^2_D ", round(sum_u_s), "|u-v|^2_D ", round(sum_u_v), "|2u-s-v|^2_D ", round(sum_2u_s_v), 
+          "|u-v|^2 ", round(sum_u_v_), " cost_dre ", cost_dre)
     # print("dre_per_part ",dre_per_part)
     #print(np.sum(np.array(dre_per_part)), " ", cost_input)
-    return cost_input, dre_per_part
+    return cost_dre, dre_per_part
 
 
 def average_landmarks(point_indices_in_cluster_, points_3d_in_cluster_, L_in_cluster_):

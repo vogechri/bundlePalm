@@ -579,8 +579,8 @@ def solveByGDNesterov(Ul, W, Vli, bS, m):
             costk = xk.dot(Ul * xk - W * (Vli * (W.transpose() * xk)) - 2 * bS)
             print(it, " gd cost ", costk)
 
-       if stop_criterion(np.linalg.norm(xk, 2), np.linalg.norm(1/Lip * g, 2), it__):
-           return xk, it__
+        if stop_criterion(np.linalg.norm(xk, 2), np.linalg.norm(1/Lip * g, 2), it__):
+            return xk, it__
     return xk, it__
 
 def cluster_by_camera(
@@ -794,10 +794,9 @@ def cluster_by_landmark(
 # poses_v, _ = average_cameras_new(
 #     camera_indices_in_cluster, poses_in_cluster, poses_s_in_cluster, L_in_cluster, Ul_in_cluster) # old_poses for costs?
 def average_cameras_new(
-    camera_indices_in_cluster_, poses_in_cluster_, poses_s_in_cluster_, L_in_cluster_, UL_in_cluster_#, pose_v_
-):
+    camera_indices_in_cluster_, poses_in_cluster_, poses_s_in_cluster_, L_in_cluster_, UL_in_cluster_):
     num_cameras = poses_in_cluster_[0].shape[0]
-    sum_Ds_2u = np.zeros(num_cameras * 9)
+    sum_D_u2_s = np.zeros(num_cameras * 9)
     sum_constant_term = 0
     UL_zeros_in_cluster_ = []
     for i in range(len(L_in_cluster_)):
@@ -813,8 +812,7 @@ def average_cameras_new(
         #print(UL_in_cluster_[i].data.shape, " ", camera_indices_.shape)
 
         indices = np.repeat(
-            np.array([9 * camera_indices_ + j for j in range(9)]).transpose(), 9, axis=0
-        ).flatten()
+            np.array([9 * camera_indices_ + j for j in range(9)]).transpose(), 9, axis=0).flatten()
         # indices.append(np.array([3 * point_indices_ + j for j in range(3)]).transpose().flatten())
         # indptr is to be set to have empty lines by 0 3 3 -> no entries in row 3. 0:0-3, row 1:3-3
 
@@ -823,7 +821,7 @@ def average_cameras_new(
         for q in range(num_cameras):
             # print(q, " ", j, " ", point_indices_.shape[0], " ", np.array([9*j+3, 9*j+6, 9*j+9]) )
             if j < camera_indices_.shape[0] and camera_indices_[j] == q:
-                indptr.append(np.array([81 * j + 9, 81 * j + 18, 81 * j + 27, 
+                indptr.append(np.array([81 * j +  9, 81 * j + 18, 81 * j + 27, 
                                         81 * j + 36, 81 * j + 45, 81 * j + 54, 
                                         81 * j + 63, 81 * j + 72, 81 * j + 81]).flatten())
                 j = j + 1
@@ -848,22 +846,26 @@ def average_cameras_new(
         u2_s = (2 * poses_in_cluster_[i].flatten() - poses_s_in_cluster_[i].flatten())
         #u2_s = (2 * points_3d_in_cluster_[i].flatten() - landmark_s_in_cluster_[i].flatten()) - (points_3d_in_cluster_[i].flatten() - delta_l_in_cluster[i].flatten())
 
-        sum_Ds_2u += U_pose * u2_s # has 0's for those not present
+        sum_D_u2_s += U_pose * u2_s # has 0's for those not present
 
         # print(i, "averaging u2_s ", u2_s.reshape(-1,3)[globalSingleLandmarksB_in_c[i], :]) # indeed 1 changed rest is constant
 
-        sum_constant_term += poses_in_cluster_[i].flatten().dot(U_pose * (poses_in_cluster_[i].flatten() + u2_s - poses_s_in_cluster_[i].flatten()))
+        #sum_constant_term += poses_in_cluster_[i].flatten().dot(U_pose * (poses_in_cluster_[i].flatten() + u2_s - poses_s_in_cluster_[i].flatten()))
         if i == 0:
             Up_all = U_pose
         else:
             Up_all += U_pose
     Upi_all = blockInverse(Up_all, 9)
-    # TODO change 1
-    pose_v_out = Upi_all * sum_Ds_2u
+
+    # rho_k/2 |u_k - v_k|^2 - rho_k <s_k - u_k, u_k - v_k>
+    # deriv
+    # sum_k rho_k v + rho_k (s_k - 2 u_k) = 0
+    # v = (sum_k rho_k)^-1 (sum_k rho_k (2 u_k - s_k))
+    pose_v_out = Upi_all * sum_D_u2_s
     verbose = False
     if verbose:
-        cost_input  = 0.5 * (landmark_v_.flatten().dot(Vl_all * landmark_v_.flatten() - 2 * sum_Ds_2u) + sum_constant_term)
-        cost_output = 0.5 * (landmark_v_out.dot(       Vl_all * landmark_v_out        - 2 * sum_Ds_2u) + sum_constant_term)
+        cost_input  = 0.5 * (landmark_v_.flatten().dot(Vl_all * landmark_v_.flatten() - 2 * sum_D_u2_s) + sum_constant_term)
+        cost_output = 0.5 * (landmark_v_out.dot(       Vl_all * landmark_v_out        - 2 * sum_D_u2_s) + sum_constant_term)
 
         #cost_simpler_out = landmark_v_out.dot(       Vl_all * landmark_v_out)        * 0.5 - landmark_v_out.dot(       sum_Ds_2u)
         #cost_simpler_in =  landmark_v_.flatten().dot(Vl_all * landmark_v_.flatten()) * 0.5 - landmark_v_.flatten().dot(sum_Ds_2u)
@@ -888,17 +890,17 @@ def cost_DRE(
     camera_indices_in_cluster_,  poses_in_cluster_, poses_s_in_cluster_, L_in_cluster_, Ul_in_cluster_, pose_v_
 ):
     num_cams =  poses_in_cluster_[0].shape[0]
-    sum_Ds_2u = np.zeros(num_cams * 9)
-    sum_constant_term = 0
+    #sum_Ds_2u = np.zeros(num_cams * 9)
+    #sum_constant_term = 0
     sum_u_s =0
     sum_u_v = 0
     sum_u_v_ = 0
     sum_2u_s_v = 0
+    cost_dre = 0
+    dre_per_part = []
     for i in range(len(L_in_cluster_)):
         camera_indices_ = np.unique(camera_indices_in_cluster_[i])
-        indices = np.repeat(
-            np.array([9 * camera_indices_ + j for j in range(9)]).transpose(), 9, axis=0
-        ).flatten()
+        indices = np.repeat(np.array([9 * camera_indices_ + j for j in range(9)]).transpose(), 9, axis=0).flatten()
 
         indptr = [np.array([0])]
         j = 0
@@ -918,8 +920,8 @@ def cost_DRE(
             shape=(9 * num_cams, 9 * num_cams),
         )
         u2_s = (2 *  poses_in_cluster_[i].flatten() - poses_s_in_cluster_[i].flatten())
-        sum_Ds_2u += U_pose * u2_s # has 0's for those not present
-        sum_constant_term +=  poses_in_cluster_[i].flatten().dot(U_pose * (poses_in_cluster_[i].flatten() + u2_s - poses_s_in_cluster_[i].flatten()))
+        #sum_Ds_2u += U_pose * u2_s # has 0's for those not present
+        #sum_constant_term +=  poses_in_cluster_[i].flatten().dot(U_pose * (poses_in_cluster_[i].flatten() + u2_s - poses_s_in_cluster_[i].flatten()))
 
         u_s =  poses_in_cluster_[i].flatten() - poses_s_in_cluster_[i].flatten()
         u_v =  poses_in_cluster_[i].flatten() - pose_v_.flatten()
@@ -928,6 +930,24 @@ def cost_DRE(
         sum_u_v += u_v.dot(U_pose * u_v)
         sum_u_v_ += u_v.dot(u_v)
         sum_2u_s_v += v_u2_s.dot(U_pose * v_u2_s)
+
+        # rho_k/2 |u_k - v_k|^2 - rho_k <s_k - u_k, u_k - v_k>
+        # rho_k/2 ( uu  + vv - 2uv - 2su + 2uu + 2sv - 2uv)
+        # rho_k/2 ( 3uu + vv - 4uv - 2su + 2sv)
+        # v only
+        # rho_k/2 ( vv + v(2s-4u)   - 2su + 3uu)
+        # deriv
+        # rho_k (2v + 2s-4u), same
+        #
+        # rho_k/2 |u_k - v_k|^2 - rho_k <s_k - u_k, u_k - v_k>
+        # deriv
+        # sum_k rho_k v + rho_k (s_k - 2 u_k) = 0
+        # v = (sum_k rho_k)^-1 (sum_k rho_k (2 u_k - s_k))
+
+        local_cost = 0.5 * u_v.dot(U_pose * (u_v + 2 * u_s))
+        cost_dre  += local_cost
+        dre_per_part.append(local_cost.copy())
+
         if i == 0:
             Ul_all = U_pose
         else:
@@ -936,9 +956,10 @@ def cost_DRE(
     # TODO: I use a different Vl to compute the cost here than in the update of prox u.
     #       Since I want to work with a new Vl already. Problem.
     # i want |u-s|_D |u-v|_D, also |v-2u-s|_D
-    cost_input  = 0.5 * (pose_v_.flatten().dot(Ul_all * pose_v_.flatten() - 2 * sum_Ds_2u) + sum_constant_term)
-    print("---- |u-s|^2_D ", round(sum_u_s), "|u-v|^2_D ", round(sum_u_v), "|2u-s-v|^2_D ", round(sum_2u_s_v), "|u-v|^2 ", round(sum_u_v_))
-    return cost_input
+    #cost_input  = 0.5 * (pose_v_.flatten().dot(Ul_all * pose_v_.flatten() - 2 * sum_Ds_2u) + sum_constant_term)
+    print("---- |u-s|^2_D ", round(sum_u_s), "|u-v|^2_D ", round(sum_u_v), "|2u-s-v|^2_D ", round(sum_2u_s_v), 
+          "|u-v|^2 ", round(sum_u_v_), " cost_dre ", cost_dre)
+    return cost_dre
 
 # TODO: shorten
 def primal_cost(
@@ -991,20 +1012,6 @@ def primal_cost(
         torch_points_2d)
     costEnd = np.sum(fx1.numpy() ** 2)
     return costEnd
-
-
-# cost_, x0_p_c_, x0_l_c_, Lnew_c_, Vl_c_ = bundle_adjust(
-#     local_landmark_indices_in_cluster, # these are indexing into landmarks_in_c, a subset of all landmarks, directly.
-#     pose_indices_in_c,
-#     poses_only_in_cluster_, # input those poses not present anywhere else to relax hold on those.
-#     torch_points_2d_in_c,
-#     landmarks_in_c,
-#     poses_in_c,
-#     poses_s_in_c,
-#     Vl_in_cluster_, # these are for those poses in cluster only. 
-#     L_in_cluster_,
-#     its_,
-# )
 
 def bundle_adjust(
     point_indices_,
@@ -1747,11 +1754,11 @@ else:
                     U_diag[ci * 9 * n_cameras: (ci+1) * 9 * n_cameras] = blockEigenvalue(U_cluster_zeros[ci], 9).diagonal()
                 U_diag = diag_sparse(U_diag)
                 #U_diag = np.ones(rna_s.shape)
-                #U_diag = diag_sparse(U_diag)
+                lambdaScale = np.sqrt(np.mean(U_diag.diagonal()))
 
-                Gs, Fs, Fes, dk = RNA(Gs, Fs, rna_s, bfgs_r, it, rnaBufferSize, Fes, bfgs_r, lamda = 0.25, h = -1, res_pcg=U_diag)
-                # this works
-                #dk = rna_s + bfgs_r
+                Gs, Fs, Fes, dk = RNA(Gs, Fs, rna_s, bfgs_r, it, rnaBufferSize, Fes, bfgs_r,
+                                      lamda = 0.25 * lambdaScale, h = -1, res_pcg = U_diag)
+                # dk = rna_s + bfgs_r
                 # Ui_all = blockInverse(U_all, 9)
                 # for ci in range(kClusters):
                 #     dk[ci * 9 * n_cameras: (ci+1) * 9 * n_cameras] = Ui_all * dk[ci * 9 * n_cameras: (ci+1) * 9 * n_cameras]
