@@ -1478,7 +1478,7 @@ def BFGS_direction(r, ps, qs, rhos, k, mem, mu):
         #print("j ", j, " ", r.shape, ps[j].shape)
         alpha[j] = np.dot(r, ps[j]) * rhos[j]
         r = r - alpha[j]*qs[j]
-        if (rhos[j]>0):
+        if rhos[j]>0:
             print(j, " 1st. al ", alpha[j], " rh ", rhos[j], " qs " , np.linalg.norm(qs[j],2), " ps " , np.linalg.norm(ps[j],2) )
 
     dk_ = mu * r
@@ -1489,7 +1489,7 @@ def BFGS_direction(r, ps, qs, rhos, k, mem, mu):
         #print("2j", j)
         beta = rhos[j] * np.dot(dk_, qs[j])
         dk_ = dk_ + ps[j] * (alpha[j] - beta)
-        if (rhos[j]>0):
+        if rhos[j]>0:
             print(j, " 2nd. al ", alpha[j], " rh ", rhos[j], " be ", beta, " qs " , np.linalg.norm(qs[j],2), " ps " , np.linalg.norm(ps[j],2) )
 
     return dk_
@@ -1503,13 +1503,14 @@ n_points = points_3d.shape[0]
 n = 9 * n_cameras + 3 * n_points
 m = 2 * points_2d.shape[0]
 
-write_output = False #True
-read_output =  False
+write_output = True
+read_output =  True
 if read_output:
-    # camera_params_np = np.fromfile("camera_params_drs.dat", dtype=np.float64)
-    # point_params_np = np.fromfile("point_params_drs.dat", dtype=np.float64)
-    camera_params_np = np.fromfile("camera_params_base.dat", dtype=np.float64)
-    point_params_np = np.fromfile("point_params_base.dat", dtype=np.float64)
+    # continue with this
+    camera_params_np = np.fromfile("camera_params_drs-lm.dat", dtype=np.float64)
+    point_params_np = np.fromfile("point_params_drs-lm.dat", dtype=np.float64)
+    #camera_params_np = np.fromfile("camera_params_base.dat", dtype=np.float64)
+    #point_params_np = np.fromfile("point_params_base.dat", dtype=np.float64)
     x0_p = camera_params_np.reshape(-1)
     x0_l = point_params_np.reshape(-1)
     #x0 = np.concatenate([x0_p, x0_l])
@@ -1536,8 +1537,8 @@ x0_p = x0_p.reshape(n_cameras, 9)
 # torch_points_2d.requires_grad_(False)
 # x0_t = from_numpy(x0)
 
-# init. Duplicate only non unique variables. s and u contain only those duplicates. 
-# initially all variables are contained, but selected by indices .. 
+# init. Duplicate only non unique variables. s and u contain only those duplicates.
+# initially all variables are contained, but selected by indices ..
 # Init s = v = u. = dupe all landmarks, now twice.
 # 1. s+ = s + v-u = s.
 # prox on (s+)
@@ -1551,7 +1552,7 @@ x0_p = x0_p.reshape(n_cameras, 9)
 startL = 1
 kClusters = 3
 innerIts = 1  # change to get an update, not 1 iteration
-its = 130
+its = 60
 cost = np.zeros(kClusters)
 lastCost = 1e20
 lastCostDRE = 1e20
@@ -1563,15 +1564,15 @@ init_lib()
 LipJ = np.ones(kClusters)
 
 # f(x) + 1/2 (v^T Vlk * v - v^T 2 * Vlk (2x - sk) ) for x=u/v. Does not look right .. haeh
-# 
+#
 # The Lagrangian is sum_k f_k (x_k^t) - <mu^t_k, x_k^t - Bk z^t> + rho_k/2 | Bk z^t-x_k^t |^2
 # Apparently the difference is only (for Y = x_k^t or Bk z):
 # f_k (Y) + rho_k/2 | Y - Bk z^t |^2 - <mu^t_k, Y - Bk z^t>.
 # and we recall lambda = s^+ - v = s + (v-u) - v = s - u.
 #
 # Hence it is fv' * fv versus fu' * fu + rho_k|u_k - v_k|^2 - rho_k <s_k - u_k, u_k - v_k> in DRS variables.
-# how did this turn into my dre cost? 
-# insert v -> only fk(v) remains. insert u: 
+# how did this turn into my dre cost?
+# insert v -> only fk(v) remains. insert u:
 
 (
     camera_indices_in_cluster,
@@ -1614,7 +1615,7 @@ if basic_version:
         currentCost = np.sum(cost)
         print(it, " ", round(currentCost), " gain ", round(lastCost - currentCost), ". ============= sum fk update takes ", end - start," s",)
 
-        poses_v, _, _ = average_cameras_new(
+        poses_v, _, Up_cluster = average_cameras_new(
             camera_indices_in_cluster, poses_in_cluster, poses_s_in_cluster, L_in_cluster, Ul_in_cluster) # old_poses for costs?
 
         #DRE cost BEFORE s update, always lower than AFTER update.
@@ -1622,7 +1623,10 @@ if basic_version:
 
         tau = 1 # 2 is best ? does not generalize!
         for ci in range(kClusters):
+            temp = Up_cluster[ci].diagonal()
+            temp[temp != 0] = 1
             poses_s_in_cluster[ci] = poses_s_in_cluster[ci] + tau * (poses_v - poses_in_cluster[ci]) # update s = s + v - u.
+            poses_s_in_cluster[ci] = temp.reshape(-1,9) * poses_s_in_cluster[ci] # set to zero if not in cluster.
 
         #DRE cost AFTER s update
         #dre = cost_DRE(camera_indices_in_cluster, poses_in_cluster, poses_s_in_cluster, L_in_cluster, Ul_in_cluster, poses_v) + currentCost
@@ -1673,7 +1677,7 @@ else:
     poses_s_in_cluster_bfgs = [0 for x in range(kClusters)] # dummy fill list
     steplength = [0 for x in range(kClusters)]
     lastCostDRE_bfgs = lastCostDRE
-    Gs = [] 
+    Gs = []
     Fs = []
     Fes = []
     rnaBufferSize = 6
@@ -1695,36 +1699,39 @@ else:
     currentCost = np.sum(cost)
     print(-1, " ", round(currentCost), " gain ", round(lastCost - currentCost), ". ============= sum fk update takes ", end - start," s",)
 
-    poses_v, U_all, U_cluster_zeros = average_cameras_new(
+    poses_v, _, U_cluster_zeros = average_cameras_new(
         camera_indices_in_cluster, poses_in_cluster, poses_s_in_cluster, L_in_cluster, Ul_in_cluster)
     # TODO: not updated poses are treated how? v - v old.
 
+    steplength = 0
+    tau = 1 # todo sqrt(2), not sure what is happening here.
+    for ci in range(kClusters):
+        s_step_cluster = poses_v - poses_in_cluster[ci]
+        poses_s_in_cluster_pre[ci] = poses_s_in_cluster[ci] + tau * s_step_cluster # update s = s + v - u.
+        steplength += np.linalg.norm(s_step_cluster.flatten(), 2)**2
+        #update_flat = (poses_s_in_cluster_pre[ci] - poses_s_in_cluster[ci]).flatten()
+        #steplength += update_flat.dot(Ul_all * update_flat)
+    steplength = np.sqrt(steplength)
+
     for it in range(its):
-
-        steplength = 0
-        tau = 1 # todo sqrt(2), not sure what is happening here.
-        for ci in range(kClusters):
-            poses_s_in_cluster_pre[ci] = poses_s_in_cluster[ci] + tau * (poses_v - poses_in_cluster[ci]) # update s = s + v - u.
-            steplength += np.linalg.norm((poses_s_in_cluster_pre[ci] - poses_s_in_cluster[ci]).flatten(), 2)**2
-            #update_flat = (poses_s_in_cluster_pre[ci] - poses_s_in_cluster[ci]).flatten()
-            #steplength += update_flat.dot(Ul_all * update_flat)
-        steplength = np.sqrt(steplength)
-
         # get line search direction and update bfgs data
         # operate with np concatenate to get large vector and reshape search_direction here?
-
-        RNA_or_bfgs = True
+        RNA_or_bfgs = True # RNA is best here ?! ok.
         if RNA_or_bfgs:
             use_bfgs = False # maybe full u,v?
             bfgs_r = np.zeros(kClusters * 9 * n_cameras)
             rna_s  = np.zeros(kClusters * 9 * n_cameras)
             use_s_in_rna = False # better False problem is fluctuation.
+
             for ci in range(kClusters): #bfgs_r = u-v
-                bfgs_r[ci * 9 * n_cameras: (ci+1) * 9 * n_cameras] = (poses_v - poses_in_cluster[ci]).flatten()
+                temp = U_cluster_zeros[ci].diagonal()
+                temp[temp != 0] = 1
+
+                bfgs_r[ci * 9 * n_cameras: (ci+1) * 9 * n_cameras] = temp * (poses_v - poses_in_cluster[ci]).flatten()
 
                 # somewhat unclear: s+ or s to use?
                 if not use_s_in_rna:
-                    rna_s[ci * 9 * n_cameras: (ci+1) * 9 * n_cameras] = poses_s_in_cluster_pre[ci].flatten() # TODO: check if not s is used.
+                    rna_s[ci * 9 * n_cameras: (ci+1) * 9 * n_cameras] = temp *  poses_s_in_cluster_pre[ci].flatten() # TODO: check if not s is used.
                 else:
                     # also not stable:
                     # YET this is clearly with h=-1 and lambda high delivering s+.
@@ -1858,14 +1865,14 @@ else:
                 poses_in_cluster_bfgs,
                 landmarks_bfgs,
             ) = prox_f(
-                camera_indices_in_cluster, point_indices_in_cluster, points_2d_in_cluster, 
-                poses_in_cluster_bfgs, landmarks.copy(), poses_s_in_cluster_bfgs, L_in_cluster_bfgs, 
+                camera_indices_in_cluster, point_indices_in_cluster, points_2d_in_cluster,
+                poses_in_cluster_bfgs, landmarks.copy(), poses_s_in_cluster_bfgs, L_in_cluster_bfgs,
                 Ul_in_cluster_bfgs, kClusters, LipJ, innerIts=innerIts, sequential=True,
                 )
             
             #print("2. x0_p", "points_3d_in_cluster", points_3d_in_cluster)
             currentCost_bfgs = np.sum(cost_bfgs)
-            poses_v_bfgs, Ul_all_bfgs, _ = average_cameras_new(
+            poses_v_bfgs, Ul_all_bfgs, U_cluster_zeros = average_cameras_new(
                 camera_indices_in_cluster, poses_in_cluster_bfgs, poses_s_in_cluster_bfgs, L_in_cluster_bfgs, Ul_in_cluster_bfgs)
 
             # update buffers
@@ -1909,14 +1916,25 @@ else:
             # accept / reject, reject all but drs and see
             # if ls_it == line_search_iterations-1 :
             if dre_bfgs <= lastCostDRE_bfgs or ls_it == line_search_iterations-1 : # not correct yet, must be <= last - c/gamma |u-v|
+
+                steplength = 0
                 for ci in range(kClusters):
                     poses_s_in_cluster[ci] = poses_s_in_cluster_bfgs[ci].copy()
+                    s_step_cluster = poses_v_bfgs - poses_in_cluster_bfgs[ci]
+                    poses_s_in_cluster_pre[ci] = poses_s_in_cluster[ci] + tau * s_step_cluster # update s = s + v - u.
+                    steplength += np.linalg.norm(s_step_cluster.flatten(), 2)**2
+                    #update_flat = (poses_s_in_cluster_pre[ci] - poses_s_in_cluster[ci]).flatten()
+                    #steplength += update_flat.dot(Ul_all * update_flat)
+                steplength = np.sqrt(steplength)
+
+                for ci in range(kClusters):
                     poses_in_cluster[ci] = poses_in_cluster_bfgs[ci].copy()
                     Ul_in_cluster[ci] = Ul_in_cluster_bfgs[ci].copy()
                 L_in_cluster = L_in_cluster_bfgs.copy()
                 landmarks = landmarks_bfgs.copy()
                 lastCostDRE_bfgs = dre_bfgs.copy()
                 poses_v = poses_v_bfgs.copy()
+
                 #print("A landmark_s_in_cluster", landmark_s_in_cluster)
                 break
 # here bfgs is better, but dre has better cost for the drs solution.
@@ -1948,5 +1966,5 @@ else:
 # <=> f(x) < f(y) + <nabla fy + nabla fx, x-y>
 
 if write_output:
-    x0_p.tofile("camera_params_drs.dat")
-    landmark_v.tofile("point_params_drs.dat")
+    poses_v.tofile("camera_params_drs-lm.dat")
+    landmarks.tofile("point_params_drs-lm.dat")

@@ -1377,7 +1377,7 @@ def bundle_adjust(
     # torch_points_2d = from_numpy(points_2d)
     n_cameras_ = int(x0_p_.shape[0] / 9)
     n_points_ = int(x0_l_.shape[0] / 3)
-    powerits = 100 # kind of any value works here? > =5?
+    powerits = 50 # kind of any value works here? > =5?
     tr_eta_1 = 0.8
     tr_eta_2 = 0.25
 
@@ -2139,6 +2139,7 @@ basic_version = False # accelerated or basic
 sequential = True
 # 173 true is better ?! maybe cluster?
 # might be violating lipshitz condition from last Jacobian if disabled.
+# acceleration does not work anymore if false! aha.
 linearize_at_last_solution = True # linearize at uk or v. maybe best to check energy. at u or v. DRE:
 lib = ctypes.CDLL("./libprocess_clusters.so")
 init_lib()
@@ -2317,16 +2318,17 @@ else:
         point_indices_in_cluster, points_3d_in_cluster, landmark_s_in_cluster, L_in_cluster, Vl_in_cluster, landmark_v, delta_l_in_cluster
     )
 
-    for it in range(its):
+    # to enable using v in prox map (else s is not updated properly) we do this here, once and always below.
+    steplength = 0
+    tau = 1 # todo sqrt(2), not sure what is happening here.
+    for ci in range(kClusters):
+        landmark_s_in_cluster_pre[ci] = landmark_s_in_cluster[ci] + tau * (landmark_v - points_3d_in_cluster[ci]) # update s = s + v - u.
+        steplength += np.linalg.norm(landmark_s_in_cluster_pre[ci] - landmark_s_in_cluster[ci], 2)**2
+        #update_flat = (landmark_v - points_3d_in_cluster[ci]).flatten()
+        #steplength += update_flat.dot(Vl_all * update_flat)
+    steplength = np.sqrt(steplength)
 
-        steplength = 0
-        tau = 1 # todo sqrt(2), not sure what is happening here.
-        for ci in range(kClusters):
-            landmark_s_in_cluster_pre[ci] = landmark_s_in_cluster[ci] + tau * (landmark_v - points_3d_in_cluster[ci]) # update s = s + v - u.
-            steplength += np.linalg.norm(landmark_s_in_cluster_pre[ci] - landmark_s_in_cluster[ci], 2)
-            update_flat = (landmark_v - points_3d_in_cluster[ci]).flatten()
-            #steplength += update_flat.dot(Vl_all * update_flat)
-        #steplength = np.sqrt(steplength)
+    for it in range(its):
 
         # debugging cost block ################
         if False:
@@ -2358,10 +2360,16 @@ else:
         # operate with np concatenate to get large vector and reshape search_direction here?
         bfgs_r = np.zeros(kClusters * 3 * n_points)
         rna_s  = np.zeros(kClusters * 3 * n_points)
+        rna_s_reg  = np.zeros(kClusters * 3 * n_points)
         for ci in range(kClusters): #bfgs_r = u-v
-            bfgs_r[ci * 3 * n_points: (ci+1) * 3 * n_points] = landmark_v.flatten() - points_3d_in_cluster[ci].flatten()
+
+            temp = U_cluster_zeros[ci].diagonal()
+            temp[temp != 0] = 1
+
+            bfgs_r[ci * 3 * n_points: (ci+1) * 3 * n_points] = temp * (landmark_v - points_3d_in_cluster[ci]).flatten()
             #bfgs_r[ci * 3 * n_points: (ci+1) * 3 * n_points] = (landmark_s_in_cluster_pre[ci] - landmark_s_in_cluster[ci]).flatten() # with tau NO likely due to + h * nab
-            rna_s[ci * 3 * n_points: (ci+1) * 3 * n_points] = landmark_s_in_cluster_pre[ci].flatten()
+            rna_s[ci * 3 * n_points: (ci+1) * 3 * n_points] = temp * landmark_s_in_cluster_pre[ci].flatten()
+            rna_s_reg[ci * 3 * n_points: (ci+1) * 3 * n_points] = temp * landmark_s_in_cluster[ci].flatten()
 
         use_bfgs = True # maybe full u,v?
         if use_bfgs:
@@ -2387,7 +2395,7 @@ else:
                 #dk_stepLength = np.sqrt(dk_stepLength)
                 multiplier = steplength / dk_stepLength
 
-            else: # nesterov
+            else: # nesterov, best here.
                 xk1 = rna_s
                 xk05= rna_s - bfgs_r
                 if it > 0:
@@ -2399,7 +2407,7 @@ else:
                 dk_stepLength = np.linalg.norm(dk, 2)
                 multiplier = 1
         else: # RNA works, yet not good enough
-            L_rna = max(L_in_cluster)
+            #L_rna = max(L_in_cluster) # nope?
 
             U_diag = np.zeros(rna_s.shape)
             for ci in range(kClusters):
@@ -2417,9 +2425,18 @@ else:
             # U_diag.diagonal()[:] = 1. / temp[:]
             # U_diag.diagonal()[temp >= 1e10] = 0
 
+            # stable but a bit slow.
             lambdaScale = np.sqrt(np.mean(U_diag.diagonal())) # sqrt?
-            Gs, Fs, Fes, dk = RNA(Gs, Fs, rna_s, L_rna * bfgs_r, it, rnaBufferSize, Fes, bfgs_r, res_pcg=U_diag, lamda = 0.001 * lambdaScale, h =-1)
-            dk = dk - (rna_s - bfgs_r)
+            #Gs, Fs, Fes, dk = RNA(Gs, Fs, rna_s_reg, bfgs_r, it, rnaBufferSize, Fes, bfgs_r, res_pcg = U_diag, lamda = 0.001 * lambdaScale, h = -1)
+            #dk = dk - rna_s_reg
+
+            # other option also stable with - rna_s.
+            Gs, Fs, Fes, dk = RNA(Gs, Fs, rna_s, bfgs_r, it, rnaBufferSize, Fes, bfgs_r, res_pcg = U_diag, lamda = 0.001 * lambdaScale, h = -1)
+            if it < 5:
+                dk = dk - rna_s # start at s, not s+. stable.
+            else: # ok maybe the '-1' should be 0 then .. ?
+                dk = dk - rna_s_reg # appears since dk is extrapolated point and ls is reg + dk this should be used, but just not stable at all, crazy overshoot in 1st run(s)?
+
             dk_stepLength = np.linalg.norm(dk, 2)
             multiplier = 1
 
@@ -2462,7 +2479,7 @@ else:
                 )
             #print("2. x0_p", "points_3d_in_cluster", points_3d_in_cluster)
             currentCost_bfgs = np.sum(cost_bfgs)
-            landmark_v_bfgs, Vl_all, V_cluster_zeros = average_landmarks_new( # v update
+            landmark_v_bfgs, _, V_cluster_zeros = average_landmarks_new( # v update
                 point_indices_in_cluster, points_3d_in_cluster_bfgs, landmark_s_in_cluster_bfgs, L_in_cluster_bfgs, Vl_in_cluster_bfgs, landmark_v, delta_l_in_cluster
                 )
             #print("3. x0_p", x0_p, "points_3d_in_cluster", points_3d_in_cluster)
@@ -2519,9 +2536,19 @@ else:
             # accept / reject, reject all but drs and see
             # if ls_it == line_search_iterations-1 :
             if dre_bfgs <= lastCostDRE_bfgs or ls_it == line_search_iterations-1 : # not correct yet, must be <= last - c/gamma |u-v|
+
+                steplength = 0
                 for ci in range(kClusters):
                     landmark_s_in_cluster[ci] = landmark_s_in_cluster_bfgs[ci].copy()
-                    if True or linearize_at_last_solution: # here appears to be needed
+                    s_step_cluster = landmark_v_bfgs - points_3d_in_cluster_bfgs[ci]
+                    landmark_s_in_cluster_pre[ci] = landmark_s_in_cluster[ci] + tau * s_step_cluster # update s = s + v - u.
+                    steplength += np.linalg.norm(s_step_cluster, 2)**2
+                    #update_flat = (landmark_v - points_3d_in_cluster[ci]).flatten()
+                    #steplength += update_flat.dot(Vl_all * update_flat)
+                steplength = np.sqrt(steplength)
+
+                for ci in range(kClusters):
+                    if linearize_at_last_solution:
                         points_3d_in_cluster[ci] = points_3d_in_cluster_bfgs[ci].copy()
                     else:
                         #compare cost of part and dre_per_part to pick best option
