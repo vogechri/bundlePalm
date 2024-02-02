@@ -1374,7 +1374,7 @@ def bundle_adjust(
     successfull_its_=1,
 ):
     # print("landmarks_only_in_cluster_  ", landmarks_only_in_cluster_, " ", np.sum(landmarks_only_in_cluster_), " vs ", np.sum(1 - landmarks_only_in_cluster_) )
-    newForUnique = False #True # debug nable_approx 
+    newForUnique = True # debug nable_approx 
     blockEigMult = 1e-3 # 1e-3 was used before less hicups smaller 1e-3. recall last val ..
     normal_case_ = True # No L * JltJl at all. Does not work
     # define x0_t, x0_p, x0_l, L # todo: missing Lb: inner L for bundle, Lc: to fix duplicates
@@ -1725,6 +1725,7 @@ def bundle_adjust(
         #stepSize = 1. * (blockEigMult * blockEigenvalueJltJl +     JltJl.copy()) # obviously the same as above, right.
         JltJlDiag = 1/L * stepSize.copy() # max 1, 1/L, line-search dre fails -> increase
 
+        # ok maybe yes. I want to 'set those to a small value' only.
         if newForUnique: # does this make sense at all? just clear and manipulate s->u, s.t. v = 2u-s = u. new s = u (old), will set to new later.
             JltJlDiag = copy_selected_blocks(JltJlDiag, landmarks_only_in_cluster_, 3)
             if normal_case_:
@@ -1733,6 +1734,11 @@ def bundle_adjust(
                 JltJlDiag = JltJlDiag + 1e-4 * blockEigenvalueJltJl
 
         nabla_l_approx2 = JltJlDiag * (delta_l + prox_rhs)
+
+        if newForUnique:
+            nabla_l_approx2 = diag_present * nabla_l_approx2
+            bl = diag_present * bl
+
         diff_to_nabla_l2_2 = np.linalg.norm(L*nabla_l_approx2+bl, 2)
         diff_to_nabla_l2   = np.linalg.norm(L*nabla_l_approx+bl, 2)
         #diff_to_nabla_p1 = np.linalg.norm(nablaXp-bp, 2)
@@ -1827,6 +1833,8 @@ def bundle_adjust(
     # TODO change 2
     # It appears as if we set entries to 1 for covered landmarks in Rho (those were set to almost 0)
     # and hack the outpout xl to ensure 'averaging' will later operate on v = 2s-u
+    # here these have 1 on diagonal and i return u := s, then v = 2s-s = s. This leads to a cost of 0 in dre.
+    # but how do i get true u in there? heah? Better reset s.
     # that is not smart since we also reuse those xl later (now wrong) and also compute dre from it (wrong now)
     if newForUnique:
         #print( "B JltJlDiag-bun ", JltJlDiag.data.reshape(-1,9)[landmarks_only_in_cluster_,:])
@@ -1843,7 +1851,11 @@ def bundle_adjust(
         #print( "Y ", (L * JltJlDiag).data.reshape(-1,9)[landmarks_only_in_cluster_,:])
 
         # see above, compensate for averaging
-        xTest = x0_l_ - (diag_present*(x0_l_.flatten() - s_l_)).reshape(-1,3)
+        if False:
+            xTest = x0_l_ - (diag_present*(x0_l_.flatten() - s_l_)).reshape(-1,3)
+        else:
+            xTest = x0_l_ # settting s to u after prox
+
         # print("xt ", xTest[landmarks_only_in_cluster_,:])
         # print("x0 ", x0_l_[landmarks_only_in_cluster_,:])
 
@@ -2184,7 +2196,8 @@ its = 60
 cost = np.zeros(kClusters)
 lastCost = 1e20
 lastCostDRE = 1e20
-basic_version = False # accelerated or basic
+basic_version = False #True # accelerated or basic
+newForUnique = True
 sequential = True
 # 173 true is better ?! maybe cluster?
 # might be violating lipshitz condition from last Jacobian if disabled.
@@ -2258,6 +2271,10 @@ if basic_version:
             LipJ, kClusters, innerIts=innerIts, sequential=True,
             )
         end = time.time()
+
+        if newForUnique:
+            for ci in range(kClusters):
+                landmark_s_in_cluster[ci][globalSingleLandmarksB_in_c[ci]] = points_3d_in_cluster[ci][globalSingleLandmarksB_in_c[ci]]
 
         #print("++++++++++++++++++ globalSingleLandmarksB_in_c[0].shape ", globalSingleLandmarksB_in_c[0].shape)
 
@@ -2361,6 +2378,10 @@ else:
         points_3d_in_cluster, landmark_s_in_cluster, L_in_cluster, Vl_in_cluster, 
         LipJ, kClusters, innerIts=innerIts, sequential=True,
         )
+    if newForUnique:
+        for ci in range(kClusters):
+            landmark_s_in_cluster[ci][globalSingleLandmarksB_in_c[ci]] = points_3d_in_cluster[ci][globalSingleLandmarksB_in_c[ci]]
+
     end = time.time()
     currentCost = np.sum(cost)
     print(-1, " ", round(currentCost), " gain ", round(lastCost - currentCost), ". ============= sum fk update takes ", end - start," s",)
@@ -2522,12 +2543,16 @@ else:
                 x0_p_bfgs,
                 delta_l_in_cluster,
                 globalSingleLandmarksA_in_c,
-                globalSingleLandmarksB_in_c
+                globalSingleLandmarksB_in_c # fixed
             ) = prox_f(
                 x0_p.copy(), camera_indices_in_cluster, point_indices_in_cluster, points_2d_in_cluster,
                 points_3d_in_cluster_bfgs, landmark_s_in_cluster_bfgs, L_in_cluster_bfgs, Vl_in_cluster_bfgs, 
                 LipJ, kClusters, innerIts=innerIts, sequential=True,
                 )
+            if newForUnique:
+                for ci in range(kClusters):
+                    landmark_s_in_cluster_bfgs[ci][globalSingleLandmarksB_in_c[ci]] = points_3d_in_cluster_bfgs[ci][globalSingleLandmarksB_in_c[ci]]
+
             #print("2. x0_p", "points_3d_in_cluster", points_3d_in_cluster)
             currentCost_bfgs = np.sum(cost_bfgs)
             landmark_v_bfgs, _, V_cluster_zeros = average_landmarks_new( # v update
