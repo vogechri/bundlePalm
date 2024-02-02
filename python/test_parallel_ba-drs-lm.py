@@ -30,9 +30,19 @@ FILE_NAME = "problem-16-22106-pre.txt.bz2"
 FILE_NAME = "problem-173-111908-pre.txt.bz2"
 #FILE_NAME = "problem-135-90642-pre.txt.bz2"
 
-#BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/trafalgar/"
-# FILE_NAME = "problem-21-11315-pre.txt.bz2"
+BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/trafalgar/"
+# 71k
+FILE_NAME = "problem-21-11315-pre.txt.bz2"
 #FILE_NAME = "problem-257-65132-pre.txt.bz2"
+
+# 59 / 0  ======== DRE BFGS ======  1235653  ========= gain  618
+BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/venice/"
+FILE_NAME = "problem-52-64053-pre.txt.bz2"
+
+# 59 / 0  ======== DRE BFGS ======  323919  ==
+#BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/final/"
+#FILE_NAME = "problem-93-61203-pre.txt.bz2"
+
 
 URL = BASE_URL + FILE_NAME
 
@@ -1066,12 +1076,18 @@ def bundle_adjust(
             J_pose, J_land, fx0 = ComputeDerivativeMatricesNew (
                 x0_t_cam, x0_t_land, camera_indices_, point_indices_, torch_points_2d )
 
+            # clearly: 2a^2+b^2 > (a+b)^2 = a^2 + b^2 + 2ab. Since (a-b)^2 = a^2 + b^2 - 2ab > 0, so a^2 + b^2 > 2ab. 
+            # a^2 = p^t* Jp^TJp * p , b^2 = l^tJl^TJl l. ab = p^tJp^T Jl*l.
+            #(Jl | Jp) (l,p)^T = Jl l + Jp p and |(Jl | Jp) (l,p)^T|^2 = l^t Jl^t Jl l + p^t Jp^t Jp p + 2 p^t Jp^t Jl l.
+            # So 2 JtJ  + 2 JltJl shuold majorize |J^t x|^2 for all x.
+
             JtJ = J_pose.transpose() * J_pose
             #JtJDiag = diag_sparse(np.fmax(JtJ.diagonal(), 1e-4))
             J_eps = 1e-4
 
             blockEigenvalueJtJ = blockEigenvalue(JtJ, 9)
             # TODO does work with 1.. ?
+
             stepSize = 1. * (blockEigMult * blockEigenvalueJtJ + LipJ * JtJ.copy()) # Todo '2 *' vs 1 by convex.
 
             # stepSize = 1. * (blockEigMult * blockEigenvalueJtJ + 1.4 * JtJ.copy()) # Todo '2 *' vs 1 by convex.
@@ -1503,8 +1519,8 @@ n_points = points_3d.shape[0]
 n = 9 * n_cameras + 3 * n_points
 m = 2 * points_2d.shape[0]
 
-write_output = True
-read_output =  True
+write_output = False
+read_output =  False
 if read_output:
     # continue with this
     camera_params_np = np.fromfile("camera_params_drs-lm.dat", dtype=np.float64)

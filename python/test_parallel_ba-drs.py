@@ -33,6 +33,15 @@ FILE_NAME = "problem-173-111908-pre.txt.bz2"
 # FILE_NAME = "problem-21-11315-pre.txt.bz2"
 #FILE_NAME = "problem-257-65132-pre.txt.bz2"
 
+# 63 / 1  ======== DRE BFGS ======  506844  ========= gain  794 ==== f(v)=  506844
+#BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/venice/"
+#FILE_NAME = "problem-52-64053-pre.txt.bz2"
+
+# 59 / 0  ======== DRE BFGS ======  291177  ========= gain  938
+#BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/final/"
+#FILE_NAME = "problem-93-61203-pre.txt.bz2"
+
+
 URL = BASE_URL + FILE_NAME
 
 if not os.path.isfile(FILE_NAME):
@@ -1241,8 +1250,13 @@ def cost_DRE(
         # deriv
         # rho_k (2v + 2s-4u) = 0
 
+        # let rho_k = rho, the 2v = 4u-2s at min with cost 
+        # r/2|u-2u+s|^2 - r<s-u, u-2u+s>
+        # r/2|s-u|^2 - r|s-u, s-u|^2 = -r/2|s-u|^2 <0 Haeh? 
+
+        #local_cost = min(0, local_cost.copy()) # well prevent chaos. sandwich lemma
         cost_dre += local_cost
-        dre_per_part.append(local_cost.copy())
+        dre_per_part.append(local_cost) #.copy())
 
         if i == 0:
             Vl_all = V_land
@@ -1360,11 +1374,12 @@ def bundle_adjust(
     successfull_its_=1,
 ):
     # print("landmarks_only_in_cluster_  ", landmarks_only_in_cluster_, " ", np.sum(landmarks_only_in_cluster_), " vs ", np.sum(1 - landmarks_only_in_cluster_) )
-    newForUnique = True
+    newForUnique = False #True # debug nable_approx 
     blockEigMult = 1e-3 # 1e-3 was used before less hicups smaller 1e-3. recall last val ..
     normal_case_ = True # No L * JltJl at all. Does not work
     # define x0_t, x0_p, x0_l, L # todo: missing Lb: inner L for bundle, Lc: to fix duplicates
     minimumL = 1e-6
+    JJ_mult = 1
     L = max(minimumL, L_in_cluster_)
     updateJacobian = True
     # holds all! landmarks, only use fraction likely no matter not present in cams anyway.
@@ -1377,7 +1392,7 @@ def bundle_adjust(
     # torch_points_2d = from_numpy(points_2d)
     n_cameras_ = int(x0_p_.shape[0] / 9)
     n_points_ = int(x0_l_.shape[0] / 3)
-    powerits = 50 # kind of any value works here? > =5?
+    powerits = 100 # kind of any value works here? > =5?
     tr_eta_1 = 0.8
     tr_eta_2 = 0.25
 
@@ -1431,7 +1446,7 @@ def bundle_adjust(
             # 'hangs at this value.' Check new variant with recomputing Jacobian at end.
             #68 / 0  ======== DRE BFGS ======  501664  ========= gain  247 ==== f(v)=  502614  f(u)=  500821  ~=  500704.09297090676
             #81 / 0  ======== DRE BFGS ======  501076  ========= gain  139 ==== f(v)=  502339  f(u)=  499758  ~=  499713.50253538677
-            stepSize = 1. * (blockEigMult * blockEigenvalueJltJl + 1 * JltJl.copy()) # Todo '2 *' vs 1 by convex.
+            stepSize = 1. * (blockEigMult * blockEigenvalueJltJl + JJ_mult * JltJl.copy()) # Todo '2 *' vs 1 by convex.
             #stepSize = 1. * (blockEigMult * blockEigenvalueJltJl + LipJ * JltJl.copy()) # hmm
             
             #stepSize = 1. * (1e-0 * diag_sparse(np.ones(n_points_*3)) + 1.0 * JltJl.copy()) # not so good
@@ -1442,16 +1457,17 @@ def bundle_adjust(
             # averaging leaves a gap here, if gap is too large we fail.
             # should still be caverable by (pre!)-computing deriv in advance. Then jump is limited by inc in L.
             #JltJlDiag = diag_sparse(np.fmax(JltJl.diagonal(), 1e1)) # startL defines this. 
-            maxDiag = np.max(JltJl.diagonal())
+            #maxDiag = np.max(JltJl.diagonal())
             # here larger x, eg 5: 1ex leasd  to stallment, small to v,u divergence.
             #JltJlDiag = diag_sparse(np.fmax(JltJl.diagonal(), np.minimum(maxDiag, 1e5 * np.maximum(1., 1./L)))) # startL defines this. 
             # theoretic value is 2 * diag. [modula change to diag]. Here we use 1/2 diag. but No dependence on L.
-            JltJlDiag = np.maximum(1, 0.5 / L) * diag_sparse(np.fmax(JltJl.diagonal(), 1e1)) # this should ensure (small L) condition.
+            #JltJlDiag = np.maximum(1, 0.5 / L) * diag_sparse(np.fmax(JltJl.diagonal(), 1e1)) # this should ensure (small L) condition.
             # improvement: only for constrained variables.
             # improvement: acceleration, maybe needs ALL variables to be effective.
 
             JltJlDiag = stepSize.copy() # max 1, 1/L, line-search dre fails -> increase
 
+            # set to 1e-12+L * blockEigMult * blockEigenvalueJltJl all entries of completely covered lms.
             if newForUnique:
                 JltJlDiag = copy_selected_blocks(JltJlDiag, landmarks_only_in_cluster_, 3)
                 if normal_case_:
@@ -1468,7 +1484,7 @@ def bundle_adjust(
             # but Dl is fulfilled with L. So would lower Dl just like, or? 
             # maybe better: 3x3 matrix sqrt(|M|_1 |M|inf) as diag. Yet this removes effect of 'L' getting small = large steps.
             # do i need to keep memory to ensure it remains >? or pre compute grad (and store)?
-            print(" min/max JltJl.diagonal() ", np.min(JltJl.diagonal()), " ", maxDiag, " adjusted ", np.min(JltJlDiag.diagonal()), " ", np.max(JltJlDiag.diagonal()))
+            print(" min/max JltJl.diagonal() ", np.min(JltJl.diagonal()), " ", np.max(JltJl.diagonal()), " adjusted ", np.min(JltJlDiag.diagonal()), " ", np.max(JltJlDiag.diagonal()))
             #print("JltJlDiag.shape ", JltJlDiag.shape, JltJlDiag.shape[0]/3)
 
             # based on unique_pointindices_ make diag_1L that is 1 at points 
@@ -1483,6 +1499,7 @@ def bundle_adjust(
             bl = J_land.transpose() * fx0
 
             prox_rhs = x0_l_ - s_l_
+            # remove prox term for covered landmarks
             if newForUnique: # alternative turn off completely, use 2u-s -> return (u-s)/2 to average u+k = uk + delta uk
                 landmarks_in_many_cluster_ = np.invert(landmarks_only_in_cluster_)
                 diag_present = diag_sparse( np.repeat((np.ones(n_points_) * landmarks_in_many_cluster_).reshape(-1,1), 3).flatten() )
@@ -1528,10 +1545,7 @@ def bundle_adjust(
         x0_t_cam = x0_t[: n_cameras_ * 9].reshape(n_cameras_, 9)
         x0_t_land = x0_t[n_cameras_ * 9 :].reshape(n_points_, 3)
 
-        fx1 = funx0_st1(
-            x0_t_cam[camera_indices_[:]],
-            x0_t_land[point_indices_[:]],
-            torch_points_2d)
+        fx1 = funx0_st1(x0_t_cam[camera_indices_[:]], x0_t_land[point_indices_[:]], torch_points_2d)
         costEnd = np.sum(fx1.numpy() ** 2)
         print(it_, "it. cost 1     ", round(costEnd), "      + penalty ", round(costEnd + penaltyL + penaltyP),)
 
@@ -1596,6 +1610,7 @@ def bundle_adjust(
 
         if LfkSafe and not steSizeTouched:
             L = L / 2
+            JltJlDiag = 2 * JltJlDiag # we return this maybe -- of course stupid to do in a release version
 
         # if LfkDiagonal < -2 and steSizeTouched:
         #     LfkDiagonal = -2
@@ -1692,16 +1707,46 @@ def bundle_adjust(
         J_pose, J_land, fx0 = ComputeDerivativeMatricesNew(
             x0_t_cam, x0_t_land, camera_indices_, point_indices_, torch_points_2d
         )
+        # this is nabla, compare to estimation old (u-s)^T Jdiag (u-s)
+        #bp = J_pose.transpose() * fx0
+        bl = J_land.transpose() * fx0
+
         JltJl = J_land.transpose() * J_land
         # #JltJlDiag = diag_sparse(np.fmax(JltJl.diagonal(), 1e1)) # should be same as above
         # #JltJlDiag = np.maximum(1, 0.5 / L) * diag_sparse(np.fmax(JltJl.diagonal(), 1e1)) # this should ensure (small L) condition.
         # #stepSize = blockEigenvalue(JltJl, 3)
         # stepSize.data = np.maximum(stepSize.data, blockEigenvalue(JltJl, 3).data) # else diagSparse of it
 
+        nabla_l_approx = JltJlDiag * (delta_l + prox_rhs)
+
         # fairly good. x2 tested. x1 ?
-        # stepSize = 1. * (blockEigMult * blockEigenvalueJltJl + 2 * JltJl.copy())
-        stepSize = 1. * (blockEigMult * blockEigenvalueJltJl + JltJl.copy()) # obviously the same as above, right.
+        #stepSize = 1. * (blockEigMult * blockEigenvalueJltJl + LipJ * JltJl.copy()) # hmm
+        stepSize = 1. * (blockEigMult * blockEigenvalueJltJl + JJ_mult * JltJl.copy())
+        #stepSize = 1. * (blockEigMult * blockEigenvalueJltJl +     JltJl.copy()) # obviously the same as above, right.
         JltJlDiag = 1/L * stepSize.copy() # max 1, 1/L, line-search dre fails -> increase
+
+        if newForUnique: # does this make sense at all? just clear and manipulate s->u, s.t. v = 2u-s = u. new s = u (old), will set to new later.
+            JltJlDiag = copy_selected_blocks(JltJlDiag, landmarks_only_in_cluster_, 3)
+            if normal_case_:
+                JltJlDiag = JltJlDiag + L * blockEigMult * blockEigenvalueJltJl
+            else: # usual version of L
+                JltJlDiag = JltJlDiag + 1e-4 * blockEigenvalueJltJl
+
+        nabla_l_approx2 = JltJlDiag * (delta_l + prox_rhs)
+        diff_to_nabla_l2_2 = np.linalg.norm(L*nabla_l_approx2+bl, 2)
+        diff_to_nabla_l2   = np.linalg.norm(L*nabla_l_approx+bl, 2)
+        #diff_to_nabla_p1 = np.linalg.norm(nablaXp-bp, 2)
+        #diff_to_nabla_p2 = np.linalg.norm(nablaXp+bp, 2)
+        diff_to_nabla_l4_2 = np.linalg.norm(2*L*nabla_l_approx2+bl, 2)
+        diff_to_nabla_l4   = np.linalg.norm(2*L*nabla_l_approx+bl, 2)
+
+        print("diff_to_nabla_l *2 ", diff_to_nabla_l4, " | ", "diff_to_nabla_l ", diff_to_nabla_l2, " |")
+        print("diff_to_nabla2_l *2 ", diff_to_nabla_l4_2, " | ", "diff_to_nabla2_l ", diff_to_nabla_l2_2, " |")
+
+        print(" nablas 1", - L * nabla_l_approx ) # So nabla_l_approx = JtJDiag * (u-s), hence return (i use s-u), 2 * JtJDiag * L, the 2 DELIVERS a better cost!
+        print(" nablas 2", - L * nabla_l_approx2) # So nabla_l_approx = JtJDiag * (u-s), hence return (i use s-u), JtJDiag * L, the 2 DELIVERS a better cost!
+        print(" nablas b", bl) # TINY
+
 
         # Also ok, but slower. Haeh? numerically unstable. at some point dre estimate wrong -> collapse.
         # JltJlDiag = 2/L * JltJl.copy() # could use as precomputed
@@ -1773,12 +1818,16 @@ def bundle_adjust(
     # u+ = u - Vli/2 [(W.transpose() * delta_p).flatten() + bl_s]
     # u+ = u - Vli/2 [(W.transpose() * delta_p).flatten() + bl + Vl * (u - s)]
 
+    # see diff_to_nabla_l3 = np.linalg.norm(2*L*nabla_l_approx-bl, 2) is smallest. only for computing DRE.
     if normal_case_:
         Rho = L * JltJlDiag #+ 1e-12 * Vl
     else:
         Rho = JltJlDiag #+ 1e-12 * Vl
 
     # TODO change 2
+    # It appears as if we set entries to 1 for covered landmarks in Rho (those were set to almost 0)
+    # and hack the outpout xl to ensure 'averaging' will later operate on v = 2s-u
+    # that is not smart since we also reuse those xl later (now wrong) and also compute dre from it (wrong now)
     if newForUnique:
         #print( "B JltJlDiag-bun ", JltJlDiag.data.reshape(-1,9)[landmarks_only_in_cluster_,:])
         #landmarks_in_many_cluster_ = np.invert(landmarks_only_in_cluster_)
@@ -2131,7 +2180,7 @@ x0_p = x0_p.reshape(n_cameras, 9)
 startL = 1
 kClusters = 5
 innerIts = 1  # change to get an update, not 1 iteration
-its = 120
+its = 60
 cost = np.zeros(kClusters)
 lastCost = 1e20
 lastCostDRE = 1e20
@@ -2250,6 +2299,8 @@ if basic_version:
         primal_cost_v = np.sum(np.array(primal_cost_vs))
         primal_cost_u = np.sum(np.array(primal_cost_us))
 
+        dre = max( primal_cost_v, dre ) # sandwich lemma, prevent maybe chaos
+
         print( it, " ======== DRE ====== ", round(dre) , " ========= gain " , \
             round(lastCostDRE - dre), "==== f(v)= ", round(primal_cost_v), " f(u)= ", round(primal_cost_u))
 
@@ -2363,7 +2414,7 @@ else:
         rna_s_reg  = np.zeros(kClusters * 3 * n_points)
         for ci in range(kClusters): #bfgs_r = u-v
 
-            temp = U_cluster_zeros[ci].diagonal()
+            temp = V_cluster_zeros[ci].diagonal()
             temp[temp != 0] = 1
 
             bfgs_r[ci * 3 * n_points: (ci+1) * 3 * n_points] = temp * (landmark_v - points_3d_in_cluster[ci]).flatten()
@@ -2517,6 +2568,8 @@ else:
                     points_3d_in_cluster_bfgs[ci])
             primal_cost_v = np.sum(np.array(primal_cost_vs))
             primal_cost_u = np.sum(np.array(primal_cost_us))
+
+            dre_bfgs = max(dre_bfgs, primal_cost_v) # sandwich lemma 
 
             print( it, "/", ls_it, " ======== DRE BFGS ====== ", round(dre_bfgs) , " ========= gain " , \
                 round(lastCostDRE_bfgs - dre_bfgs), "==== f(v)= ", round(primal_cost_v), " f(u)= ", round(primal_cost_u), " ~= ", currentCost_bfgs)
