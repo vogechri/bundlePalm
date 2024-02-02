@@ -26,6 +26,7 @@ BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/dubrovnik/"
 #FILE_NAME = "problem-16-22106-pre.txt.bz2"
 #FILE_NAME = "problem-356-226730-pre.txt.bz2" # large dub, play with ideas: cover, etc
 #FILE_NAME = "problem-237-154414-pre.txt.bz2"
+#59 / 0  ======== DRE BFGS ======  502663  ========= gain  122 ====
 FILE_NAME = "problem-173-111908-pre.txt.bz2"
 #FILE_NAME = "problem-135-90642-pre.txt.bz2"
 
@@ -1702,7 +1703,8 @@ def bundle_adjust(
 
     # 173 with more stable, still dre can increase later many more of 'accept' first line search.
     # still not much faster.
-    getBetterStepSize = True # this is used as approx of f in update of v and thus s. maybe change there u-v should be small. 
+    # both gradient-approx appear very close to each other so maybe not needed.
+    getBetterStepSize = False # this is used as approx of f in update of v and thus s. maybe change there u-v should be small. 
     if getBetterStepSize: # needs to set L correctly
         J_pose, J_land, fx0 = ComputeDerivativeMatricesNew(
             x0_t_cam, x0_t_land, camera_indices_, point_indices_, torch_points_2d
@@ -2486,11 +2488,11 @@ else:
                 U_diag[ci * 3 * n_points: (ci+1) * 3 * n_points] = blockEigenvalue(V_cluster_zeros[ci], 3).diagonal()
             U_diag = diag_sparse(U_diag)
             #0.001 * lambdaScale
-            #59 / 0  ======== DRE BFGS ======  510799  ========= gain  52 ==== f(v)=  510791  f(u)=  510825  ~=  510808.95759023685
-            #U_diag = np.ones(rna_s.shape)
-            #U_diag = diag_sparse(U_diag)
+            # 59 / 0  ======== DRE BFGS ======  503077  ========= gain  7 ==== f(v)=  503075
+            U_diag.data = np.ones(U_diag.data.shape) # appears better .. ? why?
+            #U_diag = np.ones(rna_s.shape) ;U_diag = diag_sparse(U_diag)
 
-            # inverse from some reason
+            # try also inverse from some reason
             # same performance so no clear if needed at all. likely not :)
             # temp = U_diag.diagonal()[:]
             # temp[temp < 1e-4] = 1e10
@@ -2599,13 +2601,9 @@ else:
             print( it, "/", ls_it, " ======== DRE BFGS ====== ", round(dre_bfgs) , " ========= gain " , \
                 round(lastCostDRE_bfgs - dre_bfgs), "==== f(v)= ", round(primal_cost_v), " f(u)= ", round(primal_cost_u), " ~= ", currentCost_bfgs)
 
-            # 61 / 2   ======== DRE BFGS ======  501556  ========= gain -193 ==== f(v)=  510508  f(u)=  506330  ~=  506300.815580494
-            # 119 / 0  ======== DRE BFGS ======  503411  ========= gain  264 ==== f(v)=  504490  f(u)=  503734  ~=  503689.71918651415
-            # try also as blockMult and per sub-problem.
-            # appears better to do globally .. hm.
+            # appears better to do globally .. hm. not used any more.
             if lastCostDRE_bfgs < dre_bfgs and ls_it == line_search_iterations-1:
                 LipJ += 0.2 * np.ones(kClusters) # need to skip once .. 
-
             # if ls_it == line_search_iterations-1:
             #     for ci in range(kClusters):
             #         if lastCostDRE_bfgs_per_part[ci] < dre_per_part[ci] + cost_bfgs[ci] :
@@ -2626,7 +2624,7 @@ else:
                 steplength = np.sqrt(steplength)
 
                 for ci in range(kClusters):
-                    if linearize_at_last_solution:
+                    if linearize_at_last_solution: # better with acceleration.
                         points_3d_in_cluster[ci] = points_3d_in_cluster_bfgs[ci].copy()
                     else:
                         #compare cost of part and dre_per_part to pick best option
