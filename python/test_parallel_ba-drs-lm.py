@@ -30,14 +30,19 @@ FILE_NAME = "problem-16-22106-pre.txt.bz2"
 FILE_NAME = "problem-173-111908-pre.txt.bz2"
 #FILE_NAME = "problem-135-90642-pre.txt.bz2"
 
-BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/trafalgar/"
+#BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/trafalgar/"
 # 71k
-FILE_NAME = "problem-21-11315-pre.txt.bz2"
+#FILE_NAME = "problem-21-11315-pre.txt.bz2"
 #FILE_NAME = "problem-257-65132-pre.txt.bz2"
 
-# 59 / 0  ======== DRE BFGS ======  1235653  ========= gain  618
-BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/venice/"
-FILE_NAME = "problem-52-64053-pre.txt.bz2"
+# RNA is best, other awful. in general cams as shared vars very bad.
+# 59 / 0  ======== DRE BFGS ======  1203190  ========= gain  1391 ==== f(v)=  1203133  f(u)=  1203208  ~=  1203207.857094867
+# 12 / 0  ======== DRE BFGS ======  1318853  ========= gain  21411 ==== f(v)=  1318185  f(u)=  1319645  ~=  1319644.5758874172
+# 59 / 0  ======== DRE BFGS ======  682466  ========= gain  3123 ==== f(v)=  682399  f(u)=  682500  ~=  682499.5381159959
+# 1e-8: 59 / 0  ======== DRE BFGS ======  576626  ========= gain  1364 ==== f(v)=  576480  f(u)=  576687  ~=  576687.2452693246
+# 3rd largest ev 59 / 0  ======== DRE BFGS ======  548500  ========= gain  358 ==== f(v)=  548379  f(u)=  548553  ~=  548553.2643365501
+#BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/venice/"
+#FILE_NAME = "problem-52-64053-pre.txt.bz2"
 
 # 59 / 0  ======== DRE BFGS ======  323919  ==
 #BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/final/"
@@ -507,7 +512,8 @@ def blockEigenvalue(M, bs):
             mat = M.data[bs2 * i : bs2 * i + bs2].reshape(bs, bs)
             # print(i, " ", mat)
             evs = eigvalsh(mat)
-            Ei[bs*i:bs*i+bs] = evs[bs-1]
+            Ei[bs*i:bs*i+bs] = evs[bs-1] # largest
+            #Ei[bs*i:bs*i+bs] = max(1e-4, evs[bs-3]) # smallest, maybe some cams only 1 lm in part?
         Ei = diag_sparse(Ei)
     else:
         Ei = M.copy()
@@ -1036,11 +1042,18 @@ def bundle_adjust(
     LipJ, # start with 1.0. externally increase if dre increases
     successfull_its_=1,
 ):
-    # print("landmarks_only_in_cluster_  ", landmarks_only_in_cluster_, " ", np.sum(landmarks_only_in_cluster_), " vs ", np.sum(1 - landmarks_only_in_cluster_) )
     newForUnique = False
-    blockEigMult = 1e-4 # 1e-3 was used before, too high low precision.
-    L = L_in_cluster_
+    #  1e-6:  12 / 0  ======== DRE BFGS ======  1240831  ========= gain  15238 ==== f(v)=  1237348  f(u)=  1242571  ~=  1242571.1898081787
+    #  1e-8:  12 / 1  ======== DRE BFGS ======   929137  ========= gain  20474 ==== f(v)=   922583  f(u)=   934835  ~=  934834.5306621138
+    blockEigMult = 1e-5 # 1e-3 was used before, too high low precision.
+    # 1e-8 fluctuates but faster 1e-6. increase JJ_mult?
+    # problem dies at 173 example. 1e-5 ok more not.
+    # blockEigMult = 1e-0
+    J_eps = 1e-4
     minimumL = 1e-6
+    minDiag = 1e-5
+    L = max(minimumL, L_in_cluster_)
+    JJ_mult = 2
     updateJacobian = True
     # holds all! landmarks, only use fraction likely no matter not present in cams anyway.
     x0_l_ = points_3d_in.flatten()
@@ -1076,6 +1089,7 @@ def bundle_adjust(
             J_pose, J_land, fx0 = ComputeDerivativeMatricesNew (
                 x0_t_cam, x0_t_land, camera_indices_, point_indices_, torch_points_2d )
 
+            # 2 * JtJ majorizes, note JtJ:=(UW|W^TV), so W part majorized by *2:
             # clearly: 2a^2+b^2 > (a+b)^2 = a^2 + b^2 + 2ab. Since (a-b)^2 = a^2 + b^2 - 2ab > 0, so a^2 + b^2 > 2ab. 
             # a^2 = p^t* Jp^TJp * p , b^2 = l^tJl^TJl l. ab = p^tJp^T Jl*l.
             #(Jl | Jp) (l,p)^T = Jl l + Jp p and |(Jl | Jp) (l,p)^T|^2 = l^t Jl^t Jl l + p^t Jp^t Jp p + 2 p^t Jp^t Jl l.
@@ -1083,12 +1097,17 @@ def bundle_adjust(
 
             JtJ = J_pose.transpose() * J_pose
             #JtJDiag = diag_sparse(np.fmax(JtJ.diagonal(), 1e-4))
-            J_eps = 1e-4
 
+            # this might be an issue for poses.
+            # R|T| f,d. especially d might have much different (smaller) eigenvalues.
+            # 
             blockEigenvalueJtJ = blockEigenvalue(JtJ, 9)
             # TODO does work with 1.. ?
 
-            stepSize = 1. * (blockEigMult * blockEigenvalueJtJ + LipJ * JtJ.copy()) # Todo '2 *' vs 1 by convex.
+            stepSize = blockEigMult * blockEigenvalueJtJ + JJ_mult * JtJ.copy() # Todo '2 *' vs 1 by convex.
+
+            # try this. maybe eigenvals very far apart?
+            #stepSize = JJ_mult * JtJ.copy() + minDiag * diag_sparse(np.fmax(JtJ.diagonal(), 1e-4))
 
             # stepSize = 1. * (blockEigMult * blockEigenvalueJtJ + 1.4 * JtJ.copy()) # Todo '2 *' vs 1 by convex.
             #stepSize = 1. * (1e-1 * diag_sparse(np.ones(JtJ.shape[0])) + 1.1 * JtJ.copy()) # not at all working
@@ -1110,6 +1129,8 @@ def bundle_adjust(
 
             JltJl = J_land.transpose() * J_land
             JltJlDiag = JltJl + J_eps * diag_sparse(np.ones(JltJl.shape[0]))
+            #blockEigenvalueJltJl = blockEigenvalue(JltJl, 3)
+            #JltJlDiag = JltJl + J_eps * blockEigenvalueJltJl #diag_sparse(np.ones(JltJl.shape[0]))
           
             JtJDiag = stepSize.copy() # max 1, 1/L, line-search dre fails -> increase
             #JtJDiag = diag_sparse(np.fmax(JtJ.diagonal(), 1e-4)) # diagonal is solid. slower than JtJ + something though
@@ -1155,7 +1176,6 @@ def bundle_adjust(
         delta_p, powerits_run = solveByGDNesterov(Ul, W, Vli, bS, powerits)
         delta_p = -delta_p
         delta_l = -Vli * ((W.transpose() * delta_p).flatten() + bl)
-
         penaltyL = L * (delta_l).dot(JltJlDiag * delta_l)
         penaltyP = L * (delta_p + prox_rhs).dot(JtJDiag * (delta_p + prox_rhs))
         # end_ = time.time()
@@ -1183,6 +1203,7 @@ def bundle_adjust(
         print(it_, "it. cost 1     ", round(costEnd), "      + penalty ", round(costEnd + penaltyL + penaltyP),)
 
         tr_check = (costStart + penaltyStart - costEnd - penaltyL) / (costStart + penaltyStart - costQuad - penaltyL)
+        #tr_check = (costStart - costEnd) / (costStart - costQuad) # does not help.
 
         old_descent_lemma = True
         if old_descent_lemma:
@@ -1217,6 +1238,7 @@ def bundle_adjust(
             L = L * 2
             JtJDiag = 1/2 * JtJDiag
 
+        #LfkViolated = False # todo remove?
         if tr_check >= tr_eta_2 and LfkViolated: # violated -- should revert update.
             steSizeTouched = True
             print(" |||||||  Lfk distance ", LfkDistance, " -nabla^Tdelta=" , -bp.dot(delta_p) - bl.dot(delta_l), " LipJ ", LipJ, " |||||||")
@@ -1228,6 +1250,11 @@ def bundle_adjust(
             blockEigMult *= 2
             #blockEigenvalueJtJ.data *= 2 # appears slow but safe
 
+            # try this
+            #minDiag *= 2
+            #stepSize = JJ_mult * JtJ.copy() + diag_sparse(np.fmax(JtJ.diagonal(), minDiag))
+            #stepSize = JJ_mult * JtJ.copy() + minDiag * diag_sparse(np.fmax(JtJ.diagonal(), 1e-4))
+
             # try this, should memorize if works (exists scale s.t. fulfilled)
             # rather if dre is violated increase this.
             #LipJ += 0.2 EXTERNALLY -- we do not know if dre increases.
@@ -1238,6 +1265,7 @@ def bundle_adjust(
 
         if LfkSafe and not steSizeTouched:
             L = L / 2
+            JtJDiag = 2 * JtJDiag # we return this maybe -- of course stupid to do in a release version
 
         # version with penalty check for ADMM convergence / descent lemma. Problem: slower?
         if costStart + penaltyStart < costEnd + penaltyL or LfkViolated:
@@ -1265,14 +1293,32 @@ def bundle_adjust(
         J_pose, J_land, fx0 = ComputeDerivativeMatricesNew(
             x0_t_cam, x0_t_land, camera_indices_, point_indices_, torch_points_2d
         )
+        bp = J_pose.transpose() * fx0
         JtJ = J_pose.transpose() * J_pose
         #stepSize.data = np.maximum(stepSize.data, blockEigenvalue(JltJl, 3).data) # else diagSparse of it
 
-        stepSize = 1. * (blockEigMult * blockEigenvalueJtJ + LipJ * JtJ.copy())
+        nabla_p_approx = JtJDiag * (delta_p + prox_rhs)
+
+        stepSize = 1. * (blockEigMult * blockEigenvalueJtJ + JJ_mult * JtJ.copy())
 
         #stepSize = LipJ * JtJ.copy() + J_eps2 * diag_sparse(np.ones(JtJ.shape[0])) # ?
         #stepSize = LipJ * JtJ.copy() + diag_sparse(np.fmax(JtJ.diagonal(), 1e-4))
         JtJDiag = 1/L * stepSize.copy() # max 1, 1/L, line-search dre fails -> increase
+
+        nabla_p_approx2 = JtJDiag * (delta_p + prox_rhs)
+
+        diff_to_nabla_l2_2 = np.linalg.norm(L*nabla_p_approx2+bp, 2)
+        diff_to_nabla_l2   = np.linalg.norm(L*nabla_p_approx+bp, 2)
+        diff_to_nabla_l4_2 = np.linalg.norm(2*L*nabla_p_approx2+bp, 2)
+        diff_to_nabla_l4   = np.linalg.norm(2*L*nabla_p_approx+bp, 2)
+
+        print("diff_to_nabla_p *2 ", diff_to_nabla_l4, " | ", "diff_to_nabla_p ", diff_to_nabla_l2, " |")
+        print("diff_to_nabla2_p *2 ", diff_to_nabla_l4_2, " | ", "diff_to_nabla2_p ", diff_to_nabla_l2_2, " |")
+
+        print(" nablas 1", - L * nabla_p_approx ) # So nabla_l_approx = JtJDiag * (u-s), hence return (i use s-u), 2 * JtJDiag * L, the 2 DELIVERS a better cost!
+        print(" nablas 2", - L * nabla_p_approx2) # So nabla_l_approx = JtJDiag * (u-s), hence return (i use s-u), JtJDiag * L, the 2 DELIVERS a better cost!
+        print(" nablas b", bp) # TINY
+
 
     Rho = L * JtJDiag #+ 1e-12 * Ul
     # Rho = blockEigenvalueJtJ + 1e-12 * Ul # issue: needs to be same as drs penalty. else slow ?!
@@ -1572,7 +1618,7 @@ its = 60
 cost = np.zeros(kClusters)
 lastCost = 1e20
 lastCostDRE = 1e20
-basic_version = False # accelerated or basic
+basic_version = True #False # accelerated or basic
 sequential = True
 linearize_at_last_solution = True # linearize at uk or v. maybe best to check energy. at u or v. DRE:
 lib = ctypes.CDLL("./libprocess_clusters.so")
@@ -1664,6 +1710,7 @@ if basic_version:
                 points_2d_in_cluster[ci],
                 landmarks)
 
+        dre = max( primal_cost_v, dre ) # sandwich lemma, prevent maybe chaos
         print( it, " ======== DRE ====== ", round(dre) , " ========= gain " , \
             round(lastCostDRE - dre), "==== f(v)= ", round(primal_cost_v), " f(u)= ", round(primal_cost_u))
 
@@ -1785,6 +1832,7 @@ else:
                 for ci in range(kClusters):
                     U_diag[ci * 9 * n_cameras: (ci+1) * 9 * n_cameras] = blockEigenvalue(U_cluster_zeros[ci], 9).diagonal()
                 U_diag = diag_sparse(U_diag)
+                U_diag.data = np.ones(U_diag.data.shape) # appears better .. ? why?
                 #U_diag = np.ones(rna_s.shape)
                 lambdaScale = np.sqrt(np.mean(U_diag.diagonal()))
 
@@ -1923,6 +1971,7 @@ else:
                     points_2d_in_cluster[ci],
                     landmarks_bfgs)
 
+            dre_bfgs = max(dre_bfgs, primal_cost_v) # sandwich lemma 
             print( it, "/", ls_it, " ======== DRE BFGS ====== ", round(dre_bfgs) , " ========= gain " , \
                 round(lastCostDRE_bfgs - dre_bfgs), "==== f(v)= ", round(primal_cost_v), " f(u)= ", round(primal_cost_u), " ~= ", currentCost_bfgs)
 
