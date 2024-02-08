@@ -27,6 +27,8 @@ BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/dubrovnik/"
 FILE_NAME = "problem-16-22106-pre.txt.bz2"
 #FILE_NAME = "problem-356-226730-pre.txt.bz2" # large dub, play with ideas: cover, etc
 #FILE_NAME = "problem-237-154414-pre.txt.bz2"
+# acc. 59 / 0  ======== DRE BFGS ======  530126  ========= gain
+# acc. x 100: fluctuates
 FILE_NAME = "problem-173-111908-pre.txt.bz2"
 #FILE_NAME = "problem-135-90642-pre.txt.bz2"
 
@@ -159,9 +161,9 @@ def init_lib():
                                   ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p] # out]
 
 
-def cluster_covis_lib(kClusters, camera_indices__, point_indices__):
+def cluster_covis_lib(kClusters, pre_merges_, camera_indices__, point_indices__):
     c_kClusters_ = ctypes.c_int(kClusters)
-    pre_merges_ = 0
+    #pre_merges_ = 0
     c_pre_merges_ = ctypes.c_int(pre_merges_)
     c_max_vol_part = 4
     c_max_vol_part_ = ctypes.c_int(c_max_vol_part)
@@ -313,9 +315,9 @@ def torchSingleResiduum(camera_params_, point_params_, p2d):
     points_cam = points_cam + camera_params_[:, 3:6]
     points_projX = -points_cam[:, 0] / points_cam[:, 2]
     points_projY = -points_cam[:, 1] / points_cam[:, 2]
-    f = camera_params_[:, 6]
-    k1 = camera_params_[:, 7]
-    k2 = camera_params_[:, 8]
+    f = camera_params_[:, 6] * 100
+    k1 = camera_params_[:, 7] * 100
+    k2 = camera_params_[:, 8] * 100
     r2 = points_projX * points_projX + points_projY * points_projY
     distortion = 1.0 + r2 * (k1 + k2 * r2)
     points_reprojX = points_projX * distortion * f
@@ -331,9 +333,9 @@ def torchSingleResiduumX(camera_params, point_params, p2d) :
     points_cam = points_cam + camera_params[:,3:6]
     points_projX = -points_cam[:, 0] / points_cam[:, 2]
     points_projY = -points_cam[:, 1] / points_cam[:, 2]
-    f  = camera_params[:, 6]
-    k1 = camera_params[:, 7]
-    k2 = camera_params[:, 8]
+    f  = camera_params[:, 6] * 100
+    k1 = camera_params[:, 7] * 100
+    k2 = camera_params[:, 8] * 100
     r2 = points_projX*points_projX + points_projY*points_projY
     distortion = 1. + r2 * (k1 + k2 * r2)
     points_reprojX = points_projX * distortion * f
@@ -346,9 +348,9 @@ def torchSingleResiduumY(camera_params, point_params, p2d) :
     points_cam = points_cam + camera_params[:,3:6]
     points_projX = -points_cam[:, 0] / points_cam[:, 2]
     points_projY = -points_cam[:, 1] / points_cam[:, 2]
-    f  = camera_params[:, 6]
-    k1 = camera_params[:, 7]
-    k2 = camera_params[:, 8]
+    f  = camera_params[:, 6] * 100
+    k1 = camera_params[:, 7] * 100
+    k2 = camera_params[:, 8] * 100
     r2 = points_projX*points_projX + points_projY*points_projY
     distortion = 1. + r2 * (k1 + k2 * r2)
     points_reprojY = points_projY * distortion * f
@@ -513,6 +515,7 @@ def blockEigenvalue(M, bs):
             # print(i, " ", mat)
             evs = eigvalsh(mat)
             Ei[bs*i:bs*i+bs] = evs[bs-1] # largest
+            #Ei[bs*i:bs*i+bs] = max(1e-4, evs[0]) # prevent 0, does not work, why ?
             #Ei[bs*i:bs*i+bs] = max(1e-4, evs[bs-3]) # smallest, maybe some cams only 1 lm in part?
         Ei = diag_sparse(Ei)
     else:
@@ -748,7 +751,7 @@ def cluster_by_landmark(
     num_lands = np.unique(point_indices_).shape[0] #points_3d_.shape[0]
     print("number of residuum: ", num_res)
 
-    res_indices_in_cluster_, kClusters = cluster_covis_lib(kClusters_, camera_indices_, point_indices_)
+    res_indices_in_cluster_, kClusters = cluster_covis_lib(kClusters_, pre_merges, camera_indices_, point_indices_)
     kClusters_ = kClusters
     camera_indices_in_cluster_ = []
     point_indices_in_cluster_ = []
@@ -1029,6 +1032,14 @@ def primal_cost(
     costEnd = np.sum(fx1.numpy() ** 2)
     return costEnd
 
+# there are cams with < 5 -- even 1 landmark only.
+# must invert 9x9 in ok manner. those also constrain the cam vectors to lie at s.
+# what if we constrain it to lie in BS place? k1,k2,f>0 e.g. 
+#
+# TODO maybe need to split prox and tr terms? So prox always JtJ and some other part is 
+# to make underconstrained VLi work at to diag to invert? pseudo inverse?
+# cams are not full rank. swap cams? fill based on #cams present -- 
+# recall clustering 1. cams disjoint, 2. add res to make complete landmarks
 def bundle_adjust(
     point_indices_,
     camera_indices_,
@@ -1045,7 +1056,7 @@ def bundle_adjust(
     newForUnique = False
     #  1e-6:  12 / 0  ======== DRE BFGS ======  1240831  ========= gain  15238 ==== f(v)=  1237348  f(u)=  1242571  ~=  1242571.1898081787
     #  1e-8:  12 / 1  ======== DRE BFGS ======   929137  ========= gain  20474 ==== f(v)=   922583  f(u)=   934835  ~=  934834.5306621138
-    blockEigMult = 1e-5 # 1e-3 was used before, too high low precision.
+    blockEigMult = 1e-4 # 1e-3 was used before, too high low precision.
     # 1e-8 fluctuates but faster 1e-6. increase JJ_mult?
     # problem dies at 173 example. 1e-5 ok more not.
     # blockEigMult = 1e-0
@@ -1053,7 +1064,7 @@ def bundle_adjust(
     minimumL = 1e-6
     minDiag = 1e-5
     L = max(minimumL, L_in_cluster_)
-    JJ_mult = 2
+    JJ_mult = 1 # TODO does this matter?
     updateJacobian = True
     # holds all! landmarks, only use fraction likely no matter not present in cams anyway.
     x0_l_ = points_3d_in.flatten()
@@ -1582,6 +1593,15 @@ if read_output:
     points_3d = x0_l.reshape(n_points,3)
     print("READ DATA")
 
+# totally stcuk solution in base has BS values as solution k1 = 600k, k2 =-200
+print("min focal distance ", np.min(cameras[:,6].flatten()), " ", np.max(cameras[:,6].flatten()) )
+print("min k1 distance ", np.min(cameras[:,7].flatten()), " ", np.max(cameras[:,7].flatten()) )
+print("min k2 distance ", np.min(cameras[:,8].flatten()), " ", np.max(cameras[:,8].flatten()) )
+
+cameras[:,6] = cameras[:,6] / 100
+cameras[:,7] = cameras[:,7] / 100
+cameras[:,8] = cameras[:,8] / 100
+
 np.set_printoptions(formatter={"float": "{: 0.2f}".format})
 
 print("n_cameras: {}".format(n_cameras))
@@ -1618,12 +1638,14 @@ its = 60
 cost = np.zeros(kClusters)
 lastCost = 1e20
 lastCostDRE = 1e20
-basic_version = True #False # accelerated or basic
+basic_version = False # accelerated or basic
 sequential = True
 linearize_at_last_solution = True # linearize at uk or v. maybe best to check energy. at u or v. DRE:
 lib = ctypes.CDLL("./libprocess_clusters.so")
 init_lib()
 LipJ = np.ones(kClusters)
+pre_merges = 0
+pre_merges = int(0.4 * n_cameras) # play to get 'best' cluster. Depends quite a lot
 
 # f(x) + 1/2 (v^T Vlk * v - v^T 2 * Vlk (2x - sk) ) for x=u/v. Does not look right .. haeh
 #
@@ -1636,13 +1658,22 @@ LipJ = np.ones(kClusters)
 # how did this turn into my dre cost?
 # insert v -> only fk(v) remains. insert u:
 
+values, counts = np.unique(camera_indices, return_counts=True)
+minCount = np.min(counts)
+print(". minimum camera in total ", minCount, " cams with < 5 landmarks ", np.sum(counts < 5))
+
 (
     camera_indices_in_cluster,
     point_indices_in_cluster,
     points_2d_in_cluster,
     kClusters,
 ) = cluster_by_landmark(
-    camera_indices, points_2d, point_indices, kClusters, pre_merges=0)
+    camera_indices, points_2d, point_indices, kClusters, pre_merges)
+
+for ci in range(kClusters):
+    values, counts = np.unique(camera_indices_in_cluster[ci], return_counts=True)
+    minCount = np.min(counts)
+    print(ci, ". minimum camera in cluster ", minCount, " cams with < 5 landmarks ", np.sum(counts < 5))
 
 L_in_cluster = []
 for _ in range(kClusters):
@@ -1913,6 +1944,10 @@ else:
                 poses_s_in_cluster_bfgs[ci] = tk * poses_s_in_cluster_pre[ci] + (1-tk) * (poses_s_in_cluster[ci] + multiplier * search_direction[ci])
                 #print(" bfgs_r ", bfgs_r[ci * 3 * n_points: (ci+1) * 3 * n_points].reshape(n_points, 3))
                 #print(" search_direction[ci] ", search_direction[ci])
+
+                print("s focal distance ", np.min(poses_s_in_cluster_bfgs[ci][:,6]), " - ", np.max(poses_s_in_cluster_bfgs[ci][:,6]))
+                print("s k1 distance ", np.min(poses_s_in_cluster_bfgs[ci][:,7]), " - ", np.max(poses_s_in_cluster_bfgs[ci][:,7]))
+                print("s k2 distance ", np.min(poses_s_in_cluster_bfgs[ci][:,8]), " - ", np.max(poses_s_in_cluster_bfgs[ci][:,8]))
 
             # prox on line search s:
             #print("1. x0_p", "points_3d_in_cluster", points_3d_in_cluster)
