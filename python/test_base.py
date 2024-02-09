@@ -1424,6 +1424,10 @@ updateJacobian = True
 # 1. divide Ul and other part so divide S by diag(Ul).
 # 2. then gamma~2/1+almost 1? hmm.
 
+print("min focal distance ", np.min(cameras[:,6].flatten()), " ", np.max(cameras[:,6].flatten()) )
+print("min k1 distance ", np.min(cameras[:,7].flatten()), " ", np.max(cameras[:,7].flatten()) )
+print("min k2 distance ", np.min(cameras[:,8].flatten()), " ", np.max(cameras[:,8].flatten()) )
+
 camera_params = x0_t[:n_cameras*9].reshape(n_cameras,9)
 if debug:
     print("init x0_p rot", camera_params[:,0:3]) # to check validity -- what goes wrong?
@@ -1740,6 +1744,10 @@ while it < iterations:
         L = L / 2
     if tr_check < eta_2:
         L = L * 2
+
+    print("s focal distance ", np.min(camera_params[:,6].numpy()), " - ", np.max(camera_params[:,6].numpy()))
+    print("s k1 distance ", np.min(camera_params[:,7].numpy()), " - ", np.max(camera_params[:,7].numpy()))
+    print("s k2 distance ", np.min(camera_params[:,8].numpy()), " - ", np.max(camera_params[:,8].numpy()))
 
     if o3d_defined:
         rerender(vis, geometry, point_params[0:30000,:], save_image)

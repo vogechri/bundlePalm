@@ -360,8 +360,7 @@ def getJacSin(
 ):
     end_ = min(end_, camera_indices_.shape[0])
     funx0_st1 = lambda X0, X1, X2: torchSingleResiduum(
-        X0.view(-1, 9), X1.view(-1, 3), X2.view(-1, 2)
-    )
+        X0.view(-1, 9), X1.view(-1, 3), X2.view(-1, 2) )
     jac = jacobian(
         funx0_st1,
         (
@@ -791,7 +790,11 @@ def blockEigenvalue(M, bs):
         bs2 = bs * bs
         for i in range(int(M.data.shape[0] / bs2)):
             mat = M.data[bs2 * i : bs2 * i + bs2].reshape(bs, bs)
-            # print(i, " ", mat)
+            mat = np.fliplr(mat)
+            #print(i, " ", mat) # kind of flipped, so eigenval is crap.
+            # [[ 4575.01 -1272.34  6458.94]
+            #  [ 1029.28  8855.05 -1272.34]
+            #  [ 4838.40  1029.28  4575.01]]
             evs = eigvalsh(mat)
             Ei[bs*i:bs*i+bs] = evs[bs-1]
         Ei = diag_sparse(Ei)
@@ -1347,20 +1350,6 @@ def primal_cost(
     costEnd = np.sum(fx1.numpy() ** 2)
     return costEnd
 
-# TODO: to run multiple iterations in distributed version we need to use f(x) + L/2|x -  z|
-# where z is the mean of the landmarks. likely L can be set via descent lemma or better as diag Vl
-# there is the notion of whether to start from x or z.
-# using landmarks_only_in_cluster_: issue is s + v-u is now wrong, but since unique lms only ok. when extrapolating set to 0. 
-# 10  ======== DRE ======  29051  ========= gain  483 ==== f(v)=  28898  f(u)=  29207
-# 21  ======== DRE ======  27571  ========= gain  44 ==== f(v)=  27532  f(u)=  27571
-# 30  ======== DRE ======  27286  ========= gain  25 ==== f(v)=  27268  f(u)=  27275
-# 38  ======== DRE ======  27169  ========= gain  14 ==== f(v)=  27157  f(u)=  27159
-# without not much, still some its.
-# 21  ======== DRE ======  27795  ========= gain  58 ==== f(v)=  27752  f(u)=  27799
-# 30  ======== DRE ======  27415  ========= gain  34 ==== f(v)=  27399  f(u)=  27405
-# 38  ======== DRE ======  27260  ========= gain  20 ==== f(v)=  27249  f(u)=  27250
-# TODO: strict change: only increase phi -> DRS makes sense.
-# use blockeig for that. (or just diag and max).
 def bundle_adjust(
     camera_indices_,
     point_indices_,
@@ -1423,14 +1412,12 @@ def bundle_adjust(
             JtJDiag = diag_sparse(JtJ.diagonal())
 
             J_eps = 1e-3
-            JtJDiag = JtJ + J_eps * diag_sparse(np.ones(JtJ.shape[0]))
-
             # test CSU: 2a^2+b^2 > (a+b)^2 = a^2 + b^2 + 2ab. Since (a-b)^2 = a^2 + b^2 - 2ab > 0, so a^2 + b^2 > 2ab. 
             # a^2 = p^t* Jp^TJp * p , b^2 = l^tJl^TJl l. ab = p^tJp^T Jl*l.
             #(Jl | Jp) (l,p)^T = Jl l + Jp p and |(Jl | Jp) (l,p)^T|^2 = l^t Jl^t Jl l + p^t Jp^t Jp p + 2 p^t Jp^t Jl l.
             # So 2 JtJ  + 2 JltJl shuold majorize |J^t x|^2 for all x.
             # why relevant here.
-            JtJDiag = 1 * JtJ + J_eps * diag_sparse(np.ones(JtJ.shape[0]))
+            JtJDiag = JtJ + J_eps * diag_sparse(np.ones(JtJ.shape[0]))
 
             #blockEigenvalueJtJ = blockEigenvalue(JtJ, 9)
             #print(" min/max JtJ.diagonal() ", np.min(JtJ.diagonal()), " ", np.max(JtJ.diagonal()), " adjusted ", np.min(JtJDiag.diagonal()), " ", np.max(JtJDiag.diagonal()), " ", np.min(blockEigenvalueJtJ.diagonal()) ," ", np.max(blockEigenvalueJtJ.diagonal()) )
