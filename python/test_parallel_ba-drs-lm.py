@@ -10,7 +10,7 @@ from scipy.sparse import csr_array, csr_matrix, issparse
 from scipy.sparse import diags as diag_sparse
 from scipy.sparse.linalg import inv as inv_sparse
 from numpy.linalg import pinv as inv_dense
-from numpy.linalg import eigvalsh
+from numpy.linalg import eigvalsh, eigh
 # idea reimplement projection with torch to get a jacobian -> numpy then
 import torch
 import math
@@ -398,7 +398,7 @@ def blockInverse(M, bs):
         bs2 = bs * bs
         for i in range(int(M.data.shape[0] / bs2)):
             mat = Mi.data[bs2 * i : bs2 * i + bs2].reshape(bs, bs)
-            # print(i, " ", mat)
+            #    print(i, " ", mat) # also symmetric? those are? WTF
             imat = inv_dense(mat) # inv or pinv?
             Mi.data[bs2 * i : bs2 * i + bs2] = imat.flatten()
     else:
@@ -477,7 +477,6 @@ def buildMatrixNew(dx, dy, v_indices, sz=9) :
     indptr.append(np.arange(2*start*sz, 2*end*sz, sz).flatten())
     indices.append(np.array([sz * v_indices[start:end] + j for j in range(sz)]).transpose().flatten())
     indices.append(np.array([sz * v_indices[start:end] + j for j in range(sz)]).transpose().flatten())
-
     indptr.append(np.array([sz+ indptr[-1][-1]])) # closing
 
     datavals = np.concatenate(data)
@@ -496,6 +495,7 @@ def buildMatrixNew(dx, dy, v_indices, sz=9) :
         datavals[8:end:9] = 0
 
     crs_pose = csr_array((datavals, np.concatenate(indices), np.concatenate(indptr)))
+
     J_pose = csr_matrix(crs_pose)
     return J_pose
 
@@ -512,10 +512,11 @@ def blockEigenvalue(M, bs):
         bs2 = bs * bs
         for i in range(int(M.data.shape[0] / bs2)):
             mat = M.data[bs2 * i : bs2 * i + bs2].reshape(bs, bs)
+            mat = np.fliplr(mat)
             # print(i, " ", mat)
             evs = eigvalsh(mat)
             Ei[bs*i:bs*i+bs] = evs[bs-1] # largest
-            #Ei[bs*i:bs*i+bs] = max(1e-4, evs[0]) # prevent 0, does not work, why ?
+            #Ei[bs*i:bs*i+bs] = max(1e7, evs[0]) # just does not work
             #Ei[bs*i:bs*i+bs] = max(1e-4, evs[bs-3]) # smallest, maybe some cams only 1 lm in part?
         Ei = diag_sparse(Ei)
     else:
@@ -526,6 +527,29 @@ def blockEigenvalue(M, bs):
     #maxEv = np.max(Ei.data)
     #Ei.data[:] = 0.1 * maxEv # 0.1 worked
     #Ei.data[:] *= 0.125 #0.25 promising # 0.1 already too low. could try line-search idea
+    return Ei
+
+def blockEigenvalueFull(M, bs):
+    Ei = M.copy()
+    if bs > 1:
+        bs2 = bs * bs
+        for i in range(int(M.data.shape[0] / bs2)):
+            #print(M.data.shape)
+            mat = M.data[bs2 * i : bs2 * i + bs2].transpose().reshape(bs, bs)
+            mat = np.fliplr(mat) # ! attention matrix can be flipped !
+            #print(i, " ", mat)
+            #print(M.indices[bs2 * i : bs2 * i + bs2])
+            evs = eigvalsh(mat)
+            evs, evv = eigh(mat) # just add something to 0 directions and return matrix
+            evs = np.fmax(evs, evs[bs-1] * 1e-6) # e.g. ?
+            #print("evs ", evs)
+            #print("evv ", evv)
+            mat = evv.dot(diag_sparse(evs) * evv.transpose())
+            #print("mat ", mat)
+            mat = np.fliplr(mat)
+            Ei.data[bs2 * i : bs2 * i + bs2] = mat.flatten()
+    else:
+        Ei = M.copy()
     return Ei
 
 def copy_selected_blocks(M, block_selection_, bs):
@@ -810,10 +834,8 @@ def cluster_by_landmark(
 # just to check, problem last uk is not present.
 # or 2u+ - s - u to get delta. then add to v. or use real uk instead.
 #
-# poses_v, _ = average_cameras_new(
-#     camera_indices_in_cluster, poses_in_cluster, poses_s_in_cluster, L_in_cluster, Ul_in_cluster) # old_poses for costs?
 def average_cameras_new(
-    camera_indices_in_cluster_, poses_in_cluster_, poses_s_in_cluster_, L_in_cluster_, UL_in_cluster_):
+    camera_indices_in_cluster_, poses_in_cluster_, poses_s_in_cluster_, L_in_cluster_, UL_in_cluster_, nabla_p_in_cluster_):
     num_cameras = poses_in_cluster_[0].shape[0]
     sum_D_u2_s = np.zeros(num_cameras * 9)
     sum_constant_term = 0
@@ -828,7 +850,9 @@ def average_cameras_new(
         #
         # data can remain, indptr can remain, indices must be adjusted / new
         # point_indices_
-        #print(UL_in_cluster_[i].data.shape, " ", camera_indices_.shape)
+        # print(UL_in_cluster_[i].data.shape, " flip? ", camera_indices_.shape)
+        # print(UL_in_cluster_[i].data[0:81].reshape(9,9), " datA")
+        # print(UL_in_cluster_[i].indices[0:81].reshape(9,9), " indices")
 
         indices = np.repeat(
             np.array([9 * camera_indices_ + j for j in range(9)]).transpose(), 9, axis=0).flatten()
@@ -861,11 +885,16 @@ def average_cameras_new(
         # print(i, "averaging 3d ", points_3d_in_cluster_[i][globalSingleLandmarksB_in_c[i], :]) # indeed 1 changed rest is constant
         # print(i, "averaging vl ", V_land.data.reshape(-1,9)[globalSingleLandmarksA_in_c[i],:])  # indeed diagonal
 
-        # TODO change 3, claim  2u+-s = 2 * (s+u)/2 - s  -  2 * (vli/2 .. ), so subtract u to get delta only
-        u2_s = (2 * poses_in_cluster_[i].flatten() - poses_s_in_cluster_[i].flatten())
-        #u2_s = (2 * points_3d_in_cluster_[i].flatten() - landmark_s_in_cluster_[i].flatten()) - (points_3d_in_cluster_[i].flatten() - delta_l_in_cluster[i].flatten())
-
-        sum_D_u2_s += U_pose * u2_s # has 0's for those not present
+        prox_solution = False
+        if prox_solution:
+            # TODO change 3, claim  2u+-s = 2 * (s+u)/2 - s  -  2 * (vli/2 .. ), so subtract u to get delta only
+            u2_s = (2 * poses_in_cluster_[i].flatten() - poses_s_in_cluster_[i].flatten())
+            #u2_s = (2 * points_3d_in_cluster_[i].flatten() - landmark_s_in_cluster_[i].flatten()) - (points_3d_in_cluster_[i].flatten() - delta_l_in_cluster[i].flatten())
+            sum_D_u2_s += U_pose * u2_s # has 0's for those not present
+        else: # assuming we do not solve the problem exactly
+            nabla_p = np.zeros(num_cameras * 9)
+            nabla_p[np.array([9 * camera_indices_ + j for j in range(9)]).transpose().flatten()] = nabla_p_in_cluster_[i]
+            sum_D_u2_s += U_pose * poses_in_cluster_[i].flatten() - nabla_p
 
         # print(i, "averaging u2_s ", u2_s.reshape(-1,3)[globalSingleLandmarksB_in_c[i], :]) # indeed 1 changed rest is constant
 
@@ -875,6 +904,12 @@ def average_cameras_new(
         else:
             Up_all += U_pose
     Upi_all = blockInverse(Up_all, 9)
+
+    # rho_k/2 |u_k - v_k|^2 - rho_k <s_k - u_k, u_k - v_k> is actually 
+    # rho_k/2 |u_k - v_k|^2 - <nabla_k, u_k - v_k>
+    # and solution 
+    # sum_k rho_k (u_k - v_k) + nabla_k = 0 -> 
+    # v = sum_k (rho_k)^-1 * sum_k (rho_k u_k + nabla_k)
 
     # rho_k/2 |u_k - v_k|^2 - rho_k <s_k - u_k, u_k - v_k>
     # deriv
@@ -906,7 +941,7 @@ def average_cameras_new(
 #                     rho_k/2 {v^tv - 2vT[2uk-sk] + uk^T[3uk-2sk]}
 def cost_DRE(
     #camera_indices_in_cluster, poses_in_cluster, poses_s_in_cluster, L_in_cluster, Ul_in_cluster, pose_v
-    camera_indices_in_cluster_,  poses_in_cluster_, poses_s_in_cluster_, L_in_cluster_, Ul_in_cluster_, pose_v_
+    camera_indices_in_cluster_,  poses_in_cluster_, poses_s_in_cluster_, L_in_cluster_, Ul_in_cluster_, pose_v_, nabla_p_in_cluster_
 ):
     num_cams =  poses_in_cluster_[0].shape[0]
     #sum_Ds_2u = np.zeros(num_cams * 9)
@@ -963,7 +998,14 @@ def cost_DRE(
         # sum_k rho_k v + rho_k (s_k - 2 u_k) = 0
         # v = (sum_k rho_k)^-1 (sum_k rho_k (2 u_k - s_k))
 
-        local_cost = 0.5 * u_v.dot(U_pose * (u_v + 2 * u_s))
+        prox_solution = False
+        if prox_solution:
+            local_cost = 0.5 * u_v.dot(U_pose * (u_v + 2 * u_s))
+        else: # assuming we do not solve the problem exactly
+            nabla_p = np.zeros(num_cams * 9)
+            nabla_p[np.array([9 * camera_indices_ + j for j in range(9)]).transpose().flatten()] = nabla_p_in_cluster_[i]
+            local_cost = 0.5 * u_v.dot(U_pose * u_v) - u_v.dot(nabla_p)
+
         cost_dre  += local_cost
         dre_per_part.append(local_cost.copy())
 
@@ -1040,6 +1082,13 @@ def primal_cost(
 # to make underconstrained VLi work at to diag to invert? pseudo inverse?
 # cams are not full rank. swap cams? fill based on #cams present -- 
 # recall clustering 1. cams disjoint, 2. add res to make complete landmarks
+# TODO: what does not work:
+# trust region binds to s-u = delta but we eval f at u.
+# then TR binds closer to f(u-s), which can be very bad.
+# we get jac at dist s-u, so |nabla f(u) - nabla f(s)|^2 <= L/2 |s-u|^2
+# upper bound f(s) <= f(u) + <nabla f(u), s-u> + L/2|s-u|^2. in other words f(s) should be accepted, delta_u = s-u.
+# in particular L > 2 nabla f(u) on s-u. nabla f(u) = J^t f(u).
+# So disable TR? and understand why my J fails? 
 def bundle_adjust(
     point_indices_,
     camera_indices_,
@@ -1056,7 +1105,7 @@ def bundle_adjust(
     newForUnique = False
     #  1e-6:  12 / 0  ======== DRE BFGS ======  1240831  ========= gain  15238 ==== f(v)=  1237348  f(u)=  1242571  ~=  1242571.1898081787
     #  1e-8:  12 / 1  ======== DRE BFGS ======   929137  ========= gain  20474 ==== f(v)=   922583  f(u)=   934835  ~=  934834.5306621138
-    blockEigMult = 1e-4 # 1e-3 was used before, too high low precision.
+    blockEigMult = 1e-6 # 1e-3 was used before, too high low precision.
     # 1e-8 fluctuates but faster 1e-6. increase JJ_mult?
     # problem dies at 173 example. 1e-5 ok more not.
     # blockEigMult = 1e-0
@@ -1064,7 +1113,7 @@ def bundle_adjust(
     minimumL = 1e-6
     minDiag = 1e-5
     L = max(minimumL, L_in_cluster_)
-    JJ_mult = 1 # TODO does this matter?
+    JJ_mult = 2 # TODO does this matter?
     updateJacobian = True
     # holds all! landmarks, only use fraction likely no matter not present in cams anyway.
     x0_l_ = points_3d_in.flatten()
@@ -1107,15 +1156,19 @@ def bundle_adjust(
             # So 2 JtJ  + 2 JltJl shuold majorize |J^t x|^2 for all x.
 
             JtJ = J_pose.transpose() * J_pose
+            #print(JtJ.indices) # TODO: these are twisted around / backward indices per row.
+            # print(JtJ.indptr)
+            # exit()
             #JtJDiag = diag_sparse(np.fmax(JtJ.diagonal(), 1e-4))
 
             # this might be an issue for poses.
             # R|T| f,d. especially d might have much different (smaller) eigenvalues.
             # 
-            blockEigenvalueJtJ = blockEigenvalue(JtJ, 9)
-            # TODO does work with 1.. ?
-
+            blockEigenvalueJtJ = blockEigenvalue(JtJ, 9) # TODO: what if this is only needed for 0-eigen directions? return !=0 only if in small eigendir
             stepSize = blockEigMult * blockEigenvalueJtJ + JJ_mult * JtJ.copy() # Todo '2 *' vs 1 by convex.
+
+            # blockEigenvalueJtJ = blockEigenvalueFull(JtJ, 9)
+            # stepSize = blockEigenvalueJtJ + JJ_mult * JtJ.copy() # Todo '2 *' vs 1 by convex.
 
             # try this. maybe eigenvals very far apart?
             #stepSize = JJ_mult * JtJ.copy() + minDiag * diag_sparse(np.fmax(JtJ.diagonal(), 1e-4))
@@ -1213,7 +1266,7 @@ def bundle_adjust(
         costEnd = np.sum(fx1.numpy() ** 2)
         print(it_, "it. cost 1     ", round(costEnd), "      + penalty ", round(costEnd + penaltyL + penaltyP),)
 
-        tr_check = (costStart + penaltyStart - costEnd - penaltyL) / (costStart + penaltyStart - costQuad - penaltyL)
+        tr_check = (costStart + penaltyStart - costEnd - penaltyP - penaltyL) / (costStart + penaltyStart - costQuad - penaltyP - penaltyL)
         #tr_check = (costStart - costEnd) / (costStart - costQuad) # does not help.
 
         old_descent_lemma = True
@@ -1244,10 +1297,10 @@ def bundle_adjust(
             LfkViolated = LfkDistance > 0
             LfkSafe = (costEnd - costStart - bp.dot(delta_p) - bl.dot(delta_l)) < 0 # for any phi ok.
 
-        if tr_check < tr_eta_2:
+        if tr_check < tr_eta_2: # and False: # TR should not help here. Maybe apply differently? TR checks if approx w. JtJ is ok within region.
             print(" //////  tr_check " , tr_check, " Lfk distance ", LfkDistance, " -nabla^Tdelta=" , -bp.dot(delta_p) - bl.dot(delta_l), " /////")
             L = L * 2
-            JtJDiag = 1/2 * JtJDiag
+            JtJDiag = 1/2 * JtJDiag # why that?
 
         #LfkViolated = False # todo remove?
         if tr_check >= tr_eta_2 and LfkViolated: # violated -- should revert update.
@@ -1299,7 +1352,7 @@ def bundle_adjust(
     x0_l_ = x0_l_.reshape(n_points_, 3)
 
     # idea use latest for better control ?
-    getBetterStepSize = True # this is used as approx of f in update of v and thus s. maybe change there u-v should be small. 
+    getBetterStepSize = False # this is used as approx of f in update of v and thus s. maybe change there u-v should be small. 
     if getBetterStepSize: # needs to set L correctly
         J_pose, J_land, fx0 = ComputeDerivativeMatricesNew(
             x0_t_cam, x0_t_land, camera_indices_, point_indices_, torch_points_2d
@@ -1330,7 +1383,7 @@ def bundle_adjust(
         print(" nablas 2", - L * nabla_p_approx2) # So nabla_l_approx = JtJDiag * (u-s), hence return (i use s-u), JtJDiag * L, the 2 DELIVERS a better cost!
         print(" nablas b", bp) # TINY
 
-
+    nabla_p = bp.copy()
     Rho = L * JtJDiag #+ 1e-12 * Ul
     # Rho = blockEigenvalueJtJ + 1e-12 * Ul # issue: needs to be same as drs penalty. else slow ?!
     # Rho = 2 * JtJ.copy() + 1e-12 * Ul # this here means we just use safe bet. Likely multiplier, '2' does not matter anyway. stable but slower. FUCK
@@ -1343,7 +1396,7 @@ def bundle_adjust(
         return costEnd, x0_p_, xTest, L, diag_present + Rho
 
     L_out = np.maximum(minimumL, np.minimum(L_in_cluster_ * 2, L)) # not clear if generally ok, or 2 or 4 should be used.
-    return costEnd, x0_p_, x0_l_, L_out, Rho
+    return costEnd, x0_p_, x0_l_, L_out, Rho, nabla_p
 
     # recall solution wo. splitting is 
     # solve Vl x + bS + Vd () 
@@ -1401,7 +1454,7 @@ def updateCluster(
     poses_in_c = poses_in_cluster_[unique_poses_in_c_]
     poses_s_in_c = poses_s_in_cluster_[unique_poses_in_c_] # same as landmarks
 
-    cost_, x0_p_c_, x0_l_c_, Lnew_c_, Vl_c_ = bundle_adjust(
+    cost_, x0_p_c_, x0_l_c_, Lnew_c_, Vl_c_, nabla_p_c_ = bundle_adjust(
         local_landmark_indices_in_cluster, # these are indexing into landmarks_in_c, a subset of all landmarks, directly.
         pose_indices_in_c,
         poses_only_in_cluster_, # input those poses not present anywhere else to relax hold on those.
@@ -1422,13 +1475,15 @@ def updateCluster(
         Lnew_c_,
         Vl_c_,
         unique_poses_in_c_,
-        landmark_indices_in_c_
+        landmark_indices_in_c_,
+        nabla_p_c_
     )
 
 def prox_f(camera_indices_in_cluster_, point_indices_in_cluster_, points_2d_in_cluster_,
     poses_in_cluster_, landmarks_, poses_s_in_cluster_, L_in_cluster_, Vl_in_cluster_, 
     kClusters, LipJ, innerIts=1, sequential=True) :
     cost_ = np.zeros(kClusters)
+    nabla_p_in_cluster_ = [0 for _ in range(kClusters)]
 
     num_poses = poses_in_cluster_[0].shape[0]
     pose_occurences = np.zeros(num_poses)
@@ -1447,7 +1502,8 @@ def prox_f(camera_indices_in_cluster_, point_indices_in_cluster_, points_2d_in_c
             Lnew_c_,
             Vl_c_,
             unique_poses_in_c_,
-            landmark_indices_in_c_
+            landmark_indices_in_c_,
+            nabla_p_c_
         ) = updateCluster(
             poses_in_cluster_[ci],
             camera_indices_in_cluster_[ci],
@@ -1466,6 +1522,7 @@ def prox_f(camera_indices_in_cluster_, point_indices_in_cluster_, points_2d_in_c
         Vl_in_cluster_[ci] = Vl_c_
         poses_in_cluster_[ci][unique_poses_in_c_, :] = x0_p_c_
         landmarks_[landmark_indices_in_c_] = x0_l_c_
+        nabla_p_in_cluster_[ci] = nabla_p_c_
 
     for ci in range(kClusters):
         #vl = Vl_in_cluster_[ci]
@@ -1477,7 +1534,7 @@ def prox_f(camera_indices_in_cluster_, point_indices_in_cluster_, points_2d_in_c
         # print(ci, " 3d ", points_3d_in_cluster_[ci][landmark_occurences==1, :]) # indeed 1 changed rest is constant
         # print(ci, " vl ", vl.data.reshape(-1,9)[landmarks_only_in_cluster_,:])  # indeed diagonal
     #return (cost_, L_in_cluster_, Vl_in_cluster_, points_3d_in_cluster_, x0_p_, delta_l_in_cluster_, globalSingleLandmarksA_in_c, globalSingleLandmarksB_in_c)
-    return (cost_, L_in_cluster_, Vl_in_cluster_, poses_in_cluster_, landmarks_)
+    return (cost_, L_in_cluster_, Vl_in_cluster_, poses_in_cluster_, landmarks_, nabla_p_in_cluster_)
 
 
 # fill lists G and F, with g and f = g - old g, sets of size m, 
@@ -1645,7 +1702,7 @@ lib = ctypes.CDLL("./libprocess_clusters.so")
 init_lib()
 LipJ = np.ones(kClusters)
 pre_merges = 0
-pre_merges = int(0.4 * n_cameras) # play to get 'best' cluster. Depends quite a lot
+#pre_merges = int(0.4 * n_cameras) # play to get 'best' cluster. Depends quite a lot
 
 # f(x) + 1/2 (v^T Vlk * v - v^T 2 * Vlk (2x - sk) ) for x=u/v. Does not look right .. haeh
 #
@@ -1695,7 +1752,8 @@ if basic_version:
             L_in_cluster,
             Ul_in_cluster,
             poses_in_cluster,
-            landmarks
+            landmarks,
+            nabla_p_in_cluster
         ) = prox_f(
             camera_indices_in_cluster, point_indices_in_cluster, points_2d_in_cluster,
             poses_in_cluster, landmarks, poses_s_in_cluster, L_in_cluster, Ul_in_cluster, 
@@ -1709,10 +1767,10 @@ if basic_version:
         print(it, " ", round(currentCost), " gain ", round(lastCost - currentCost), ". ============= sum fk update takes ", end - start," s",)
 
         poses_v, _, Up_cluster = average_cameras_new(
-            camera_indices_in_cluster, poses_in_cluster, poses_s_in_cluster, L_in_cluster, Ul_in_cluster) # old_poses for costs?
+            camera_indices_in_cluster, poses_in_cluster, poses_s_in_cluster, L_in_cluster, Ul_in_cluster, nabla_p_in_cluster) # old_poses for costs?
 
         #DRE cost BEFORE s update, always lower than AFTER update.
-        dre = cost_DRE(camera_indices_in_cluster, poses_in_cluster, poses_s_in_cluster, L_in_cluster, Ul_in_cluster, poses_v) + currentCost
+        dre = cost_DRE(camera_indices_in_cluster, poses_in_cluster, poses_s_in_cluster, L_in_cluster, Ul_in_cluster, poses_v, nabla_p_in_cluster) + currentCost
 
         tau = 1 # 2 is best ? does not generalize!
         for ci in range(kClusters):
@@ -1722,7 +1780,7 @@ if basic_version:
             poses_s_in_cluster[ci] = temp.reshape(-1,9) * poses_s_in_cluster[ci] # set to zero if not in cluster.
 
         #DRE cost AFTER s update
-        #dre = cost_DRE(camera_indices_in_cluster, poses_in_cluster, poses_s_in_cluster, L_in_cluster, Ul_in_cluster, poses_v) + currentCost
+        #dre = cost_DRE(camera_indices_in_cluster, poses_in_cluster, poses_s_in_cluster, L_in_cluster, Ul_in_cluster, poses_v, nabla_p_in_cluster) + currentCost
 
         primal_cost_v = 0
         for ci in range(kClusters):
@@ -1783,7 +1841,8 @@ else:
         L_in_cluster,
         Ul_in_cluster,
         poses_in_cluster,
-        landmarks
+        landmarks,
+        nabla_p_in_cluster
     ) = prox_f(
         camera_indices_in_cluster, point_indices_in_cluster, points_2d_in_cluster,
         poses_in_cluster, landmarks, poses_s_in_cluster, L_in_cluster, Ul_in_cluster, 
@@ -1794,7 +1853,7 @@ else:
     print(-1, " ", round(currentCost), " gain ", round(lastCost - currentCost), ". ============= sum fk update takes ", end - start," s",)
 
     poses_v, _, U_cluster_zeros = average_cameras_new(
-        camera_indices_in_cluster, poses_in_cluster, poses_s_in_cluster, L_in_cluster, Ul_in_cluster)
+        camera_indices_in_cluster, poses_in_cluster, poses_s_in_cluster, L_in_cluster, Ul_in_cluster, nabla_p_in_cluster)
     # TODO: not updated poses are treated how? v - v old.
 
     steplength = 0
@@ -1963,6 +2022,7 @@ else:
                 Ul_in_cluster_bfgs,
                 poses_in_cluster_bfgs,
                 landmarks_bfgs,
+                nabla_p_in_cluster_bfgs
             ) = prox_f(
                 camera_indices_in_cluster, point_indices_in_cluster, points_2d_in_cluster,
                 poses_in_cluster_bfgs, landmarks.copy(), poses_s_in_cluster_bfgs, L_in_cluster_bfgs,
@@ -1972,7 +2032,7 @@ else:
             #print("2. x0_p", "points_3d_in_cluster", points_3d_in_cluster)
             currentCost_bfgs = np.sum(cost_bfgs)
             poses_v_bfgs, Ul_all_bfgs, U_cluster_zeros = average_cameras_new(
-                camera_indices_in_cluster, poses_in_cluster_bfgs, poses_s_in_cluster_bfgs, L_in_cluster_bfgs, Ul_in_cluster_bfgs)
+                camera_indices_in_cluster, poses_in_cluster_bfgs, poses_s_in_cluster_bfgs, L_in_cluster_bfgs, Ul_in_cluster_bfgs, nabla_p_in_cluster_bfgs)
 
             # update buffers
             if RNA_or_bfgs and use_bfgs and ls_it == 0: # todo: the one we accept put here, no?
@@ -1985,7 +2045,8 @@ else:
                 bfgs_rhos[it % bfgs_mem] = np.maximum(0., 1./ bfgs_qs[it % bfgs_mem].dot(bfgs_ps[it % bfgs_mem]))
 
             # eval cost
-            dre_bfgs = cost_DRE(camera_indices_in_cluster, poses_in_cluster_bfgs, poses_s_in_cluster_bfgs, L_in_cluster_bfgs, Ul_in_cluster_bfgs, poses_v_bfgs)
+            dre_bfgs = cost_DRE(camera_indices_in_cluster, poses_in_cluster_bfgs, poses_s_in_cluster_bfgs, 
+                                L_in_cluster_bfgs, Ul_in_cluster_bfgs, poses_v_bfgs, nabla_p_in_cluster_bfgs)
             dre_bfgs += currentCost_bfgs
 
             # debugging cost block ################

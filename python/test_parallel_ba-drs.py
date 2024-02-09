@@ -790,7 +790,11 @@ def blockEigenvalue(M, bs):
         bs2 = bs * bs
         for i in range(int(M.data.shape[0] / bs2)):
             mat = M.data[bs2 * i : bs2 * i + bs2].reshape(bs, bs)
-            # print(i, " ", mat)
+            mat = np.fliplr(mat)
+            #print(i, " ", mat) # kind of flipped, so eigenval is crap.
+            # [[ 4575.01 -1272.34  6458.94]
+            #  [ 1029.28  8855.05 -1272.34]
+            #  [ 4838.40  1029.28  4575.01]]
             evs = eigvalsh(mat)
             Ei[bs*i:bs*i+bs] = evs[bs-1]
         Ei = diag_sparse(Ei)
