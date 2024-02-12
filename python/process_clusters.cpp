@@ -965,14 +965,17 @@ fill_vec_and_size(res_to_cluster, res_to_cluster_sizes, res_indices_in_cluster);
 // relevantCameras hold part and camId
 void FillRelevantCameras(const std::vector<std::map<int, std::set<int>>> &landmarkFromCameraPerPart,
                          std::vector<std::vector<std::pair<int, int>>> &relevantCameras,
+                         const std::vector<std::set<int>>& lms_from_cam,
                          int maxLmPerCam) {
   relevantCameras.clear();
   relevantCameras.resize(maxLmPerCam);
   for (int partId = 0; partId < landmarkFromCameraPerPart.size(); partId++) {
     std::map<int, std::set<int>> camToLmsInPart = landmarkFromCameraPerPart[partId];
     for (const auto &[camId, lms] : camToLmsInPart) {
-      if (lms.size() < maxLmPerCam && lms.size() > 0) {
+      if (lms.size() < std::min(static_cast<int>(lms_from_cam[camId].size()), maxLmPerCam) && lms.size() > 0 )  {
         relevantCameras[lms.size()].push_back({partId, camId});
+        std::cout << "Cam " << camId << " in part " << partId << " with " 
+                  << lms.size() << "/" << lms_from_cam[camId].size() << " observations\n";
       }
     }
   } // try to move all lms of above.
@@ -986,9 +989,10 @@ double CostGain(int numLmsBefore, int numLmsAfter,
       numLmsBefore == 0 && numLmsAfter <= 0) {
     return 0.0;
   }
-  // 0/1: 1 - exp(-t/5), 1/2 exp(-t/5) - exp(-2t/5)
-  return std::exp(-numLmsBefore / static_cast<double>(maxLmPerCam) * temperature) - 
-         std::exp(-numLmsAfter / static_cast<double>(maxLmPerCam) * temperature);
+  // 0/1: 1 - exp(-t/5), should be bad. 1/0 should be good.
+  // 1/2 exp(-t/5) - exp(-2t/5)
+  return std::exp(-numLmsAfter / static_cast<double>(maxLmPerCam) * temperature) - 
+         std::exp(-numLmsBefore / static_cast<double>(maxLmPerCam) * temperature);
 }
 
 // cost with known lmid. try to move ANY of the lmids. move the best.
@@ -1028,8 +1032,7 @@ std::pair<int, int> GetBestMoveCost(int partId, int camId, int kClusters,
 
   for (int lmId : landmarkFromCameraIt->second) {
     std::pair<double, int> costAndPart = GetMoveCost(lmId, partId, kClusters, landmarkFromCameraPerPart, cams_from_lm, maxLmPerCam, temperature);
-    if (costAndPart.first > bestCost)
-    {
+    if (costAndPart.first > bestCost) {
       bestCost = costAndPart.first;
       bestLmAndPartId.first = costAndPart.second;
       bestLmAndPartId.second = lmId;
@@ -1097,18 +1100,23 @@ void recluster_cameras(
     std::vector<std::vector<std::pair<int,int>>> relevantCameras(maxLmPerCam);
 
     // relevantCameras hold part and camId
-    for(int repeats = 0; repeats < 3; ++repeats) {
-      FillRelevantCameras(landmarkFromCameraPerPart, relevantCameras, maxLmPerCam);
-
+    bool moved = true;
+    int repeats = 20;
+    while(moved && repeats >= 0) {
+      FillRelevantCameras(landmarkFromCameraPerPart, relevantCameras, lms_from_cam, maxLmPerCam);
+      --repeats;
+      moved = false;
       for (std::vector<std::pair<int, int>> relevantCamerasPerLm : relevantCameras) {
         for (std::pair<int, int> partAndCamIdx : relevantCamerasPerLm) {
           int fromPartId = partAndCamIdx.first;
           int camId = partAndCamIdx.second;
-          const auto [toPartId, lmIdx] = 
-            GetBestMoveCost(fromPartId, camId, kClusters, 
+          const auto [toPartId, lmIdx] =
+            GetBestMoveCost(fromPartId, camId, kClusters,
               landmarkFromCameraPerPart, cams_from_lm, maxLmPerCam, temperature);
           if(toPartId>=0 && lmIdx>=0) {
+            std::cout << " Moving " << lmIdx << " from " << fromPartId << " observed by cam " << camId << " to " << toPartId << "\n";
             ApplyMove(lmIdx, fromPartId, toPartId, cams_from_lm, landmarkFromCameraPerPart);
+            moved = true;
           }
         }
       }
