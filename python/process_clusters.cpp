@@ -964,9 +964,9 @@ fill_vec_and_size(res_to_cluster, res_to_cluster_sizes, res_indices_in_cluster);
 
 // relevantCameras hold part and camId
 void FillRelevantCameras(const std::vector<std::map<int, std::set<int>>> &landmarkFromCameraPerPart,
-                         std::vector<std::vector<std::pair<int, int>>> &relevantCameras,
                          const std::vector<std::set<int>>& lms_from_cam,
-                         int maxLmPerCam) {
+                         int maxLmPerCam,
+                         std::vector<std::vector<std::pair<int, int>>> &relevantCameras) {
   relevantCameras.clear();
   relevantCameras.resize(maxLmPerCam);
   for (int partId = 0; partId < landmarkFromCameraPerPart.size(); partId++) {
@@ -974,8 +974,8 @@ void FillRelevantCameras(const std::vector<std::map<int, std::set<int>>> &landma
     for (const auto &[camId, lms] : camToLmsInPart) {
       if (lms.size() < std::min(static_cast<int>(lms_from_cam[camId].size()), maxLmPerCam) && lms.size() > 0 )  {
         relevantCameras[lms.size()].push_back({partId, camId});
-        std::cout << "Cam " << camId << " in part " << partId << " with " 
-                  << lms.size() << "/" << lms_from_cam[camId].size() << " observations\n";
+        // std::cout << "Cam " << camId << " in part " << partId << " with " 
+        //           << lms.size() << "/" << lms_from_cam[camId].size() << " observations\n";
       }
     }
   } // try to move all lms of above.
@@ -1095,17 +1095,23 @@ void recluster_cameras(
     // accept with 1-exp(-cost * temperature), pick with  ? prevent x2 picking .. sigh.
 
     // A relevant cameras / parts. 
-    static int maxLmPerCam = 5;
+    static int maxLmPerCam = 6;
     static double temperature = 10;
     std::vector<std::vector<std::pair<int,int>>> relevantCameras(maxLmPerCam);
 
     // relevantCameras hold part and camId
-    bool moved = true;
+    int movable = 0;
     int repeats = 20;
-    while(moved && repeats >= 0) {
-      FillRelevantCameras(landmarkFromCameraPerPart, relevantCameras, lms_from_cam, maxLmPerCam);
+    std::vector<int> started(maxLmPerCam, 0);
+    std::vector<int> finished(maxLmPerCam, 0);
+    FillRelevantCameras(landmarkFromCameraPerPart, lms_from_cam, maxLmPerCam, relevantCameras);
+    for(int camObservations = 1 ; camObservations < relevantCameras.size(); ++camObservations) {
+      started[camObservations] = relevantCameras[camObservations].size();
+      movable += started[camObservations];
+    }
+
+    while(movable > 0 && repeats >= 0) {
       --repeats;
-      moved = false;
       for (std::vector<std::pair<int, int>> relevantCamerasPerLm : relevantCameras) {
         for (std::pair<int, int> partAndCamIdx : relevantCamerasPerLm) {
           int fromPartId = partAndCamIdx.first;
@@ -1114,13 +1120,26 @@ void recluster_cameras(
             GetBestMoveCost(fromPartId, camId, kClusters,
               landmarkFromCameraPerPart, cams_from_lm, maxLmPerCam, temperature);
           if(toPartId>=0 && lmIdx>=0) {
-            std::cout << " Moving " << lmIdx << " from " << fromPartId << " observed by cam " << camId << " to " << toPartId << "\n";
+            //std::cout << " Moving " << lmIdx << " from " << fromPartId << " observed by cam " << camId << " to " << toPartId << "\n";
             ApplyMove(lmIdx, fromPartId, toPartId, cams_from_lm, landmarkFromCameraPerPart);
-            moved = true;
           }
         }
       }
+      movable = 0;
+      FillRelevantCameras(landmarkFromCameraPerPart, lms_from_cam, maxLmPerCam, relevantCameras);
+      for(int camObservations = 1 ; camObservations < relevantCameras.size(); ++camObservations) {
+        finished[camObservations] = relevantCameras[camObservations].size();
+        movable += finished[camObservations];
+      }
   }
+
+  std::cout << "Cam observations started/finished: ";
+  for(int camObservations = 1 ; camObservations < relevantCameras.size(); ++camObservations) {
+      std::cout << camObservations << " : " << started[camObservations] << "/" << finished[camObservations] << ", ";
+  }
+  std::cout << " left " << movable << std::endl;
+
+
   // output res_to_cluster (_by_landmark)
 
   // map from cam/lm id to resid:
