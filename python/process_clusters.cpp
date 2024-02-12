@@ -999,18 +999,24 @@ double CostGain(int numLmsBefore, int numLmsAfter,
 std::pair<double, int> GetMoveCost(int lmId, int partFrom, int kClusters,
                                    const std::vector<std::map<int, std::set<int>>> &landmarkFromCameraPerPart,
                                    const std::vector<std::set<int>>& cams_from_lm,
+                                   const std::vector<int>& res_per_cluster,
                                    int maxLmPerCam, double temperature) {
   // per part getCostGain: here just the new min number of landmarks in the part.
   std::vector<double> moveCost(kClusters); // cost per part to move to?
   double gainFrom = 0;
+  constexpr double eps = 1e-6;// prefer cluster with fewer res, tiny bias.
+  int min_res_per_cluster = res_per_cluster[partFrom];
+  for (int partId = 0; partId < kClusters; ++partId) {
+    min_res_per_cluster = std::min(min_res_per_cluster, res_per_cluster[partId]);
+  }
   for (int partId = 0; partId < kClusters; ++partId) {
     for (int camId : cams_from_lm[lmId]) {
       const auto landmarkFromCameraIt = landmarkFromCameraPerPart[partId].find(camId);
       int lmOfCaminPart = landmarkFromCameraIt == landmarkFromCameraPerPart[partId].end() ? 0 : landmarkFromCameraIt->second.size();
       if (partId == partFrom) {
-        gainFrom += CostGain(lmOfCaminPart, lmOfCaminPart - 1, maxLmPerCam, temperature);
+        gainFrom += CostGain(lmOfCaminPart, lmOfCaminPart - 1, maxLmPerCam, temperature) - eps * lmOfCaminPart / min_res_per_cluster;
       }
-      moveCost[partId] += CostGain(lmOfCaminPart, lmOfCaminPart + 1, maxLmPerCam, temperature);
+      moveCost[partId] += CostGain(lmOfCaminPart, lmOfCaminPart + 1, maxLmPerCam, temperature) + eps * lmOfCaminPart / res_per_cluster[partId];
     }
   }
 
@@ -1022,6 +1028,7 @@ std::pair<double, int> GetMoveCost(int lmId, int partFrom, int kClusters,
 std::pair<int, int> GetBestMoveCost(int partId, int camId, int kClusters,
                                     const std::vector<std::map<int, std::set<int>>> &landmarkFromCameraPerPart,
                                     const std::vector<std::set<int>>& cams_from_lm,
+                                    const std::vector<int>& res_per_cluster,
                                     int maxLmPerCam, double temperature) {
   std::pair<int, int> bestLmAndPartId = {-1, -1};
   double bestCost = 0;
@@ -1031,7 +1038,7 @@ std::pair<int, int> GetBestMoveCost(int partId, int camId, int kClusters,
   };
 
   for (int lmId : landmarkFromCameraIt->second) {
-    std::pair<double, int> costAndPart = GetMoveCost(lmId, partId, kClusters, landmarkFromCameraPerPart, cams_from_lm, maxLmPerCam, temperature);
+    std::pair<double, int> costAndPart = GetMoveCost(lmId, partId, kClusters, landmarkFromCameraPerPart, cams_from_lm, res_per_cluster, maxLmPerCam, temperature);
     if (costAndPart.first > bestCost) {
       bestCost = costAndPart.first;
       bestLmAndPartId.first = costAndPart.second;
@@ -1075,12 +1082,14 @@ void recluster_cameras(
     std::vector<std::set<int>> cams_from_lm(num_lands);
     std::vector<std::set<int>> lms_from_cam(num_cams);
     std::vector<std::map<int, std::set<int>>> landmarkFromCameraPerPart(kClusters);
+    std::vector<int> res_per_cluster(kClusters, 0);
     for (int res_id = 0; res_id < landmark_indices_in.size(); ++res_id) {
         const int lm_id = landmark_indices_in[res_id];
         const int cam_id = camera_indices_in[res_id];
         cams_from_lm[lm_id].insert(cam_id);
         lms_from_cam[cam_id].insert(lm_id);
         int partId = res_to_cluster_by_landmark[res_id];
+        res_per_cluster[partId]++;
         landmarkFromCameraPerPart[partId][cam_id].insert(lm_id);
     }
 
@@ -1090,7 +1099,7 @@ void recluster_cameras(
     // 2. per landmark find best fitting cluster. or jointly?
     //
     // could do annealing procedure cost before / after if above threshold apply.
-    // only do with cams with few landmarks, pcik the landmark.
+    // only do with cams with few landmarks, pick the landmark.
     // eg move one lm from cam with 5 landmarks brings +1. 4: +2 3: +3 etc. 
     // accept with 1-exp(-cost * temperature), pick with  ? prevent x2 picking .. sigh.
 
@@ -1117,8 +1126,8 @@ void recluster_cameras(
           int fromPartId = partAndCamIdx.first;
           int camId = partAndCamIdx.second;
           const auto [toPartId, lmIdx] =
-            GetBestMoveCost(fromPartId, camId, kClusters,
-              landmarkFromCameraPerPart, cams_from_lm, maxLmPerCam, temperature);
+            GetBestMoveCost(fromPartId, camId, kClusters, // should consider # res in cluster as tie breaker.
+              landmarkFromCameraPerPart, cams_from_lm, res_per_cluster, maxLmPerCam, temperature);
           if(toPartId>=0 && lmIdx>=0) {
             //std::cout << " Moving " << lmIdx << " from " << fromPartId << " observed by cam " << camId << " to " << toPartId << "\n";
             ApplyMove(lmIdx, fromPartId, toPartId, cams_from_lm, landmarkFromCameraPerPart);
