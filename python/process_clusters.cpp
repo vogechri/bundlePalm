@@ -1001,7 +1001,8 @@ std::pair<double, int> GetMoveCost(int lmId, int partFrom, int kClusters,
   double gainFrom = 0;
   for (int partId = 0; partId < kClusters; ++partId) {
     for (int camId : cams_from_lm[lmId]) {
-      int lmOfCaminPart = (landmarkFromCameraPerPart[partId])[camId].size();
+      const auto landmarkFromCameraIt = landmarkFromCameraPerPart[partId].find(camId);
+      int lmOfCaminPart = landmarkFromCameraIt == landmarkFromCameraPerPart[partId].end() ? 0 : landmarkFromCameraIt->second.size();
       if (partId == partFrom) {
         gainFrom += CostGain(lmOfCaminPart, lmOfCaminPart - 1, maxLmPerCam, temperature);
       }
@@ -1020,8 +1021,12 @@ std::pair<int, int> GetBestMoveCost(int partId, int camId, int kClusters,
                                     int maxLmPerCam, double temperature) {
   std::pair<int, int> bestLmAndPartId = {-1, -1};
   double bestCost = 0;
-  for (int lmId : landmarkFromCameraPerPart[partId][camId])
-  {
+  const auto landmarkFromCameraIt = landmarkFromCameraPerPart[partId].find(camId);
+  if (landmarkFromCameraIt == landmarkFromCameraPerPart[partId].end()){
+    return bestLmAndPartId; // invalid since no landmarks observed by cam in part.
+  };
+
+  for (int lmId : landmarkFromCameraIt->second) {
     std::pair<double, int> costAndPart = GetMoveCost(lmId, partId, kClusters, landmarkFromCameraPerPart, cams_from_lm, maxLmPerCam, temperature);
     if (costAndPart.first > bestCost)
     {
@@ -1102,8 +1107,9 @@ void recluster_cameras(
           const auto [toPartId, lmIdx] = 
             GetBestMoveCost(fromPartId, camId, kClusters, 
               landmarkFromCameraPerPart, cams_from_lm, maxLmPerCam, temperature);
-
-          ApplyMove(lmIdx, fromPartId, toPartId, cams_from_lm, landmarkFromCameraPerPart);
+          if(toPartId>=0 && lmIdx>=0) {
+            ApplyMove(lmIdx, fromPartId, toPartId, cams_from_lm, landmarkFromCameraPerPart);
+          }
         }
       }
   }

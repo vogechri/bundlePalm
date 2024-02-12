@@ -38,6 +38,13 @@ process_clusters(
     std::vector<int>& covered_landmark_indices_c_out, std::vector<int>& covered_landmark_indices_c_sizes, 
     std::vector<int>& res_to_cluster_by_landmark_out);
 
+extern "C" void
+recluster_cameras(
+    int kClusters,
+    const std::vector<int>& camera_indices_in,
+    const std::vector<int>& landmark_indices_in,
+    std::vector<int>& res_to_cluster_by_landmark);
+
 // simplify removing inputs
 // extern "C"
 // void cluster_covis_full(
