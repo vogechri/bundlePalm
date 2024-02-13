@@ -1110,7 +1110,7 @@ void recluster_cameras(
 
     // relevantCameras hold part and camId
     int movable = 0;
-    int repeats = 20;
+    int repeats = 30;
     std::vector<int> started(maxLmPerCam, 0);
     std::vector<int> finished(maxLmPerCam, 0);
     FillRelevantCameras(landmarkFromCameraPerPart, lms_from_cam, maxLmPerCam, relevantCameras);
@@ -1131,6 +1131,7 @@ void recluster_cameras(
           if(toPartId>=0 && lmIdx>=0) {
             //std::cout << " Moving " << lmIdx << " from " << fromPartId << " observed by cam " << camId << " to " << toPartId << "\n";
             ApplyMove(lmIdx, fromPartId, toPartId, cams_from_lm, landmarkFromCameraPerPart);
+            // could break if enters here after for loop end, to ensure we process small 1st. also could use pq.
           }
         }
       }
@@ -1139,6 +1140,12 @@ void recluster_cameras(
       for(int camObservations = 1 ; camObservations < relevantCameras.size(); ++camObservations) {
         finished[camObservations] = relevantCameras[camObservations].size();
         movable += finished[camObservations];
+      }
+      if (movable == 0 && maxLmPerCam < 20) {
+        movable = 1;
+        maxLmPerCam +=5;
+        relevantCameras.resize(maxLmPerCam);
+        finished.resize(maxLmPerCam);
       }
   }
 
@@ -1168,5 +1175,28 @@ void recluster_cameras(
   }
 
   // fill vector : see above, done
+// posst process clusters : in res_to_cluster_by_landmark, res to cam and res to lm.
+// cluster should be whole landmark to cluster with all res in 1 cluster.
+// problem cameras are split over clusters and some cameras and up with < 5 lms observed.
+// idea is to move cams around a posteriori.
+// per cluster -> cam to #lms. 0 is good, 1-5 is bad. > 5 ok.
+// need to map from lm to all cams observing
+// and from all cams to lms observed.
+// find cams with < 5 lms and try move to other clusters.
+// all of its lms must be moved now.
+// for each of those lms, find cluster with 
+
+// for smallest cluster find all cams with < 5 observations.
+// try to add landmark from other clusters observed by that camera: 
+
+// - for all lms observed by cam, get current cluster and cameras observing, 
+// - check minimal # lms observed by any camera in this cluster. 
+// - if # is large enough move landmark to this cluster.
+
+// try to move landmarks observed by the cam to other clusters:
+// - for lm find cluster with least cams observing it, move to that cluster.
+// - if for all we do not introduce a new cam to the cluster : ok.
+// - moving the landmarks reduces # observation for cam in cluster, ensure we do not create a new cam with < 5 lms.
+// avoid to grow clsuter endlessly
 
 }

@@ -385,12 +385,12 @@ def AngleAxisRotatePoint(angleAxis, pt):
 def torchSingleResiduum(camera_params_, point_params_, p2d):
     angle_axis = camera_params_[:, :3]
     points_cam = AngleAxisRotatePoint(angle_axis, point_params_)
-    points_cam = points_cam + camera_params_[:, 3:6]
+    points_cam = points_cam + camera_params_[:, 3:6] * 20
     points_projX = -points_cam[:, 0] / points_cam[:, 2]
     points_projY = -points_cam[:, 1] / points_cam[:, 2]
-    f = camera_params_[:, 6] * 100
-    k1 = camera_params_[:, 7] * 100
-    k2 = camera_params_[:, 8] * 100
+    f = camera_params_[:, 6] * 1000
+    k1 = camera_params_[:, 7] * 20
+    k2 = camera_params_[:, 8] * 40
     r2 = points_projX * points_projX + points_projY * points_projY
     distortion = 1.0 + r2 * (k1 + k2 * r2)
     points_reprojX = points_projX * distortion * f
@@ -403,12 +403,12 @@ def torchSingleResiduum(camera_params_, point_params_, p2d):
 def torchSingleResiduumX(camera_params, point_params, p2d) :
     angle_axis = camera_params[:,:3]
     points_cam = AngleAxisRotatePoint(angle_axis, point_params)
-    points_cam = points_cam + camera_params[:,3:6]
+    points_cam = points_cam + camera_params[:,3:6] * 20
     points_projX = -points_cam[:, 0] / points_cam[:, 2]
     points_projY = -points_cam[:, 1] / points_cam[:, 2]
-    f  = camera_params[:, 6] * 100
-    k1 = camera_params[:, 7] * 100
-    k2 = camera_params[:, 8] * 100
+    f  = camera_params[:, 6] * 1000
+    k1 = camera_params[:, 7] * 20
+    k2 = camera_params[:, 8] * 40
     r2 = points_projX*points_projX + points_projY*points_projY
     distortion = 1. + r2 * (k1 + k2 * r2)
     points_reprojX = points_projX * distortion * f
@@ -418,12 +418,12 @@ def torchSingleResiduumX(camera_params, point_params, p2d) :
 def torchSingleResiduumY(camera_params, point_params, p2d) :
     angle_axis = camera_params[:,:3]
     points_cam = AngleAxisRotatePoint(angle_axis, point_params)
-    points_cam = points_cam + camera_params[:,3:6]
+    points_cam = points_cam + camera_params[:,3:6] * 20
     points_projX = -points_cam[:, 0] / points_cam[:, 2]
     points_projY = -points_cam[:, 1] / points_cam[:, 2]
-    f  = camera_params[:, 6] * 100
-    k1 = camera_params[:, 7] * 100
-    k2 = camera_params[:, 8] * 100
+    f  = camera_params[:, 6] * 1000
+    k1 = camera_params[:, 7] * 20
+    k2 = camera_params[:, 8] * 40
     r2 = points_projX*points_projX + points_projY*points_projY
     distortion = 1. + r2 * (k1 + k2 * r2)
     points_reprojY = points_projY * distortion * f
@@ -1244,6 +1244,8 @@ def bundle_adjust(
             blockEigenvalueJtJ = blockEigenvalue(JtJ, 9) # TODO: what if this is only needed for 0-eigen directions? return !=0 only if in small eigendir
             stepSize = blockEigMult * blockEigenvalueJtJ + JJ_mult * JtJ.copy() # Todo '2 *' vs 1 by convex.
 
+            print( "Mean diagonal of pseudo Hessian ",  np.sum(np.abs(JtJ.diagonal()).reshape(-1,9) / (1000 * n_cameras_), 0))
+
             # blockEigenvalueJtJ = blockEigenvalueFull(JtJ, 9)
             # stepSize = blockEigenvalueJtJ + JJ_mult * JtJ.copy() # Todo '2 *' vs 1 by convex.
 
@@ -1732,9 +1734,10 @@ print("min focal distance ", np.min(cameras[:,6].flatten()), " ", np.max(cameras
 print("min k1 distance ", np.min(cameras[:,7].flatten()), " ", np.max(cameras[:,7].flatten()) )
 print("min k2 distance ", np.min(cameras[:,8].flatten()), " ", np.max(cameras[:,8].flatten()) )
 
-cameras[:,6] = cameras[:,6] / 100
-cameras[:,7] = cameras[:,7] / 100
-cameras[:,8] = cameras[:,8] / 100
+cameras[:,3:6] = cameras[:,3:6] / 20
+cameras[:,6] = cameras[:,6] / 1000
+cameras[:,7] = cameras[:,7] / 20
+cameras[:,8] = cameras[:,8] / 40
 
 np.set_printoptions(formatter={"float": "{: 0.2f}".format})
 
