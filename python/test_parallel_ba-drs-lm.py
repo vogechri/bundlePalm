@@ -388,7 +388,7 @@ def torchSingleResiduum(camera_params_, point_params_, p2d):
     points_cam = points_cam + camera_params_[:, 3:6] * 20
     points_projX = -points_cam[:, 0] / points_cam[:, 2]
     points_projY = -points_cam[:, 1] / points_cam[:, 2]
-    f = camera_params_[:, 6] * 2000
+    f = camera_params_[:, 6] * 3000
     k1 = camera_params_[:, 7] * 10
     k2 = camera_params_[:, 8] * 20
     r2 = points_projX * points_projX + points_projY * points_projY
@@ -406,7 +406,7 @@ def torchSingleResiduumX(camera_params, point_params, p2d) :
     points_cam = points_cam + camera_params[:,3:6] * 20
     points_projX = -points_cam[:, 0] / points_cam[:, 2]
     points_projY = -points_cam[:, 1] / points_cam[:, 2]
-    f  = camera_params[:, 6] * 2000
+    f  = camera_params[:, 6] * 3000
     k1 = camera_params[:, 7] * 10
     k2 = camera_params[:, 8] * 20
     r2 = points_projX*points_projX + points_projY*points_projY
@@ -421,7 +421,7 @@ def torchSingleResiduumY(camera_params, point_params, p2d) :
     points_cam = points_cam + camera_params[:,3:6] * 20
     points_projX = -points_cam[:, 0] / points_cam[:, 2]
     points_projY = -points_cam[:, 1] / points_cam[:, 2]
-    f  = camera_params[:, 6] * 2000
+    f  = camera_params[:, 6] * 3000
     k1 = camera_params[:, 7] * 10
     k2 = camera_params[:, 8] * 20
     r2 = points_projX*points_projX + points_projY*points_projY
@@ -1735,7 +1735,7 @@ print("min k1 distance ", np.min(cameras[:,7].flatten()), " ", np.max(cameras[:,
 print("min k2 distance ", np.min(cameras[:,8].flatten()), " ", np.max(cameras[:,8].flatten()) )
 
 cameras[:,3:6] = cameras[:,3:6] / 20
-cameras[:,6] = cameras[:,6] / 2000
+cameras[:,6] = cameras[:,6] / 3000
 cameras[:,7] = cameras[:,7] / 10
 cameras[:,8] = cameras[:,8] / 20
 
