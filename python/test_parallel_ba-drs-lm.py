@@ -385,12 +385,12 @@ def AngleAxisRotatePoint(angleAxis, pt):
 def torchSingleResiduum(camera_params_, point_params_, p2d):
     angle_axis = camera_params_[:, :3]
     points_cam = AngleAxisRotatePoint(angle_axis, point_params_)
-    points_cam = points_cam + camera_params_[:, 3:6]
+    points_cam = points_cam + camera_params_[:, 3:6] * 20
     points_projX = -points_cam[:, 0] / points_cam[:, 2]
     points_projY = -points_cam[:, 1] / points_cam[:, 2]
-    f = camera_params_[:, 6] * 100
-    k1 = camera_params_[:, 7] * 100
-    k2 = camera_params_[:, 8] * 100
+    f = camera_params_[:, 6] * 3000
+    k1 = camera_params_[:, 7] * 10
+    k2 = camera_params_[:, 8] * 20
     r2 = points_projX * points_projX + points_projY * points_projY
     distortion = 1.0 + r2 * (k1 + k2 * r2)
     points_reprojX = points_projX * distortion * f
@@ -403,12 +403,12 @@ def torchSingleResiduum(camera_params_, point_params_, p2d):
 def torchSingleResiduumX(camera_params, point_params, p2d) :
     angle_axis = camera_params[:,:3]
     points_cam = AngleAxisRotatePoint(angle_axis, point_params)
-    points_cam = points_cam + camera_params[:,3:6]
+    points_cam = points_cam + camera_params[:,3:6] * 20
     points_projX = -points_cam[:, 0] / points_cam[:, 2]
     points_projY = -points_cam[:, 1] / points_cam[:, 2]
-    f  = camera_params[:, 6] * 100
-    k1 = camera_params[:, 7] * 100
-    k2 = camera_params[:, 8] * 100
+    f  = camera_params[:, 6] * 3000
+    k1 = camera_params[:, 7] * 10
+    k2 = camera_params[:, 8] * 20
     r2 = points_projX*points_projX + points_projY*points_projY
     distortion = 1. + r2 * (k1 + k2 * r2)
     points_reprojX = points_projX * distortion * f
@@ -418,12 +418,12 @@ def torchSingleResiduumX(camera_params, point_params, p2d) :
 def torchSingleResiduumY(camera_params, point_params, p2d) :
     angle_axis = camera_params[:,:3]
     points_cam = AngleAxisRotatePoint(angle_axis, point_params)
-    points_cam = points_cam + camera_params[:,3:6]
+    points_cam = points_cam + camera_params[:,3:6] * 20
     points_projX = -points_cam[:, 0] / points_cam[:, 2]
     points_projY = -points_cam[:, 1] / points_cam[:, 2]
-    f  = camera_params[:, 6] * 100
-    k1 = camera_params[:, 7] * 100
-    k2 = camera_params[:, 8] * 100
+    f  = camera_params[:, 6] * 3000
+    k1 = camera_params[:, 7] * 10
+    k2 = camera_params[:, 8] * 20
     r2 = points_projX*points_projX + points_projY*points_projY
     distortion = 1. + r2 * (k1 + k2 * r2)
     points_reprojY = points_projY * distortion * f
@@ -962,7 +962,7 @@ def average_cameras_new(
         # print(i, "averaging 3d ", points_3d_in_cluster_[i][globalSingleLandmarksB_in_c[i], :]) # indeed 1 changed rest is constant
         # print(i, "averaging vl ", V_land.data.reshape(-1,9)[globalSingleLandmarksA_in_c[i],:])  # indeed diagonal
 
-        prox_solution = False
+        prox_solution = True # does not matter
         if prox_solution:
             # TODO change 3, claim  2u+-s = 2 * (s+u)/2 - s  -  2 * (vli/2 .. ), so subtract u to get delta only
             u2_s = (2 * poses_in_cluster_[i].flatten() - poses_s_in_cluster_[i].flatten())
@@ -1075,7 +1075,7 @@ def cost_DRE(
         # sum_k rho_k v + rho_k (s_k - 2 u_k) = 0
         # v = (sum_k rho_k)^-1 (sum_k rho_k (2 u_k - s_k))
 
-        prox_solution = False
+        prox_solution = True # does not matter
         if prox_solution:
             local_cost = 0.5 * u_v.dot(U_pose * (u_v + 2 * u_s))
         else: # assuming we do not solve the problem exactly
@@ -1243,6 +1243,8 @@ def bundle_adjust(
             # 
             blockEigenvalueJtJ = blockEigenvalue(JtJ, 9) # TODO: what if this is only needed for 0-eigen directions? return !=0 only if in small eigendir
             stepSize = blockEigMult * blockEigenvalueJtJ + JJ_mult * JtJ.copy() # Todo '2 *' vs 1 by convex.
+
+            print( "Mean diagonal of pseudo Hessian ",  np.sum(np.abs(JtJ.diagonal()).reshape(-1,9) / (1000 * n_cameras_), 0))
 
             # blockEigenvalueJtJ = blockEigenvalueFull(JtJ, 9)
             # stepSize = blockEigenvalueJtJ + JJ_mult * JtJ.copy() # Todo '2 *' vs 1 by convex.
@@ -1732,9 +1734,10 @@ print("min focal distance ", np.min(cameras[:,6].flatten()), " ", np.max(cameras
 print("min k1 distance ", np.min(cameras[:,7].flatten()), " ", np.max(cameras[:,7].flatten()) )
 print("min k2 distance ", np.min(cameras[:,8].flatten()), " ", np.max(cameras[:,8].flatten()) )
 
-cameras[:,6] = cameras[:,6] / 100
-cameras[:,7] = cameras[:,7] / 100
-cameras[:,8] = cameras[:,8] / 100
+cameras[:,3:6] = cameras[:,3:6] / 20
+cameras[:,6] = cameras[:,6] / 3000
+cameras[:,7] = cameras[:,7] / 10
+cameras[:,8] = cameras[:,8] / 20
 
 np.set_printoptions(formatter={"float": "{: 0.2f}".format})
 
@@ -1794,7 +1797,7 @@ pre_merges = 0
 
 values, counts = np.unique(camera_indices, return_counts=True)
 minCount = np.min(counts)
-print(". minimum camera in total ", minCount, " cams with < 5 landmarks ", np.sum(counts < 5))
+print(". minimum camera observations in total ", minCount, " cams with < 5 landmarks ", np.sum(counts < 5))
 
 (
     camera_indices_in_cluster,
@@ -1807,7 +1810,7 @@ print(". minimum camera in total ", minCount, " cams with < 5 landmarks ", np.su
 for ci in range(kClusters):
     values, counts = np.unique(camera_indices_in_cluster[ci], return_counts=True)
     minCount = np.min(counts)
-    print(ci, ". minimum camera in cluster ", minCount, " cams with < 5 landmarks ", np.sum(counts < 5))
+    print(ci, ". minimum camera observations in cluster ", minCount, " cams with < 5 landmarks ", np.sum(counts < 5))
 
 L_in_cluster = []
 for _ in range(kClusters):
