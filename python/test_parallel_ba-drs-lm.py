@@ -962,7 +962,7 @@ def average_cameras_new(
         # print(i, "averaging 3d ", points_3d_in_cluster_[i][globalSingleLandmarksB_in_c[i], :]) # indeed 1 changed rest is constant
         # print(i, "averaging vl ", V_land.data.reshape(-1,9)[globalSingleLandmarksA_in_c[i],:])  # indeed diagonal
 
-        prox_solution = False
+        prox_solution = True # does not matter
         if prox_solution:
             # TODO change 3, claim  2u+-s = 2 * (s+u)/2 - s  -  2 * (vli/2 .. ), so subtract u to get delta only
             u2_s = (2 * poses_in_cluster_[i].flatten() - poses_s_in_cluster_[i].flatten())
@@ -1075,7 +1075,7 @@ def cost_DRE(
         # sum_k rho_k v + rho_k (s_k - 2 u_k) = 0
         # v = (sum_k rho_k)^-1 (sum_k rho_k (2 u_k - s_k))
 
-        prox_solution = False
+        prox_solution = True # does not matter
         if prox_solution:
             local_cost = 0.5 * u_v.dot(U_pose * (u_v + 2 * u_s))
         else: # assuming we do not solve the problem exactly
@@ -1182,7 +1182,7 @@ def bundle_adjust(
     newForUnique = False
     #  1e-6:  12 / 0  ======== DRE BFGS ======  1240831  ========= gain  15238 ==== f(v)=  1237348  f(u)=  1242571  ~=  1242571.1898081787
     #  1e-8:  12 / 1  ======== DRE BFGS ======   929137  ========= gain  20474 ==== f(v)=   922583  f(u)=   934835  ~=  934834.5306621138
-    blockEigMult = 1e-6 # 1e-3 was used before, too high low precision.
+    blockEigMult = 1e-5 # 1e-3 was used before, too high low precision.
     # 1e-8 fluctuates but faster 1e-6. increase JJ_mult?
     # problem dies at 173 example. 1e-5 ok more not.
     # blockEigMult = 1e-0
@@ -1794,7 +1794,7 @@ pre_merges = 0
 
 values, counts = np.unique(camera_indices, return_counts=True)
 minCount = np.min(counts)
-print(". minimum camera in total ", minCount, " cams with < 5 landmarks ", np.sum(counts < 5))
+print(". minimum camera observations in total ", minCount, " cams with < 5 landmarks ", np.sum(counts < 5))
 
 (
     camera_indices_in_cluster,
@@ -1807,7 +1807,7 @@ print(". minimum camera in total ", minCount, " cams with < 5 landmarks ", np.su
 for ci in range(kClusters):
     values, counts = np.unique(camera_indices_in_cluster[ci], return_counts=True)
     minCount = np.min(counts)
-    print(ci, ". minimum camera in cluster ", minCount, " cams with < 5 landmarks ", np.sum(counts < 5))
+    print(ci, ". minimum camera observations in cluster ", minCount, " cams with < 5 landmarks ", np.sum(counts < 5))
 
 L_in_cluster = []
 for _ in range(kClusters):
