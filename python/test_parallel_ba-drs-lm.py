@@ -160,6 +160,9 @@ def init_lib():
     lib.cluster_covis.argtypes = [ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_void_p, ctypes.c_void_p,
                                   ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p] # out]
 
+    lib.recluster_cameras.restype = None
+    lib.recluster_cameras.argtypes = [ctypes.c_int, ctypes.c_void_p, ctypes.c_void_p,
+                                      ctypes.c_void_p] # in&out]
 
 def cluster_covis_lib(kClusters, pre_merges_, camera_indices__, point_indices__):
     c_kClusters_ = ctypes.c_int(kClusters)
@@ -256,6 +259,76 @@ def process_cluster_lib(num_lands_, num_res_, kClusters__, point_indices_in_clus
     covered_landmark_indices_c_ = fillPythonVec(covered_landmark_indices_c_out, covered_landmark_indices_c_sizes, kClusters__)
     res_to_cluster_by_landmark_out_ = fillPythonVecSimple(res_to_cluster_by_landmark_out)
 
+    return res_to_cluster_by_landmark_out_, point_indices_already_covered_, covered_landmark_indices_c_
+
+def post_process_cluster_lib(num_lands_, num_res_, kClusters__, point_indices_in_cluster__, res_indices_in_cluster__, point_indices__, camera_indices__):
+
+    # Flatten the nested lists and get the sizes of the sublists
+    point_indices_in_cluster_flat = [item for sublist in point_indices_in_cluster__ for item in sublist]
+    point_indices_in_cluster_sizes = [len(sublist) for sublist in point_indices_in_cluster__]
+
+    res_indices_in_cluster_flat = [item for sublist in res_indices_in_cluster__ for item in sublist]
+    res_indices_in_cluster_sizes = [len(sublist) for sublist in res_indices_in_cluster__]
+
+    # Convert the input arguments to C types
+    c_num_lands_ = ctypes.c_int(num_lands_)
+    c_num_res_ = ctypes.c_int(num_res_)
+    c_kClusters_ = ctypes.c_int(kClusters__)
+
+    c_point_indices_in_cluster_flat_ptr = (ctypes.c_int * len(point_indices_in_cluster_flat))(*point_indices_in_cluster_flat)
+    c_point_indices_in_cluster_sizes_ptr = (ctypes.c_int * len(point_indices_in_cluster_sizes))(*point_indices_in_cluster_sizes)
+
+    c_point_indices_ptr = (ctypes.c_int * len(point_indices__))(*point_indices__)
+    c_camera_indices_ptr = (ctypes.c_int * len(camera_indices__))(*camera_indices__)
+
+    c_res_indices_in_cluster_flat_ptr = (ctypes.c_int * len(res_indices_in_cluster_flat))(*res_indices_in_cluster_flat)
+    c_res_indices_in_cluster_sizes_ptr = (ctypes.c_int * len(res_indices_in_cluster_sizes))(*res_indices_in_cluster_sizes)
+
+    #c_res_indices_in_cluster_flat = lib.new_vector_of_size(len(c_res_indices_in_cluster_flat))
+    c_point_indices_in_cluster_flat_cpp = lib.new_vector_by_copy(c_point_indices_in_cluster_flat_ptr, len(c_point_indices_in_cluster_flat_ptr))
+    c_point_indices_in_cluster_sizes_cpp = lib.new_vector_by_copy(c_point_indices_in_cluster_sizes_ptr, len(c_point_indices_in_cluster_sizes_ptr))
+    c_point_indices_cpp = lib.new_vector_by_copy(c_point_indices_ptr, len(c_point_indices_ptr))
+    c_camera_indices_cpp = lib.new_vector_by_copy(c_camera_indices_ptr, len(c_camera_indices_ptr))
+
+    c_res_indices_in_cluster_flat_cpp = lib.new_vector_by_copy(c_res_indices_in_cluster_flat_ptr, len(c_res_indices_in_cluster_flat_ptr))
+    c_res_indices_in_cluster_sizes_cpp = lib.new_vector_by_copy(c_res_indices_in_cluster_sizes_ptr, len(c_res_indices_in_cluster_sizes_ptr))
+
+    #lib.vector_set(c_res_indices_in_cluster_flat, i, value)
+
+    res_toadd_out = lib.new_vector()
+    res_toadd_sizes_out = lib.new_vector_of_size(kClusters)
+
+    point_indices_already_covered_out = lib.new_vector_of_size(kClusters)
+    point_indices_already_covered_sizes = lib.new_vector_of_size(kClusters)
+
+    # print("point_indices_already_covered_outsiez ", lib.vector_size(point_indices_already_covered_out))
+    # print("point_indices_already_covered_sizes siez ", lib.vector_size(point_indices_already_covered_sizes))
+
+    covered_landmark_indices_c_out = lib.new_vector()
+    covered_landmark_indices_c_sizes = lib.new_vector_of_size(kClusters)
+
+    res_to_cluster_by_landmark_out = lib.new_vector()
+
+    lib.process_clusters(c_num_lands_, c_num_res_, c_kClusters_, 
+                         c_point_indices_in_cluster_flat_cpp, c_point_indices_in_cluster_sizes_cpp,
+                         c_point_indices_cpp,
+                         c_res_indices_in_cluster_flat_cpp,c_res_indices_in_cluster_sizes_cpp,
+                         res_toadd_out, res_toadd_sizes_out,
+                         point_indices_already_covered_out, point_indices_already_covered_sizes,
+                         covered_landmark_indices_c_out, covered_landmark_indices_c_sizes,
+                         res_to_cluster_by_landmark_out)
+
+    lib.recluster_cameras(c_kClusters_, c_camera_indices_cpp, c_point_indices_cpp,
+                          res_to_cluster_by_landmark_out)
+
+    #print("lib.vector_get(res_toadd_sizes_out, i) ", 0, " : ", lib.vector_get(res_toadd_sizes_out, 0))
+    #res_toadd_to_c_ = fillPythonVec(res_toadd_out, res_toadd_sizes_out, kClusters)
+    point_indices_already_covered_ = fillPythonVec(point_indices_already_covered_out, point_indices_already_covered_sizes, kClusters)
+    covered_landmark_indices_c_ = fillPythonVec(covered_landmark_indices_c_out, covered_landmark_indices_c_sizes, kClusters)
+    #num_res_per_c_ = fillPythonVecSimple(res_toadd_out)
+
+    res_to_cluster_by_landmark_out_ = fillPythonVecSimple(res_to_cluster_by_landmark_out)
+    # only first needed: res_to_cluster_by_landmark_out_
     return res_to_cluster_by_landmark_out_, point_indices_already_covered_, covered_landmark_indices_c_
 
 def AngleAxisRotatePoint(angleAxis, pt):
@@ -788,9 +861,13 @@ def cluster_by_landmark(
         point_indices_in_cluster_.append(point_indices_[res_indices_in_c_])
         cluster_to_camera_.append(np.unique(camera_indices_[res_indices_in_c_]))
 
-    res_to_cluster_by_landmark_, point_indices_already_covered_, covered_landmark_indices_c_ = \
-        process_cluster_lib(num_lands, num_res, kClusters, point_indices_in_cluster_, res_indices_in_cluster_, point_indices_)
-    
+    if False:
+        res_to_cluster_by_landmark_, point_indices_already_covered_, covered_landmark_indices_c_ = \
+            process_cluster_lib(num_lands, num_res, kClusters, point_indices_in_cluster_, res_indices_in_cluster_, point_indices_)
+    else: # avoid cameras with few evidence / singular updates.
+        res_to_cluster_by_landmark_, point_indices_already_covered_, covered_landmark_indices_c_ = \
+            post_process_cluster_lib(num_lands, num_res, kClusters, point_indices_in_cluster_, res_indices_in_cluster_, point_indices_, camera_indices_)
+
     # we only case about covered_landmark_indices_c_
     # 1. distribute residuals by occurence of above per cluster: res_to_cluster_by_landmark_: res -> cluster covers all landmarks exculsively. to test.
     # 2. landmarks per cluster are exclusive, but use whole cams per cluster (simpler)
