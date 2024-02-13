@@ -1105,7 +1105,7 @@ def bundle_adjust(
     newForUnique = False
     #  1e-6:  12 / 0  ======== DRE BFGS ======  1240831  ========= gain  15238 ==== f(v)=  1237348  f(u)=  1242571  ~=  1242571.1898081787
     #  1e-8:  12 / 1  ======== DRE BFGS ======   929137  ========= gain  20474 ==== f(v)=   922583  f(u)=   934835  ~=  934834.5306621138
-    blockEigMult = 1e-6 # 1e-3 was used before, too high low precision.
+    blockEigMult = 1e-5 # 1e-3 was used before, too high low precision.
     # 1e-8 fluctuates but faster 1e-6. increase JJ_mult?
     # problem dies at 173 example. 1e-5 ok more not.
     # blockEigMult = 1e-0
@@ -1300,7 +1300,7 @@ def bundle_adjust(
         if tr_check < tr_eta_2: # and False: # TR should not help here. Maybe apply differently? TR checks if approx w. JtJ is ok within region.
             print(" //////  tr_check " , tr_check, " Lfk distance ", LfkDistance, " -nabla^Tdelta=" , -bp.dot(delta_p) - bl.dot(delta_l), " /////")
             L = L * 2
-            JtJDiag = 1/2 * JtJDiag # why that?
+            JtJDiag = 1/2 * JtJDiag # why that? tr only for landmarks here..
 
         #LfkViolated = False # todo remove?
         if tr_check >= tr_eta_2 and LfkViolated: # violated -- should revert update.

@@ -814,7 +814,7 @@ def copy_selected_blocks(M, block_selection_, bs):
         bs2 = bs * bs
         for i in range(int(M.data.shape[0] / bs2)):
             if block_selection_[i] == True:
-                Mi.data[bs2 * i : bs2 * i + bs2] = 1e-12
+                Mi.data[bs2 * i : bs2 * i + bs2] = 1e-15
     else:
         Mi = M.copy()
         for i in range(int(M.data.shape[0])):
@@ -1365,7 +1365,7 @@ def bundle_adjust(
 ):
     # print("landmarks_only_in_cluster_  ", landmarks_only_in_cluster_, " ", np.sum(landmarks_only_in_cluster_), " vs ", np.sum(1 - landmarks_only_in_cluster_) )
     newForUnique = True # debug nable_approx 
-    blockEigMult = 1e-3 # 1e-3 was used before less hicups smaller 1e-3. recall last val ..
+    blockEigMult = 1e-3 # 1e-3 was used before, solid, less hicups smaller 1e-3. recall last val .. 1e-4 explodes for 173 example.
     normal_case_ = True # No L * JltJl at all. Does not work
     # define x0_t, x0_p, x0_l, L # todo: missing Lb: inner L for bundle, Lc: to fix duplicates
     minimumL = 1e-6
@@ -1409,9 +1409,10 @@ def bundle_adjust(
             )
 
             JtJ = J_pose.transpose() * J_pose
-            JtJDiag = diag_sparse(JtJ.diagonal())
+            # in test_base
+            #JtJDiag = diag_sparse(JtJ.diagonal())
 
-            J_eps = 1e-3
+            J_eps = 1e-3 # does this matter? 1e-3 2 / 0  ======== DRE BFGS ======  861672  ========= gain  486744 ==== f(v)=  735282  f(u)=  971304  ~=  971304.0525993105
             # test CSU: 2a^2+b^2 > (a+b)^2 = a^2 + b^2 + 2ab. Since (a-b)^2 = a^2 + b^2 - 2ab > 0, so a^2 + b^2 > 2ab. 
             # a^2 = p^t* Jp^TJp * p , b^2 = l^tJl^TJl l. ab = p^tJp^T Jl*l.
             #(Jl | Jp) (l,p)^T = Jl l + Jp p and |(Jl | Jp) (l,p)^T|^2 = l^t Jl^t Jl l + p^t Jp^t Jp p + 2 p^t Jp^t Jl l.
@@ -1420,6 +1421,8 @@ def bundle_adjust(
             JtJDiag = JtJ + J_eps * diag_sparse(np.ones(JtJ.shape[0]))
 
             #blockEigenvalueJtJ = blockEigenvalue(JtJ, 9)
+            #JtJDiag = JtJ + 1e-9 * blockEigenvalueJtJ # alot worse at 1e6, bit better 1e-9, but hmm 59 / 0  ======== DRE BFGS ======  501565
+
             #print(" min/max JtJ.diagonal() ", np.min(JtJ.diagonal()), " ", np.max(JtJ.diagonal()), " adjusted ", np.min(JtJDiag.diagonal()), " ", np.max(JtJDiag.diagonal()), " ", np.min(blockEigenvalueJtJ.diagonal()) ," ", np.max(blockEigenvalueJtJ.diagonal()) )
 
             #JtJDiag = diag_sparse(np.fmax(JtJ.diagonal(), 1e1)) # sensible not clear maybe lower.
@@ -1455,6 +1458,9 @@ def bundle_adjust(
 
             JltJlDiag = stepSize.copy() # max 1, 1/L, line-search dre fails -> increase
 
+            print(" min/max JltJl.diagonal() ", np.min(JltJl.diagonal()), " ", np.max(JltJl.diagonal()), " adjusted ", np.min(JltJlDiag.diagonal()), " ", np.max(JltJlDiag.diagonal()))
+            #print("JltJlDiag.shape ", JltJlDiag.shape, JltJlDiag.shape[0]/3)
+
             # set to 1e-12+L * blockEigMult * blockEigenvalueJltJl all entries of completely covered lms.
             if newForUnique:
                 JltJlDiag = copy_selected_blocks(JltJlDiag, landmarks_only_in_cluster_, 3)
@@ -1472,8 +1478,6 @@ def bundle_adjust(
             # but Dl is fulfilled with L. So would lower Dl just like, or? 
             # maybe better: 3x3 matrix sqrt(|M|_1 |M|inf) as diag. Yet this removes effect of 'L' getting small = large steps.
             # do i need to keep memory to ensure it remains >? or pre compute grad (and store)?
-            print(" min/max JltJl.diagonal() ", np.min(JltJl.diagonal()), " ", np.max(JltJl.diagonal()), " adjusted ", np.min(JltJlDiag.diagonal()), " ", np.max(JltJlDiag.diagonal()))
-            #print("JltJlDiag.shape ", JltJlDiag.shape, JltJlDiag.shape[0]/3)
 
             # based on unique_pointindices_ make diag_1L that is 1 at points 
             # only present within this part.
