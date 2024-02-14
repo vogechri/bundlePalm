@@ -1346,7 +1346,7 @@ if read_output:
 
 def rerender(vis, geometry, cameras, landmarks, save_image):
     geometry.points = o3d.utility.Vector3dVector(landmarks) # ?
-    geometry_cam = o3d.utility.Vector3dVector(cameras[:,3:6]) # ?
+    geometry_cam.points = o3d.utility.Vector3dVector(cameras) # ?
     vis.update_geometry(geometry)
     vis.update_geometry(geometry_cam)
     vis.poll_events()
