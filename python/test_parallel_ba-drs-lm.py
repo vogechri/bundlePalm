@@ -27,15 +27,16 @@ BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/dubrovnik/"
 FILE_NAME = "problem-16-22106-pre.txt.bz2"
 #FILE_NAME = "problem-356-226730-pre.txt.bz2" # large dub, play with ideas: cover, etc
 #FILE_NAME = "problem-237-154414-pre.txt.bz2"
-# acc. 59 / 0  ======== DRE BFGS ======  530126  ========= gain
+# acc. 59 / 0  ======== DRE BFGS ======  514126  ========= gain
 # acc. x 100: fluctuates
 FILE_NAME = "problem-173-111908-pre.txt.bz2"
 #FILE_NAME = "problem-135-90642-pre.txt.bz2"
 
-#BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/trafalgar/"
+BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/trafalgar/"
 # 71k
 #FILE_NAME = "problem-21-11315-pre.txt.bz2"
-#FILE_NAME = "problem-257-65132-pre.txt.bz2"
+#59 / 0  ======== DRE BFGS ======  207468  ========= gain  102
+FILE_NAME = "problem-257-65132-pre.txt.bz2"
 
 # RNA is best, other awful. in general cams as shared vars very bad.
 # 59 / 0  ======== DRE BFGS ======  1203190  ========= gain  1391 ==== f(v)=  1203133  f(u)=  1203208  ~=  1203207.857094867
@@ -43,10 +44,22 @@ FILE_NAME = "problem-173-111908-pre.txt.bz2"
 # 59 / 0  ======== DRE BFGS ======  682466  ========= gain  3123 ==== f(v)=  682399  f(u)=  682500  ~=  682499.5381159959
 # 1e-8: 59 / 0  ======== DRE BFGS ======  576626  ========= gain  1364 ==== f(v)=  576480  f(u)=  576687  ~=  576687.2452693246
 # 3rd largest ev 59 / 0  ======== DRE BFGS ======  548500  ========= gain  358 ==== f(v)=  548379  f(u)=  548553  ~=  548553.2643365501
+# NEEDS work : adjust pcg from mean diag of hess? differs here clearly. try manually
+#Mean diagonal of pseudo Hessian  [ did not work .. then drops by 100k in middle weird 552k
+# 5120163.27  
+# 5272611.74  
+# 703975.30  
+# 1251497692.06  ! /10
+# 1237795224.54 
+# 119045567.82  
+# 724022.87      ! *5
+# 444848.29      * 5
+# 114198.39]     * 10
+# 59 / 0  ======== DRE BFGS ======  548142  ========= gain  601
 #BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/venice/"
 #FILE_NAME = "problem-52-64053-pre.txt.bz2"
 
-# 59 / 0  ======== DRE BFGS ======  323919  ==
+# 53 / 0  ======== DRE BFGS ======  291195  ========= gain  0, jumps around after
 #BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/final/"
 #FILE_NAME = "problem-93-61203-pre.txt.bz2"
 
@@ -1954,7 +1967,10 @@ else:
             use_bfgs = False # maybe full u,v?
             bfgs_r = np.zeros(kClusters * 9 * n_cameras)
             rna_s  = np.zeros(kClusters * 9 * n_cameras)
-            use_s_in_rna = False # better False problem is fluctuation.
+            if use_bfgs:
+                use_s_in_rna = False # better False problem is fluctuation. False for RNA works good.
+            else:
+                use_s_in_rna = False # better False problem is fluctuation. False for RNA works good.
 
             for ci in range(kClusters): #bfgs_r = u-v
                 temp = U_cluster_zeros[ci].diagonal()
@@ -1977,12 +1993,22 @@ else:
             if use_bfgs:
                 dk = BFGS_direction(bfgs_r, bfgs_ps, bfgs_qs, bfgs_rhos, it, bfgs_mem, bfgs_mu)
                 dk_stepLength = np.linalg.norm(dk, 2)
+                # debug Hessian H fulfills H * (xt+1-xt) = nabla f (xt+1) - nabla f (xt)
+                # learn H^-1 and apply on nabla f(x): update delta = - eta * H^-1 nabla f. xt+1 = xt + delta
+                # inverse Hess does here fulfill? (test)  delta = (st+1 - st) = H^-1 * ()
+                # how does this make sense actually? 
+                # implemented is    H^-1 * bfgs_qs[it % bfgs_mem] = bfgs_ps[it % bfgs_mem]
+                # test:
+                #ps_maybe = BFGS_direction(bfgs_qs[(it-1) % bfgs_mem], bfgs_ps, bfgs_qs, bfgs_rhos, it, bfgs_mem, bfgs_mu)
+                #print("bfgs test ", np.linalg.norm(ps_maybe - bfgs_ps[(it-1) % bfgs_mem], 2) ) # yes.
+                # so ps = r = delta
+
                 # step length by using Vl, also above computing steplength!
                 #dk_stepLength = 0
                 #for ci in range(kClusters): #bfgs_r = u-v
                     #dk_stepLength += (dk[ci * 3 * n_points: (ci+1) * 3 * n_points]).dot(Ul_all * (dk[ci * 3 * n_points: (ci+1) * 3 * n_points]))
                 #dk_stepLength = np.sqrt(dk_stepLength)
-                multiplier = steplength / dk_stepLength
+                multiplier = 1 #steplength / dk_stepLength
             else:
                 #L_rna = max(L_in_cluster) , L_rna * bfgs_r
                 # Ui_all = blockInverse(U_all, 9)
@@ -2065,7 +2091,7 @@ else:
 
             #dk = s_new - s_cur + 5 * delta_s # all of this is worse for mult = 1 .. 4
             dk_stepLength = np.linalg.norm(dk, 2)
-            multiplier = steplength / dk_stepLength
+            multiplier = 1 # steplength / dk_stepLength # Haeh?
             for ci in range(kClusters):
                 search_direction[ci] = dk[ci * 9 * n_cameras: (ci+1) * 9 * n_cameras].reshape(n_cameras, 9)
 

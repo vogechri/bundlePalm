@@ -13,7 +13,7 @@ from numpy.linalg import inv as inv_dense
 # idea reimplement projection with torch to get a jacobian -> numpy then 
 import torch
 import math
-# import open3d as o3d
+import open3d as o3d
 from torch.autograd.functional import jacobian
 from torch import tensor, from_numpy
 
@@ -1344,17 +1344,18 @@ if read_output:
     camera_params = x0_t[:n_cameras*9].reshape(n_cameras,9)
     point_params  = x0_t[n_cameras*9:].reshape(n_points,3)
 
-
-def rerender(vis, geometry, landmarks, save_image):
+def rerender(vis, geometry, cameras, landmarks, save_image):
     geometry.points = o3d.utility.Vector3dVector(landmarks) # ?
+    geometry_cam = o3d.utility.Vector3dVector(cameras[:,3:6]) # ?
     vis.update_geometry(geometry)
+    vis.update_geometry(geometry_cam)
     vis.poll_events()
     vis.update_renderer()
     if save_image:
         vis.capture_screen_image("temp_%04d.jpg" % i)
     #vis.destroy_window()
 
-o3d_defined = False
+o3d_defined = True
 if o3d_defined:
     o3d.utility.set_verbosity_level(o3d.utility.VerbosityLevel.Debug)
     vis = o3d.visualization.Visualizer()
@@ -1374,6 +1375,10 @@ if o3d_defined:
     #geometry.points = o3d.utility.Vector3dVector(points_3d[65000:66500:,:])
     geometry.points = o3d.utility.Vector3dVector(points_3d)
     vis.add_geometry(geometry)
+    geometry_cam = o3d.geometry.PointCloud()
+    geometry_cam.points = o3d.utility.Vector3dVector(cameras[:,3:6])
+    vis.add_geometry(geometry_cam)
+
     #o3d.visualization.draw_geometries([geometry])    # Visualize point cloud 
     save_image = False
     #exit()
@@ -1750,7 +1755,7 @@ while it < iterations:
     print("s k2 distance ", np.min(camera_params[:,8].numpy()), " - ", np.max(camera_params[:,8].numpy()))
 
     if o3d_defined:
-        rerender(vis, geometry, point_params[0:30000,:], save_image)
+        rerender(vis, geometry, camera_params[:,3:6].numpy(), point_params[0:30000,:], save_image)
     
     if write_output:
         camera_params.numpy().tofile("camera_params_base.dat")
