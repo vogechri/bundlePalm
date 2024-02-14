@@ -17,6 +17,7 @@ import math
 import ctypes
 from torch.autograd.functional import jacobian
 from torch import tensor, from_numpy
+import open3d as o3d
 
 # look at website. This is the smallest problem. guess: pytoch cpu is pure python?
 BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/ladybug/"
@@ -56,8 +57,8 @@ FILE_NAME = "problem-257-65132-pre.txt.bz2"
 # 444848.29      * 5
 # 114198.39]     * 10
 # 59 / 0  ======== DRE BFGS ======  548142  ========= gain  601
-#BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/venice/"
-#FILE_NAME = "problem-52-64053-pre.txt.bz2"
+BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/venice/"
+FILE_NAME = "problem-52-64053-pre.txt.bz2"
 
 # 53 / 0  ======== DRE BFGS ======  291195  ========= gain  0, jumps around after
 #BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/final/"
@@ -1742,6 +1743,89 @@ if read_output:
     points_3d = x0_l.reshape(n_points,3)
     print("READ DATA")
 
+def float_to_rgb(f):
+    a=(1-f)/0.2
+    x = np.floor(a)
+    y = np.floor(255*(a-x))
+    match x:
+        case 0: 
+            r=1;g=y/255;b=0
+        case 1: 
+            r=1-y/255;g=1;b=0
+        case 2: 
+            r=0;g=1;b=y/255
+        case 3: 
+            r=0;g=1-y/255;b=1
+        case 4: 
+            r=y/255;g=0;b=1
+        case 5: 
+            r=1;g=0;b=1
+    return [r,g,b]
+
+def render_points_cameras(camera_indices_in_cluster, point_indices_in_cluster, cameras, landmark_v):
+    vis = o3d.visualization.Visualizer()
+    vis.create_window()
+    landmarks_vis = []
+    cameras_vis1 = []
+    for ci in range(kClusters):
+
+        alpha = (kClusters-1 - ci) / (kClusters-1)
+        col = float_to_rgb(alpha)
+
+        cameras_ci = cameras[np.unique(camera_indices_in_cluster[ci]), 3:6].copy()
+        landmarks_vis.append(o3d.geometry.PointCloud())
+        landmarks_ci = landmark_v[np.unique(point_indices_in_cluster[ci]),:]
+        landmarks_vis[ci].points = o3d.utility.Vector3dVector(landmarks_ci)
+        pc = []
+        for i in range(3):
+            for j in range(3):
+                for k in range(3):
+                    a = np.repeat(np.array([i-1,j-1,k-1]), cameras_ci.shape[0]) * 0.5
+                    pc.append(cameras_ci + a.copy().reshape(3, cameras_ci.shape[0]).transpose())
+        cameras_vis1.append(o3d.geometry.PointCloud())
+        cameras_vis1[ci].points = o3d.utility.Vector3dVector(np.concatenate(pc))
+        cameras_vis1[ci].paint_uniform_color(col) # make larger or what ?
+        landmarks_vis[ci].paint_uniform_color(col)
+
+        if ci ==0:
+            vis.add_geometry(landmarks_vis[ci])
+        else:
+            vis.add_geometry(landmarks_vis[ci],  reset_bounding_box=False)
+        vis.add_geometry(cameras_vis1[ci], reset_bounding_box=False)
+
+    vis.get_render_option().point_size = 2.0
+    vis.run()
+    return vis, cameras_vis1, landmarks_vis
+
+def rerender(vis, camera_indices_in_cluster, point_indices_in_cluster, poses_in_cluster, landmark_v, save_image=False):
+    for ci in range(kClusters):
+        alpha = (kClusters-1 - ci) / (kClusters-1)
+        col = float_to_rgb(alpha)
+        cameras_ci = poses_in_cluster[ci][np.unique(camera_indices_in_cluster[ci]), 3:6].copy()
+        landmarks_ci = landmark_v[np.unique(point_indices_in_cluster[ci]),:]
+        landmarks_vis[ci].points = o3d.utility.Vector3dVector(landmarks_ci)
+        pc = []
+        for i in range(3):
+            for j in range(3):
+                for k in range(3):
+                    a = np.repeat(np.array([i-1,j-1,k-1]), cameras_ci.shape[0]) * 0.5
+                    pc.append(cameras_ci + a.copy().reshape(3, cameras_ci.shape[0]).transpose())
+        cameras_vis1[ci].points = o3d.utility.Vector3dVector(np.concatenate(pc))
+        cameras_vis1[ci].paint_uniform_color(col)
+        vis.update_geometry(cameras_vis1[ci])
+
+        landmarks_vis[ci].paint_uniform_color(col)
+        vis.update_geometry(landmarks_vis[ci])
+
+    vis.poll_events()
+    vis.update_renderer()
+    vis.run()
+
+    if save_image:
+        vis.capture_screen_image("temp_%04d.jpg" % i)
+    #vis.destroy_window()
+
+
 # totally stcuk solution in base has BS values as solution k1 = 600k, k2 =-200
 print("min focal distance ", np.min(cameras[:,6].flatten()), " ", np.max(cameras[:,6].flatten()) )
 print("min k1 distance ", np.min(cameras[:,7].flatten()), " ", np.max(cameras[:,7].flatten()) )
@@ -1835,6 +1919,8 @@ Ul_in_cluster = [0 for x in range(kClusters)] # dummy fill list
 poses_s_in_cluster = [cameras.copy() for _ in range(kClusters)]
 poses_in_cluster = [cameras.copy() for _ in range(kClusters)]
 landmarks = points_3d.copy()
+
+vis, cameras_vis1, landmarks_vis = render_points_cameras(camera_indices_in_cluster, point_indices_in_cluster, cameras, landmarks)
 
 if basic_version:
 
@@ -2202,6 +2288,8 @@ else:
                 lastCostDRE_bfgs = dre_bfgs.copy()
                 poses_v = poses_v_bfgs.copy()
 
+                rerender(vis, camera_indices_in_cluster, point_indices_in_cluster, poses_in_cluster, landmarks, save_image=False)
+                
                 #print("A landmark_s_in_cluster", landmark_s_in_cluster)
                 break
 # here bfgs is better, but dre has better cost for the drs solution.

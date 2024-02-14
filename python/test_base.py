@@ -28,11 +28,11 @@ FILE_NAME = "problem-49-7776-pre.txt.bz2"
 # FILE_NAME = "problem-21-11315-pre.txt.bz2"
 #FILE_NAME = "problem-257-65132-pre.txt.bz2"
 
-BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/dubrovnik/"
-FILE_NAME = "problem-16-22106-pre.txt.bz2"
-# FILE_NAME = "problem-356-226730-pre.txt.bz2"
-# #FILE_NAME = "problem-237-154414-pre.txt.bz2"
-FILE_NAME = "problem-173-111908-pre.txt.bz2" # ex where power its are worse ->493669
+#BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/dubrovnik/"
+#FILE_NAME = "problem-16-22106-pre.txt.bz2"
+#FILE_NAME = "problem-356-226730-pre.txt.bz2"
+#FILE_NAME = "problem-237-154414-pre.txt.bz2"
+#FILE_NAME = "problem-173-111908-pre.txt.bz2" # ex where power its are worse ->493669
 
 # # test problem with / without removal of far points.
 # # ~702k, with far: 737k jeps=1e-4
@@ -42,8 +42,8 @@ FILE_NAME = "problem-173-111908-pre.txt.bz2" # ex where power its are worse ->49
 #FILE_NAME = "problem-52-64053-pre.txt.bz2"
 #FILE_NAME = "problem-1778-993923-pre.txt.bz2"
 
-# BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/final/"
-# FILE_NAME = "problem-93-61203-pre.txt.bz2"
+BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/final/"
+FILE_NAME = "problem-93-61203-pre.txt.bz2"
 # FILE_NAME = "problem-871-527480-pre.txt.bz2"
 # #FILE_NAME = "problem-394-100368-pre.txt.bz2"
 
@@ -1347,10 +1347,22 @@ if read_output:
 def rerender(vis, geometry, cameras, landmarks, save_image):
     geometry.points = o3d.utility.Vector3dVector(landmarks) # ?
     geometry_cam.points = o3d.utility.Vector3dVector(cameras) # ?
+    geometry_cam.paint_uniform_color([0, 0.5, 1])
+    vis.get_render_option().point_size = 3.2
+
+    #boundaries, mask = geometry.compute_boundary_points(radius=10, max_nn=10)
+    #boundaries.paint_uniform_color([1.0, 0.0, 0.0])
+    #o3d.visualization.draw([geometry, boundaries])
+
     vis.update_geometry(geometry)
+    #vis.get_render_option().point_size = 1.0
+    #vis.get_view_control().set_zoom(0.5)?
+    #vis.get_view_control().scale(2) ?
     vis.update_geometry(geometry_cam)
     vis.poll_events()
     vis.update_renderer()
+    vis.run()
+
     if save_image:
         vis.capture_screen_image("temp_%04d.jpg" % i)
     #vis.destroy_window()
@@ -1377,7 +1389,7 @@ if o3d_defined:
     vis.add_geometry(geometry)
     geometry_cam = o3d.geometry.PointCloud()
     geometry_cam.points = o3d.utility.Vector3dVector(cameras[:,3:6])
-    vis.add_geometry(geometry_cam)
+    vis.add_geometry(geometry_cam,  reset_bounding_box=False)
 
     #o3d.visualization.draw_geometries([geometry])    # Visualize point cloud 
     save_image = False
