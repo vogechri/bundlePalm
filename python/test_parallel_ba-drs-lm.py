@@ -2288,6 +2288,7 @@ else:
                 lastCostDRE_bfgs = dre_bfgs.copy()
                 poses_v = poses_v_bfgs.copy()
 
+                print("poses_v ", poses_v)
                 rerender(vis, camera_indices_in_cluster, point_indices_in_cluster, poses_in_cluster, landmarks, save_image=False)
                 
                 #print("A landmark_s_in_cluster", landmark_s_in_cluster)
@@ -2319,6 +2320,8 @@ else:
 #     f(x) < f(y) + <nabla fy , x-y> + (x-y)^ Vl (x-y). Vl is making this strongly convex by design. s.t. this descent lemma holds. Even by design.
 # or  f(x) < f(y) + <nabla fy , x-y> + (x-y)^ JJl (x-y). New solution < old + penalty + <nabla fy, delta>
 # <=> f(x) < f(y) + <nabla fy + nabla fx, x-y>
+
+vis, cameras_vis1, landmarks_vis = render_points_cameras(camera_indices_in_cluster, point_indices_in_cluster, poses_v, landmarks)
 
 if write_output:
     poses_v.tofile("camera_params_drs-lm.dat")

@@ -36,8 +36,8 @@ FILE_NAME = "problem-16-22106-pre.txt.bz2"
 #FILE_NAME = "problem-257-65132-pre.txt.bz2"
 
 # 63 / 1  ======== DRE BFGS ======  506844  ========= gain  794 ==== f(v)=  506844
-#BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/venice/"
-#FILE_NAME = "problem-52-64053-pre.txt.bz2"
+BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/venice/"
+FILE_NAME = "problem-52-64053-pre.txt.bz2"
 
 # 59 / 0  ======== DRE BFGS ======  291177  ========= gain  938
 #BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/final/"
@@ -2867,6 +2867,8 @@ else:
 #     f(x) < f(y) + <nabla fy , x-y> + (x-y)^ Vl (x-y). Vl is making this strongly convex by design. s.t. this descent lemma holds. Even by design.
 # or  f(x) < f(y) + <nabla fy , x-y> + (x-y)^ JJl (x-y). New solution < old + penalty + <nabla fy, delta>
 # <=> f(x) < f(y) + <nabla fy + nabla fx, x-y>
+
+vis, cameras_vis1, landmarks_vis = render_points_cameras(camera_indices_in_cluster, point_indices_in_cluster, x0_p, landmark_v)
 
 if write_output:
     x0_p.tofile("camera_params_drs.dat")
