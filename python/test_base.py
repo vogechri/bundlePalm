@@ -30,6 +30,7 @@ FILE_NAME = "problem-49-7776-pre.txt.bz2"
 
 BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/dubrovnik/"
 #FILE_NAME = "problem-16-22106-pre.txt.bz2"
+# 50 it. cost ext    4262474 .. also crap?
 FILE_NAME = "problem-356-226730-pre.txt.bz2"
 #FILE_NAME = "problem-237-154414-pre.txt.bz2"
 #FILE_NAME = "problem-173-111908-pre.txt.bz2" # ex where power its are worse ->493669

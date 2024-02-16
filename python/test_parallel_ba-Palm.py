@@ -54,7 +54,7 @@ FILE_NAME = "problem-16-22106-pre.txt.bz2"
 # 6cluster, it 96 ====== f(v)=  514801. Try again new clustering
 #              39 ====== f(v)=  512339, 51 ==== accelerated f(v)=  510986 | different clustering.
 # 149 ====== f(v)=  501696
-#FILE_NAME = "problem-173-111908-pre.txt.bz2"
+FILE_NAME = "problem-173-111908-pre.txt.bz2"
 # with x2 extrapolation 2 * delta 6 line searches:
 #26 ====== f(v)=  506172  Gain:  138  and  732184  cost per ci  [98575, 70440, 87981, 61002, 118754, 69419]
 
@@ -100,8 +100,8 @@ FILE_NAME = "problem-16-22106-pre.txt.bz2"
 # 99 ==== f(v)=  1041578  and  1524700
 
 # 62 ==== accelerated f(v)=  517125, but much faster iterations.
-BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/venice/"
-FILE_NAME = "problem-52-64053-pre.txt.bz2"
+#BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/venice/"
+#FILE_NAME = "problem-52-64053-pre.txt.bz2"
 #FILE_NAME = "problem-1778-993923-pre.txt.bz2"
 
 # ok now
@@ -223,12 +223,12 @@ def AngleAxisRotatePoint(angleAxis, pt):
 def torchSingleResiduum(camera_params_, point_params_, p2d):
     angle_axis = camera_params_[:, :3]
     points_cam = AngleAxisRotatePoint(angle_axis, point_params_)
-    points_cam = points_cam + camera_params_[:, 3:6]# * 20
+    points_cam = points_cam + camera_params_[:, 3:6] * 20
     points_projX = -points_cam[:, 0] / points_cam[:, 2]
     points_projY = -points_cam[:, 1] / points_cam[:, 2]
-    f = camera_params_[:, 6]# * 3000
-    k1 = camera_params_[:, 7]# * 10
-    k2 = camera_params_[:, 8]# * 20
+    f = camera_params_[:, 6] * 3000
+    k1 = camera_params_[:, 7] * 10
+    k2 = camera_params_[:, 8] * 20
     r2 = points_projX * points_projX + points_projY * points_projY
     distortion = 1.0 + r2 * (k1 + k2 * r2)
     points_reprojX = points_projX * distortion * f
@@ -241,12 +241,12 @@ def torchSingleResiduum(camera_params_, point_params_, p2d):
 def torchSingleResiduumX(camera_params, point_params, p2d) :
     angle_axis = camera_params[:,:3]
     points_cam = AngleAxisRotatePoint(angle_axis, point_params)
-    points_cam = points_cam + camera_params[:,3:6]# * 20
+    points_cam = points_cam + camera_params[:,3:6] * 20
     points_projX = -points_cam[:, 0] / points_cam[:, 2]
     points_projY = -points_cam[:, 1] / points_cam[:, 2]
-    f  = camera_params[:, 6] #* 3000
-    k1 = camera_params[:, 7] #* 10
-    k2 = camera_params[:, 8] #* 20
+    f  = camera_params[:, 6] * 3000
+    k1 = camera_params[:, 7] * 10
+    k2 = camera_params[:, 8] * 20
     r2 = points_projX*points_projX + points_projY*points_projY
     distortion = 1. + r2 * (k1 + k2 * r2)
     points_reprojX = points_projX * distortion * f
@@ -256,12 +256,12 @@ def torchSingleResiduumX(camera_params, point_params, p2d) :
 def torchSingleResiduumY(camera_params, point_params, p2d) :
     angle_axis = camera_params[:,:3]
     points_cam = AngleAxisRotatePoint(angle_axis, point_params)
-    points_cam = points_cam + camera_params[:,3:6] #* 20
+    points_cam = points_cam + camera_params[:,3:6] * 20
     points_projX = -points_cam[:, 0] / points_cam[:, 2]
     points_projY = -points_cam[:, 1] / points_cam[:, 2]
-    f  = camera_params[:, 6] #* 3000
-    k1 = camera_params[:, 7] #* 10
-    k2 = camera_params[:, 8] #* 20
+    f  = camera_params[:, 6] * 3000
+    k1 = camera_params[:, 7] * 10
+    k2 = camera_params[:, 8] * 20
     r2 = points_projX*points_projX + points_projY*points_projY
     distortion = 1. + r2 * (k1 + k2 * r2)
     points_reprojY = points_projY * distortion * f
@@ -2849,10 +2849,10 @@ print("n_points: {}".format(n_points))
 print("Total number of parameters: {}".format(n))
 print("Total number of residuals: {}".format(m))
 
-cameras[:,3:6] = cameras[:,3:6] #/ 20
-cameras[:,6] = cameras[:,6] #/ 3000
-cameras[:,7] = cameras[:,7] #/ 10
-cameras[:,8] = cameras[:,8] #/ 20
+cameras[:,3:6] = cameras[:,3:6] / 20
+cameras[:,6] = cameras[:,6] / 3000
+cameras[:,7] = cameras[:,7] / 10
+cameras[:,8] = cameras[:,8] / 20
 
 x0_p = cameras.ravel()
 # x0_l = points_3d.ravel()

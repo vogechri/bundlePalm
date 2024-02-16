@@ -689,6 +689,10 @@ def blockEigenvalue(M, bs):
             mat = np.fliplr(mat)
             # print(i, " ", mat)
             evs = eigvalsh(mat)
+            if evs[0] <0:
+               mat = np.fliplr(mat)
+               evs = eigvalsh(mat)
+
             Ei[bs*i:bs*i+bs] = evs[bs-1] # largest
             #Ei[bs*i:bs*i+bs] = max(1e7, evs[0]) # just does not work
             #Ei[bs*i:bs*i+bs] = max(1e-4, evs[bs-3]) # smallest, maybe some cams only 1 lm in part?
@@ -702,6 +706,26 @@ def blockEigenvalue(M, bs):
     #Ei.data[:] = 0.1 * maxEv # 0.1 worked
     #Ei.data[:] *= 0.125 #0.25 promising # 0.1 already too low. could try line-search idea
     return Ei
+
+def minmaxEv(M, bs):
+    maxE = np.zeros(int(M.shape[0]/bs))
+    minE = np.zeros(int(M.shape[0]/bs))
+    if bs > 1:
+        bs2 = bs * bs
+        for i in range(int(M.data.shape[0] / bs2)):
+            mat = M.data[bs2 * i : bs2 * i + bs2].reshape(bs, bs)
+            #mat = np.fliplr(mat)
+            evs = eigvalsh(mat)
+            maxE[i] = evs[bs-1]
+            minE[i] = evs[0]
+            if evs[0] <0:
+               #print("evs[0] ", evs[0], " " ,mat) 
+               mat = np.fliplr(mat)
+               evs = eigvalsh(mat)
+               maxE[i] = evs[bs-1]
+               minE[i] = evs[0]
+
+    return maxE, minE
 
 def blockEigenvalueFull(M, bs):
     Ei = M.copy()
@@ -1345,6 +1369,11 @@ def bundle_adjust(
             blockEigenvalueJtJ = blockEigenvalue(JtJ, 9) # TODO: what if this is only needed for 0-eigen directions? return !=0 only if in small eigendir
             stepSize = blockEigMult * blockEigenvalueJtJ + JJ_mult * JtJ.copy() # Todo '2 *' vs 1 by convex.
 
+            maxE, minE = minmaxEv(JtJ, 9)
+            print("min max ev JtJ ", np.max(maxE), " ", np.max(minE), " ", np.min(maxE), " ",  np.min(minE), " spectral ", np.max(maxE/minE) )
+            maxE, minE = minmaxEv(stepSize, 9)
+            print("min max ev stepSize ", np.max(maxE), " ", np.max(minE), " ", np.min(maxE), " ",  np.min(minE), " spectral ", np.max(maxE/minE) )
+
             print( "Mean diagonal of pseudo Hessian ",  np.sum(np.abs(JtJ.diagonal()).reshape(-1,9) / (1000 * n_cameras_), 0))
 
             # blockEigenvalueJtJ = blockEigenvalueFull(JtJ, 9)
@@ -1375,7 +1404,12 @@ def bundle_adjust(
             JltJlDiag = JltJl + J_eps * diag_sparse(np.ones(JltJl.shape[0]))
             #blockEigenvalueJltJl = blockEigenvalue(JltJl, 3)
             #JltJlDiag = JltJl + J_eps * blockEigenvalueJltJl #diag_sparse(np.ones(JltJl.shape[0]))
-          
+            maxE, minE = minmaxEv(JltJl, 9)
+            print("min max ev JtJ ", np.max(maxE), " ", np.max(minE), " ", np.min(maxE), " ",  np.min(minE), " spectral ", np.max(maxE/minE) )
+            maxE, minE = minmaxEv(JltJl, 9)
+            print("min max ev JltJlDiag ", np.max(maxE), " ", np.max(minE), " ", np.min(maxE), " ",  np.min(minE), " spectral ", np.max(maxE/minE) )
+
+
             JtJDiag = stepSize.copy() # max 1, 1/L, line-search dre fails -> increase
             #JtJDiag = diag_sparse(np.fmax(JtJ.diagonal(), 1e-4)) # diagonal is solid. slower than JtJ + something though
             if newForUnique:

@@ -26,8 +26,8 @@ FILE_NAME = "problem-49-7776-pre.txt.bz2"
 FILE_NAME = "problem-138-19878-pre.txt.bz2"
 
 BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/dubrovnik/"
-#FILE_NAME = "problem-16-22106-pre.txt.bz2"
-# large on1: 59 / 1  ======== DRE BFGS ======  9222786 
+FILE_NAME = "problem-16-22106-pre.txt.bz2"
+# large on1: 59 / 1  ======== DRE BFGS ======  9222786 FUCK, got stuck
 FILE_NAME = "problem-356-226730-pre.txt.bz2" # large dub, play with ideas: cover, etc
 #FILE_NAME = "problem-237-154414-pre.txt.bz2"
 #59 / 0  ======== DRE BFGS ======  502663  ========= gain  122 ====
@@ -937,6 +937,9 @@ def blockEigenvalue(M, bs):
             #  [ 1029.28  8855.05 -1272.34]
             #  [ 4838.40  1029.28  4575.01]]
             evs = eigvalsh(mat)
+            if evs[0] <0:
+                mat = np.fliplr(mat)
+                evs = eigvalsh(mat)
             Ei[bs*i:bs*i+bs] = evs[bs-1]
         Ei = diag_sparse(Ei)
     else:
@@ -948,6 +951,26 @@ def blockEigenvalue(M, bs):
     #Ei.data[:] = 0.1 * maxEv # 0.1 worked
     #Ei.data[:] *= 0.125 #0.25 promising # 0.1 already too low. could try line-search idea
     return Ei
+
+def minmaxEv(M, bs):
+    maxE = np.zeros(int(M.shape[0]/bs))
+    minE = np.zeros(int(M.shape[0]/bs))
+    if bs > 1:
+        bs2 = bs * bs
+        for i in range(int(M.data.shape[0] / bs2)):
+            mat = M.data[bs2 * i : bs2 * i + bs2].reshape(bs, bs)
+            #mat = np.fliplr(mat)
+            evs = eigvalsh(mat)
+            maxE[i] = evs[bs-1]
+            minE[i] = evs[0]
+            if evs[0] <0:
+               #print("evs[0] ", evs[0], " " ,mat) 
+               mat = np.fliplr(mat)
+               evs = eigvalsh(mat)
+               maxE[i] = evs[bs-1]
+               minE[i] = evs[0]
+
+    return maxE, minE
 
 def copy_selected_blocks(M, block_selection_, bs):
     Mi = M.copy()
@@ -1506,11 +1529,12 @@ def bundle_adjust(
 ):
     # print("landmarks_only_in_cluster_  ", landmarks_only_in_cluster_, " ", np.sum(landmarks_only_in_cluster_), " vs ", np.sum(1 - landmarks_only_in_cluster_) )
     newForUnique = True # debug nable_approx 
-    blockEigMult = 1e-3 # 1e-3 was used before, solid, less hicups smaller 1e-3. recall last val .. 1e-4 explodes for 173 example.
+    #blockEigMult = 1e-3 # 1e-3 was used before, solid, less hicups smaller 1e-3. recall last val .. 1e-4 explodes for 173 example.
+    blockEigMult = 1e-3 # maybe sub-problem singular? for landmarks? how to test?
     normal_case_ = True # No L * JltJl at all. Does not work
     # define x0_t, x0_p, x0_l, L # todo: missing Lb: inner L for bundle, Lc: to fix duplicates
     minimumL = 1e-6
-    JJ_mult = 1
+    JJ_mult = 2
     L = max(minimumL, L_in_cluster_)
     updateJacobian = True
     # holds all! landmarks, only use fraction likely no matter not present in cams anyway.
@@ -1560,6 +1584,8 @@ def bundle_adjust(
             # So 2 JtJ  + 2 JltJl shuold majorize |J^t x|^2 for all x.
             # why relevant here.
             JtJDiag = JtJ + J_eps * diag_sparse(np.ones(JtJ.shape[0]))
+            maxE, minE = minmaxEv(JtJDiag, 9)
+            print("min max ev JtJDiag ", np.max(maxE), " ", np.max(minE), " ", np.min(maxE), " ",  np.min(minE), " spectral ", np.max(maxE/minE) )
 
             #blockEigenvalueJtJ = blockEigenvalue(JtJ, 9)
             #JtJDiag = JtJ + 1e-9 * blockEigenvalueJtJ # alot worse at 1e6, bit better 1e-9, but hmm 59 / 0  ======== DRE BFGS ======  501565
@@ -1569,6 +1595,8 @@ def bundle_adjust(
             #JtJDiag = diag_sparse(np.fmax(JtJ.diagonal(), 1e1)) # sensible not clear maybe lower.
             JltJl = J_land.transpose() * J_land
             blockEigenvalueJltJl = blockEigenvalue(JltJl, 3)
+            maxE, minE = minmaxEv(JltJl, 3)
+            print("min max ev JltJl ", np.max(maxE), " ", np.max(minE), " ", np.min(maxE), " ",  np.min(minE), " spectral ", np.max(maxE/minE))
             # if not issparse(Vl_in_c_) and it_ < 1:
             #     stepSize = blockEigenvalueJltJl
             # else: # increase where needed -- this here is WAY too slow?
@@ -1579,6 +1607,8 @@ def bundle_adjust(
             #68 / 0  ======== DRE BFGS ======  501664  ========= gain  247 ==== f(v)=  502614  f(u)=  500821  ~=  500704.09297090676
             #81 / 0  ======== DRE BFGS ======  501076  ========= gain  139 ==== f(v)=  502339  f(u)=  499758  ~=  499713.50253538677
             stepSize = 1. * (blockEigMult * blockEigenvalueJltJl + JJ_mult * JltJl.copy()) # Todo '2 *' vs 1 by convex.
+            maxE, minE = minmaxEv(stepSize, 3)
+            print("min max ev stepSize ", np.max(maxE), " ", np.max(minE), " ", np.min(maxE), " ",  np.min(minE), " spectral ", np.max(maxE/minE))
             #stepSize = 1. * (blockEigMult * blockEigenvalueJltJl + LipJ * JltJl.copy()) # hmm
             
             #stepSize = 1. * (1e-0 * diag_sparse(np.ones(n_points_*3)) + 1.0 * JltJl.copy()) # not so good
@@ -1712,13 +1742,26 @@ def bundle_adjust(
             LfkViolated = LfkDistance > 0
             LfkSafe = (costEnd - costStart - bp.dot(delta_p) - bl.dot(delta_l)) < 0 # for any phi ok.
 
+        # TODO: this does not work: problem-356, this also explains why J_mult *2 is ok here. 
+        # Does not solve the 356 problem as one subproblem gets stcuk with huge L
+        # tr only affects cams, binds cam to 'u'
+        # descent -lem only affects landmarks, binds lms to s
+        # tr vioation could be either lms OR cams or both.
+        # unlcear what to do
+        # 1. do either, now i block descent lemma update if tr violation (why?)
+        # 2. if tr violation increase eith, not only lms. problem s could be wrong
+        # 3. introduce 'L' * for lms to ensure tr does something there see 2.
+        # 4. something smart. eval all and take best decision ?
+
         if tr_check < tr_eta_2:
             print(" //////  tr_check " , tr_check, " Lfk distance ", LfkDistance, " -nabla^Tdelta=" , -bp.dot(delta_p) - bl.dot(delta_l), " /////")
             L = L * 2
             JltJlDiag = 1/2 * JltJlDiag
 
         # todo: store last blockEigenvalueJltJl multiplier in/out current L used but not really.
+        # option 1: does not work, now subproblem gets 's' forcing much worse solutions.
         if tr_check >= tr_eta_2 and LfkViolated and not steSizeTouched or (steSizeTouched and costStart + penaltyStart < costEnd + penaltyL): # violated -- should revert update.
+        #if LfkViolated and not steSizeTouched or (steSizeTouched and costStart + penaltyStart < costEnd + penaltyL): # violated -- should revert update.
             steSizeTouched = True
             print(" |||||||  Lfk distance ", LfkDistance, " -nabla^Tdelta=" , -bp.dot(delta_p) - bl.dot(delta_l), " LipJ ", LipJ, " |||||||")
             #stepSize = stepSize * 2
