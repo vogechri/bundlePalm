@@ -1584,11 +1584,12 @@ def bundle_adjust(
             # So 2 JtJ  + 2 JltJl shuold majorize |J^t x|^2 for all x.
             # why relevant here.
             JtJDiag = JtJ + J_eps * diag_sparse(np.ones(JtJ.shape[0]))
+
+            blockEigenvalueJtJ = blockEigenvalue(JtJ, 9)
+            JtJDiag = JtJ + 1e-9 * blockEigenvalueJtJ # alot worse at 1e6, bit better 1e-9, but hmm 59 / 0  ======== DRE BFGS ======  501565
+
             maxE, minE = minmaxEv(JtJDiag, 9)
             print("min max ev JtJDiag ", np.max(maxE), " ", np.max(minE), " ", np.min(maxE), " ",  np.min(minE), " spectral ", np.max(maxE/minE) )
-
-            #blockEigenvalueJtJ = blockEigenvalue(JtJ, 9)
-            #JtJDiag = JtJ + 1e-9 * blockEigenvalueJtJ # alot worse at 1e6, bit better 1e-9, but hmm 59 / 0  ======== DRE BFGS ======  501565
 
             #print(" min/max JtJ.diagonal() ", np.min(JtJ.diagonal()), " ", np.max(JtJ.diagonal()), " adjusted ", np.min(JtJDiag.diagonal()), " ", np.max(JtJDiag.diagonal()), " ", np.min(blockEigenvalueJtJ.diagonal()) ," ", np.max(blockEigenvalueJtJ.diagonal()) )
 
