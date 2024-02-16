@@ -28,9 +28,9 @@ FILE_NAME = "problem-49-7776-pre.txt.bz2"
 # FILE_NAME = "problem-21-11315-pre.txt.bz2"
 #FILE_NAME = "problem-257-65132-pre.txt.bz2"
 
-#BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/dubrovnik/"
+BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/dubrovnik/"
 #FILE_NAME = "problem-16-22106-pre.txt.bz2"
-#FILE_NAME = "problem-356-226730-pre.txt.bz2"
+FILE_NAME = "problem-356-226730-pre.txt.bz2"
 #FILE_NAME = "problem-237-154414-pre.txt.bz2"
 #FILE_NAME = "problem-173-111908-pre.txt.bz2" # ex where power its are worse ->493669
 
@@ -42,8 +42,8 @@ FILE_NAME = "problem-49-7776-pre.txt.bz2"
 #FILE_NAME = "problem-52-64053-pre.txt.bz2"
 #FILE_NAME = "problem-1778-993923-pre.txt.bz2"
 
-BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/final/"
-FILE_NAME = "problem-93-61203-pre.txt.bz2"
+#BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/final/"
+#FILE_NAME = "problem-93-61203-pre.txt.bz2"
 # FILE_NAME = "problem-871-527480-pre.txt.bz2"
 # #FILE_NAME = "problem-394-100368-pre.txt.bz2"
 

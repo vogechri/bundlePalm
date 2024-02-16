@@ -22,22 +22,29 @@ import open3d as o3d
 BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/ladybug/"
 FILE_NAME = "problem-49-7776-pre.txt.bz2"
 #FILE_NAME = "problem-73-11032-pre.txt.bz2"
+# 59 / 2  ======== DRE BFGS ======  118872
+FILE_NAME = "problem-138-19878-pre.txt.bz2"
 
 BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/dubrovnik/"
-FILE_NAME = "problem-16-22106-pre.txt.bz2"
-#FILE_NAME = "problem-356-226730-pre.txt.bz2" # large dub, play with ideas: cover, etc
+#FILE_NAME = "problem-16-22106-pre.txt.bz2"
+# large on1: 59 / 1  ======== DRE BFGS ======  9222786 
+FILE_NAME = "problem-356-226730-pre.txt.bz2" # large dub, play with ideas: cover, etc
 #FILE_NAME = "problem-237-154414-pre.txt.bz2"
 #59 / 0  ======== DRE BFGS ======  502663  ========= gain  122 ====
+# 59 / 0  ======== DRE BFGS ======  499360  ========= gain  81 w 'pose pcg' at 500k much earlier.
 #FILE_NAME = "problem-173-111908-pre.txt.bz2"
 #FILE_NAME = "problem-135-90642-pre.txt.bz2"
 
 #BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/trafalgar/"
 # FILE_NAME = "problem-21-11315-pre.txt.bz2"
+# 59 / 0  ======== DRE BFGS ======  197984  
 #FILE_NAME = "problem-257-65132-pre.txt.bz2"
 
-# 63 / 1  ======== DRE BFGS ======  506844  ========= gain  794 ==== f(v)=  506844
-BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/venice/"
-FILE_NAME = "problem-52-64053-pre.txt.bz2"
+# 52 / 2  ======== DRE BFGS ======  481560  ========= gain  175
+# 52 / 2  ======== DRE BFGS ======  480851  ========= gain  3452 w pcg .. 'last turn' not clear
+# 59 / 2  ======== DRE BFGS ======  475798  ========= gain  1601
+#BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/venice/"
+#FILE_NAME = "problem-52-64053-pre.txt.bz2"
 
 # 59 / 0  ======== DRE BFGS ======  291177  ========= gain  938
 #BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/final/"
@@ -101,6 +108,139 @@ def read_bal_data(file_name):
         remove_large_points(points_3d_, camera_indices_, points_2d_, point_indices_)
 
     return camera_params, points_3d_, camera_indices_, point_indices_, points_2d_
+
+def float_to_rgb(f):
+    a=(1-f)/0.2
+    x = np.floor(a)
+    y = np.floor(255*(a-x))
+    match x:
+        case 0: 
+            r=1;g=y/255;b=0
+        case 1: 
+            r=1-y/255;g=1;b=0
+        case 2: 
+            r=0;g=1;b=y/255
+        case 3: 
+            r=0;g=1-y/255;b=1
+        case 4: 
+            r=y/255;g=0;b=1
+        case 5: 
+            r=1;g=0;b=1
+    return [r,g,b]
+
+def render_points_cameras(camera_indices_in_cluster, point_indices_in_cluster, cameras, landmark_v):
+    vis = o3d.visualization.Visualizer()
+    vis.create_window()
+    landmarks_vis = []
+    #cameras_vis = []
+    cameras_vis1 = []
+
+    cam_loc = -AngleAxisRotatePoint(-from_numpy(cameras[:,0:3]), from_numpy(cameras[:,3:6])).numpy()
+    #print(cam_loc.shape, " ", cam_loc)
+
+    for ci in range(kClusters):
+
+        alpha = (kClusters-1 - ci) / (kClusters-1)
+        col = float_to_rgb(alpha)
+
+        #cameras_vis.append(o3d.geometry.PointCloud())
+        #cameras_ci = cameras[np.unique(camera_indices_in_cluster[ci]), 3:6].copy()
+        cameras_ci = cam_loc[np.unique(camera_indices_in_cluster[ci]), :].copy()
+        #cameras_vis[ci].points = o3d.utility.Vector3dVector(cameras_ci)
+
+        landmarks_vis.append(o3d.geometry.PointCloud())
+        landmarks_ci = landmark_v[np.unique(point_indices_in_cluster[ci]),:]
+        landmarks_vis[ci].points = o3d.utility.Vector3dVector(landmarks_ci)
+        pc = []
+        for i in range(3):
+            for j in range(3):
+                for k in range(3):
+                    a = np.repeat(np.array([i-1,j-1,k-1]), cameras_ci.shape[0]) * 0.5
+                    pc.append(cameras_ci + a.copy().reshape(3, cameras_ci.shape[0]).transpose())
+        cameras_vis1.append(o3d.geometry.PointCloud())
+        cameras_vis1[ci].points = o3d.utility.Vector3dVector(np.concatenate(pc))
+        cameras_vis1[ci].paint_uniform_color(col) # make larger or what ?
+        landmarks_vis[ci].paint_uniform_color(col)
+        #cameras_vis1[ci].paint_uniform_color(col) # make larger or what ?
+        #cameras_vis[ci].paint_uniform_color(col) # make larger or what ?
+        #geometry.points = o3d.utility.Vector3dVector(points_3d)
+        #geometry_cam = o3d.geometry.PointCloud()
+        #geometry_cam.points = o3d.utility.Vector3dVector(cameras[:,3:6])
+
+        if ci ==0:
+            vis.add_geometry(landmarks_vis[ci])
+        else:
+            vis.add_geometry(landmarks_vis[ci],  reset_bounding_box=False)
+        vis.add_geometry(cameras_vis1[ci], reset_bounding_box=False)
+
+        #vis.add_geometry(cameras_vis[ci],  reset_bounding_box=False)
+
+        # matl = o3d.visualization.rendering.MaterialRecord()
+        # matl.shader = 'defaultUnlit'
+        # matl.point_size = 1.0
+        # if ci ==0:
+        #     pcs.append({'name': 'lm'+str(ci), 'geometry': landmarks_vis[ci], 'material': matl, 'reset_bounding_box':True})
+        # else:
+        #     pcs.append({'name': 'lm'+str(ci), 'geometry': landmarks_vis[ci], 'material': matl, 'reset_bounding_box':False})
+
+        # mat = o3d.visualization.rendering.MaterialRecord()
+        # mat.shader = 'defaultUnlit'
+        # mat.point_size = 3.0
+        # pcs.append({'name': 'pcd'+str(ci), 'geometry': cameras_vis[ci], 'material': mat, 'reset_bounding_box':True})
+
+        #o3d.geometry.create_mesh_sphere(radius=10, resolution = 20)
+
+    #o3d.visualization.draw(pcs, show_skybox=True)
+    #o3d.visualization.Visualizer().get_view_control().set_zoom(0.5)
+    #o3d.visualization.Visualizer().get_view_control().scale(0.2)
+
+    vis.get_render_option().point_size = 2.0
+    vis.run()
+    return vis, cameras_vis1, landmarks_vis
+    #o3d.visualization.draw_geometries([geometry])    # Visualize point cloud 
+    save_image = False
+    #exit()
+
+def rerender(vis, camera_indices_in_cluster, point_indices_in_cluster, cameras, landmark_v, save_image=False):
+    cam_loc = -AngleAxisRotatePoint(-from_numpy(cameras[:,0:3]), from_numpy(cameras[:,3:6])).numpy()
+    for ci in range(kClusters):
+
+        alpha = (kClusters-1 - ci) / (kClusters-1)
+        col = float_to_rgb(alpha)
+
+        #cameras_ci = cameras[np.unique(camera_indices_in_cluster[ci]), 3:6].copy()
+        cameras_ci = cam_loc[np.unique(camera_indices_in_cluster[ci]), :].copy()
+
+        #landmarks_vis.append(o3d.geometry.PointCloud())
+        landmarks_ci = landmark_v[np.unique(point_indices_in_cluster[ci]),:]
+        landmarks_vis[ci].points = o3d.utility.Vector3dVector(landmarks_ci)
+        pc = []
+        for i in range(3):
+            for j in range(3):
+                for k in range(3):
+                    a = np.repeat(np.array([i-1,j-1,k-1]), cameras_ci.shape[0]) * 0.5
+                    pc.append(cameras_ci + a.copy().reshape(3, cameras_ci.shape[0]).transpose())
+        #cameras_vis1.append(o3d.geometry.PointCloud())
+        cameras_vis1[ci].points = o3d.utility.Vector3dVector(np.concatenate(pc))
+        cameras_vis1[ci].paint_uniform_color(col) # make larger or what ?
+        vis.update_geometry(cameras_vis1[ci])#, reset_bounding_box=False)
+
+        landmarks_vis[ci].paint_uniform_color(col)
+        #cameras_vis[ci].paint_uniform_color(col) # make larger or what ?
+        #geometry.points = o3d.utility.Vector3dVector(points_3d)
+        #geometry_cam = o3d.geometry.PointCloud()
+        #geometry_cam.points = o3d.utility.Vector3dVector(cameras[:,3:6])
+
+        vis.update_geometry(landmarks_vis[ci])#,  reset_bounding_box=False)
+        #vis.update_geometry(cameras_vis[ci])#,  reset_bounding_box=False)
+
+    vis.poll_events()
+    vis.update_renderer()
+    vis.run()
+
+    if save_image:
+        vis.capture_screen_image("temp_%04d.jpg" % i)
+    #vis.destroy_window()
 
 def fillPythonVec(out, sizes_out, kClusters):
     ret = []
@@ -305,12 +445,12 @@ def AngleAxisRotatePoint(angleAxis, pt):
 def torchSingleResiduum(camera_params_, point_params_, p2d):
     angle_axis = camera_params_[:, :3]
     points_cam = AngleAxisRotatePoint(angle_axis, point_params_)
-    points_cam = points_cam + camera_params_[:, 3:6]
+    points_cam = points_cam + camera_params_[:, 3:6] * 20
     points_projX = -points_cam[:, 0] / points_cam[:, 2]
     points_projY = -points_cam[:, 1] / points_cam[:, 2]
-    f = camera_params_[:, 6]
-    k1 = camera_params_[:, 7]
-    k2 = camera_params_[:, 8]
+    f = camera_params_[:, 6] * 3000
+    k1 = camera_params_[:, 7] * 10
+    k2 = camera_params_[:, 8] * 20
     r2 = points_projX * points_projX + points_projY * points_projY
     distortion = 1.0 + r2 * (k1 + k2 * r2)
     points_reprojX = points_projX * distortion * f
@@ -323,12 +463,12 @@ def torchSingleResiduum(camera_params_, point_params_, p2d):
 def torchSingleResiduumX(camera_params, point_params, p2d) :
     angle_axis = camera_params[:,:3]
     points_cam = AngleAxisRotatePoint(angle_axis, point_params)
-    points_cam = points_cam + camera_params[:,3:6]
+    points_cam = points_cam + camera_params[:,3:6] * 20
     points_projX = -points_cam[:, 0] / points_cam[:, 2]
     points_projY = -points_cam[:, 1] / points_cam[:, 2]
-    f  = camera_params[:, 6]
-    k1 = camera_params[:, 7]
-    k2 = camera_params[:, 8]
+    f  = camera_params[:, 6] * 3000
+    k1 = camera_params[:, 7] * 10
+    k2 = camera_params[:, 8] * 20
     r2 = points_projX*points_projX + points_projY*points_projY
     distortion = 1. + r2 * (k1 + k2 * r2)
     points_reprojX = points_projX * distortion * f
@@ -338,12 +478,12 @@ def torchSingleResiduumX(camera_params, point_params, p2d) :
 def torchSingleResiduumY(camera_params, point_params, p2d) :
     angle_axis = camera_params[:,:3]
     points_cam = AngleAxisRotatePoint(angle_axis, point_params)
-    points_cam = points_cam + camera_params[:,3:6]
+    points_cam = points_cam + camera_params[:,3:6] * 20
     points_projX = -points_cam[:, 0] / points_cam[:, 2]
     points_projY = -points_cam[:, 1] / points_cam[:, 2]
-    f  = camera_params[:, 6]
-    k1 = camera_params[:, 7]
-    k2 = camera_params[:, 8]
+    f  = camera_params[:, 6] * 3000
+    k1 = camera_params[:, 7] * 10
+    k2 = camera_params[:, 8] * 20
     r2 = points_projX*points_projX + points_projY*points_projY
     distortion = 1. + r2 * (k1 + k2 * r2)
     points_reprojY = points_projY * distortion * f
@@ -2161,6 +2301,11 @@ print("n_points: {}".format(n_points))
 print("Total number of parameters: {}".format(n))
 print("Total number of residuals: {}".format(m))
 
+cameras[:,3:6] = cameras[:,3:6] / 20
+cameras[:,6] = cameras[:,6] / 3000
+cameras[:,7] = cameras[:,7] / 10
+cameras[:,8] = cameras[:,8] / 20
+
 x0_p = cameras.ravel()
 # x0_l = points_3d.ravel()
 # x0 = np.hstack((x0_p, x0_l))
@@ -2239,137 +2384,6 @@ else:
     ) = cluster_by_camera_smarter(
         camera_indices, points_3d, points_2d, point_indices, kClusters, startL, init_cam_id=0, init_lm_id=0
     )
-
-def float_to_rgb(f):
-    a=(1-f)/0.2
-    x = np.floor(a)
-    y = np.floor(255*(a-x))
-    match x:
-        case 0: 
-            r=1;g=y/255;b=0
-        case 1: 
-            r=1-y/255;g=1;b=0
-        case 2: 
-            r=0;g=1;b=y/255
-        case 3: 
-            r=0;g=1-y/255;b=1
-        case 4: 
-            r=y/255;g=0;b=1
-        case 5: 
-            r=1;g=0;b=1
-    return [r,g,b]
-
-
-def render_points_cameras(camera_indices_in_cluster, point_indices_in_cluster, cameras, landmark_v):
-    vis = o3d.visualization.Visualizer()
-    vis.create_window()
-    landmarks_vis = []
-    #cameras_vis = []
-    cameras_vis1 = []
-    for ci in range(kClusters):
-
-        alpha = (kClusters-1 - ci) / (kClusters-1)
-        col = float_to_rgb(alpha)
-
-        #cameras_vis.append(o3d.geometry.PointCloud())
-        cameras_ci = cameras[np.unique(camera_indices_in_cluster[ci]), 3:6].copy()
-        #cameras_vis[ci].points = o3d.utility.Vector3dVector(cameras_ci)
-
-        landmarks_vis.append(o3d.geometry.PointCloud())
-        landmarks_ci = landmark_v[np.unique(point_indices_in_cluster[ci]),:]
-        landmarks_vis[ci].points = o3d.utility.Vector3dVector(landmarks_ci)
-        pc = []
-        for i in range(3):
-            for j in range(3):
-                for k in range(3):
-                    a = np.repeat(np.array([i-1,j-1,k-1]), cameras_ci.shape[0]) * 0.5
-                    pc.append(cameras_ci + a.copy().reshape(3, cameras_ci.shape[0]).transpose())
-        cameras_vis1.append(o3d.geometry.PointCloud())
-        cameras_vis1[ci].points = o3d.utility.Vector3dVector(np.concatenate(pc))
-        cameras_vis1[ci].paint_uniform_color(col) # make larger or what ?
-        landmarks_vis[ci].paint_uniform_color(col)
-        #cameras_vis1[ci].paint_uniform_color(col) # make larger or what ?
-        #cameras_vis[ci].paint_uniform_color(col) # make larger or what ?
-        #geometry.points = o3d.utility.Vector3dVector(points_3d)
-        #geometry_cam = o3d.geometry.PointCloud()
-        #geometry_cam.points = o3d.utility.Vector3dVector(cameras[:,3:6])
-
-        if ci ==0:
-            vis.add_geometry(landmarks_vis[ci])
-        else:
-            vis.add_geometry(landmarks_vis[ci],  reset_bounding_box=False)
-        vis.add_geometry(cameras_vis1[ci], reset_bounding_box=False)
-
-        #vis.add_geometry(cameras_vis[ci],  reset_bounding_box=False)
-
-        # matl = o3d.visualization.rendering.MaterialRecord()
-        # matl.shader = 'defaultUnlit'
-        # matl.point_size = 1.0
-        # if ci ==0:
-        #     pcs.append({'name': 'lm'+str(ci), 'geometry': landmarks_vis[ci], 'material': matl, 'reset_bounding_box':True})
-        # else:
-        #     pcs.append({'name': 'lm'+str(ci), 'geometry': landmarks_vis[ci], 'material': matl, 'reset_bounding_box':False})
-
-        # mat = o3d.visualization.rendering.MaterialRecord()
-        # mat.shader = 'defaultUnlit'
-        # mat.point_size = 3.0
-        # pcs.append({'name': 'pcd'+str(ci), 'geometry': cameras_vis[ci], 'material': mat, 'reset_bounding_box':True})
-
-        #o3d.geometry.create_mesh_sphere(radius=10, resolution = 20)
-
-    #o3d.visualization.draw(pcs, show_skybox=True)
-    #o3d.visualization.Visualizer().get_view_control().set_zoom(0.5)
-    #o3d.visualization.Visualizer().get_view_control().scale(0.2)
-
-    vis.get_render_option().point_size = 2.0
-    vis.run()
-    return vis, cameras_vis1, landmarks_vis
-    #o3d.visualization.draw_geometries([geometry])    # Visualize point cloud 
-    save_image = False
-    #exit()
-
-def rerender(vis, camera_indices_in_cluster, point_indices_in_cluster, cameras, landmark_v, save_image=False):
-
-    for ci in range(kClusters):
-
-        alpha = (kClusters-1 - ci) / (kClusters-1)
-        col = float_to_rgb(alpha)
-
-        #cameras_vis.append(o3d.geometry.PointCloud())
-        cameras_ci = cameras[np.unique(camera_indices_in_cluster[ci]), 3:6].copy()
-        #cameras_vis[ci].points = o3d.utility.Vector3dVector(cameras_ci)
-
-        #landmarks_vis.append(o3d.geometry.PointCloud())
-        landmarks_ci = landmark_v[np.unique(point_indices_in_cluster[ci]),:]
-        landmarks_vis[ci].points = o3d.utility.Vector3dVector(landmarks_ci)
-        pc = []
-        for i in range(3):
-            for j in range(3):
-                for k in range(3):
-                    a = np.repeat(np.array([i-1,j-1,k-1]), cameras_ci.shape[0]) * 0.5
-                    pc.append(cameras_ci + a.copy().reshape(3, cameras_ci.shape[0]).transpose())
-        #cameras_vis1.append(o3d.geometry.PointCloud())
-        cameras_vis1[ci].points = o3d.utility.Vector3dVector(np.concatenate(pc))
-        cameras_vis1[ci].paint_uniform_color(col) # make larger or what ?
-        vis.update_geometry(cameras_vis1[ci])#, reset_bounding_box=False)
-
-        landmarks_vis[ci].paint_uniform_color(col)
-        #cameras_vis[ci].paint_uniform_color(col) # make larger or what ?
-        #geometry.points = o3d.utility.Vector3dVector(points_3d)
-        #geometry_cam = o3d.geometry.PointCloud()
-        #geometry_cam.points = o3d.utility.Vector3dVector(cameras[:,3:6])
-
-        vis.update_geometry(landmarks_vis[ci])#,  reset_bounding_box=False)
-        #vis.update_geometry(cameras_vis[ci])#,  reset_bounding_box=False)
-
-    vis.poll_events()
-    vis.update_renderer()
-    vis.run()
-
-    if save_image:
-        vis.capture_screen_image("temp_%04d.jpg" % i)
-    #vis.destroy_window()
-
 
 print(L_in_cluster)
 Vl_in_cluster = [0 for x in range(kClusters)] # dummy fill list
