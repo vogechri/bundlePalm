@@ -1578,7 +1578,7 @@ def bundle_adjust(
             # in test_base
             #JtJDiag = diag_sparse(JtJ.diagonal())
 
-            J_eps = 1e-3 # does this matter? 1e-3 2 / 0  ======== DRE BFGS ======  861672  ========= gain  486744 ==== f(v)=  735282  f(u)=  971304  ~=  971304.0525993105
+            #J_eps = 1e-3 # does this matter? 1e-3 2 / 0  ======== DRE BFGS ======  861672  ========= gain  486744 ==== f(v)=  735282  f(u)=  971304  ~=  971304.0525993105
             # test CSU: 2a^2+b^2 > (a+b)^2 = a^2 + b^2 + 2ab. Since (a-b)^2 = a^2 + b^2 - 2ab > 0, so a^2 + b^2 > 2ab. 
             # a^2 = p^t* Jp^TJp * p , b^2 = l^tJl^TJl l. ab = p^tJp^T Jl*l.
             #(Jl | Jp) (l,p)^T = Jl l + Jp p and |(Jl | Jp) (l,p)^T|^2 = l^t Jl^t Jl l + p^t Jp^t Jp p + 2 p^t Jp^t Jl l.
@@ -2639,7 +2639,7 @@ else:
             rna_s[ci * 3 * n_points: (ci+1) * 3 * n_points] = temp * landmark_s_in_cluster_pre[ci].flatten()
             rna_s_reg[ci * 3 * n_points: (ci+1) * 3 * n_points] = temp * landmark_s_in_cluster[ci].flatten()
 
-        use_bfgs = True # maybe full u,v?
+        use_bfgs = False #True # maybe full u,v?
         if use_bfgs:
             if False: # awful
 
@@ -2699,10 +2699,13 @@ else:
             #dk = dk - rna_s_reg
 
             # other option also stable with - rna_s.
-            Gs, Fs, Fes, dk = RNA(Gs, Fs, rna_s, bfgs_r, it, rnaBufferSize, Fes, bfgs_r, res_pcg = U_diag, lamda = 0.001 * lambdaScale, h = -1)
+            #0.01: or 0.0001? 59 / 0  ======== DRE BFGS ======  504493
+            # 0.1: 488k, 0.2: 497k
+            Gs, Fs, Fes, dk = RNA(Gs, Fs, rna_s, bfgs_r, it, rnaBufferSize, Fes, bfgs_r, res_pcg = U_diag, lamda = 0.1 * lambdaScale, h = -1)
             if it < 5:
                 dk = dk - rna_s # start at s, not s+. stable.
             else: # ok maybe the '-1' should be 0 then .. ?
+                #dk = dk - (rna_s - bfgs_r) # wrose? haeh
                 dk = dk - rna_s_reg # appears since dk is extrapolated point and ls is reg + dk this should be used, but just not stable at all, crazy overshoot in 1st run(s)?
 
             dk_stepLength = np.linalg.norm(dk, 2)
