@@ -33,11 +33,11 @@ FILE_NAME = "problem-16-22106-pre.txt.bz2"
 FILE_NAME = "problem-173-111908-pre.txt.bz2"
 #FILE_NAME = "problem-135-90642-pre.txt.bz2"
 
-BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/trafalgar/"
+#BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/trafalgar/"
 # 71k
 #FILE_NAME = "problem-21-11315-pre.txt.bz2"
 #59 / 0  ======== DRE BFGS ======  207468  ========= gain  102
-FILE_NAME = "problem-257-65132-pre.txt.bz2"
+#FILE_NAME = "problem-257-65132-pre.txt.bz2"
 
 # RNA is best, other awful. in general cams as shared vars very bad.
 # 59 / 0  ======== DRE BFGS ======  1203190  ========= gain  1391 ==== f(v)=  1203133  f(u)=  1203208  ~=  1203207.857094867
@@ -56,9 +56,9 @@ FILE_NAME = "problem-257-65132-pre.txt.bz2"
 # 724022.87      ! *5
 # 444848.29      * 5
 # 114198.39]     * 10
-# 59 / 0  ======== DRE BFGS ======  548142  ========= gain  601
-BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/venice/"
-FILE_NAME = "problem-52-64053-pre.txt.bz2"
+# 59 / 0  ======== DRE BFGS ======  548142  ========= gain  601, very bad drs cam 475k
+#BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/venice/"
+#FILE_NAME = "problem-52-64053-pre.txt.bz2"
 
 # 53 / 0  ======== DRE BFGS ======  291195  ========= gain  0, jumps around after
 #BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/final/"
@@ -696,6 +696,35 @@ def blockEigenvalue(M, bs):
             Ei[bs*i:bs*i+bs] = evs[bs-1] # largest
             #Ei[bs*i:bs*i+bs] = max(1e7, evs[0]) # just does not work
             #Ei[bs*i:bs*i+bs] = max(1e-4, evs[bs-3]) # smallest, maybe some cams only 1 lm in part?
+        Ei = diag_sparse(Ei)
+    else:
+        Ei = M.copy()
+
+    # todo: eval super safe method since symmetric FAIL again.
+    # idea was that non isotropic structure might hurting bfgs. but as bad as without
+    #maxEv = np.max(Ei.data)
+    #Ei.data[:] = 0.1 * maxEv # 0.1 worked
+    #Ei.data[:] *= 0.125 #0.25 promising # 0.1 already too low. could try line-search idea
+    return Ei
+
+def blockEigenvalueWhereNeeded(M, bs, thresh = 1e-6):
+    Ei = np.zeros(M.shape[0])
+    if bs > 1:
+        bs2 = bs * bs
+        for i in range(int(M.data.shape[0] / bs2)):
+            mat = M.data[bs2 * i : bs2 * i + bs2].reshape(bs, bs)
+            mat = np.fliplr(mat)
+            # print(i, " ", mat)
+            evs = eigvalsh(mat)
+            if evs[0] <0:
+               mat = np.fliplr(mat)
+               evs = eigvalsh(mat)
+
+            if evs[0]/evs[bs-1] < thresh: # all smaller horror.
+                Ei[bs*i:bs*i+bs] = evs[bs-1] # largest
+            else:
+                Ei[bs*i:bs*i+bs] = evs[0] # smallest
+
         Ei = diag_sparse(Ei)
     else:
         Ei = M.copy()
@@ -1366,7 +1395,8 @@ def bundle_adjust(
             # this might be an issue for poses.
             # R|T| f,d. especially d might have much different (smaller) eigenvalues.
             # 
-            blockEigenvalueJtJ = blockEigenvalue(JtJ, 9) # TODO: what if this is only needed for 0-eigen directions? return !=0 only if in small eigendir
+            #blockEigenvalueJtJ = blockEigenvalue(JtJ, 9) # TODO: what if this is only needed for 0-eigen directions? return !=0 only if in small eigendir
+            blockEigenvalueJtJ = blockEigenvalueWhereNeeded(JtJ, 9, 1e-6) # here ok?
             stepSize = blockEigMult * blockEigenvalueJtJ + JJ_mult * JtJ.copy() # Todo '2 *' vs 1 by convex.
 
             maxE, minE = minmaxEv(JtJ, 9)
@@ -1401,14 +1431,18 @@ def bundle_adjust(
             #stepSize = LipJ * JtJ.copy() + diag_sparse(np.fmax(JtJ.diagonal(), 1e-4))
 
             JltJl = J_land.transpose() * J_land
-            JltJlDiag = JltJl + J_eps * diag_sparse(np.ones(JltJl.shape[0]))
-            #blockEigenvalueJltJl = blockEigenvalue(JltJl, 3)
-            #JltJlDiag = JltJl + J_eps * blockEigenvalueJltJl #diag_sparse(np.ones(JltJl.shape[0]))
-            maxE, minE = minmaxEv(JltJl, 9)
-            print("min max ev JtJ ", np.max(maxE), " ", np.max(minE), " ", np.min(maxE), " ",  np.min(minE), " spectral ", np.max(maxE/minE) )
-            maxE, minE = minmaxEv(JltJl, 9)
-            print("min max ev JltJlDiag ", np.max(maxE), " ", np.max(minE), " ", np.min(maxE), " ",  np.min(minE), " spectral ", np.max(maxE/minE) )
 
+
+            JltJlDiag = JltJl + J_eps * diag_sparse(np.ones(JltJl.shape[0]))
+            # maybe more appropriate?
+            blockEigenvalueJltJl = blockEigenvalue(JltJl, 3)
+            #blockEigenvalueJltJl = blockEigenvalueWhereNeeded(JltJl, 3) # nope not at all.
+            JltJlDiag = JltJl + 1e-6 * blockEigenvalueJltJl # play around at 173 example. 1e-8: 58 / 0  ======== DRE BFGS ======  518626, 1e-6 518 MUCH earlier
+            # could do only where needed? smallest ev is indeed small?
+            maxE, minE = minmaxEv(JltJl, 3)
+            print("min max ev JltJl ", np.max(maxE), " ", np.max(minE), " ", np.min(maxE), " ",  np.min(minE), " spectral ", np.max(maxE/minE) )
+            maxE, minE = minmaxEv(JltJlDiag, 3)
+            print("min max ev JltJlDiag ", np.max(maxE), " ", np.max(minE), " ", np.min(maxE), " ",  np.min(minE), " spectral ", np.max(maxE/minE) )
 
             JtJDiag = stepSize.copy() # max 1, 1/L, line-search dre fails -> increase
             #JtJDiag = diag_sparse(np.fmax(JtJ.diagonal(), 1e-4)) # diagonal is solid. slower than JtJ + something though
@@ -1958,7 +1992,9 @@ poses_s_in_cluster = [cameras.copy() for _ in range(kClusters)]
 poses_in_cluster = [cameras.copy() for _ in range(kClusters)]
 landmarks = points_3d.copy()
 
-vis, cameras_vis1, landmarks_vis = render_points_cameras(camera_indices_in_cluster, point_indices_in_cluster, cameras, landmarks)
+o3d_defined = False
+if o3d_defined:
+    vis, cameras_vis1, landmarks_vis = render_points_cameras(camera_indices_in_cluster, point_indices_in_cluster, cameras, landmarks)
 
 if basic_version:
 
@@ -2330,7 +2366,8 @@ else:
                 #     print(ci, " poses_v ", poses_in_cluster[ci])
 
                 print("poses_v ", poses_v)
-                rerender(vis, camera_indices_in_cluster, point_indices_in_cluster, poses_in_cluster, landmarks, save_image=False)
+                if o3d_defined:
+                    rerender(vis, camera_indices_in_cluster, point_indices_in_cluster, poses_in_cluster, landmarks, save_image=False)
                 
                 #print("A landmark_s_in_cluster", landmark_s_in_cluster)
                 break
@@ -2362,7 +2399,8 @@ else:
 # or  f(x) < f(y) + <nabla fy , x-y> + (x-y)^ JJl (x-y). New solution < old + penalty + <nabla fy, delta>
 # <=> f(x) < f(y) + <nabla fy + nabla fx, x-y>
 
-vis, cameras_vis1, landmarks_vis = render_points_cameras(camera_indices_in_cluster, point_indices_in_cluster, poses_v, landmarks)
+if o3d_defined:
+    vis, cameras_vis1, landmarks_vis = render_points_cameras(camera_indices_in_cluster, point_indices_in_cluster, poses_v, landmarks)
 
 if write_output:
     poses_v.tofile("camera_params_drs-lm.dat")

@@ -28,7 +28,8 @@ FILE_NAME = "problem-138-19878-pre.txt.bz2"
 BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/dubrovnik/"
 FILE_NAME = "problem-16-22106-pre.txt.bz2"
 # large on1: 59 / 1  ======== DRE BFGS ======  9222786 FUCK, got stuck
-FILE_NAME = "problem-356-226730-pre.txt.bz2" # large dub, play with ideas: cover, etc
+# 36 / 0  ======== DRE BFGS ======  885868  ========= gain  973 with JtJ blockEig !
+#FILE_NAME = "problem-356-226730-pre.txt.bz2" # large dub, play with ideas: cover, etc
 #FILE_NAME = "problem-237-154414-pre.txt.bz2"
 #59 / 0  ======== DRE BFGS ======  502663  ========= gain  122 ====
 # 59 / 0  ======== DRE BFGS ======  499360  ========= gain  81 w 'pose pcg' at 500k much earlier.
@@ -43,8 +44,8 @@ FILE_NAME = "problem-356-226730-pre.txt.bz2" # large dub, play with ideas: cover
 # 52 / 2  ======== DRE BFGS ======  481560  ========= gain  175
 # 52 / 2  ======== DRE BFGS ======  480851  ========= gain  3452 w pcg .. 'last turn' not clear
 # 59 / 2  ======== DRE BFGS ======  475798  ========= gain  1601
-#BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/venice/"
-#FILE_NAME = "problem-52-64053-pre.txt.bz2"
+BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/venice/"
+FILE_NAME = "problem-52-64053-pre.txt.bz2"
 
 # 59 / 0  ======== DRE BFGS ======  291177  ========= gain  938
 #BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/final/"
@@ -1583,8 +1584,7 @@ def bundle_adjust(
             #(Jl | Jp) (l,p)^T = Jl l + Jp p and |(Jl | Jp) (l,p)^T|^2 = l^t Jl^t Jl l + p^t Jp^t Jp p + 2 p^t Jp^t Jl l.
             # So 2 JtJ  + 2 JltJl shuold majorize |J^t x|^2 for all x.
             # why relevant here.
-            JtJDiag = JtJ + J_eps * diag_sparse(np.ones(JtJ.shape[0]))
-
+            #JtJDiag = JtJ + J_eps * diag_sparse(np.ones(JtJ.shape[0])) # fails if JtJ is too large or small, example dubrovnik, 356 cams
             blockEigenvalueJtJ = blockEigenvalue(JtJ, 9)
             JtJDiag = JtJ + 1e-9 * blockEigenvalueJtJ # alot worse at 1e6, bit better 1e-9, but hmm 59 / 0  ======== DRE BFGS ======  501565
 
@@ -1607,7 +1607,7 @@ def bundle_adjust(
             # 'hangs at this value.' Check new variant with recomputing Jacobian at end.
             #68 / 0  ======== DRE BFGS ======  501664  ========= gain  247 ==== f(v)=  502614  f(u)=  500821  ~=  500704.09297090676
             #81 / 0  ======== DRE BFGS ======  501076  ========= gain  139 ==== f(v)=  502339  f(u)=  499758  ~=  499713.50253538677
-            stepSize = 1. * (blockEigMult * blockEigenvalueJltJl + JJ_mult * JltJl.copy()) # Todo '2 *' vs 1 by convex.
+            stepSize = blockEigMult * blockEigenvalueJltJl + JJ_mult * JltJl.copy() # Todo '2 *' vs 1 by convex.
             maxE, minE = minmaxEv(stepSize, 3)
             print("min max ev stepSize ", np.max(maxE), " ", np.max(minE), " ", np.min(maxE), " ",  np.min(minE), " spectral ", np.max(maxE/minE))
             #stepSize = 1. * (blockEigMult * blockEigenvalueJltJl + LipJ * JltJl.copy()) # hmm
@@ -2445,74 +2445,8 @@ landmark_v = points_3d_in_cluster[0].copy()
 LipJ = np.ones(kClusters)
 
 o3d_defined = False
-vis, cameras_vis1, landmarks_vis = render_points_cameras(camera_indices_in_cluster, point_indices_in_cluster, cameras, landmark_v)
 if o3d_defined:
-    #o3d.utility.set_verbosity_level(o3d.utility.VerbosityLevel.Debug)
-    vis = o3d.visualization.Visualizer()
-    vis.create_window()
-    landmarks_vis = []
-    cameras_vis = []
-    cameras_vis1 = []
-    pcs = []
-    for ci in range(kClusters):
-
-        alpha = (kClusters-1 - ci) / (kClusters-1)
-        col = float_to_rgb(alpha)
-
-        cameras_vis.append(o3d.geometry.PointCloud())
-        cameras_ci = cameras[np.unique(camera_indices_in_cluster[ci]), 3:6].copy()
-        cameras_vis[ci].points = o3d.utility.Vector3dVector(cameras_ci)
-
-        landmarks_vis.append(o3d.geometry.PointCloud())
-        landmarks_ci = landmark_v[np.unique(point_indices_in_cluster[ci]),:]
-        landmarks_vis[ci].points = o3d.utility.Vector3dVector(landmarks_ci)
-        if ci ==0:
-            vis.add_geometry(landmarks_vis[ci])
-
-        for i in range(3):
-            for j in range(3):
-                for k in range(3):
-                    a = np.repeat(np.array([i-1,j-1,k-1]), cameras_ci.shape[0]) * 0.5
-                    cameras_vis1.append(o3d.geometry.PointCloud())
-                    cameras_vis1[-1].points = o3d.utility.Vector3dVector(cameras_ci + a.copy().reshape(3, cameras_ci.shape[0]).transpose())
-                    cameras_vis[ci].paint_uniform_color(col) # make larger or what ?
-                    vis.add_geometry(cameras_vis1[-1], reset_bounding_box=False)
-
-        landmarks_vis[ci].paint_uniform_color(col)
-        cameras_vis[ci].paint_uniform_color(col) # make larger or what ?
-        #geometry.points = o3d.utility.Vector3dVector(points_3d)
-        #geometry_cam = o3d.geometry.PointCloud()
-        #geometry_cam.points = o3d.utility.Vector3dVector(cameras[:,3:6])
-
-        vis.add_geometry(landmarks_vis[ci],  reset_bounding_box=False)
-        vis.add_geometry(cameras_vis[ci],  reset_bounding_box=False)
-
-        # matl = o3d.visualization.rendering.MaterialRecord()
-        # matl.shader = 'defaultUnlit'
-        # matl.point_size = 1.0
-        # if ci ==0:
-        #     pcs.append({'name': 'lm'+str(ci), 'geometry': landmarks_vis[ci], 'material': matl, 'reset_bounding_box':True})
-        # else:
-        #     pcs.append({'name': 'lm'+str(ci), 'geometry': landmarks_vis[ci], 'material': matl, 'reset_bounding_box':False})
-
-        # mat = o3d.visualization.rendering.MaterialRecord()
-        # mat.shader = 'defaultUnlit'
-        # mat.point_size = 3.0
-        # pcs.append({'name': 'pcd'+str(ci), 'geometry': cameras_vis[ci], 'material': mat, 'reset_bounding_box':True})
-
-        #o3d.geometry.create_mesh_sphere(radius=10, resolution = 20)
-
-    #o3d.visualization.draw(pcs, show_skybox=True)
-    #o3d.visualization.Visualizer().get_view_control().set_zoom(0.5)
-    #o3d.visualization.Visualizer().get_view_control().scale(0.2)
-
-    vis.get_render_option().point_size = 3.2
-    vis.run()
-    
-    #o3d.visualization.draw_geometries([geometry])    # Visualize point cloud 
-    save_image = False
-    #exit()
-
+    vis, cameras_vis1, landmarks_vis = render_points_cameras(camera_indices_in_cluster, point_indices_in_cluster, cameras, landmark_v)
 
 if basic_version:
 
@@ -2904,7 +2838,8 @@ else:
                 x0_p = x0_p_bfgs.copy()
                 #print("A landmark_s_in_cluster", landmark_s_in_cluster)
                 print("x0_p ", x0_p)
-                rerender(vis, camera_indices_in_cluster, point_indices_in_cluster, x0_p, landmark_v)
+                if o3d_defined:
+                    rerender(vis, camera_indices_in_cluster, point_indices_in_cluster, x0_p, landmark_v)
 
                 break
 # here bfgs is better, but dre has better cost for the drs solution.
@@ -2935,7 +2870,8 @@ else:
 # or  f(x) < f(y) + <nabla fy , x-y> + (x-y)^ JJl (x-y). New solution < old + penalty + <nabla fy, delta>
 # <=> f(x) < f(y) + <nabla fy + nabla fx, x-y>
 
-vis, cameras_vis1, landmarks_vis = render_points_cameras(camera_indices_in_cluster, point_indices_in_cluster, x0_p, landmark_v)
+if o3d_defined:
+    vis, cameras_vis1, landmarks_vis = render_points_cameras(camera_indices_in_cluster, point_indices_in_cluster, x0_p, landmark_v)
 
 if write_output:
     x0_p.tofile("camera_params_drs.dat")
