@@ -2405,6 +2405,10 @@ init_lib()
 globalSingleLandmarksA_in_c = [0 for x in range(kClusters)]
 globalSingleLandmarksB_in_c = [0 for x in range(kClusters)]
 
+values, counts = np.unique(camera_indices, return_counts=True)
+minCount = np.min(counts)
+print(". minimum camera observations in total ", minCount, " cams with < 5 landmarks ", np.sum(counts < 5))
+
 if False:
     (
         camera_indices_in_cluster,
@@ -2428,6 +2432,11 @@ else:
     ) = cluster_by_camera_smarter(
         camera_indices, points_3d, points_2d, point_indices, kClusters, startL, init_cam_id=0, init_lm_id=0
     )
+
+for ci in range(kClusters):
+    values, counts = np.unique(camera_indices_in_cluster[ci], return_counts=True)
+    minCount = np.min(counts)
+    print(ci, ". minimum camera observations in cluster ", minCount, " cams with < 5 landmarks ", np.sum(counts < 5))
 
 print(L_in_cluster)
 Vl_in_cluster = [0 for x in range(kClusters)] # dummy fill list
