@@ -16,7 +16,7 @@ import math
 import ctypes
 from torch.autograd.functional import jacobian
 from torch import tensor, from_numpy
-import open3d as o3d
+#import open3d as o3d
 
 # look at website. This is the smallest problem. guess: pytoch cpu is pure python?
 BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/ladybug/"
@@ -38,7 +38,7 @@ FILE_NAME = "problem-16-22106-pre.txt.bz2"
 
 #BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/trafalgar/"
 # FILE_NAME = "problem-21-11315-pre.txt.bz2"
-# 59 / 0  ======== DRE BFGS ======  197984  
+# 59 / 0  ======== DRE BFGS ======  197984
 #FILE_NAME = "problem-257-65132-pre.txt.bz2"
 
 # 52 / 2  ======== DRE BFGS ======  481560  ========= gain  175
@@ -446,7 +446,8 @@ def AngleAxisRotatePoint(angleAxis, pt):
 def torchSingleResiduum(camera_params_, point_params_, p2d):
     angle_axis = camera_params_[:, :3]
     points_cam = AngleAxisRotatePoint(angle_axis, point_params_)
-    points_cam = points_cam + camera_params_[:, 3:6] * 20
+    points_cam[:,0:2] = points_cam[:,0:2] + camera_params_[:, 3:5] * 20
+    points_cam[:,2] = points_cam[:,2] + camera_params_[:, 5] * 80
     points_projX = -points_cam[:, 0] / points_cam[:, 2]
     points_projY = -points_cam[:, 1] / points_cam[:, 2]
     f = camera_params_[:, 6] * 3000
@@ -464,7 +465,8 @@ def torchSingleResiduum(camera_params_, point_params_, p2d):
 def torchSingleResiduumX(camera_params, point_params, p2d) :
     angle_axis = camera_params[:,:3]
     points_cam = AngleAxisRotatePoint(angle_axis, point_params)
-    points_cam = points_cam + camera_params[:,3:6] * 20
+    points_cam[:,0:2] = points_cam[:,0:2] + camera_params[:, 3:5] * 20
+    points_cam[:,2] = points_cam[:,2] + camera_params[:, 5] * 80
     points_projX = -points_cam[:, 0] / points_cam[:, 2]
     points_projY = -points_cam[:, 1] / points_cam[:, 2]
     f  = camera_params[:, 6] * 3000
@@ -479,7 +481,8 @@ def torchSingleResiduumX(camera_params, point_params, p2d) :
 def torchSingleResiduumY(camera_params, point_params, p2d) :
     angle_axis = camera_params[:,:3]
     points_cam = AngleAxisRotatePoint(angle_axis, point_params)
-    points_cam = points_cam + camera_params[:,3:6] * 20
+    points_cam[:,0:2] = points_cam[:,0:2] + camera_params[:, 3:5] * 20
+    points_cam[:,2] = points_cam[:,2] + camera_params[:, 5] * 80
     points_projX = -points_cam[:, 0] / points_cam[:, 2]
     points_projY = -points_cam[:, 1] / points_cam[:, 2]
     f  = camera_params[:, 6] * 3000
@@ -2346,6 +2349,7 @@ print("Total number of parameters: {}".format(n))
 print("Total number of residuals: {}".format(m))
 
 cameras[:,3:6] = cameras[:,3:6] / 20
+cameras[:,5] = cameras[:,5] / 4
 cameras[:,6] = cameras[:,6] / 3000
 cameras[:,7] = cameras[:,7] / 10
 cameras[:,8] = cameras[:,8] / 20

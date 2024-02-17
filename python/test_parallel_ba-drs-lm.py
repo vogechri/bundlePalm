@@ -17,7 +17,7 @@ import math
 import ctypes
 from torch.autograd.functional import jacobian
 from torch import tensor, from_numpy
-import open3d as o3d
+#import open3d as o3d
 
 # look at website. This is the smallest problem. guess: pytoch cpu is pure python?
 BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/ladybug/"
@@ -486,7 +486,8 @@ def AngleAxisRotatePoint(angleAxis, pt):
 def torchSingleResiduum(camera_params_, point_params_, p2d):
     angle_axis = camera_params_[:, :3]
     points_cam = AngleAxisRotatePoint(angle_axis, point_params_)
-    points_cam = points_cam + camera_params_[:, 3:6] * 20
+    points_cam[:,0:2] = points_cam[:,0:2] + camera_params_[:, 3:5] * 20
+    points_cam[:,2] = points_cam[:,2] + camera_params_[:, 5] * 80
     points_projX = -points_cam[:, 0] / points_cam[:, 2]
     points_projY = -points_cam[:, 1] / points_cam[:, 2]
     f = camera_params_[:, 6] * 3000
@@ -504,7 +505,8 @@ def torchSingleResiduum(camera_params_, point_params_, p2d):
 def torchSingleResiduumX(camera_params, point_params, p2d) :
     angle_axis = camera_params[:,:3]
     points_cam = AngleAxisRotatePoint(angle_axis, point_params)
-    points_cam = points_cam + camera_params[:,3:6] * 20
+    points_cam[:,0:2] = points_cam[:,0:2] + camera_params[:, 3:5] * 20
+    points_cam[:,2] = points_cam[:,2] + camera_params[:, 5] * 80
     points_projX = -points_cam[:, 0] / points_cam[:, 2]
     points_projY = -points_cam[:, 1] / points_cam[:, 2]
     f  = camera_params[:, 6] * 3000
@@ -519,7 +521,8 @@ def torchSingleResiduumX(camera_params, point_params, p2d) :
 def torchSingleResiduumY(camera_params, point_params, p2d) :
     angle_axis = camera_params[:,:3]
     points_cam = AngleAxisRotatePoint(angle_axis, point_params)
-    points_cam = points_cam + camera_params[:,3:6] * 20
+    points_cam[:,0:2] = points_cam[:,0:2] + camera_params[:, 3:5] * 20
+    points_cam[:,2] = points_cam[:,2] + camera_params[:, 5] * 80
     points_projX = -points_cam[:, 0] / points_cam[:, 2]
     points_projY = -points_cam[:, 1] / points_cam[:, 2]
     f  = camera_params[:, 6] * 3000
@@ -1403,7 +1406,6 @@ def bundle_adjust(
             print("min max ev JtJ ", np.max(maxE), " ", np.max(minE), " ", np.min(maxE), " ",  np.min(minE), " spectral ", np.max(maxE/minE) )
             maxE, minE = minmaxEv(stepSize, 9)
             print("min max ev stepSize ", np.max(maxE), " ", np.max(minE), " ", np.min(maxE), " ",  np.min(minE), " spectral ", np.max(maxE/minE) )
-
             print( "Mean diagonal of pseudo Hessian ",  np.sum(np.abs(JtJ.diagonal()).reshape(-1,9) / (1000 * n_cameras_), 0))
 
             # blockEigenvalueJtJ = blockEigenvalueFull(JtJ, 9)
@@ -1432,8 +1434,7 @@ def bundle_adjust(
 
             JltJl = J_land.transpose() * J_land
 
-
-            JltJlDiag = JltJl + J_eps * diag_sparse(np.ones(JltJl.shape[0]))
+            # JltJlDiag = JltJl + J_eps * diag_sparse(np.ones(JltJl.shape[0]))
             # maybe more appropriate?
             blockEigenvalueJltJl = blockEigenvalue(JltJl, 3)
             #blockEigenvalueJltJl = blockEigenvalueWhereNeeded(JltJl, 3) # nope not at all.
@@ -1534,10 +1535,10 @@ def bundle_adjust(
             # after:
             # f(x) <= f(y) + <nabla(f(y) x-y> + Lf/2 |x-y|^2
             # we demand stepsize phi >= 2 Lf. Then even
-            # f(x) <= f(y) + <nabla(f(y) x-y> + phi/4 |x-y|^2 
+            # f(x) <= f(y) + <nabla(f(y) x-y> + phi/4 |x-y|^2
             # (f(x) - f(y) - <nabla(f(y) x-y>) * 4 / |x-y|^2  <= phi
             #nablaXp = L * JtJDiag * delta_p    # actual gradient: J^t fx0 = bp|bl , no L. grad at f(x) is L * JtJDiag * delta_p - s
-            #nablaXl = JltJlDiag * delta_l  # actual gradient is b. L since JltJlDiag multiplied by 1/L. 
+            #nablaXl = JltJlDiag * delta_l  # actual gradient is b. L since JltJlDiag multiplied by 1/L.
             descent_rhs_l = delta_l.dot(JltJlDiag * delta_l)
             descent_rhs_p = L * delta_p.dot(JtJDiag * delta_p)
 
@@ -1570,8 +1571,8 @@ def bundle_adjust(
             # try this, should memorize if works (exists scale s.t. fulfilled)
             # rather if dre is violated increase this.
             #LipJ += 0.2 EXTERNALLY -- we do not know if dre increases.
-            #stepSize = 1. * (blockEigMult * blockEigenvalueJtJ + J_scale * JtJ.copy()) # Todo '2 *' vs 1 by convex. 
-            
+            #stepSize = 1. * (blockEigMult * blockEigenvalueJtJ + J_scale * JtJ.copy()) # Todo '2 *' vs 1 by convex.
+
             JtJDiag = 1/L * stepSize.copy()
             penaltyStartConst = prox_rhs.dot(JtJDiag * prox_rhs)
 
@@ -1646,12 +1647,12 @@ def bundle_adjust(
     L_out = np.maximum(minimumL, np.minimum(L_in_cluster_ * 2, L)) # not clear if generally ok, or 2 or 4 should be used.
     return costEnd, x0_p_, x0_l_, L_out, Rho, nabla_p
 
-    # recall solution wo. splitting is 
-    # solve Vl x + bS + Vd () 
+    # recall solution wo. splitting is
+    # solve Vl x + bS + Vd ()
     #bl_s = bl + L * JltJlDiag * (x0_l_ - s_l_) # TODO: + or -. '+', see above
     #delta_l = -Vli * ((W.transpose() * delta_p).flatten() + bl_s).flatten()
     # sum_k delta_l Vlk delta_l + delta_l ((Wk.transpose() * delta_p) + bl_sk) argmin
-    # all this is local per block. k blocks: sum_k Vlk = 3x3, we could instead 
+    # all this is local per block. k blocks: sum_k Vlk = 3x3, we could instead
     # return Vlk and bk = ((Wk.transpose() * delta_p) + bl_sk): 4 times #landmarks floats.
     # and compute the update, summing each and solving v = (sumk vlk)^-1 (sum_k bk).
     # would be cool if we could do n iterations locally -- with a gain.
@@ -1659,7 +1660,7 @@ def bundle_adjust(
     # large network, better send minimal information. problem still send landmarks.
     # and diagonal? would be good if can work n steps locally.
     # what is missing? maybe accumulate 'Vl' on the way or upper bound
-    # as max eigenvalue per landmark 3x3, or just sum row/col -> blockEigen, and 
+    # as max eigenvalue per landmark 3x3, or just sum row/col -> blockEigen, and
 
 def updateCluster(
     poses_in_cluster_,
@@ -1904,6 +1905,7 @@ print("min k1 distance ", np.min(cameras[:,7].flatten()), " ", np.max(cameras[:,
 print("min k2 distance ", np.min(cameras[:,8].flatten()), " ", np.max(cameras[:,8].flatten()) )
 
 cameras[:,3:6] = cameras[:,3:6] / 20
+cameras[:,5] = cameras[:,5] / 4
 cameras[:,6] = cameras[:,6] / 3000
 cameras[:,7] = cameras[:,7] / 10
 cameras[:,8] = cameras[:,8] / 20
