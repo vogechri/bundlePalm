@@ -33,7 +33,7 @@ FILE_NAME = "problem-16-22106-pre.txt.bz2"
 #FILE_NAME = "problem-237-154414-pre.txt.bz2"
 #59 / 0  ======== DRE BFGS ======  502663  ========= gain  122 ====
 # 59 / 0  ======== DRE BFGS ======  499360  ========= gain  81 w 'pose pcg' at 500k much earlier.
-#FILE_NAME = "problem-173-111908-pre.txt.bz2"
+FILE_NAME = "problem-173-111908-pre.txt.bz2"
 #FILE_NAME = "problem-135-90642-pre.txt.bz2"
 
 #BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/trafalgar/"
@@ -44,8 +44,8 @@ FILE_NAME = "problem-16-22106-pre.txt.bz2"
 # 52 / 2  ======== DRE BFGS ======  481560  ========= gain  175
 # 52 / 2  ======== DRE BFGS ======  480851  ========= gain  3452 w pcg .. 'last turn' not clear
 # 59 / 2  ======== DRE BFGS ======  475798  ========= gain  1601
-BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/venice/"
-FILE_NAME = "problem-52-64053-pre.txt.bz2"
+#BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/venice/"
+#FILE_NAME = "problem-52-64053-pre.txt.bz2"
 
 # 59 / 0  ======== DRE BFGS ======  291177  ========= gain  938
 #BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/final/"
@@ -807,23 +807,6 @@ def ComputeDerivativeMatrices(
     # print(J_pose.shape)
     return (J_pose, J_land, fx0)
 
-
-# bs : blocksize, eg 9 -> 9x9 or 3 -> 3x3 per block
-def blockInverse(M, bs):
-    Mi = M.copy()
-    if bs > 1:
-        bs2 = bs * bs
-        for i in range(int(M.data.shape[0] / bs2)):
-            mat = Mi.data[bs2 * i : bs2 * i + bs2].reshape(bs, bs)
-            # print(i, " ", mat)
-            imat = inv_dense(mat) # inv or pinv?
-            Mi.data[bs2 * i : bs2 * i + bs2] = imat.flatten()
-    else:
-        Mi = M.copy()
-        for i in range(int(M.data.shape[0])):
-            Mi.data[i : i + 1] = 1.0 / Mi.data[i : i + 1]
-    return Mi
-
 def ComputeDerivativeMatricesNew(x0_t_cam, x0_t_land, camera_indices_, point_indices_, torch_points_2d
 ):
     verbose = False
@@ -929,21 +912,48 @@ def buildResiduumNew(resX, resY) :
     res = np.concatenate(data)
     return res
 
+def check_symmetric(a, tol=1e-8):
+    return np.all(np.abs(a-a.T) < tol)
+
+# bs : blocksize, eg 9 -> 9x9 or 3 -> 3x3 per block
+def blockInverse(M, bs):
+    Mi = M.copy()
+    if bs > 1:
+        bs2 = bs * bs
+        for i in range(int(M.data.shape[0] / bs2)):
+            mat = Mi.data[bs2 * i : bs2 * i + bs2].reshape(bs, bs)
+            #mat = np.fliplr(mat)
+            if not check_symmetric(mat):
+                #print(i, " ", mat) # kind of flipped, so eigenval is crap.
+                mat = np.fliplr(mat)
+                imat = np.fliplr(inv_dense(mat)) # inv or pinv?
+            else:
+                # print(i, " ", mat)
+                imat = inv_dense(mat) # inv or pinv?
+            Mi.data[bs2 * i : bs2 * i + bs2] = imat.flatten()
+    else:
+        Mi = M.copy()
+        for i in range(int(M.data.shape[0])):
+            Mi.data[i : i + 1] = 1.0 / Mi.data[i : i + 1]
+    return Mi
+
 def blockEigenvalue(M, bs):
     Ei = np.zeros(M.shape[0])
     if bs > 1:
         bs2 = bs * bs
         for i in range(int(M.data.shape[0] / bs2)):
-            mat = M.data[bs2 * i : bs2 * i + bs2].reshape(bs, bs)
+            mat = M.data[bs2 * i : bs2 * i + bs2].reshape(bs, bs).copy()
             mat = np.fliplr(mat)
+            if not check_symmetric(mat):
+                mat = np.fliplr(mat)
             #print(i, " ", mat) # kind of flipped, so eigenval is crap.
             # [[ 4575.01 -1272.34  6458.94]
             #  [ 1029.28  8855.05 -1272.34]
             #  [ 4838.40  1029.28  4575.01]]
             evs = eigvalsh(mat)
-            if evs[0] <0:
-                mat = np.fliplr(mat)
-                evs = eigvalsh(mat)
+            # if evs[0] <0:
+            #     mat = np.fliplr(mat)
+            #     evs = eigvalsh(mat)
             Ei[bs*i:bs*i+bs] = evs[bs-1]
         Ei = diag_sparse(Ei)
     else:
@@ -962,17 +972,18 @@ def minmaxEv(M, bs):
     if bs > 1:
         bs2 = bs * bs
         for i in range(int(M.data.shape[0] / bs2)):
-            mat = M.data[bs2 * i : bs2 * i + bs2].reshape(bs, bs)
-            #mat = np.fliplr(mat)
+            mat = M.data[bs2 * i : bs2 * i + bs2].reshape(bs, bs).copy()
+            if not check_symmetric(mat):
+                mat = np.fliplr(mat)
             evs = eigvalsh(mat)
             maxE[i] = evs[bs-1]
             minE[i] = evs[0]
-            if evs[0] <0:
-               #print("evs[0] ", evs[0], " " ,mat) 
-               mat = np.fliplr(mat)
-               evs = eigvalsh(mat)
-               maxE[i] = evs[bs-1]
-               minE[i] = evs[0]
+            # if evs[0] <0:
+            #    #print("evs[0] ", evs[0], " " ,mat) 
+            #    mat = np.fliplr(mat)
+            #    evs = eigvalsh(mat)
+            #    maxE[i] = evs[bs-1]
+            #    minE[i] = evs[0]
 
     return maxE, minE
 
@@ -992,6 +1003,7 @@ def copy_selected_blocks(M, block_selection_, bs):
 
 def stop_criterion(delta, delta_i, i):
     eps = 1e-2 #1e-2 used in paper, tune. might allow smaller as faster?
+    #print(i+1, " ", delta_i, " ", delta)
     return (i+1) * delta_i / delta < eps
 
 def solvePowerIts(Ul, W, Vli, bS, m_):
@@ -1535,7 +1547,6 @@ def bundle_adjust(
     newForUnique = True # debug nable_approx 
     #blockEigMult = 1e-3 # 1e-3 was used before, solid, less hicups smaller 1e-3. recall last val .. 1e-4 explodes for 173 example.
     blockEigMult = 1e-3 # maybe sub-problem singular? for landmarks? how to test?
-    normal_case_ = True # No L * JltJl at all. Does not work
     # define x0_t, x0_p, x0_l, L # todo: missing Lb: inner L for bundle, Lc: to fix duplicates
     minimumL = 1e-6
     JJ_mult = 2
@@ -1544,6 +1555,9 @@ def bundle_adjust(
     # holds all! landmarks, only use fraction likely no matter not present in cams anyway.
     x0_l_ = points_3d_in.flatten()
     s_l_ = landmark_s_.flatten()
+
+    #x0_l_ = 0.5*(x0_l_ + s_l_) # TODO EXPERIMENT, join TR and DL, does it help? A bit worse? performance, chokes in a different manner. init s becomes too far from 'u' solution at some point.
+
     # holds all cameras, only use fraction, camera_indices_ can be adjusted - min index
     x0_p_ = cameras_in.flatten()
     x0 = np.hstack((x0_p_, x0_l_))
@@ -1565,19 +1579,25 @@ def bundle_adjust(
         stepSize = diag_sparse(Vl_in_c_.diagonal())
 
     steSizeTouched = False
+    newVersion = True
+    newForUnique = True
+    if newVersion:
+        blockEigMult = 1e-3
 
     while it_ < successfull_its_:
         # to torch here ?
 
         if updateJacobian:  # not needed if rejected
-            #
             x0_t_cam = x0_t[: n_cameras_ * 9].reshape(n_cameras_, 9) # not needed?
-            x0_t_land = x0_t[n_cameras_ * 9 :].reshape(n_points_, 3)
+            x0_t_land = x0_t[n_cameras_ * 9 :].reshape(n_points_, 3) # another idea, start at s, see below, unifies TR and Descent Lemma check. See above replace u_l with sl
             J_pose, J_land, fx0 = ComputeDerivativeMatricesNew(
                 x0_t_cam, x0_t_land, camera_indices_, point_indices_, torch_points_2d
             )
 
             JtJ = J_pose.transpose() * J_pose
+            # TODO: flip if needed. likely not needed. since  adding a flipped and a non flipped matrix should deliver a non flipped one. This might lead to issues in every 'block' method
+            #JtJ = flipIfNeeded(JtJ)
+
             # in test_base
             #JtJDiag = diag_sparse(JtJ.diagonal())
 
@@ -1639,10 +1659,8 @@ def bundle_adjust(
             # set to 1e-12+L * blockEigMult * blockEigenvalueJltJl all entries of completely covered lms.
             if newForUnique:
                 JltJlDiag = copy_selected_blocks(JltJlDiag, landmarks_only_in_cluster_, 3)
-                if normal_case_:
-                    JltJlDiag = JltJlDiag + L * blockEigMult * blockEigenvalueJltJl
-                else: # usual version of L
-                    JltJlDiag = JltJlDiag + 1e-4 * blockEigenvalueJltJl
+                JltJlDiag = JltJlDiag + L * blockEigMult * blockEigenvalueJltJl
+ 
                 #JltJlDiag = JltJlDiag + L * diag_sparse(JltJl.diagonal()) # original
                 #JltJlDiag = 1/L * JltJlDiag + diag_sparse(JltJl.diagonal()) #diag_sparse(np.fmax(JltJl.diagonal(), 1e0))
 
@@ -1658,8 +1676,7 @@ def bundle_adjust(
             # only present within this part.
 
             # 0.2 was working
-            if normal_case_:
-                JltJlDiag = 1/L * JltJlDiag # max 1, 1/L, line-search dre fails -> increase
+            JltJlDiag = 1/L * JltJlDiag # max 1, 1/L, line-search dre fails -> increase
 
             W = J_pose.transpose() * J_land
             bp = J_pose.transpose() * fx0
@@ -1670,15 +1687,35 @@ def bundle_adjust(
             if newForUnique: # alternative turn off completely, use 2u-s -> return (u-s)/2 to average u+k = uk + delta uk
                 landmarks_in_many_cluster_ = np.invert(landmarks_only_in_cluster_)
                 diag_present = diag_sparse( np.repeat((np.ones(n_points_) * landmarks_in_many_cluster_).reshape(-1,1), 3).flatten() )
-                prox_rhs = 1 * diag_present * prox_rhs
+                prox_rhs = diag_present * prox_rhs
 
             costStart = np.sum(fx0**2)
             penaltyStartConst = prox_rhs.dot(JltJlDiag * prox_rhs)
+
+            # idea stepSize is EXTRA on prox part and 'fixed'. unless DL fails we need to add something. use blockEigenvalueJltJl as before? or increase JJ_mult?
+            if newVersion:
+                stepSize = JJ_mult * JltJl.copy() + blockEigMult * blockEigenvalueJltJl # is  + blockEigMult * blockEigenvalueJltJl needed? -- should not be too small!!!
+                JltJlDiag = JltJl.copy() + 1e-6 * blockEigMult * blockEigenvalueJltJl # not that important what to add ?!
+                if newForUnique:
+                    stepSize = copy_selected_blocks(stepSize, landmarks_only_in_cluster_, 3)
+                    penaltyStartConst = prox_rhs.dot(stepSize * prox_rhs)
+                maxE, minE = minmaxEv(stepSize, 3)
+                print("min max ev stepSize ", np.max(maxE), " ", np.max(minE), " ", np.min(maxE), " ",  np.min(minE), " spectral ", np.max(maxE/minE))
+                maxE, minE = minmaxEv(JltJlDiag, 3)
+                print("min max ev JltJlDiag ", np.max(maxE), " ", np.max(minE), " ", np.min(maxE), " ",  np.min(minE), " spectral ", np.max(maxE/minE))
+
 
         # start_ = time.time()
         Vl = JltJl + L * JltJlDiag
         Ul = JtJ + L * JtJDiag
         penaltyStart = L * penaltyStartConst
+
+        if newVersion:
+            Vl = JltJl + L * JltJlDiag + stepSize
+            penaltyStart = penaltyStartConst
+            maxE, minE = minmaxEv(Vl, 3)
+            #print("min max ev Vl ", np.max(maxE), " ", np.max(minE), " ", np.min(maxE), " ",  np.min(minE), " spectral ", np.max(maxE/minE))
+
         # cost added is + L * (delta_v - s_l_ + x0_l_)^T  JltJlDiag * (delta_v - s_l_ + x0_l_)
         # + L * (delta_v)^T  JltJlDiag * (delta_v) + 2 L * (delta_v^T JltJlDiag * (x0_l_ - s_l_) + L * (s_l_ - x0_l_)^T  JltJlDiag * (s_l_ - x0_l_)
         # derivative
@@ -1686,7 +1723,12 @@ def bundle_adjust(
         # added cost is, 2 L * (delta_v^T JltJlDiag * (x0_l_ - s_l_) + L * (s_l_ - x0_l_)^T  JltJlDiag * (s_l_ - x0_l_)
 
         Vli = blockInverse(Vl, 3)
+        maxE, minE = minmaxEv(Vli, 3)
+        #print("min max ev Vli ", np.max(maxE), " ", np.max(minE), " ", np.min(maxE), " ",  np.min(minE), " spectral ", np.max(maxE/minE))
+
         bl_s = bl + L * JltJlDiag * prox_rhs # TODO: + or -. '+', see above
+        if newVersion:
+            bl_s = bl + stepSize * prox_rhs # TODO: + or -. '+', see above
         bS = (bp - W * Vli * bl_s).flatten()
 
         #delta_p = -solvePowerIts(Ul, W, Vli, bS, powerits)
@@ -1695,6 +1737,9 @@ def bundle_adjust(
         delta_l = -Vli * ((W.transpose() * delta_p).flatten() + bl_s)
         penaltyL = L * (delta_l + prox_rhs).dot(JltJlDiag * (delta_l + prox_rhs))
         penaltyP = L * delta_p.dot(JtJDiag * delta_p)
+        if newVersion:
+            penaltyL = L * delta_l.dot(JltJlDiag * delta_l) + (delta_l + prox_rhs).dot(stepSize * (delta_l + prox_rhs))
+
         # end_ = time.time()
         # print("Lm step took ", end - start, "s")
 
@@ -1717,6 +1762,8 @@ def bundle_adjust(
         print(it_, "it. cost 1     ", round(costEnd), "      + penalty ", round(costEnd + penaltyL + penaltyP),)
 
         tr_check = (costStart + penaltyStart - costEnd - penaltyL) / (costStart + penaltyStart - costQuad - penaltyL)
+        if newVersion:
+            tr_check = (costStart + penaltyStart - costEnd - penaltyL - penaltyP) / (costStart + penaltyStart - costQuad - penaltyL - penaltyP)
 
         old_descent_lemma = True # appears not to bring value with 4x
         if old_descent_lemma:
@@ -1756,34 +1803,35 @@ def bundle_adjust(
         # 2. if tr violation increase eith, not only lms. problem s could be wrong
         # 3. introduce 'L' * for lms to ensure tr does something there see 2.
         # 4. something smart. eval all and take best decision ?
+        # for 3: so our cost is prox f(s) instead. Easy.
 
         if tr_check < tr_eta_2:
             print(" //////  tr_check " , tr_check, " Lfk distance ", LfkDistance, " -nabla^Tdelta=" , -bp.dot(delta_p) - bl.dot(delta_l), " /////")
             L = L * 2
-            JltJlDiag = 1/2 * JltJlDiag
+            if not newVersion:
+                JltJlDiag = 1/2 * JltJlDiag
 
         # todo: store last blockEigenvalueJltJl multiplier in/out current L used but not really.
         # option 1: does not work, now subproblem gets 's' forcing much worse solutions.
-        if tr_check >= tr_eta_2 and LfkViolated and not steSizeTouched or (steSizeTouched and costStart + penaltyStart < costEnd + penaltyL): # violated -- should revert update.
-        #if LfkViolated and not steSizeTouched or (steSizeTouched and costStart + penaltyStart < costEnd + penaltyL): # violated -- should revert update.
+        #if tr_check >= tr_eta_2 and LfkViolated and not steSizeTouched or (steSizeTouched and costStart + penaltyStart < costEnd + penaltyL): # violated -- should revert update.
+        #if tr_check >= tr_eta_2 and (LfkViolated and costStart + penaltyStart < costEnd + penaltyL): # violated -- should revert update.
+        if LfkViolated and not steSizeTouched or (steSizeTouched and costStart + penaltyStart < costEnd + penaltyL): # violated -- should revert update.
             steSizeTouched = True
             print(" |||||||  Lfk distance ", LfkDistance, " -nabla^Tdelta=" , -bp.dot(delta_p) - bl.dot(delta_l), " LipJ ", LipJ, " |||||||")
             #stepSize = stepSize * 2
             # other idea, initially we only add 1/2^k eg 0.125, times the needed value and inc if necessary, maybe do not add anything if not needed.
 
-            if normal_case_:
-                if True: # just adjusted: blockEigenvalueJltJl * L above s.t. it depends on L
-                    stepSize += blockEigMult * blockEigenvalueJltJl
-                    blockEigMult *= 2
-                    #blockEigenvalueJltJl.data *= 2 # appears slow but safe
-                    #stepSize.data = np.maximum(stepSize.data, blockEigenvalueJltJl.data) # else diagSparse of it
+            stepSize += blockEigMult * blockEigenvalueJltJl
+            blockEigMult *= 2
+            #blockEigenvalueJltJl.data *= 2 # appears slow but safe
+            #stepSize.data = np.maximum(stepSize.data, blockEigenvalueJltJl.data) # else diagSparse of it
 
-                    JltJlDiag = 1/L * stepSize.copy()
-                    penaltyStartConst = prox_rhs.dot(JltJlDiag * prox_rhs)
-                else:
-                    L = L * 2
+            if not newVersion:
+                JltJlDiag = 1/L * stepSize.copy()
+                penaltyStartConst = prox_rhs.dot(JltJlDiag * prox_rhs)
             else:
-                L = L * 2
+                penaltyStartConst = prox_rhs.dot(stepSize * prox_rhs)
+
         else:
             LfkViolated = False # hack, also above , or (steSizeTouched and costStart + penaltyStart < costEnd + penaltyL) is hack
             # replace by following: track cost, if next has lower cost -> continue. if next has higher cost return current.
@@ -1909,10 +1957,7 @@ def bundle_adjust(
         # ok maybe yes. I want to 'set those to a small value' only.
         if newForUnique: # does this make sense at all? just clear and manipulate s->u, s.t. v = 2u-s = u. new s = u (old), will set to new later.
             JltJlDiag = copy_selected_blocks(JltJlDiag, landmarks_only_in_cluster_, 3)
-            if normal_case_:
-                JltJlDiag = JltJlDiag + L * blockEigMult * blockEigenvalueJltJl
-            else: # usual version of L
-                JltJlDiag = JltJlDiag + 1e-4 * blockEigenvalueJltJl
+            JltJlDiag = JltJlDiag + L * blockEigMult * blockEigenvalueJltJl
 
         nabla_l_approx2 = JltJlDiag * (delta_l + prox_rhs)
 
@@ -2006,10 +2051,9 @@ def bundle_adjust(
     # u+ = u - Vli/2 [(W.transpose() * delta_p).flatten() + bl + Vl * (u - s)]
 
     # see diff_to_nabla_l3 = np.linalg.norm(2*L*nabla_l_approx-bl, 2) is smallest. only for computing DRE.
-    if normal_case_:
-        Rho = L * JltJlDiag #+ 1e-12 * Vl
-    else:
-        Rho = JltJlDiag #+ 1e-12 * Vl
+    Rho = L * JltJlDiag #+ 1e-12 * Vl
+    if newVersion:
+        Rho = stepSize #+ 1e-12 * Vl
 
     # TODO change 2
     # It appears as if we set entries to 1 for covered landmarks in Rho (those were set to almost 0)
@@ -2671,9 +2715,13 @@ else:
                 xk1 = rna_s
                 xk05= rna_s - bfgs_r
                 if it > 0:
-                    beta_nesterov = (it-1) / (it+2)
+                    t_k1 = 1 + np.sqrt(1 + 4 * t_k)/2
+                    beta_nesterov = (tk-1) / (t_k1+2) # 488120, 52 but 1k gain
+                    t_k = t_k1
+                    #beta_nesterov = (it-1) / (it+2) # usual
                     delta_v = xk1 - xk05 + beta_nesterov * delta_v
                 else:
+                    t_k = 1
                     delta_v = xk1 - xk05 # for momentum
                 dk = delta_v.copy()
                 dk_stepLength = np.linalg.norm(dk, 2)
