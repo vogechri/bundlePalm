@@ -30,7 +30,7 @@ FILE_NAME = "problem-16-22106-pre.txt.bz2"
 #FILE_NAME = "problem-237-154414-pre.txt.bz2"
 # acc. 59 / 0  ======== DRE BFGS ======  514126  ========= gain
 # acc. x 100: fluctuates
-FILE_NAME = "problem-173-111908-pre.txt.bz2"
+#FILE_NAME = "problem-173-111908-pre.txt.bz2"
 #FILE_NAME = "problem-135-90642-pre.txt.bz2"
 
 #BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/trafalgar/"
@@ -57,8 +57,8 @@ FILE_NAME = "problem-173-111908-pre.txt.bz2"
 # 444848.29      * 5
 # 114198.39]     * 10
 # 59 / 0  ======== DRE BFGS ======  548142  ========= gain  601, very bad drs cam 475k
-#BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/venice/"
-#FILE_NAME = "problem-52-64053-pre.txt.bz2"
+BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/venice/"
+FILE_NAME = "problem-52-64053-pre.txt.bz2"
 
 # 53 / 0  ======== DRE BFGS ======  291195  ========= gain  0, jumps around after
 #BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/final/"
@@ -568,22 +568,6 @@ def getJacSin(
     # print("res", res.shape) # 200,2, so N, x/y
     return (jac[0], jac[1], res)
 
-# bs : blocksize, eg 9 -> 9x9 or 3 -> 3x3 per block
-def blockInverse(M, bs):
-    Mi = M.copy()
-    if bs > 1:
-        bs2 = bs * bs
-        for i in range(int(M.data.shape[0] / bs2)):
-            mat = Mi.data[bs2 * i : bs2 * i + bs2].reshape(bs, bs)
-            #    print(i, " ", mat) # also symmetric? those are? WTF
-            imat = inv_dense(mat) # inv or pinv?
-            Mi.data[bs2 * i : bs2 * i + bs2] = imat.flatten()
-    else:
-        Mi = M.copy()
-        for i in range(int(M.data.shape[0])):
-            Mi.data[i : i + 1] = 1.0 / Mi.data[i : i + 1]
-    return Mi
-
 def ComputeDerivativeMatricesNew(x0_t_cam, x0_t_land, camera_indices_, point_indices_, torch_points_2d
 ):
     verbose = False
@@ -683,31 +667,47 @@ def buildResiduumNew(resX, resY) :
     res = np.concatenate(data)
     return res
 
+def check_symmetric(a, tol=1e-8):
+    return np.all(np.abs(a-a.T) < tol)
+
+# bs : blocksize, eg 9 -> 9x9 or 3 -> 3x3 per block
+def blockInverse(M, bs):
+    Mi = M.copy()
+    if bs > 1:
+        bs2 = bs * bs
+        for i in range(int(M.data.shape[0] / bs2)):
+            mat = Mi.data[bs2 * i : bs2 * i + bs2].reshape(bs, bs)
+            if not check_symmetric(mat):
+                mat = np.fliplr(mat)
+                imat = np.fliplr(inv_dense(mat)) # inv or pinv?
+            else:
+                imat = inv_dense(mat)
+            Mi.data[bs2 * i : bs2 * i + bs2] = imat.flatten()
+    else:
+        Mi = M.copy()
+        for i in range(int(M.data.shape[0])):
+            Mi.data[i : i + 1] = 1.0 / Mi.data[i : i + 1]
+    return Mi
+
 def blockEigenvalue(M, bs):
     Ei = np.zeros(M.shape[0])
     if bs > 1:
         bs2 = bs * bs
         for i in range(int(M.data.shape[0] / bs2)):
-            mat = M.data[bs2 * i : bs2 * i + bs2].reshape(bs, bs)
-            mat = np.fliplr(mat)
+            mat = M.data[bs2 * i : bs2 * i + bs2].reshape(bs, bs).copy()
+            if not check_symmetric(mat):
+                mat = np.fliplr(mat)
             # print(i, " ", mat)
             evs = eigvalsh(mat)
-            if evs[0] <0:
-               mat = np.fliplr(mat)
-               evs = eigvalsh(mat)
+            # if evs[0] <0:
+            #    mat = np.fliplr(mat)
+            #    evs = eigvalsh(mat)
 
             Ei[bs*i:bs*i+bs] = evs[bs-1] # largest
-            #Ei[bs*i:bs*i+bs] = max(1e7, evs[0]) # just does not work
-            #Ei[bs*i:bs*i+bs] = max(1e-4, evs[bs-3]) # smallest, maybe some cams only 1 lm in part?
         Ei = diag_sparse(Ei)
     else:
         Ei = M.copy()
 
-    # todo: eval super safe method since symmetric FAIL again.
-    # idea was that non isotropic structure might hurting bfgs. but as bad as without
-    #maxEv = np.max(Ei.data)
-    #Ei.data[:] = 0.1 * maxEv # 0.1 worked
-    #Ei.data[:] *= 0.125 #0.25 promising # 0.1 already too low. could try line-search idea
     return Ei
 
 def blockEigenvalueWhereNeeded(M, bs, thresh = 1e-6):
@@ -715,13 +715,14 @@ def blockEigenvalueWhereNeeded(M, bs, thresh = 1e-6):
     if bs > 1:
         bs2 = bs * bs
         for i in range(int(M.data.shape[0] / bs2)):
-            mat = M.data[bs2 * i : bs2 * i + bs2].reshape(bs, bs)
-            mat = np.fliplr(mat)
+            mat = M.data[bs2 * i : bs2 * i + bs2].reshape(bs, bs).copy()
+            if not check_symmetric(mat):
+                mat = np.fliplr(mat)
             # print(i, " ", mat)
             evs = eigvalsh(mat)
-            if evs[0] <0:
-               mat = np.fliplr(mat)
-               evs = eigvalsh(mat)
+            # if evs[0] <0:
+            #    mat = np.fliplr(mat)
+            #    evs = eigvalsh(mat)
 
             if evs[0]/evs[bs-1] < thresh: # all smaller horror.
                 Ei[bs*i:bs*i+bs] = evs[bs-1] # largest
@@ -745,17 +746,18 @@ def minmaxEv(M, bs):
     if bs > 1:
         bs2 = bs * bs
         for i in range(int(M.data.shape[0] / bs2)):
-            mat = M.data[bs2 * i : bs2 * i + bs2].reshape(bs, bs)
-            #mat = np.fliplr(mat)
+            mat = M.data[bs2 * i : bs2 * i + bs2].reshape(bs, bs).copy()
+            if not check_symmetric(mat):
+                mat = np.fliplr(mat)
             evs = eigvalsh(mat)
             maxE[i] = evs[bs-1]
             minE[i] = evs[0]
-            if evs[0] <0:
-               #print("evs[0] ", evs[0], " " ,mat) 
-               mat = np.fliplr(mat)
-               evs = eigvalsh(mat)
-               maxE[i] = evs[bs-1]
-               minE[i] = evs[0]
+            # if evs[0] <0:
+            #    #print("evs[0] ", evs[0], " " ,mat) 
+            #    mat = np.fliplr(mat)
+            #    evs = eigvalsh(mat)
+            #    maxE[i] = evs[bs-1]
+            #    minE[i] = evs[0]
 
     return maxE, minE
 
@@ -765,18 +767,18 @@ def blockEigenvalueFull(M, bs):
         bs2 = bs * bs
         for i in range(int(M.data.shape[0] / bs2)):
             #print(M.data.shape)
-            mat = M.data[bs2 * i : bs2 * i + bs2].transpose().reshape(bs, bs)
-            mat = np.fliplr(mat) # ! attention matrix can be flipped !
-            #print(i, " ", mat)
-            #print(M.indices[bs2 * i : bs2 * i + bs2])
-            evs = eigvalsh(mat)
-            evs, evv = eigh(mat) # just add something to 0 directions and return matrix
+            mat = M.data[bs2 * i : bs2 * i + bs2].reshape(bs, bs)
+            flip = False
+            if not check_symmetric(mat):
+                mat = np.fliplr(mat)
+                flip = True
+            evs, evv = eigh(mat)
             evs = np.fmax(evs, evs[bs-1] * 1e-6) # e.g. ?
             #print("evs ", evs)
             #print("evv ", evv)
             mat = evv.dot(diag_sparse(evs) * evv.transpose())
-            #print("mat ", mat)
-            mat = np.fliplr(mat)
+            if flip:
+                mat = np.fliplr(mat)
             Ei.data[bs2 * i : bs2 * i + bs2] = mat.flatten()
     else:
         Ei = M.copy()
@@ -1362,6 +1364,9 @@ def bundle_adjust(
     tr_eta_1 = 0.8
     tr_eta_2 = 0.25
 
+    # False: 59 / 0  ======== DRE BFGS ======  536487
+    newVersion = True
+
     it_ = 0
     funx0_st1 = lambda X0, X1, X2: \
         torchSingleResiduum(X0.view(-1, 9), X1.view(-1, 3), X2.view(-1, 2))
@@ -1402,9 +1407,9 @@ def bundle_adjust(
             stepSize = blockEigMult * blockEigenvalueJtJ + JJ_mult * JtJ.copy() # Todo '2 *' vs 1 by convex.
 
             maxE, minE = minmaxEv(JtJ, 9)
-            print("min max ev JtJ ", np.max(maxE), " ", np.max(minE), " ", np.min(maxE), " ",  np.min(minE), " spectral ", np.max(maxE/minE) )
+            print("minmax ev JtJ ", np.max(maxE), " ", np.max(minE), " ", np.min(maxE), " ",  np.min(minE), " spec ", np.max(maxE/minE) )
             maxE, minE = minmaxEv(stepSize, 9)
-            print("min max ev stepSize ", np.max(maxE), " ", np.max(minE), " ", np.min(maxE), " ",  np.min(minE), " spectral ", np.max(maxE/minE) )
+            print("minmax ev stepSz ", np.max(maxE), " ", np.max(minE), " ", np.min(maxE), " ",  np.min(minE), " spec ", np.max(maxE/minE) )
             print( "Mean diagonal of pseudo Hessian ",  np.sum(np.abs(JtJ.diagonal()).reshape(-1,9) / (1000 * n_cameras_), 0))
 
             # blockEigenvalueJtJ = blockEigenvalueFull(JtJ, 9)
@@ -1440,9 +1445,9 @@ def bundle_adjust(
             JltJlDiag = JltJl + 1e-6 * blockEigenvalueJltJl # play around at 173 example. 1e-8: 58 / 0  ======== DRE BFGS ======  518626, 1e-6 518 MUCH earlier
             # could do only where needed? smallest ev is indeed small?
             maxE, minE = minmaxEv(JltJl, 3)
-            print("min max ev JltJl ", np.max(maxE), " ", np.max(minE), " ", np.min(maxE), " ",  np.min(minE), " spectral ", np.max(maxE/minE) )
+            print("minmax ev JltJl ", np.max(maxE), " ", np.max(minE), " ", np.min(maxE), " ",  np.min(minE), " spec ", np.max(maxE/minE) )
             maxE, minE = minmaxEv(JltJlDiag, 3)
-            print("min max ev JltJlDiag ", np.max(maxE), " ", np.max(minE), " ", np.min(maxE), " ",  np.min(minE), " spectral ", np.max(maxE/minE) )
+            print("minmax ev JltJlD ", np.max(maxE), " ", np.max(minE), " ", np.min(maxE), " ",  np.min(minE), " spec ", np.max(maxE/minE) )
 
             JtJDiag = stepSize.copy() # max 1, 1/L, line-search dre fails -> increase
             #JtJDiag = diag_sparse(np.fmax(JtJ.diagonal(), 1e-4)) # diagonal is solid. slower than JtJ + something though
@@ -1452,7 +1457,7 @@ def bundle_adjust(
 
             # maybe better: 3x3 matrix sqrt(|M|_1 |M|inf) as diag. Yet this removes effect of 'L' getting small = large steps.
             # do i need to keep memory to ensure it remains >? or pre compute grad (and store)?
-            print(" min/max JtJ.diagonal() ", np.min(JtJ.diagonal()), " ", np.max(JtJ.diagonal()), " adjusted ", np.min(JtJDiag.diagonal()), " ", np.max(JtJDiag.diagonal()))
+            #print(" min/max JtJ.diag ", np.min(JtJ.diagonal()), " ", np.max(JtJ.diagonal()), " adjusted ", np.min(JtJDiag.diagonal()), " ", np.max(JtJDiag.diagonal()))
             #print("JltJlDiag.shape ", JltJlDiag.shape, JltJlDiag.shape[0]/3)
 
             JtJDiag = 1/L * JtJDiag # max 1, 1/L, line-search dre fails -> increase
@@ -1470,6 +1475,15 @@ def bundle_adjust(
             costStart = np.sum(fx0**2)
             penaltyStartConst = prox_rhs.dot(JtJDiag * prox_rhs)
 
+            if newVersion:
+                stepSize = JJ_mult * JtJ.copy() + blockEigMult * blockEigenvalueJtJ
+                JtJDiag = JtJ.copy() + 1e-4 * blockEigMult * blockEigenvalueJtJ
+                maxE, minE = minmaxEv(stepSize, 9)
+                print("minmax ev stepSz ", np.max(maxE), " ", np.max(minE), " ", np.min(maxE), " ",  np.min(minE), " spec ", np.max(maxE/minE))
+                maxE, minE = minmaxEv(JtJDiag, 9)
+                print("minmax ev JltJlD ", np.max(maxE), " ", np.max(minE), " ", np.min(maxE), " ",  np.min(minE), " spec ", np.max(maxE/minE))
+                penaltyStartConst = prox_rhs.dot(stepSize * prox_rhs)
+
         # start_ = time.time()
         Vl = JltJl + L * JltJlDiag
         Ul = JtJ + L * JtJDiag
@@ -1480,8 +1494,14 @@ def bundle_adjust(
         # L * 2 * JltJlDiag * (delta_v) + 2 L * JltJlDiag * (x0_l_ - s_l_) = 0
         # added cost is, 2 L * (delta_v^T JltJlDiag * (x0_l_ - s_l_) + L * (s_l_ - x0_l_)^T  JltJlDiag * (s_l_ - x0_l_)
 
+        if newVersion:
+            Ul = JtJ + L * JtJDiag + stepSize
+            penaltyStart = penaltyStartConst
+
         Vli = blockInverse(Vl, 3)
         bp_s = bp + L * JtJDiag * prox_rhs # TODO: + or -. '+', see above
+        if newVersion:
+            bp_s = bp + stepSize * prox_rhs
         bS = (bp_s - W * Vli * bl).flatten()
 
         #delta_p = -solvePowerIts(Ul, W, Vli, bS, powerits)
@@ -1490,6 +1510,9 @@ def bundle_adjust(
         delta_l = -Vli * ((W.transpose() * delta_p).flatten() + bl)
         penaltyL = L * (delta_l).dot(JltJlDiag * delta_l)
         penaltyP = L * (delta_p + prox_rhs).dot(JtJDiag * (delta_p + prox_rhs))
+        if newVersion:
+            penaltyP = L * delta_p.dot(JtJDiag * delta_p) + (delta_p + prox_rhs).dot(stepSize * (delta_p + prox_rhs))
+
         # end_ = time.time()
         # print("Lm step took ", end - start, "s")
 
@@ -1527,9 +1550,14 @@ def bundle_adjust(
             LfkDiagonal = \
                 2 * (costEnd - costStart - bp.dot(delta_p) - bl.dot(delta_l)) \
                 / (delta_l.dot(nablaXl) + delta_p.dot(nablaXp))
-            LfkDistance  = costEnd - (costStart + bp.dot(delta_p) + bl.dot(delta_l) + (delta_l.dot(nablaXl) + delta_p.dot(nablaXp)) / 2)
+
+            Lfklin = (costEnd - costStart - bp.dot(delta_p) - bl.dot(delta_l))
+            if newVersion:
+                Lfklin = Lfklin + (delta_p + prox_rhs).dot(stepSize * (delta_p + prox_rhs)) - penaltyStartConst
+
+            LfkDistance  = Lfklin - (delta_l.dot(nablaXl) + delta_p.dot(nablaXp)) / 2
             LfkViolated = LfkDistance > 0
-            LfkSafe = (costEnd - costStart - bp.dot(delta_p) - bl.dot(delta_l)) < 0 # for any phi ok.
+            LfkSafe = Lfklin < 0 # for any phi ok.
         else:
             # after:
             # f(x) <= f(y) + <nabla(f(y) x-y> + Lf/2 |x-y|^2
@@ -1548,10 +1576,13 @@ def bundle_adjust(
         if tr_check < tr_eta_2: # and False: # TR should not help here. Maybe apply differently? TR checks if approx w. JtJ is ok within region.
             print(" //////  tr_check " , tr_check, " Lfk distance ", LfkDistance, " -nabla^Tdelta=" , -bp.dot(delta_p) - bl.dot(delta_l), " /////")
             L = L * 2
-            JtJDiag = 1/2 * JtJDiag # why that? tr only for landmarks here..
+            if not newVersion:
+                JtJDiag = 1/2 * JtJDiag # why that? tr only for landmarks here..
 
         #LfkViolated = False # todo remove?
-        if tr_check >= tr_eta_2 and LfkViolated: # violated -- should revert update.
+        #if tr_check >= tr_eta_2 and LfkViolated: # violated -- should revert update.
+        if tr_check >= tr_eta_2 and LfkViolated and not steSizeTouched or (steSizeTouched and costStart + penaltyStart < costEnd + penaltyL): # violated -- should revert update.
+        #if LfkViolated and not steSizeTouched or (steSizeTouched and costStart + penaltyStart < costEnd + penaltyL): # violated -- should revert update.
             steSizeTouched = True
             print(" |||||||  Lfk distance ", LfkDistance, " -nabla^Tdelta=" , -bp.dot(delta_p) - bl.dot(delta_l), " LipJ ", LipJ, " |||||||")
             #stepSize = stepSize * 2
@@ -1572,12 +1603,18 @@ def bundle_adjust(
             #LipJ += 0.2 EXTERNALLY -- we do not know if dre increases.
             #stepSize = 1. * (blockEigMult * blockEigenvalueJtJ + J_scale * JtJ.copy()) # Todo '2 *' vs 1 by convex.
 
-            JtJDiag = 1/L * stepSize.copy()
-            penaltyStartConst = prox_rhs.dot(JtJDiag * prox_rhs)
+            if not newVersion:
+                JtJDiag = 1/L * stepSize.copy()
+                penaltyStartConst = prox_rhs.dot(JtJDiag * prox_rhs)
+            else:
+                penaltyStartConst = prox_rhs.dot(stepSize * prox_rhs)
+        else:
+            LfkViolated = False # hack, also above , or (steSizeTouched and costStart + penaltyStart < costEnd + penaltyL) is hack
 
         if LfkSafe and not steSizeTouched:
             L = L / 2
-            JtJDiag = 2 * JtJDiag # we return this maybe -- of course stupid to do in a release version
+            if not newVersion:
+                JtJDiag = 2 * JtJDiag # we return this maybe -- of course stupid to do in a release version
 
         # version with penalty check for ADMM convergence / descent lemma. Problem: slower?
         if costStart + penaltyStart < costEnd + penaltyL or LfkViolated:
@@ -1633,6 +1670,8 @@ def bundle_adjust(
 
     nabla_p = bp.copy()
     Rho = L * JtJDiag #+ 1e-12 * Ul
+    if not newVersion:
+        Rho = stepSize
     # Rho = blockEigenvalueJtJ + 1e-12 * Ul # issue: needs to be same as drs penalty. else slow ?!
     # Rho = 2 * JtJ.copy() + 1e-12 * Ul # this here means we just use safe bet. Likely multiplier, '2' does not matter anyway. stable but slower. FUCK
 
@@ -1939,13 +1978,13 @@ x0_p = x0_p.reshape(n_cameras, 9)
 
 # 1. take problem and split, sort indices by camera, define local global map and test it.
 startL = 1
-kClusters = 10#3
+kClusters = 3 # 10
 innerIts = 1  # change to get an update, not 1 iteration
-its = 60
+its = 20
 cost = np.zeros(kClusters)
 lastCost = 1e20
 lastCostDRE = 1e20
-basic_version = False # accelerated or basic
+basic_version = True # accelerated or basic
 sequential = True
 linearize_at_last_solution = True # linearize at uk or v. maybe best to check energy. at u or v. DRE:
 lib = ctypes.CDLL("./libprocess_clusters.so")

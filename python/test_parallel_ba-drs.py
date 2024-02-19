@@ -1695,16 +1695,15 @@ def bundle_adjust(
 
             # idea stepSize is EXTRA on prox part and 'fixed'. unless DL fails we need to add something. use blockEigenvalueJltJl as before? or increase JJ_mult?
             if newVersion:
-                stepSize = JJ_mult * JltJl.copy() + blockEigMult * blockEigenvalueJltJl # is  + blockEigMult * blockEigenvalueJltJl needed? -- should not be too small!!!
-                JltJlDiag = JltJl.copy() + 1e-6 * blockEigMult * blockEigenvalueJltJl # not that important what to add ?!
+                stepSize = JJ_mult * JltJl.copy() + blockEigMult * blockEigenvalueJltJl
+                JltJlDiag = JltJl.copy() + 1e-6 * blockEigMult * blockEigenvalueJltJl
                 if newForUnique:
                     stepSize = copy_selected_blocks(stepSize, landmarks_only_in_cluster_, 3)
-                    penaltyStartConst = prox_rhs.dot(stepSize * prox_rhs)
+                penaltyStartConst = prox_rhs.dot(stepSize * prox_rhs)
                 maxE, minE = minmaxEv(stepSize, 3)
                 print("min max ev stepSize ", np.max(maxE), " ", np.max(minE), " ", np.min(maxE), " ",  np.min(minE), " spectral ", np.max(maxE/minE))
                 maxE, minE = minmaxEv(JltJlDiag, 3)
                 print("min max ev JltJlDiag ", np.max(maxE), " ", np.max(minE), " ", np.min(maxE), " ",  np.min(minE), " spectral ", np.max(maxE/minE))
-
 
         # start_ = time.time()
         Vl = JltJl + L * JltJlDiag
@@ -1714,7 +1713,7 @@ def bundle_adjust(
         if newVersion:
             Vl = JltJl + L * JltJlDiag + stepSize
             penaltyStart = penaltyStartConst
-            maxE, minE = minmaxEv(Vl, 3)
+            #maxE, minE = minmaxEv(Vl, 3)
             #print("min max ev Vl ", np.max(maxE), " ", np.max(minE), " ", np.min(maxE), " ",  np.min(minE), " spectral ", np.max(maxE/minE))
 
         # cost added is + L * (delta_v - s_l_ + x0_l_)^T  JltJlDiag * (delta_v - s_l_ + x0_l_)
@@ -1776,9 +1775,14 @@ def bundle_adjust(
             LfkDiagonal = \
                 2 * (costEnd - costStart - bp.dot(delta_p) - bl.dot(delta_l)) \
                 / (delta_l.dot(nablaXl) + delta_p.dot(nablaXp))
-            LfkDistance  = costEnd - (costStart + bp.dot(delta_p) + bl.dot(delta_l) + (delta_l.dot(nablaXl) + delta_p.dot(nablaXp)) / 2)
+
+            Lfklin = (costEnd - costStart - bp.dot(delta_p) - bl.dot(delta_l))
+            if newVersion:
+                Lfklin = Lfklin + (delta_p + prox_rhs).dot(stepSize * (delta_p + prox_rhs))  - penaltyStartConst
+
+            LfkDistance  = Lfklin - (delta_l.dot(nablaXl) + delta_p.dot(nablaXp)) / 2
             LfkViolated = LfkDistance > 0
-            LfkSafe = (costEnd - costStart - bp.dot(delta_p) - bl.dot(delta_l)) < 0 # for any phi ok.
+            LfkSafe = Lfklin < 0 # for any phi ok.
         else:
             # after:
             # f(x) <= f(y) + <nabla(f(y) x-y> + Lf/2 |x-y|^2
@@ -1814,9 +1818,9 @@ def bundle_adjust(
 
         # todo: store last blockEigenvalueJltJl multiplier in/out current L used but not really.
         # option 1: does not work, now subproblem gets 's' forcing much worse solutions.
-        #if tr_check >= tr_eta_2 and LfkViolated and not steSizeTouched or (steSizeTouched and costStart + penaltyStart < costEnd + penaltyL): # violated -- should revert update.
+        if tr_check >= tr_eta_2 and LfkViolated and not steSizeTouched or (steSizeTouched and costStart + penaltyStart < costEnd + penaltyL): # violated -- should revert update.
         #if tr_check >= tr_eta_2 and (LfkViolated and costStart + penaltyStart < costEnd + penaltyL): # violated -- should revert update.
-        if LfkViolated and not steSizeTouched or (steSizeTouched and costStart + penaltyStart < costEnd + penaltyL): # violated -- should revert update.
+        #if LfkViolated and not steSizeTouched or (steSizeTouched and costStart + penaltyStart < costEnd + penaltyL): # violated -- should revert update.
             steSizeTouched = True
             print(" |||||||  Lfk distance ", LfkDistance, " -nabla^Tdelta=" , -bp.dot(delta_p) - bl.dot(delta_l), " LipJ ", LipJ, " |||||||")
             #stepSize = stepSize * 2
@@ -1839,7 +1843,8 @@ def bundle_adjust(
 
         if LfkSafe and not steSizeTouched:
             L = L / 2
-            JltJlDiag = 2 * JltJlDiag # we return this maybe -- of course stupid to do in a release version
+            if not newVersion:
+                JltJlDiag = 2 * JltJlDiag # we return this maybe -- of course stupid to do in a release version
 
         # if LfkDiagonal < -2 and steSizeTouched:
         #     LfkDiagonal = -2
