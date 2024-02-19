@@ -8,12 +8,13 @@ from joblib import Parallel, delayed
 from scipy.sparse import csr_array, csr_matrix
 from scipy.sparse import diags as diag_sparse
 from scipy.sparse.linalg import inv as inv_sparse
-from numpy.linalg import inv as inv_dense
+from numpy.linalg import pinv as inv_dense
+from numpy.linalg import eigvalsh
 
 # idea reimplement projection with torch to get a jacobian -> numpy then 
 import torch
 import math
-import open3d as o3d
+#import open3d as o3d
 from torch.autograd.functional import jacobian
 from torch import tensor, from_numpy
 
@@ -31,6 +32,7 @@ FILE_NAME = "problem-49-7776-pre.txt.bz2"
 BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/dubrovnik/"
 #FILE_NAME = "problem-16-22106-pre.txt.bz2"
 # 50 it. cost ext    4262474 .. also crap?
+# 28 it. cost 0       841047 with blockeig
 FILE_NAME = "problem-356-226730-pre.txt.bz2"
 #FILE_NAME = "problem-237-154414-pre.txt.bz2"
 #FILE_NAME = "problem-173-111908-pre.txt.bz2" # ex where power its are worse ->493669
@@ -328,12 +330,13 @@ def torchResiduum(x0T, n_cameras, n_points, camera_indices, point_indices, p2d) 
 def torchSingleResiduum(camera_params, point_params, p2d) :
     angle_axis = camera_params[:,:3]
     points_cam = AngleAxisRotatePoint(angle_axis, point_params)
-    points_cam = points_cam + camera_params[:,3:6]
+    points_cam[:,0:2] = points_cam[:,0:2] + camera_params[:, 3:5] #* 20
+    points_cam[:,2] = points_cam[:,2] + camera_params[:, 5] #* 100
     points_projX = -points_cam[:, 0] / points_cam[:, 2]
     points_projY = -points_cam[:, 1] / points_cam[:, 2]
-    f  = camera_params[:, 6]
-    k1 = camera_params[:, 7]
-    k2 = camera_params[:, 8]
+    f = camera_params[:, 6] #* 3000
+    k1 = camera_params[:, 7] #* 10
+    k2 = camera_params[:, 8] #* 20
     r2 = points_projX*points_projX + points_projY*points_projY
     distortion = 1. + r2 * (k1 + k2 * r2)
     points_reprojX = points_projX * distortion * f
@@ -346,12 +349,13 @@ def torchSingleResiduum(camera_params, point_params, p2d) :
 def torchSingleResiduumX(camera_params, point_params, p2d) :
     angle_axis = camera_params[:,:3]
     points_cam = AngleAxisRotatePoint(angle_axis, point_params)
-    points_cam = points_cam + camera_params[:,3:6]
+    points_cam[:,0:2] = points_cam[:,0:2] + camera_params[:, 3:5] #* 20
+    points_cam[:,2] = points_cam[:,2] + camera_params[:, 5] #* 100
     points_projX = -points_cam[:, 0] / points_cam[:, 2]
     points_projY = -points_cam[:, 1] / points_cam[:, 2]
-    f  = camera_params[:, 6]
-    k1 = camera_params[:, 7]
-    k2 = camera_params[:, 8]
+    f = camera_params[:, 6] #* 3000
+    k1 = camera_params[:, 7] #* 10
+    k2 = camera_params[:, 8] #* 20
     r2 = points_projX*points_projX + points_projY*points_projY
     distortion = 1. + r2 * (k1 + k2 * r2)
     points_reprojX = points_projX * distortion * f
@@ -361,12 +365,13 @@ def torchSingleResiduumX(camera_params, point_params, p2d) :
 def torchSingleResiduumY(camera_params, point_params, p2d) :
     angle_axis = camera_params[:,:3]
     points_cam = AngleAxisRotatePoint(angle_axis, point_params)
-    points_cam = points_cam + camera_params[:,3:6]
+    points_cam[:,0:2] = points_cam[:,0:2] + camera_params[:, 3:5] #* 20
+    points_cam[:,2] = points_cam[:,2] + camera_params[:, 5] #* 100
     points_projX = -points_cam[:, 0] / points_cam[:, 2]
     points_projY = -points_cam[:, 1] / points_cam[:, 2]
-    f  = camera_params[:, 6]
-    k1 = camera_params[:, 7]
-    k2 = camera_params[:, 8]
+    f = camera_params[:, 6] #* 3000
+    k1 = camera_params[:, 7] #* 10
+    k2 = camera_params[:, 8] #* 20
     r2 = points_projX*points_projX + points_projY*points_projY
     distortion = 1. + r2 * (k1 + k2 * r2)
     points_reprojY = points_projY * distortion * f
@@ -446,6 +451,12 @@ def torchSingleResiduumY(camera_params, point_params, p2d) :
 #     return residual
 
 cameras, points_3d, camera_indices, point_indices, points_2d = read_bal_data(FILE_NAME)
+
+# cameras[:,3:6] = cameras[:,3:6] / 20
+# cameras[:,5] = cameras[:,5] / 100
+# cameras[:,6] = cameras[:,6] / 3000
+# cameras[:,7] = cameras[:,7] / 10
+# cameras[:,8] = cameras[:,8] / 20
 
 # # better define function. data in as batch -> normal gradient.
 # # Dp this with the jacobian ?!
@@ -1175,13 +1186,24 @@ def stop_criterion(delta, delta_i, i):
     return (i+1) * delta_i / delta < eps
 
 # |f(x0) + J(xo) * delta|^2 + lambda | [Ip,Il] * delta|^2
-# iterate over this: 
 
-# Lm step took  0.11277008056640625 s
-# 3 it. cost 0      3535975824.167471
-# 3 it. cost 0/new  3290971702.6593885
-# 3 it. cost 1      3315161329.207933  cost compute took  0.00623321533203125 s
-#  Test  258.96993952164456   148.9847721007778   538.8031130609922
+def blockEigenvalue(M, bs):
+    Ei = np.zeros(M.shape[0])
+    if bs > 1:
+        bs2 = bs * bs
+        for i in range(int(M.data.shape[0] / bs2)):
+            mat = M.data[bs2 * i : bs2 * i + bs2].reshape(bs, bs)
+            mat = np.fliplr(mat)
+            #print(i, " ", mat) # kind of flipped, so eigenval is crap.
+            evs = eigvalsh(mat)
+            if evs[0] <0:
+                mat = np.fliplr(mat)
+                evs = eigvalsh(mat)
+            Ei[bs*i:bs*i+bs] = evs[bs-1]
+        Ei = diag_sparse(Ei)
+    else:
+        Ei = M.copy()
+    return Ei
 
 # fill lists G and F, with g and f = g - old g, sets of size m, 
 # at position it % m, c^t compute F^tF c + lamda (c - 1/k)^2, sum c=1
@@ -1250,21 +1272,21 @@ def RNA(G, F, g, f, it, m, Fe, fe, lamda, old_c):
     # test
     verbose = False
     if verbose:
-      if it > 0:
-          if it < m:
-              #print("old_c pre append", old_c)
-              old_c = np.append(old_c, np.array([0]), axis=0)
-              #print("old_c append", old_c)
-          else:
-             old_c[it % m] = 0
-          #print("old_c ", old_c)
-          #print("old_c ", old_c.shape)
-          old_extr_cost = np.linalg.norm(Fs.dot(old_c), 2)
-          old_c = c # current
-      else:
-         old_extr_cost = -1
-         old_c = c
-      print(" Test Ex/Last/old", np.linalg.norm(extrapolationF,2), " ",  np.linalg.norm(f,2), " ", old_extr_cost)
+        if it > 0:
+            if it < m:
+                #print("old_c pre append", old_c)
+                old_c = np.append(old_c, np.array([0]), axis=0)
+                #print("old_c append", old_c)
+            else:
+               old_c[it % m] = 0
+            #print("old_c ", old_c)
+            #print("old_c ", old_c.shape)
+            old_extr_cost = np.linalg.norm(Fs.dot(old_c), 2)
+            old_c = c # current
+        else:
+            old_extr_cost = -1
+            old_c = c
+        print(" Test Ex/Last/old", np.linalg.norm(extrapolationF,2), " ",  np.linalg.norm(f,2), " ", old_extr_cost)
     print("c ", c, " ", c.shape)
 
     # shape utter non sense
@@ -1368,31 +1390,18 @@ def rerender(vis, geometry, cameras, landmarks, save_image):
         vis.capture_screen_image("temp_%04d.jpg" % i)
     #vis.destroy_window()
 
-o3d_defined = True
+o3d_defined = False
 if o3d_defined:
     o3d.utility.set_verbosity_level(o3d.utility.VerbosityLevel.Debug)
     vis = o3d.visualization.Visualizer()
     vis.create_window()
     geometry = o3d.geometry.PointCloud()
 
-    #geometry.points = o3d.utility.Vector3dVector(points_3d[0:65000,:])
-    #geometry.points = o3d.utility.Vector3dVector(points_3d[70500:,:])
-    #print(points_3d[70480:70485:,:])
-    #points_3d[70483,:] = np.array([0,0,0]) # bad points to vis. does anything?
-    #print(points_3d[70483,:])
-
-    #points_3d[temp > 1e6,:] = np.array([0,0,0])
-    #am = np.argsort(temp)
-    #print(am, " ", points_3d[am,:] )
-    #exit()
-    #geometry.points = o3d.utility.Vector3dVector(points_3d[65000:66500:,:])
     geometry.points = o3d.utility.Vector3dVector(points_3d)
     vis.add_geometry(geometry)
     geometry_cam = o3d.geometry.PointCloud()
     geometry_cam.points = o3d.utility.Vector3dVector(cameras[:,3:6])
     vis.add_geometry(geometry_cam,  reset_bounding_box=False)
-
-    #o3d.visualization.draw_geometries([geometry])    # Visualize point cloud 
     save_image = False
     #exit()
 
@@ -1474,9 +1483,15 @@ while it < iterations:
         # maybe for both this or for both above diag idea (like in papers).
         # from 1e-9 to 1e-4 -> lower energy for problem-135-90642
         #J_eps = 1e-4 # could even depend on L? NO.
-        J_eps = 1e-4
-        JltJlDiag = JltJl + J_eps * diag_sparse(np.ones(JltJl.shape[0]))
-        JtJDiag   = JtJ + J_eps * diag_sparse(np.ones(JtJ.shape[0]))
+        does_not_scale_with_verybadly_scaled_problems = False
+        if does_not_scale_with_verybadly_scaled_problems:
+            J_eps = 1e-4
+            JltJlDiag = JltJl + J_eps * diag_sparse(np.ones(JltJl.shape[0]))
+            JtJDiag   = JtJ + J_eps * diag_sparse(np.ones(JtJ.shape[0]))
+        else:
+            J_eps_block = 1e-6
+            JltJlDiag = JltJl + J_eps_block * blockEigenvalue(JltJl, 3)
+            JtJDiag   = JtJ + J_eps_block * blockEigenvalue(JtJ, 9)
 
         if verbose:
             print("J_pose ", J_pose.shape)
@@ -1520,11 +1535,11 @@ while it < iterations:
     bl = J_land.transpose() * fx0
 
     if verbose:
-       print("W", W.shape)
-       print("Vl", Vl.shape, " ", Vl.data.shape, "non zeros in 3x3 blocks")
-       print("Ul", Ul.shape)
-       print("bp", bp.shape)
-       print("bl", bl.shape)
+        print("W", W.shape)
+        print("Vl", Vl.shape, " ", Vl.data.shape, "non zeros in 3x3 blocks")
+        print("Ul", Ul.shape)
+        print("bp", bp.shape)
+        print("bl", bl.shape)
 
     Vli = blockInverse(Vl, 3)
     bS = (bp - W * Vli * bl).flatten()
@@ -1533,7 +1548,7 @@ while it < iterations:
     # recall the pcg trick row sum col sum from left / right
     # then L <= 1? diag_sparse(1./np.abs(A).sum(axis=0)) and diag_sparse(1./np.abs(A).sum(axis=1))
     # but since Ul ( I - bla ) is sym -> both are same !?
-    # even only U suffices? 
+    # even only U suffices?
 
     if useInvSolver:
         S = Ul - W * Vli * W.transpose() # = Ul - Jp^t J_l * (Jl^t Jl)^-1 J_l^T Jp^t

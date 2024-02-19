@@ -29,6 +29,7 @@ BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/dubrovnik/"
 FILE_NAME = "problem-16-22106-pre.txt.bz2"
 # large on1: 59 / 1  ======== DRE BFGS ======  9222786 FUCK, got stuck
 # 36 / 0  ======== DRE BFGS ======  885868  ========= gain  973 with JtJ blockEig !
+# 28 it. cost 0      841047 test_base
 #FILE_NAME = "problem-356-226730-pre.txt.bz2" # large dub, play with ideas: cover, etc
 #FILE_NAME = "problem-237-154414-pre.txt.bz2"
 #59 / 0  ======== DRE BFGS ======  502663  ========= gain  122 ====

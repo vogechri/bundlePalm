@@ -1342,12 +1342,11 @@ def bundle_adjust(
     blockEigMult = 1e-5 # 1e-3 was used before, too high low precision.
     # 1e-8 fluctuates but faster 1e-6. increase JJ_mult?
     # problem dies at 173 example. 1e-5 ok more not.
-    # blockEigMult = 1e-0
     J_eps = 1e-4
     minimumL = 1e-6
     minDiag = 1e-5
     L = max(minimumL, L_in_cluster_)
-    JJ_mult = 2 # TODO does this matter?
+    JJ_mult = 4 # TODO 4 / 2. 4 should suffice ecerywhere?
     updateJacobian = True
     # holds all! landmarks, only use fraction likely no matter not present in cams anyway.
     x0_l_ = points_3d_in.flatten()
@@ -1940,7 +1939,7 @@ x0_p = x0_p.reshape(n_cameras, 9)
 
 # 1. take problem and split, sort indices by camera, define local global map and test it.
 startL = 1
-kClusters = 3
+kClusters = 10#3
 innerIts = 1  # change to get an update, not 1 iteration
 its = 60
 cost = np.zeros(kClusters)
