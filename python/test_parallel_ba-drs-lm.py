@@ -32,7 +32,7 @@ FILE_NAME = "problem-16-22106-pre.txt.bz2"
 # acc. 59 / 0  ======== DRE BFGS ======  514126  ========= gain
 # acc. x 100: fluctuates
 FILE_NAME = "problem-173-111908-pre.txt.bz2"
-#FILE_NAME = "problem-135-90642-pre.txt.bz2"
+#FILE_NAME = "problem-135-90642-pre.txt.bz2" # this appears incredibly bad
 
 #BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/trafalgar/"
 # 71k

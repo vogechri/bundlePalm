@@ -1778,7 +1778,7 @@ def bundle_adjust(
 
             Lfklin = (costEnd - costStart - bp.dot(delta_p) - bl.dot(delta_l))
             if newVersion:
-                Lfklin = Lfklin + (delta_p + prox_rhs).dot(stepSize * (delta_p + prox_rhs))  - penaltyStartConst
+                Lfklin = Lfklin + (delta_l + prox_rhs).dot(stepSize * (delta_l + prox_rhs)) - penaltyStartConst
 
             LfkDistance  = Lfklin - (delta_l.dot(nablaXl) + delta_p.dot(nablaXp)) / 2
             LfkViolated = LfkDistance > 0
