@@ -1558,6 +1558,7 @@ def bundle_adjust(
 
             Lfklin = (costEnd - costStart - bp.dot(delta_p) - bl.dot(delta_l))
             if newVersion:
+                nablaXp = JtJDiag * delta_p # idea here 1/L is dropped so no need to correct this.
                 Lfklin = Lfklin + (delta_p + prox_rhs).dot(stepSize * (delta_p + prox_rhs)) - penaltyStartConst
 
             LfkDistance  = Lfklin - (delta_l.dot(nablaXl) + delta_p.dot(nablaXp)) / 2
