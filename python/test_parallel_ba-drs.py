@@ -1841,7 +1841,8 @@ def bundle_adjust(
             LfkViolated = False # hack, also above , or (steSizeTouched and costStart + penaltyStart < costEnd + penaltyL) is hack
             # replace by following: track cost, if next has lower cost -> continue. if next has higher cost return current.
 
-        if LfkSafe and not steSizeTouched:
+        #if LfkSafe and not steSizeTouched:
+        if (newVersion and tr_check >= tr_eta_1) or (not newVersion and LfkSafe and not steSizeTouched):
             L = L / 2
             if not newVersion:
                 JltJlDiag = 2 * JltJlDiag # we return this maybe -- of course stupid to do in a release version

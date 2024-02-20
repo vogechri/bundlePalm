@@ -26,11 +26,12 @@ FILE_NAME = "problem-49-7776-pre.txt.bz2"
 
 BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/dubrovnik/"
 FILE_NAME = "problem-16-22106-pre.txt.bz2"
+#FILE_NAME = "problem-88-64298-pre.txt.bz2"
 #FILE_NAME = "problem-356-226730-pre.txt.bz2" # large dub, play with ideas: cover, etc
 #FILE_NAME = "problem-237-154414-pre.txt.bz2"
 # acc. 59 / 0  ======== DRE BFGS ======  514126  ========= gain
 # acc. x 100: fluctuates
-#FILE_NAME = "problem-173-111908-pre.txt.bz2"
+FILE_NAME = "problem-173-111908-pre.txt.bz2"
 #FILE_NAME = "problem-135-90642-pre.txt.bz2"
 
 #BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/trafalgar/"
@@ -57,8 +58,8 @@ FILE_NAME = "problem-16-22106-pre.txt.bz2"
 # 444848.29      * 5
 # 114198.39]     * 10
 # 59 / 0  ======== DRE BFGS ======  548142  ========= gain  601, very bad drs cam 475k
-BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/venice/"
-FILE_NAME = "problem-52-64053-pre.txt.bz2"
+#BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/venice/"
+#FILE_NAME = "problem-52-64053-pre.txt.bz2"
 
 # 53 / 0  ======== DRE BFGS ======  291195  ========= gain  0, jumps around after
 #BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/final/"
@@ -1348,7 +1349,7 @@ def bundle_adjust(
     minimumL = 1e-6
     minDiag = 1e-5
     L = max(minimumL, L_in_cluster_)
-    JJ_mult = 4 # TODO 4 / 2. 4 should suffice ecerywhere?
+    JJ_mult = 4 # TODO 4 / 2. 4 should suffice everywhere?
     updateJacobian = True
     # holds all! landmarks, only use fraction likely no matter not present in cams anyway.
     x0_l_ = points_3d_in.flatten()
@@ -1366,6 +1367,8 @@ def bundle_adjust(
 
     # False: 59 / 0  ======== DRE BFGS ======  536487
     newVersion = True
+    if newVersion:
+        JJ_mult = 1
 
     it_ = 0
     funx0_st1 = lambda X0, X1, X2: \
@@ -1444,12 +1447,13 @@ def bundle_adjust(
             #blockEigenvalueJltJl = blockEigenvalueWhereNeeded(JltJl, 3) # nope not at all.
             JltJlDiag = JltJl + 1e-6 * blockEigenvalueJltJl # play around at 173 example. 1e-8: 58 / 0  ======== DRE BFGS ======  518626, 1e-6 518 MUCH earlier
             # could do only where needed? smallest ev is indeed small?
+            JtJDiag = stepSize.copy() # max 1, 1/L, line-search dre fails -> increase
+
             maxE, minE = minmaxEv(JltJl, 3)
             print("minmax ev JltJl ", np.max(maxE), " ", np.max(minE), " ", np.min(maxE), " ",  np.min(minE), " spec ", np.max(maxE/minE) )
             maxE, minE = minmaxEv(JltJlDiag, 3)
             print("minmax ev JltJlD ", np.max(maxE), " ", np.max(minE), " ", np.min(maxE), " ",  np.min(minE), " spec ", np.max(maxE/minE) )
 
-            JtJDiag = stepSize.copy() # max 1, 1/L, line-search dre fails -> increase
             #JtJDiag = diag_sparse(np.fmax(JtJ.diagonal(), 1e-4)) # diagonal is solid. slower than JtJ + something though
             if newForUnique:
                 JtJDiag = copy_selected_blocks(JtJDiag, poses_only_in_cluster_, 3)
@@ -1478,6 +1482,7 @@ def bundle_adjust(
             if newVersion:
                 stepSize = JJ_mult * JtJ.copy() + blockEigMult * blockEigenvalueJtJ
                 JtJDiag = JtJ.copy() + 1e-4 * blockEigMult * blockEigenvalueJtJ
+                #JtJDiag = 1e-4 * blockEigMult * blockEigenvalueJtJ # this could also work?
                 maxE, minE = minmaxEv(stepSize, 9)
                 print("minmax ev stepSz ", np.max(maxE), " ", np.max(minE), " ", np.min(maxE), " ",  np.min(minE), " spec ", np.max(maxE/minE))
                 maxE, minE = minmaxEv(JtJDiag, 9)
@@ -1611,7 +1616,7 @@ def bundle_adjust(
         else:
             LfkViolated = False # hack, also above , or (steSizeTouched and costStart + penaltyStart < costEnd + penaltyL) is hack
 
-        if LfkSafe and not steSizeTouched:
+        if (newVersion and tr_check >= tr_eta_1) or (not newVersion and LfkSafe and not steSizeTouched):
             L = L / 2
             if not newVersion:
                 JtJDiag = 2 * JtJDiag # we return this maybe -- of course stupid to do in a release version
@@ -1670,7 +1675,7 @@ def bundle_adjust(
 
     nabla_p = bp.copy()
     Rho = L * JtJDiag #+ 1e-12 * Ul
-    if not newVersion:
+    if newVersion:
         Rho = stepSize
     # Rho = blockEigenvalueJtJ + 1e-12 * Ul # issue: needs to be same as drs penalty. else slow ?!
     # Rho = 2 * JtJ.copy() + 1e-12 * Ul # this here means we just use safe bet. Likely multiplier, '2' does not matter anyway. stable but slower. FUCK
@@ -1980,11 +1985,11 @@ x0_p = x0_p.reshape(n_cameras, 9)
 startL = 1
 kClusters = 3 # 10
 innerIts = 1  # change to get an update, not 1 iteration
-its = 20
+its = 60
 cost = np.zeros(kClusters)
 lastCost = 1e20
 lastCostDRE = 1e20
-basic_version = True # accelerated or basic
+basic_version = False #True # accelerated or basic
 sequential = True
 linearize_at_last_solution = True # linearize at uk or v. maybe best to check energy. at u or v. DRE:
 lib = ctypes.CDLL("./libprocess_clusters.so")
