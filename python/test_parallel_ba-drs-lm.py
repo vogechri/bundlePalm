@@ -58,12 +58,12 @@ FILE_NAME = "problem-173-111908-pre.txt.bz2"
 # 444848.29      * 5
 # 114198.39]     * 10
 # 59 / 0  ======== DRE BFGS ======  548142  ========= gain  601, very bad drs cam 475k
-BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/venice/"
-FILE_NAME = "problem-52-64053-pre.txt.bz2"
+# BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/venice/"
+# FILE_NAME = "problem-52-64053-pre.txt.bz2"
 
-# 53 / 0  ======== DRE BFGS ======  291195  ========= gain  0, jumps around after
-#BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/final/"
-#FILE_NAME = "problem-93-61203-pre.txt.bz2"
+# # 53 / 0  ======== DRE BFGS ======  291195  ========= gain  0, jumps around after, ultra bad.
+# BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/final/"
+# FILE_NAME = "problem-93-61203-pre.txt.bz2"
 
 
 URL = BASE_URL + FILE_NAME
@@ -1138,7 +1138,7 @@ def average_cameras_new(
     sum_D_u2_s = np.zeros(num_cameras * 9)
     sum_constant_term = 0
     UL_zeros_in_cluster_ = []
-    for i in range(len(L_in_cluster_)):
+    for i in range(len(UL_in_cluster_)):
         # Lc = L_in_cluster_[i]
         camera_indices_ = np.unique(camera_indices_in_cluster_[i])
         # mean_points[point_indices_,:] = mean_points[point_indices_,:] + points_3d_in_cluster_[i][point_indices_,:] * Lc
@@ -1250,7 +1250,7 @@ def cost_DRE(
     sum_2u_s_v = 0
     cost_dre = 0
     dre_per_part = []
-    for i in range(len(L_in_cluster_)):
+    for i in range(len(Ul_in_cluster_)):
         camera_indices_ = np.unique(camera_indices_in_cluster_[i])
         indices = np.repeat(np.array([9 * camera_indices_ + j for j in range(9)]).transpose(), 9, axis=0).flatten()
 
@@ -1276,6 +1276,9 @@ def cost_DRE(
         #sum_constant_term +=  poses_in_cluster_[i].flatten().dot(U_pose * (poses_in_cluster_[i].flatten() + u2_s - poses_s_in_cluster_[i].flatten()))
 
         u_s =  poses_in_cluster_[i].flatten() - poses_s_in_cluster_[i].flatten()
+        # do not do this: never accepted extrapolation
+        #u_s =  2 * poses_in_cluster_[i].flatten() - poses_s_in_cluster_[i].flatten() - pose_v_.flatten() # next s : s + v-u
+
         u_v =  poses_in_cluster_[i].flatten() - pose_v_.flatten()
         v_u2_s = u2_s - pose_v_.flatten()
         sum_u_s += u_s.dot(U_pose * u_s)
@@ -1440,8 +1443,8 @@ def bundle_adjust(
     # False: 59 / 0  ======== DRE BFGS ======  536487
     newVersion = True
     if newVersion:
-        JJ_mult = 1
-        blockEigMult = 1e-6 # more fails with 52
+        JJ_mult = 1 #+ L # YES! .. should i add tr thing instead, no? use first in computing deriv 2nd time (simple test to lower this here.)
+        blockEigMult = 1e-6 # 1e-7 fails with venice'52' ? WTF ?  173 demands 1e-5? 1e-6 totally fails. Maybe also True below (recomp jacobian)
 
     it_ = 0
     funx0_st1 = lambda X0, X1, X2: \
@@ -1464,7 +1467,6 @@ def bundle_adjust(
     while it_ < successfull_its_:
 
         if updateJacobian:  # not needed if rejected
-            #
             x0_t_cam  = x0_t_[: n_cameras_ * 9].reshape(n_cameras_, 9)
             x0_t_land = x0_t_[n_cameras_ * 9 :].reshape(n_points_, 3)
             J_pose, J_land, fx0 = ComputeDerivativeMatricesNew (
@@ -1568,8 +1570,11 @@ def bundle_adjust(
                 # traditional ADMM: not good -- also return
                 # blockEigenvalueJtJ = blockEigenvalue(JtJ, 9) + 1e-15 * JtJ
                 # stepSize = blockEigenvalueJtJ #
+
                 stepSize = JJ_mult * JtJ.copy() + blockEigMult * blockEigenvalueJtJ
                 JtJDiag = JtJ.copy() + 1e-3 * blockEigMult * blockEigenvalueJtJ
+                #stepSize = JtJ.copy() + L * JtJDiag # ??? 
+
                 #JtJDiag = 1e-4 * blockEigMult * blockEigenvalueJtJ # this could also work?
                 maxE, minE = minmaxEv(stepSize, 9)
                 print("minmax ev stepSz ", np.max(maxE), " ", np.max(minE), " ", np.min(maxE), " ",  np.min(minE), " spec ", np.max(maxE/minE))
@@ -1672,7 +1677,10 @@ def bundle_adjust(
             L = L * 2
             if not newVersion:
                 JtJDiag = 1/2 * JtJDiag # why that? tr only for landmarks here..
-
+            # else:
+            #     stepSize = JtJ.copy() + L * JtJDiag
+            #     penaltyStartConst = prox_rhs.dot(stepSize * prox_rhs)
+                
         #LfkViolated = False # todo remove?
         #if tr_check >= tr_eta_2 and LfkViolated: # violated -- should revert update.
         if tr_check >= tr_eta_2 and LfkViolated and not steSizeTouched or (steSizeTouched and costStart + penaltyStart < costEnd + penaltyL + penaltyP): # violated -- should revert update.
@@ -1762,14 +1770,20 @@ def bundle_adjust(
         print(" nablas 2", - L * nabla_p_approx2) # So nabla_l_approx = JtJDiag * (u-s), hence return (i use s-u), JtJDiag * L, the 2 DELIVERS a better cost!
         print(" nablas b", bp) # TINY
 
-    if True:
+    if False: #True:
         J_pose, J_land, fx0 = ComputeDerivativeMatricesNew (
             x0_t_cam, x0_t_land, camera_indices_, point_indices_, torch_points_2d, unique_poses_in_c_ )
         JtJ = J_pose.transpose() * J_pose
+        bp = J_pose.transpose() * fx0
+        #JJ_mult = 1 + np.maximum(minimumL, np.minimum(L_in_cluster_ * 2, L)) # might have changed .. must be off sigh
         blockEigenvalueJtJ = blockEigenvalue(JtJ, 9) # TODO: what if this is only needed for 0-eigen directions? return !=0 only if in small eigendir
         stepSize = JJ_mult * JtJ.copy() + blockEigMult * blockEigenvalueJtJ
+
         if not newVersion:
             JtJDiag = 1/L * stepSize.copy() # max 1, 1/L, line-search dre fails -> increase
+        # else:
+        #     JtJDiag = JtJ.copy() + 1e-3 * blockEigMult * blockEigenvalueJtJ
+        #     stepSize = JtJ.copy() + L * JtJDiag
 
     nabla_p = bp.copy()
     Rho = L * JtJDiag #+ 1e-12 * Ul
@@ -1777,8 +1791,8 @@ def bundle_adjust(
         Rho = stepSize
 
     # TODO: preconditioning should influence this.
-    # this should be less communication, where do we get to? 518k vs 875k
-    # Rho = blockEigenvalueJtJ + 1e-12 * Rho # issue: needs to be same as drs penalty. else slow ?!
+    # this should be less communication, where do we get to? 518k vs 875k. With PCG does work now.
+    # Rho = blockEigenvalueJtJ + 1e-16 * Rho # issue: needs to be same as drs penalty. else slow ?!
     # Rho = 2 * JtJ.copy() + 1e-12 * Ul # this here means we just use safe bet. Likely multiplier, '2' does not matter anyway. stable but slower. FUCK
 
     # TODO change 2
@@ -2134,7 +2148,7 @@ x0_p = x0_p.reshape(n_cameras, 9)
 startL = 1
 kClusters = 3 # 10
 innerIts = 1  # change to get an update, not 1 iteration
-its = 60
+its = 120
 cost = np.zeros(kClusters)
 lastCost = np.sum(fx0**2) #1e20
 lastCostDRE = np.sum(fx0**2) #1e20
@@ -2452,7 +2466,7 @@ else:
             s_prev = s_cur.copy() # access to old s.
 
 
-        line_search_iterations = 2 # 3 appears ok
+        line_search_iterations = 3 # 3 appears ok
         print(" ..... step length ", steplength, " bfgs step ", dk_stepLength, " ratio ", multiplier)
         for ls_it in range(line_search_iterations):
             if line_search_iterations >1:
@@ -2536,7 +2550,7 @@ else:
 
             # accept / reject, reject all but drs and see
             # if ls_it == line_search_iterations-1 :
-            if dre_bfgs <= lastCostDRE_bfgs or ls_it == line_search_iterations-1 : # not correct yet, must be <= last - c/gamma |u-v|
+            if dre_bfgs <= lastCostDRE_bfgs or 1000 * (dre_bfgs-lastCostDRE_bfgs) <= lastCostDRE_bfgs or ls_it == line_search_iterations-1 : # not correct yet, must be <= last - c/gamma |u-v|
 
                 steplength = 0
                 for ci in range(kClusters):
