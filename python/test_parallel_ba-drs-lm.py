@@ -1441,7 +1441,7 @@ def bundle_adjust(
     newVersion = True
     if newVersion:
         JJ_mult = 1
-        blockEigMult = 1e-6
+        blockEigMult = 1e-6 # more fails with 52
 
     it_ = 0
     funx0_st1 = lambda X0, X1, X2: \
@@ -1762,11 +1762,20 @@ def bundle_adjust(
         print(" nablas 2", - L * nabla_p_approx2) # So nabla_l_approx = JtJDiag * (u-s), hence return (i use s-u), JtJDiag * L, the 2 DELIVERS a better cost!
         print(" nablas b", bp) # TINY
 
+    if True:
+        J_pose, J_land, fx0 = ComputeDerivativeMatricesNew (
+            x0_t_cam, x0_t_land, camera_indices_, point_indices_, torch_points_2d, unique_poses_in_c_ )
+        JtJ = J_pose.transpose() * J_pose
+        blockEigenvalueJtJ = blockEigenvalue(JtJ, 9) # TODO: what if this is only needed for 0-eigen directions? return !=0 only if in small eigendir
+        stepSize = JJ_mult * JtJ.copy() + blockEigMult * blockEigenvalueJtJ
+        if not newVersion:
+            JtJDiag = 1/L * stepSize.copy() # max 1, 1/L, line-search dre fails -> increase
+
     nabla_p = bp.copy()
     Rho = L * JtJDiag #+ 1e-12 * Ul
     if newVersion:
         Rho = stepSize
-    
+
     # TODO: preconditioning should influence this.
     # this should be less communication, where do we get to? 518k vs 875k
     # Rho = blockEigenvalueJtJ + 1e-12 * Rho # issue: needs to be same as drs penalty. else slow ?!
