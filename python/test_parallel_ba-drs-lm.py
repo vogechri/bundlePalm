@@ -1444,7 +1444,8 @@ def bundle_adjust(
     newVersion = True
     if newVersion:
         JJ_mult = 1 #+ L # YES! .. should i add tr thing instead, no? use first in computing deriv 2nd time (simple test to lower this here.)
-        blockEigMult = 1e-5 # 1e-7 fails with venice'52' ? WTF ?  173 demands 1e-5? 1e-6 totally fails. Maybe also True below (recomp jacobian)
+        blockEigMult = 1e-3 # 1e-7 fails with venice'52' 173 demands 1e-3/1e-4/1e-5? 52:1e-6 totally fails. Maybe also True below (recomp jacobian)
+        blockEigMultJtJ = 1e-4 # 173: little effect 1e-6/4/8. just 173 or always not mattering much?
 
     it_ = 0
     funx0_st1 = lambda X0, X1, X2: \
@@ -1572,7 +1573,7 @@ def bundle_adjust(
                 # stepSize = blockEigenvalueJtJ #
 
                 stepSize = JJ_mult * JtJ.copy() + blockEigMult * blockEigenvalueJtJ
-                JtJDiag = JtJ.copy() + 1e-3 * blockEigMult * blockEigenvalueJtJ
+                JtJDiag = JtJ.copy() + blockEigMultJtJ * blockEigenvalueJtJ
                 #stepSize = JtJ.copy() + L * JtJDiag # ??? 
 
                 #JtJDiag = 1e-4 * blockEigMult * blockEigenvalueJtJ # this could also work?
@@ -1750,7 +1751,7 @@ def bundle_adjust(
 
         nabla_p_approx = JtJDiag * (delta_p + prox_rhs)
 
-        stepSize = 1. * (blockEigMult * blockEigenvalueJtJ + JJ_mult * JtJ.copy())
+        stepSize = blockEigMult * blockEigenvalueJtJ + JJ_mult * JtJ.copy()
 
         #stepSize = LipJ * JtJ.copy() + J_eps2 * diag_sparse(np.ones(JtJ.shape[0])) # ?
         #stepSize = LipJ * JtJ.copy() + diag_sparse(np.fmax(JtJ.diagonal(), 1e-4))
@@ -1782,7 +1783,7 @@ def bundle_adjust(
         if not newVersion:
             JtJDiag = 1/L * stepSize.copy() # max 1, 1/L, line-search dre fails -> increase
         # else:
-        #     JtJDiag = JtJ.copy() + 1e-3 * blockEigMult * blockEigenvalueJtJ
+        #     JtJDiag = JtJ.copy() + blockEigMultJtJ * blockEigenvalueJtJ
         #     stepSize = JtJ.copy() + L * JtJDiag
 
     nabla_p = bp.copy()
