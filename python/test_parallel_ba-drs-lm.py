@@ -1444,7 +1444,7 @@ def bundle_adjust(
     newVersion = True
     if newVersion:
         JJ_mult = 1 #+ L # YES! .. should i add tr thing instead, no? use first in computing deriv 2nd time (simple test to lower this here.)
-        blockEigMult = 1e-6 # 1e-7 fails with venice'52' ? WTF ?  173 demands 1e-5? 1e-6 totally fails. Maybe also True below (recomp jacobian)
+        blockEigMult = 1e-5 # 1e-7 fails with venice'52' ? WTF ?  173 demands 1e-5? 1e-6 totally fails. Maybe also True below (recomp jacobian)
 
     it_ = 0
     funx0_st1 = lambda X0, X1, X2: \
@@ -1487,8 +1487,8 @@ def bundle_adjust(
             # this might be an issue for poses.
             # R|T| f,d. especially d might have much different (smaller) eigenvalues.
             # 
-            blockEigenvalueJtJ = blockEigenvalue(JtJ, 9) # TODO: what if this is only needed for 0-eigen directions? return !=0 only if in small eigendir
-            #blockEigenvalueJtJ = blockEigenvalueWhereNeeded(JtJ, 9, 1e-6) # here ok?
+            #blockEigenvalueJtJ = blockEigenvalue(JtJ, 9) # TODO: what if this is only needed for 0-eigen directions? return !=0 only if in small eigendir
+            blockEigenvalueJtJ = blockEigenvalueWhereNeeded(JtJ, 9, 1e-6) # here ok?
             stepSize = blockEigMult * blockEigenvalueJtJ + JJ_mult * JtJ.copy() # Todo '2 *' vs 1 by convex.
 
             #blockEigenvalueJtJ = blockEigenvalueFull(JtJ, 9, x0_t_cam)
@@ -1530,8 +1530,8 @@ def bundle_adjust(
 
             # JltJlDiag = JltJl + J_eps * diag_sparse(np.ones(JltJl.shape[0]))
             # maybe more appropriate?
-            blockEigenvalueJltJl = blockEigenvalue(JltJl, 3)
-            #blockEigenvalueJltJl = blockEigenvalueWhereNeeded(JltJl, 3) # nope not at all.
+            #blockEigenvalueJltJl = blockEigenvalue(JltJl, 3)
+            blockEigenvalueJltJl = blockEigenvalueWhereNeeded(JltJl, 3) # nope not at all.
             JltJlDiag = JltJl + 1e-6 * blockEigenvalueJltJl # play around at 173 example. 1e-8: 58 / 0  ======== DRE BFGS ======  518626, 1e-6 518 MUCH earlier
             # could do only where needed? smallest ev is indeed small?
             JtJDiag = stepSize.copy() # max 1, 1/L, line-search dre fails -> increase
