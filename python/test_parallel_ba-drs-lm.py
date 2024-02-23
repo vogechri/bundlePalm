@@ -58,8 +58,13 @@ FILE_NAME = "problem-173-111908-pre.txt.bz2"
 # 444848.29      * 5
 # 114198.39]     * 10
 # 59 / 0  ======== DRE BFGS ======  548142  ========= gain  601, very bad drs cam 475k
-# BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/venice/"
-# FILE_NAME = "problem-52-64053-pre.txt.bz2"
+# newVersion 59 / 0  ======== DRE BFGS ======  527787
+BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/venice/"
+FILE_NAME = "problem-52-64053-pre.txt.bz2"
+# TODO: fake: take best not last line search
+# restart s ? if dre - f(u) > 0.1 * f(u). s=v?
+# restart s ? if f(v) - dre > 0.1 * dre.  s=u? BOTH .. ? This is likely total BS -> stepsize?
+# DRE: 78539 |2u-s-v|^2_D per component or <s-u,u-v>_D + |u-v|_D
 
 # # 53 / 0  ======== DRE BFGS ======  291195  ========= gain  0, jumps around after, ultra bad.
 # BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/final/"
@@ -813,7 +818,7 @@ def minmaxEv(M, bs):
             maxE[i] = evs[bs-1]
             minE[i] = evs[0]
             # if evs[0] <0:
-            #    #print("evs[0] ", evs[0], " " ,mat) 
+            #    #print("evs[0] ", evs[0], " " ,mat)
             #    mat = np.fliplr(mat)
             #    evs = eigvalsh(mat)
             #    maxE[i] = evs[bs-1]
@@ -882,7 +887,7 @@ def solvePowerIts(Ul, W, Vli, bS, m_):
             costk = np.sum(((Ul - W * Vli * W.transpose()) * xk - bS) ** 2)
             print(it, " gd cost ", costk)
         if stop_criterion(np.linalg.norm(xk, 2), np.linalg.norm(g, 2), it):
-           return xk
+            return xk
     return xk
 
 # test Loop over L0=x, L=y here. Likely best to do grid search to get an idea. model as exp(-poly(L,it))
@@ -1250,6 +1255,7 @@ def cost_DRE(
     sum_2u_s_v = 0
     cost_dre = 0
     dre_per_part = []
+    penalty_per_cluster = []
     for i in range(len(Ul_in_cluster_)):
         camera_indices_ = np.unique(camera_indices_in_cluster_[i])
         indices = np.repeat(np.array([9 * camera_indices_ + j for j in range(9)]).transpose(), 9, axis=0).flatten()
@@ -1301,6 +1307,9 @@ def cost_DRE(
 
         prox_solution = True # does not matter
         if prox_solution:
+            # rho_k/2 |u_k - v_k|^2 - rho_k <s_k - u_k, u_k - v_k>
+            # rho_k/2 <u_k - v_k - 2s_k + 2u_k , u_k - v_k>
+            # rho_k/2 <3u_k - v_k - 2s_k, u_k - v_k>:
             local_cost = 0.5 * u_v.dot(U_pose * (u_v + 2 * u_s))
         else: # assuming we do not solve the problem exactly
             nabla_p = np.zeros(num_cams * 9)
@@ -1308,7 +1317,7 @@ def cost_DRE(
             local_cost = 0.5 * u_v.dot(U_pose * u_v) - u_v.dot(nabla_p)
 
         cost_dre  += local_cost
-        dre_per_part.append(local_cost.copy())
+        dre_per_part.append(round(local_cost.copy()))
 
         if i == 0:
             Ul_all = U_pose
@@ -1321,6 +1330,7 @@ def cost_DRE(
     #cost_input  = 0.5 * (pose_v_.flatten().dot(Ul_all * pose_v_.flatten() - 2 * sum_Ds_2u) + sum_constant_term)
     print("---- |u-s|^2_D ", round(sum_u_s), "|u-v|^2_D ", round(sum_u_v), "|2u-s-v|^2_D ", round(sum_2u_s_v), 
           "|u-v|^2 ", round(sum_u_v_), " cost_dre ", cost_dre)
+    print("---- dre_per_part --- ", dre_per_part)
     return cost_dre
 
 # TODO: shorten
@@ -1444,8 +1454,9 @@ def bundle_adjust(
     newVersion = True
     if newVersion:
         JJ_mult = 1 #+ L # YES! .. should i add tr thing instead, no? use first in computing deriv 2nd time (simple test to lower this here.)
-        blockEigMult = 1e-3 # 1e-7 fails with venice'52' 173 demands 1e-3/1e-4/1e-5? 52:1e-6 totally fails. Maybe also True below (recomp jacobian)
+        blockEigMult = 1e-5 # 1e-7 fails with venice'52' 173 demands 1e-3/1e-4/1e-5? 52:1e-6 totally fails. Maybe also True below (recomp jacobian): yes stable
         blockEigMultJtJ = 1e-4 # 173: little effect 1e-6/4/8. just 173 or always not mattering much?
+        # blockEigMult not import for 173 but 52 yes
 
     it_ = 0
     funx0_st1 = lambda X0, X1, X2: \
@@ -1458,8 +1469,6 @@ def bundle_adjust(
     funx0_st1 = lambda X0, X1, X2: \
         torchSingleResiduumScaled(X0.view(-1, 9), X1.view(-1, 3), X2.view(-1, 2), camScale)
 
-    #stepSize = diag_sparse(np.zeros(n_points_))
-    # make diagonal again.
     if issparse(Ul_in_c_): # only increase -- if needed.
         stepSize = diag_sparse(Ul_in_c_.diagonal())
 
@@ -1474,22 +1483,22 @@ def bundle_adjust(
                 x0_t_cam, x0_t_land, camera_indices_, point_indices_, torch_points_2d, unique_poses_in_c_ )
 
             # 2 * JtJ majorizes, note JtJ:=(UW|W^TV), so W part majorized by *2:
-            # clearly: 2a^2+b^2 > (a+b)^2 = a^2 + b^2 + 2ab. Since (a-b)^2 = a^2 + b^2 - 2ab > 0, so a^2 + b^2 > 2ab. 
+            # clearly: 2a^2+b^2 > (a+b)^2 = a^2 + b^2 + 2ab. Since (a-b)^2 = a^2 + b^2 - 2ab > 0, so a^2 + b^2 > 2ab.
             # a^2 = p^t* Jp^TJp * p , b^2 = l^tJl^TJl l. ab = p^tJp^T Jl*l.
             #(Jl | Jp) (l,p)^T = Jl l + Jp p and |(Jl | Jp) (l,p)^T|^2 = l^t Jl^t Jl l + p^t Jp^t Jp p + 2 p^t Jp^t Jl l.
             # So 2 JtJ  + 2 JltJl shuold majorize |J^t x|^2 for all x.
 
             JtJ = J_pose.transpose() * J_pose
-            #print(JtJ.indices) # TODO: these are twisted around / backward indices per row.
+            # print(JtJ.indices) # TODO: these are twisted around / backward indices per row.
             # print(JtJ.indptr)
             # exit()
-            #JtJDiag = diag_sparse(np.fmax(JtJ.diagonal(), 1e-4))
+            # JtJDiag = diag_sparse(np.fmax(JtJ.diagonal(), 1e-4))
 
             # this might be an issue for poses.
             # R|T| f,d. especially d might have much different (smaller) eigenvalues.
-            # 
+
             #blockEigenvalueJtJ = blockEigenvalue(JtJ, 9) # TODO: what if this is only needed for 0-eigen directions? return !=0 only if in small eigendir
-            blockEigenvalueJtJ = blockEigenvalueWhereNeeded(JtJ, 9, 1e-6) # here ok?
+            blockEigenvalueJtJ = blockEigenvalueWhereNeeded(JtJ, 9, 1e-6) # here ok? 173: 1e-6
             stepSize = blockEigMult * blockEigenvalueJtJ + JJ_mult * JtJ.copy() # Todo '2 *' vs 1 by convex.
 
             #blockEigenvalueJtJ = blockEigenvalueFull(JtJ, 9, x0_t_cam)
@@ -1572,9 +1581,10 @@ def bundle_adjust(
                 # blockEigenvalueJtJ = blockEigenvalue(JtJ, 9) + 1e-15 * JtJ
                 # stepSize = blockEigenvalueJtJ #
 
+                # TODO: LipJ for both? or only JJ?
                 stepSize = JJ_mult * JtJ.copy() + blockEigMult * blockEigenvalueJtJ
+                #stepSize = LipJ * JtJ.copy() + blockEigMult * blockEigenvalueJtJ
                 JtJDiag = JtJ.copy() + blockEigMultJtJ * blockEigenvalueJtJ
-                #stepSize = JtJ.copy() + L * JtJDiag # ??? 
 
                 #JtJDiag = 1e-4 * blockEigMult * blockEigenvalueJtJ # this could also work?
                 maxE, minE = minmaxEv(stepSize, 9)
@@ -1771,7 +1781,7 @@ def bundle_adjust(
         print(" nablas 2", - L * nabla_p_approx2) # So nabla_l_approx = JtJDiag * (u-s), hence return (i use s-u), JtJDiag * L, the 2 DELIVERS a better cost!
         print(" nablas b", bp) # TINY
 
-    if False: #True:
+    if True:
         J_pose, J_land, fx0 = ComputeDerivativeMatricesNew (
             x0_t_cam, x0_t_land, camera_indices_, point_indices_, torch_points_2d, unique_poses_in_c_ )
         JtJ = J_pose.transpose() * J_pose
@@ -2552,8 +2562,9 @@ else:
             # accept / reject, reject all but drs and see
             # if ls_it == line_search_iterations-1 :
             if dre_bfgs <= lastCostDRE_bfgs or 1000 * (dre_bfgs-lastCostDRE_bfgs) <= lastCostDRE_bfgs or ls_it == line_search_iterations-1 : # not correct yet, must be <= last - c/gamma |u-v|
-
-                steplength = 0
+                # TODO: save and use best wrt. cost: new fct?
+                # 
+                steplength = 0 # currently printed
                 for ci in range(kClusters):
                     poses_s_in_cluster[ci] = poses_s_in_cluster_bfgs[ci].copy()
                     s_step_cluster = poses_v_bfgs - poses_in_cluster_bfgs[ci]
