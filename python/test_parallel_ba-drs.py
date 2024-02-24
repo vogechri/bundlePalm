@@ -37,10 +37,10 @@ FILE_NAME = "problem-16-22106-pre.txt.bz2"
 FILE_NAME = "problem-173-111908-pre.txt.bz2"
 #FILE_NAME = "problem-135-90642-pre.txt.bz2"
 
-#BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/trafalgar/"
+BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/trafalgar/"
 # FILE_NAME = "problem-21-11315-pre.txt.bz2"
 # 59 / 0  ======== DRE BFGS ======  197984
-#FILE_NAME = "problem-257-65132-pre.txt.bz2"
+FILE_NAME = "problem-257-65132-pre.txt.bz2"
 
 # 52 / 2  ======== DRE BFGS ======  481560  ========= gain  175
 # 52 / 2  ======== DRE BFGS ======  480851  ========= gain  3452 w pcg .. 'last turn' not clear
@@ -445,15 +445,15 @@ def AngleAxisRotatePoint(angleAxis, pt):
 
 
 def torchSingleResiduum(camera_params_, point_params_, p2d):
-    angle_axis = camera_params_[:, :3]
+    angle_axis = camera_params_[:, :3] * c02_mult
     points_cam = AngleAxisRotatePoint(angle_axis, point_params_)
-    points_cam[:,0:2] = points_cam[:,0:2] + camera_params_[:, 3:5] * 20
-    points_cam[:,2] = points_cam[:,2] + camera_params_[:, 5] * 80
+    points_cam[:,0:2] = points_cam[:,0:2] + camera_params_[:, 3:5] * c34_mult
+    points_cam[:,2] = points_cam[:,2] + camera_params_[:, 5] * c5_mult
     points_projX = -points_cam[:, 0] / points_cam[:, 2]
     points_projY = -points_cam[:, 1] / points_cam[:, 2]
-    f = camera_params_[:, 6] * 3000
-    k1 = camera_params_[:, 7] * 10
-    k2 = camera_params_[:, 8] * 20
+    f = camera_params_[:, 6] * c6_mult
+    k1 = camera_params_[:, 7] * c7_mult
+    k2 = camera_params_[:, 8] * c8_mult
     r2 = points_projX * points_projX + points_projY * points_projY
     distortion = 1.0 + r2 * (k1 + k2 * r2)
     points_reprojX = points_projX * distortion * f
@@ -464,15 +464,15 @@ def torchSingleResiduum(camera_params_, point_params_, p2d):
     return residual
 
 def torchSingleResiduumX(camera_params, point_params, p2d) :
-    angle_axis = camera_params[:,:3]
+    angle_axis = camera_params[:,:3] * c02_mult
     points_cam = AngleAxisRotatePoint(angle_axis, point_params)
-    points_cam[:,0:2] = points_cam[:,0:2] + camera_params[:, 3:5] * 20
-    points_cam[:,2] = points_cam[:,2] + camera_params[:, 5] * 80
+    points_cam[:,0:2] = points_cam[:,0:2] + camera_params[:, 3:5] * c34_mult
+    points_cam[:,2] = points_cam[:,2] + camera_params[:, 5] * c5_mult
     points_projX = -points_cam[:, 0] / points_cam[:, 2]
     points_projY = -points_cam[:, 1] / points_cam[:, 2]
-    f  = camera_params[:, 6] * 3000
-    k1 = camera_params[:, 7] * 10
-    k2 = camera_params[:, 8] * 20
+    f  = camera_params[:, 6] * c6_mult
+    k1 = camera_params[:, 7] * c7_mult
+    k2 = camera_params[:, 8] * c8_mult
     r2 = points_projX*points_projX + points_projY*points_projY
     distortion = 1. + r2 * (k1 + k2 * r2)
     points_reprojX = points_projX * distortion * f
@@ -480,15 +480,15 @@ def torchSingleResiduumX(camera_params, point_params, p2d) :
     return resX
 
 def torchSingleResiduumY(camera_params, point_params, p2d) :
-    angle_axis = camera_params[:,:3]
+    angle_axis = camera_params[:,:3] * c02_mult
     points_cam = AngleAxisRotatePoint(angle_axis, point_params)
-    points_cam[:,0:2] = points_cam[:,0:2] + camera_params[:, 3:5] * 20
-    points_cam[:,2] = points_cam[:,2] + camera_params[:, 5] * 80
+    points_cam[:,0:2] = points_cam[:,0:2] + camera_params[:, 3:5] * c34_mult
+    points_cam[:,2] = points_cam[:,2] + camera_params[:, 5] * c5_mult
     points_projX = -points_cam[:, 0] / points_cam[:, 2]
     points_projY = -points_cam[:, 1] / points_cam[:, 2]
-    f  = camera_params[:, 6] * 3000
-    k1 = camera_params[:, 7] * 10
-    k2 = camera_params[:, 8] * 20
+    f  = camera_params[:, 6] * c6_mult
+    k1 = camera_params[:, 7] * c7_mult
+    k2 = camera_params[:, 8] * c8_mult
     r2 = points_projX*points_projX + points_projY*points_projY
     distortion = 1. + r2 * (k1 + k2 * r2)
     points_reprojY = points_projY * distortion * f
@@ -2445,11 +2445,26 @@ print("n_points: {}".format(n_points))
 print("Total number of parameters: {}".format(n))
 print("Total number of residuals: {}".format(m))
 
-cameras[:,3:6] = cameras[:,3:6] / 20
-cameras[:,5] = cameras[:,5] / 4
-cameras[:,6] = cameras[:,6] / 3000
-cameras[:,7] = cameras[:,7] / 10
-cameras[:,8] = cameras[:,8] / 20
+c02_mult = 1
+c34_mult = 1
+c5_mult = 1
+c6_mult = 1
+c7_mult = 1
+c8_mult = 1
+if True:
+    c02_mult = 0.01
+    c34_mult = 1
+    c5_mult = 10
+    c6_mult = 100
+    c7_mult = 1
+    c8_mult = 10 # amazingly smallest and largest ev are this component in subsequent cams
+
+    cameras[:,0:3] = cameras[:,0:3] / c02_mult
+    cameras[:,3:6] = cameras[:,3:6] / c34_mult
+    cameras[:,5] = cameras[:,5] / c5_mult
+    cameras[:,6] = cameras[:,6] / c6_mult
+    cameras[:,7] = cameras[:,7] / c7_mult
+    cameras[:,8] = cameras[:,8] / c8_mult
 
 x0_p = cameras.ravel()
 # x0_l = points_3d.ravel()

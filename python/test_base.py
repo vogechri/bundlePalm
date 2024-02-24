@@ -41,12 +41,19 @@ FILE_NAME = "problem-356-226730-pre.txt.bz2"
 # # ~702k, with far: 737k jeps=1e-4
 # FILE_NAME = "problem-135-90642-pre.txt.bz2"
 
-#BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/venice/"
-#FILE_NAME = "problem-52-64053-pre.txt.bz2"
+BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/venice/"
+FILE_NAME = "problem-52-64053-pre.txt.bz2"
+# super tough apparently .. WTF? 49 it. cost 1      623672 -- differ pcg & replace it to exact
+# 99 it. cost 0      540860 pcg/non-it. check sci-py
 #FILE_NAME = "problem-1778-993923-pre.txt.bz2"
 
-#BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/final/"
-#FILE_NAME = "problem-93-61203-pre.txt.bz2"
+# BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/final/"
+# FILE_NAME = "problem-93-61203-pre.txt.bz2"
+# 25 it. cost ext    291090       with penalty  291090
+# s focal distance  462.33773467968246  -  4298.019088260181
+# s k1 distance  -0.35128310254164263  -  0.5239066647338921
+# s k2 distance  -0.4131712578247545  -  2.9701916486051774
+
 # FILE_NAME = "problem-871-527480-pre.txt.bz2"
 # #FILE_NAME = "problem-394-100368-pre.txt.bz2"
 
@@ -71,6 +78,12 @@ FILE_NAME = "problem-356-226730-pre.txt.bz2"
 # powerits = 100 Lm step took  2.429298162460327 s, 46 it. cost 1      196634
 # 99 it. cost 1      195253       with penalty  195254  cost compute took  0.10700201988220215 s
 # powerits = 200: 99 it. cost 1      193227
+
+BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/ladybug/"
+FILE_NAME = "problem-138-19878-pre.txt.bz2"
+# 26 it. cost 1      120979, stuck
+FILE_NAME = "problem-646-73584-pre.txt.bz2"
+#22 it. cost 0       377834, stuck
 
 URL = BASE_URL + FILE_NAME
 old_c = 0
@@ -328,15 +341,15 @@ def torchResiduum(x0T, n_cameras, n_points, camera_indices, point_indices, p2d) 
     return residual
 
 def torchSingleResiduum(camera_params, point_params, p2d) :
-    angle_axis = camera_params[:,:3]
+    angle_axis = camera_params[:,:3] * c02_mult
     points_cam = AngleAxisRotatePoint(angle_axis, point_params)
-    points_cam[:,0:2] = points_cam[:,0:2] + camera_params[:, 3:5] #* 20
-    points_cam[:,2] = points_cam[:,2] + camera_params[:, 5] #* 100
+    points_cam[:,0:2] = points_cam[:,0:2] + camera_params[:, 3:5] * c34_mult
+    points_cam[:,2] = points_cam[:,2] + camera_params[:, 5] * c5_mult
     points_projX = -points_cam[:, 0] / points_cam[:, 2]
     points_projY = -points_cam[:, 1] / points_cam[:, 2]
-    f = camera_params[:, 6] #* 3000
-    k1 = camera_params[:, 7] #* 10
-    k2 = camera_params[:, 8] #* 20
+    f = camera_params[:, 6] * c6_mult
+    k1 = camera_params[:, 7] * c7_mult
+    k2 = camera_params[:, 8] * c8_mult
     r2 = points_projX*points_projX + points_projY*points_projY
     distortion = 1. + r2 * (k1 + k2 * r2)
     points_reprojX = points_projX * distortion * f
@@ -347,15 +360,15 @@ def torchSingleResiduum(camera_params, point_params, p2d) :
     return residual
 
 def torchSingleResiduumX(camera_params, point_params, p2d) :
-    angle_axis = camera_params[:,:3]
+    angle_axis = camera_params[:,:3] * c02_mult
     points_cam = AngleAxisRotatePoint(angle_axis, point_params)
-    points_cam[:,0:2] = points_cam[:,0:2] + camera_params[:, 3:5] #* 20
-    points_cam[:,2] = points_cam[:,2] + camera_params[:, 5] #* 100
+    points_cam[:,0:2] = points_cam[:,0:2] + camera_params[:, 3:5] * c34_mult
+    points_cam[:,2] = points_cam[:,2] + camera_params[:, 5] * c5_mult
     points_projX = -points_cam[:, 0] / points_cam[:, 2]
     points_projY = -points_cam[:, 1] / points_cam[:, 2]
-    f = camera_params[:, 6] #* 3000
-    k1 = camera_params[:, 7] #* 10
-    k2 = camera_params[:, 8] #* 20
+    f = camera_params[:, 6] * c6_mult
+    k1 = camera_params[:, 7] * c7_mult
+    k2 = camera_params[:, 8] * c8_mult
     r2 = points_projX*points_projX + points_projY*points_projY
     distortion = 1. + r2 * (k1 + k2 * r2)
     points_reprojX = points_projX * distortion * f
@@ -363,15 +376,15 @@ def torchSingleResiduumX(camera_params, point_params, p2d) :
     return resX
 
 def torchSingleResiduumY(camera_params, point_params, p2d) :
-    angle_axis = camera_params[:,:3]
+    angle_axis = camera_params[:,:3] * c02_mult
     points_cam = AngleAxisRotatePoint(angle_axis, point_params)
-    points_cam[:,0:2] = points_cam[:,0:2] + camera_params[:, 3:5] #* 20
-    points_cam[:,2] = points_cam[:,2] + camera_params[:, 5] #* 100
+    points_cam[:,0:2] = points_cam[:,0:2] + camera_params[:, 3:5]  * c34_mult
+    points_cam[:,2] = points_cam[:,2] + camera_params[:, 5] * c5_mult
     points_projX = -points_cam[:, 0] / points_cam[:, 2]
     points_projY = -points_cam[:, 1] / points_cam[:, 2]
-    f = camera_params[:, 6] #* 3000
-    k1 = camera_params[:, 7] #* 10
-    k2 = camera_params[:, 8] #* 20
+    f = camera_params[:, 6] * c6_mult
+    k1 = camera_params[:, 7] * c7_mult
+    k2 = camera_params[:, 8] * c8_mult
     r2 = points_projX*points_projX + points_projY*points_projY
     distortion = 1. + r2 * (k1 + k2 * r2)
     points_reprojY = points_projY * distortion * f
@@ -452,11 +465,26 @@ def torchSingleResiduumY(camera_params, point_params, p2d) :
 
 cameras, points_3d, camera_indices, point_indices, points_2d = read_bal_data(FILE_NAME)
 
-# cameras[:,3:6] = cameras[:,3:6] / 20
-# cameras[:,5] = cameras[:,5] / 100
-# cameras[:,6] = cameras[:,6] / 3000
-# cameras[:,7] = cameras[:,7] / 10
-# cameras[:,8] = cameras[:,8] / 20
+c02_mult = 1
+c34_mult = 1
+c5_mult = 1
+c6_mult = 1
+c7_mult = 1
+c8_mult = 1
+if True:
+    c02_mult = 0.01
+    c34_mult = 1
+    c5_mult = 10
+    c6_mult = 100
+    c7_mult = 1
+    c8_mult = 10 # amazingly smallest and largest ev are this component in subsequent cams
+
+    cameras[:,0:3] = cameras[:,0:3] / c02_mult
+    cameras[:,3:6] = cameras[:,3:6] / c34_mult
+    cameras[:,5] = cameras[:,5] / c5_mult
+    cameras[:,6] = cameras[:,6] / c6_mult
+    cameras[:,7] = cameras[:,7] / c7_mult
+    cameras[:,8] = cameras[:,8] / c8_mult
 
 # # better define function. data in as batch -> normal gradient.
 # # Dp this with the jacobian ?!
@@ -1417,7 +1445,7 @@ bfgs_rhos = np.zeros([bfgs_mem, 1])
 useExtInCost = True # with using extrapolation, does it lead to lower cost, how much? -- must use with TR as well?
 L0 = 1.0 #e-3
 L = L0
-iterations = 50
+iterations = 100
 verbose = False
 debug = False
 useInvSolver = False

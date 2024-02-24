@@ -100,10 +100,41 @@ FILE_NAME = "problem-257-65132-pre.txt.bz2" # 193123.30793304814
 #  -0.05093602]   (451822,)
 # Residuum equals finally  193123.30793304814
 
+#BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/venice/"
+#FILE_NAME = "problem-52-64053-pre.txt.bz2"
+# Residuum equals finally  515118.3761825738, ftol -2
+# Residuum equals finally  492329.25549524  , ftol -3
+
+BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/ladybug/"
+FILE_NAME = "problem-138-19878-pre.txt.bz2"
+
 URL = BASE_URL + FILE_NAME
 
 if not os.path.isfile(FILE_NAME):
     urllib.request.urlretrieve(URL, FILE_NAME)
+
+def remove_large_points(points_3d, camera_indices, points_2d, point_indices):
+    remove_ids = np.arange(points_3d.shape[0])[np.sum(points_3d**2, 1) > 1e6]
+    if remove_ids.shape[0] >0:
+        points_3d = np.delete(points_3d, remove_ids, axis=0)
+        num_all_res = camera_indices.shape[0]
+        res_remove_ids = np.isin(point_indices, remove_ids)
+        camera_indices = camera_indices[~res_remove_ids]
+        points_2d = points_2d[~res_remove_ids]
+        point_indices = point_indices[~res_remove_ids]
+        unique_numbers = np.unique(point_indices)
+        # Step 2: Create a dictionary for mapping
+        mapping = {number: i for i, number in enumerate(unique_numbers)}    
+        # Step 3: Apply the mapping to the array
+        vfunc = np.vectorize(mapping.get)
+        point_indices = vfunc(point_indices)
+        print("Removed ", remove_ids.shape[0], " points")
+        # alot points far away. so likely present in many parts.
+        print("Removed ", num_all_res - camera_indices.shape[0], " residuals, ", \
+            (num_all_res - camera_indices.shape[0]) / remove_ids.shape[0], " observations in removed landmarks")
+        print(np.max(point_indices))
+        print(points_3d.shape)
+    return points_3d, camera_indices, points_2d, point_indices
 
 def read_bal_data(file_name):
     with bz2.open(file_name, "rt") as file:
@@ -129,6 +160,10 @@ def read_bal_data(file_name):
         for i in range(n_points * 3):
             points_3d[i] = float(file.readline())
         points_3d = points_3d.reshape((n_points, -1))
+
+    # remove all residuals of points and all points with this property
+    (points_3d, camera_indices, points_2d, point_indices) = \
+        remove_large_points(points_3d, camera_indices, points_2d, point_indices)
 
     return camera_params, points_3d, camera_indices, point_indices, points_2d
 
@@ -209,7 +244,9 @@ print("Residuum equals initially ", np.sum(f0**2))
 A = bundle_adjustment_sparsity(n_cameras, n_points, camera_indices, point_indices)
 
 t0 = time.time()
-res = least_squares(fun, x0, jac_sparsity=A, verbose=2, x_scale='jac', ftol=1e-5, method='trf', # test method = 'lm' or 'dogbox'
+# ftol=1e-5 can be very slow. interested in ballpark estimate how good it should get.
+# since my base is sometimes badnot good, eg problem venice'52'
+res = least_squares(fun, x0, jac_sparsity=A, verbose=2, x_scale='jac', ftol=1e-3, method='trf', # test method = 'lm' or 'dogbox'
                     args=(n_cameras, n_points, camera_indices, point_indices, points_2d))
 t1 = time.time()
 

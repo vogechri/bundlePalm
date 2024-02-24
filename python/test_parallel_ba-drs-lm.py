@@ -23,6 +23,7 @@ from torch import tensor, from_numpy
 BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/ladybug/"
 FILE_NAME = "problem-49-7776-pre.txt.bz2"
 #FILE_NAME = "problem-73-11032-pre.txt.bz2"
+FILE_NAME = "problem-138-19878-pre.txt.bz2"
 
 BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/dubrovnik/"
 FILE_NAME = "problem-16-22106-pre.txt.bz2"
@@ -38,6 +39,7 @@ FILE_NAME = "problem-173-111908-pre.txt.bz2"
 # 71k
 #FILE_NAME = "problem-21-11315-pre.txt.bz2"
 #59 / 0  ======== DRE BFGS ======  207468  ========= gain  102
+# newVersion worse .. 60 / 0  ======== DRE BFGS ======  208439, 100 its 204k
 #FILE_NAME = "problem-257-65132-pre.txt.bz2"
 
 # RNA is best, other awful. in general cams as shared vars very bad.
@@ -47,16 +49,6 @@ FILE_NAME = "problem-173-111908-pre.txt.bz2"
 # 1e-8: 59 / 0  ======== DRE BFGS ======  576626  ========= gain  1364 ==== f(v)=  576480  f(u)=  576687  ~=  576687.2452693246
 # 3rd largest ev 59 / 0  ======== DRE BFGS ======  548500  ========= gain  358 ==== f(v)=  548379  f(u)=  548553  ~=  548553.2643365501
 # NEEDS work : adjust pcg from mean diag of hess? differs here clearly. try manually
-#Mean diagonal of pseudo Hessian  [ did not work .. then drops by 100k in middle weird 552k
-# 5120163.27  
-# 5272611.74  
-# 703975.30  
-# 1251497692.06  ! /10
-# 1237795224.54 
-# 119045567.82  
-# 724022.87      ! *5
-# 444848.29      * 5
-# 114198.39]     * 10
 # 59 / 0  ======== DRE BFGS ======  548142  ========= gain  601, very bad drs cam 475k
 # newVersion 59 / 0  ======== DRE BFGS ======  527787
 BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/venice/"
@@ -67,9 +59,18 @@ FILE_NAME = "problem-52-64053-pre.txt.bz2"
 # DRE: 78539 |2u-s-v|^2_D per component or <s-u,u-v>_D + |u-v|_D
 
 # # 53 / 0  ======== DRE BFGS ======  291195  ========= gain  0, jumps around after, ultra bad.
-# BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/final/"
-# FILE_NAME = "problem-93-61203-pre.txt.bz2"
+# 59 / 0  ======== DRE BFGS ======  291111
+# 21 / 0  ======== DRE BFGS ======  291499  ========= gain  123 ==== f(v)=  291496  f(u)=  291502
+# completely stuck at 36. frozen.
+BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/final/"
+FILE_NAME = "problem-93-61203-pre.txt.bz2"
 
+BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/ladybug/"
+FILE_NAME = "problem-138-19878-pre.txt.bz2"
+# 61 / 0  ======== DRE BFGS ======  125095
+# 87 / 0  ======== DRE BFGS ======  123684
+FILE_NAME = "problem-646-73584-pre.txt.bz2"
+# 27 / 2  ======== DRE BFGS ======  403123  ========= gain  -13118 ==== f(v)=  382646  f(u)=  385660
 
 URL = BASE_URL + FILE_NAME
 
@@ -866,7 +867,7 @@ def copy_selected_blocks(M, block_selection_, bs):
     return Mi
 
 def stop_criterion(delta, delta_i, i):
-    eps = 1e-2 #1e-2 used in paper, tune. might allow smaller as faster?
+    eps = 1e-3 #1e-2 used in paper, tune. might allow smaller as faster?
     return (i+1) * delta_i / delta < eps
 
 def solvePowerIts(Ul, W, Vli, bS, m_):
