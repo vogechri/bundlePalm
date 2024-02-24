@@ -863,7 +863,7 @@ def blockInverse(M,bs):
         for i in range(int(M.data.shape[0])):
             Mi.data[i:i+1] = 1./ Mi.data[i:i+1]
     return Mi
-#S = Ul - W * Vli * W.transpose()
+# S = Ul - W * Vli * W.transpose()
 # alternative power its on Ul - W * Vli * W.transpose()
 # better on Ul [I - Uli * W * Vli * W.transpose()] or rather
 # sum_k [Uli * W * Vli * W.transpose()]^k (Ul^-1 * b)

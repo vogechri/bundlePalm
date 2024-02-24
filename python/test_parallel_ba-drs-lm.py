@@ -58,8 +58,8 @@ FILE_NAME = "problem-173-111908-pre.txt.bz2"
 # 444848.29      * 5
 # 114198.39]     * 10
 # 59 / 0  ======== DRE BFGS ======  548142  ========= gain  601, very bad drs cam 475k
-BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/venice/"
-FILE_NAME = "problem-52-64053-pre.txt.bz2"
+#BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/venice/"
+#FILE_NAME = "problem-52-64053-pre.txt.bz2"
 
 # 53 / 0  ======== DRE BFGS ======  291195  ========= gain  0, jumps around after
 #BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/final/"
@@ -1441,7 +1441,7 @@ def bundle_adjust(
     newVersion = True
     if newVersion:
         JJ_mult = 1
-        blockEigMult = 1e-6 # more fails with 52
+        blockEigMult = 1e-2 # more fails with 52
 
     it_ = 0
     funx0_st1 = lambda X0, X1, X2: \
@@ -1485,8 +1485,8 @@ def bundle_adjust(
             # this might be an issue for poses.
             # R|T| f,d. especially d might have much different (smaller) eigenvalues.
             # 
-            blockEigenvalueJtJ = blockEigenvalue(JtJ, 9) # TODO: what if this is only needed for 0-eigen directions? return !=0 only if in small eigendir
-            #blockEigenvalueJtJ = blockEigenvalueWhereNeeded(JtJ, 9, 1e-6) # here ok?
+            #blockEigenvalueJtJ = blockEigenvalue(JtJ, 9) # TODO: what if this is only needed for 0-eigen directions? return !=0 only if in small eigendir
+            blockEigenvalueJtJ = blockEigenvalueWhereNeeded(JtJ, 9, 1e-6) # here ok?
             stepSize = blockEigMult * blockEigenvalueJtJ + JJ_mult * JtJ.copy() # Todo '2 *' vs 1 by convex.
 
             #blockEigenvalueJtJ = blockEigenvalueFull(JtJ, 9, x0_t_cam)
@@ -1528,8 +1528,8 @@ def bundle_adjust(
 
             # JltJlDiag = JltJl + J_eps * diag_sparse(np.ones(JltJl.shape[0]))
             # maybe more appropriate?
-            blockEigenvalueJltJl = blockEigenvalue(JltJl, 3)
-            #blockEigenvalueJltJl = blockEigenvalueWhereNeeded(JltJl, 3) # nope not at all.
+            #blockEigenvalueJltJl = blockEigenvalue(JltJl, 3)
+            blockEigenvalueJltJl = blockEigenvalueWhereNeeded(JltJl, 3) # nope not at all.
             JltJlDiag = JltJl + 1e-6 * blockEigenvalueJltJl # play around at 173 example. 1e-8: 58 / 0  ======== DRE BFGS ======  518626, 1e-6 518 MUCH earlier
             # could do only where needed? smallest ev is indeed small?
             JtJDiag = stepSize.copy() # max 1, 1/L, line-search dre fails -> increase
@@ -1601,7 +1601,7 @@ def bundle_adjust(
         delta_p, powerits_run = solveByGDNesterov(Ul, W, Vli, bS, powerits)
         delta_p = -delta_p
         delta_l = -Vli * ((W.transpose() * delta_p).flatten() + bl)
-        penaltyL = L * (delta_l).dot(JltJlDiag * delta_l)
+        penaltyL = L * delta_l.dot(JltJlDiag * delta_l)
         penaltyP = L * (delta_p + prox_rhs).dot(JtJDiag * (delta_p + prox_rhs))
         if newVersion:
             penaltyP = L * delta_p.dot(JtJDiag * delta_p) + (delta_p + prox_rhs).dot(stepSize * (delta_p + prox_rhs))
@@ -1635,37 +1635,26 @@ def bundle_adjust(
 
         old_descent_lemma = True
         if old_descent_lemma:
-            # old descent lemma test.
-            #nablaXp = L * JtJDiag * delta_p  # actual gradient. discussable
-            nablaXp = L * JtJDiag * delta_p  # actual gradient. discussable TODO
-            nablaXl = JltJlDiag * delta_l  # actual gradient: J^t fx0 = bp|bl
-            # before
-            LfkDiagonal = \
-                2 * (costEnd - costStart - bp.dot(delta_p) - bl.dot(delta_l)) \
-                / (delta_l.dot(nablaXl) + delta_p.dot(nablaXp))
-
-            Lfklin = (costEnd - costStart - bp.dot(delta_p) - bl.dot(delta_l))
-            if newVersion:
-                nablaXp = JtJDiag * delta_p # idea here 1/L is dropped so no need to correct this.
-                Lfklin = Lfklin + (delta_p + prox_rhs).dot(stepSize * (delta_p + prox_rhs)) - penaltyStartConst
-
-            LfkDistance  = Lfklin - (delta_l.dot(nablaXl) + delta_p.dot(nablaXp)) / 2
-            LfkViolated = LfkDistance > 0
-            LfkSafe = Lfklin < 0 # for any phi ok.
+            decent_lemma_divisor = 2
         else:
             # after:
             # f(x) <= f(y) + <nabla(f(y) x-y> + Lf/2 |x-y|^2
             # we demand stepsize phi >= 2 Lf. Then even
             # f(x) <= f(y) + <nabla(f(y) x-y> + phi/4 |x-y|^2
             # (f(x) - f(y) - <nabla(f(y) x-y>) * 4 / |x-y|^2  <= phi
-            #nablaXp = L * JtJDiag * delta_p    # actual gradient: J^t fx0 = bp|bl , no L. grad at f(x) is L * JtJDiag * delta_p - s
-            #nablaXl = JltJlDiag * delta_l  # actual gradient is b. L since JltJlDiag multiplied by 1/L.
-            descent_rhs_l = delta_l.dot(JltJlDiag * delta_l)
-            descent_rhs_p = L * delta_p.dot(JtJDiag * delta_p)
+            # actual gradient: J^t fx0 = bp|bl , no L. grad at f(x) is L * JtJDiag * delta_p - s
+            decent_lemma_divisor = 4
 
-            LfkDistance  = costEnd - (costStart + bp.dot(delta_p) + bl.dot(delta_l) + (descent_rhs_l + descent_rhs_p) / 4)
-            LfkViolated = LfkDistance > 0
-            LfkSafe = (costEnd - costStart - bp.dot(delta_p) - bl.dot(delta_l)) < 0 # for any phi ok.
+        nablaXp = L * JtJDiag * delta_p #
+        nablaXl = JltJlDiag * delta_l   # actual gradient: J^t fx0 = bp|bl
+        Lfklin = costEnd - costStart - bp.dot(delta_p) - bl.dot(delta_l)
+        # The tr part? Deriv of (delta_l).dot(JltJlDiag * delta_l) at delta_l=0 is 0
+        if newVersion:
+            nablaXp = JtJDiag * delta_p # idea here 1/L is dropped so no need to correct this.
+            Lfklin = Lfklin + (delta_p + prox_rhs).dot(stepSize * (delta_p + prox_rhs)) - penaltyStartConst
+        LfkDistance  = Lfklin - (delta_l.dot(nablaXl) + delta_p.dot(nablaXp)) / decent_lemma_divisor
+        LfkViolated = LfkDistance > 0
+        LfkSafe = Lfklin < 0 # for any phi ok.
 
         if tr_check < tr_eta_2: # and False: # TR should not help here. Maybe apply differently? TR checks if approx w. JtJ is ok within region.
             print(" //////  tr_check " , tr_check, " Lfk distance ", LfkDistance, " -nabla^Tdelta=" , -bp.dot(delta_p) - bl.dot(delta_l), " /////")
@@ -1762,7 +1751,7 @@ def bundle_adjust(
         print(" nablas 2", - L * nabla_p_approx2) # So nabla_l_approx = JtJDiag * (u-s), hence return (i use s-u), JtJDiag * L, the 2 DELIVERS a better cost!
         print(" nablas b", bp) # TINY
 
-    if True:
+    if False:
         J_pose, J_land, fx0 = ComputeDerivativeMatricesNew (
             x0_t_cam, x0_t_land, camera_indices_, point_indices_, torch_points_2d, unique_poses_in_c_ )
         JtJ = J_pose.transpose() * J_pose
