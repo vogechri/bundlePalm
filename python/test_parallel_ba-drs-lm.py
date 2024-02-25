@@ -71,6 +71,8 @@ FILE_NAME = "problem-138-19878-pre.txt.bz2"
 # 87 / 0  ======== DRE BFGS ======  123684
 FILE_NAME = "problem-646-73584-pre.txt.bz2"
 # 27 / 2  ======== DRE BFGS ======  403123  ========= gain  -13118 ==== f(v)=  382646  f(u)=  385660
+# issue jumps around and appears wrong. 377k testbase. is scipy better? why? what is different?
+# 44 / 0  ======== DRE BFGS ======  380727  ========= gain  38491 ==== f(v)=  380727  f(u)=  376607  ~=  376607.30596203764
 
 URL = BASE_URL + FILE_NAME
 
@@ -1332,7 +1334,7 @@ def cost_DRE(
     print("---- |u-s|^2_D ", round(sum_u_s), "|u-v|^2_D ", round(sum_u_v), "|2u-s-v|^2_D ", round(sum_2u_s_v), 
           "|u-v|^2 ", round(sum_u_v_), " cost_dre ", cost_dre)
     print("---- dre_per_part --- ", dre_per_part)
-    return cost_dre
+    return cost_dre, dre_per_part
 
 # TODO: shorten
 def primal_cost(
@@ -1454,6 +1456,9 @@ def bundle_adjust(
     # False: 59 / 0  ======== DRE BFGS ======  536487
     newVersion = True
     if newVersion:
+        # JJ_mult = 2 less flipping much slower in ladybug646, 
+        # but 119 / 1  ======== DRE BFGS ======  391600  ========= gain  531 ==== f(v)=  374313  f(u)=  376802  ~=  376801.807411641 
+        # Lesson appears to be: use LipJ, maybe * sqrt(2) instead.
         JJ_mult = 1 #+ L # YES! .. should i add tr thing instead, no? use first in computing deriv 2nd time (simple test to lower this here.)
         blockEigMult = 1e-5 # 1e-7 fails with venice'52' 173 demands 1e-3/1e-4/1e-5? 52:1e-6 totally fails. Maybe also True below (recomp jacobian): yes stable
         blockEigMultJtJ = 1e-4 # 173: little effect 1e-6/4/8. just 173 or always not mattering much?
@@ -1583,8 +1588,8 @@ def bundle_adjust(
                 # stepSize = blockEigenvalueJtJ #
 
                 # TODO: LipJ for both? or only JJ?
-                stepSize = JJ_mult * JtJ.copy() + blockEigMult * blockEigenvalueJtJ
-                #stepSize = LipJ * JtJ.copy() + blockEigMult * blockEigenvalueJtJ
+                #stepSize = JJ_mult * JtJ.copy() + blockEigMult * blockEigenvalueJtJ
+                stepSize = LipJ * JtJ.copy() + blockEigMult * blockEigenvalueJtJ
                 JtJDiag = JtJ.copy() + blockEigMultJtJ * blockEigenvalueJtJ
 
                 #JtJDiag = 1e-4 * blockEigMult * blockEigenvalueJtJ # this could also work?
@@ -1652,40 +1657,46 @@ def bundle_adjust(
 
         old_descent_lemma = True
         if old_descent_lemma:
-            # old descent lemma test.
-            #nablaXp = L * JtJDiag * delta_p  # actual gradient. discussable
-            nablaXp = L * JtJDiag * delta_p  # actual gradient. discussable TODO
-            nablaXl = JltJlDiag * delta_l  # actual gradient: J^t fx0 = bp|bl
-            # before
-            LfkDiagonal = \
-                2 * (costEnd - costStart - bp.dot(delta_p) - bl.dot(delta_l)) \
-                / (delta_l.dot(nablaXl) + delta_p.dot(nablaXp))
-
-            Lfklin = (costEnd - costStart - bp.dot(delta_p) - bl.dot(delta_l))
-            if newVersion:
-                nablaXp = JtJDiag * delta_p # idea here 1/L is dropped so no need to correct this.
-                Lfklin = Lfklin + (delta_p + prox_rhs).dot(stepSize * (delta_p + prox_rhs)) - penaltyStartConst
-
-            LfkDistance  = Lfklin - (delta_l.dot(nablaXl) + delta_p.dot(nablaXp)) / 2
-            LfkViolated = LfkDistance > 0
-            LfkSafe = Lfklin < 0 # for any phi ok.
+            decent_lemma_divisor = 2
         else:
-            # after:
             # f(x) <= f(y) + <nabla(f(y) x-y> + Lf/2 |x-y|^2
             # we demand stepsize phi >= 2 Lf. Then even
             # f(x) <= f(y) + <nabla(f(y) x-y> + phi/4 |x-y|^2
             # (f(x) - f(y) - <nabla(f(y) x-y>) * 4 / |x-y|^2  <= phi
-            #nablaXp = L * JtJDiag * delta_p    # actual gradient: J^t fx0 = bp|bl , no L. grad at f(x) is L * JtJDiag * delta_p - s
-            #nablaXl = JltJlDiag * delta_l  # actual gradient is b. L since JltJlDiag multiplied by 1/L.
-            descent_rhs_l = delta_l.dot(JltJlDiag * delta_l)
-            descent_rhs_p = L * delta_p.dot(JtJDiag * delta_p)
+            # recall actual gradient: J^t fx0 = bp|bl , no L. grad at f(x) is L * JtJDiag * delta_p - s
+            # f(x) is costEnd
+            decent_lemma_divisor = 4
 
-            LfkDistance  = costEnd - (costStart + bp.dot(delta_p) + bl.dot(delta_l) + (descent_rhs_l + descent_rhs_p) / 4)
-            LfkViolated = LfkDistance > 0
-            LfkSafe = (costEnd - costStart - bp.dot(delta_p) - bl.dot(delta_l)) < 0 # for any phi ok.
+        nablaXp = L * JtJDiag * delta_p  # actual gradient. discussable TODO
+        nablaXl = JltJlDiag * delta_l  # actual gradient: J^t fx0 = bp|bl
+        Lfkconst = costEnd - costStart
+        Lfklin = bp.dot(delta_p) + bl.dot(delta_l)
+        # The tr part? Deriv of (delta_l).dot(JltJlDiag * delta_l) at delta_l=0 is 0
+        if newVersion:
+            nablaXp = JtJDiag * delta_p # idea here 1/L is dropped so no need to correct this.
+            # TODO This does not belong here, no? DL is not including prox term. It is plain function only.
+            #Lfklin = Lfklin + (delta_p + prox_rhs).dot(stepSize * (delta_p + prox_rhs)) - penaltyStartConst
+
+        # TODO actually not clear. I look at at as if l part is not there or implicit.
+        LfkQuad = (delta_l.dot(nablaXl) + delta_p.dot(stepSize * delta_p)) / decent_lemma_divisor
+        # Model could be f(x(y), y), where x(y) := argmax_x f(x,y), with p=y, l=x
+        # we have x=x-delta_l <=> x = x - Vli * ((W.transpose() * delta_p).flatten() + bl), bl = Jl^t f0
+        # derivative as df/dx * dx/dy = <bl, Vli * W^T * dy> = <xl, delta_l + Vli * bl> ? looks weird
+        # but assume nabla_l = 0. Then changing y only has this effect.
+        # now look at changing y only leads to a change in x as follows
+        # Lfklin = (costEnd - costStart - bp.dot(delta_p) - bl.dot(delta_l + Vli * bl))
+        # LfkQuad = delta_p.dot(stepSize * delta_p)) / decent_lemma_divisor
+        only_function_of_p = True
+        if newVersion and only_function_of_p:
+            Lfklin = bp.dot(delta_p) + bl.dot(delta_l + Vli * bl)
+            LfkQuad = delta_p.dot(stepSize * delta_p) / decent_lemma_divisor
+
+        LfkDistance  = Lfkconst - Lfklin - LfkQuad
+        LfkViolated = LfkDistance > 0
+        LfkSafe = Lfklin < 0 # for any phi ok.
 
         if tr_check < tr_eta_2: # and False: # TR should not help here. Maybe apply differently? TR checks if approx w. JtJ is ok within region.
-            print(" //////  tr_check " , tr_check, " Lfk distance ", LfkDistance, " -nabla^Tdelta=" , -bp.dot(delta_p) - bl.dot(delta_l), " /////")
+            print(" //////  tr_check " , tr_check, " Lfk distance ", LfkDistance, " -nabla^Tdelta=" , -Lfklin, " /////")
             L = L * 2
             if not newVersion:
                 JtJDiag = 1/2 * JtJDiag # why that? tr only for landmarks here..
@@ -1694,11 +1705,13 @@ def bundle_adjust(
             #     penaltyStartConst = prox_rhs.dot(stepSize * prox_rhs)
                 
         #LfkViolated = False # todo remove?
-        #if tr_check >= tr_eta_2 and LfkViolated: # violated -- should revert update.
-        if tr_check >= tr_eta_2 and LfkViolated and not steSizeTouched or (steSizeTouched and costStart + penaltyStart < costEnd + penaltyL + penaltyP): # violated -- should revert update.
+        if tr_check >= tr_eta_2 and LfkViolated: # violated -- should revert update.
+        #if tr_check >= tr_eta_2 and LfkViolated and not steSizeTouched or (steSizeTouched and costStart + penaltyStart < costEnd + penaltyL + penaltyP): # violated -- should revert update.
         #if LfkViolated and not steSizeTouched or (steSizeTouched and costStart + penaltyStart < costEnd + penaltyL): # violated -- should revert update.
             steSizeTouched = True
             print(" |||||||  Lfk distance ", LfkDistance, " -nabla^Tdelta=" , -bp.dot(delta_p) - bl.dot(delta_l), " LipJ ", LipJ, " |||||||")
+            print(" |||||||  f(x) <= f(y) + <nabla(f(y) x-y> + Lf/2 |x-y|^2: ", costEnd, " <= ", costStart, " + ", Lfklin, " + ", LfkQuad, " |||||||")
+
             #stepSize = stepSize * 2
             # other idea, initially we only add 1/2^k eg 0.125, times the needed value and inc if necessary, maybe do not add anything if not needed.
 
@@ -1714,7 +1727,7 @@ def bundle_adjust(
 
             # try this, should memorize if works (exists scale s.t. fulfilled)
             # rather if dre is violated increase this.
-            #LipJ += 0.2 EXTERNALLY -- we do not know if dre increases.
+            #LipJ *= np.sqrt(2) EXTERNALLY -- we do not know if dre increases.
             #stepSize = 1. * (blockEigMult * blockEigenvalueJtJ + J_scale * JtJ.copy()) # Todo '2 *' vs 1 by convex.
 
             if not newVersion:
@@ -1745,7 +1758,7 @@ def bundle_adjust(
             it_ = it_ + 1
             updateJacobian = True
 
-        print(" ------- Lfk distance ", LfkDistance, " -nabla^Tdelta=" , -bp.dot(delta_p) - bl.dot(delta_l),  " tr_check ", tr_check, " -------- ")
+        print(" ------- Lfk distance ", LfkDistance, " tr_check ", tr_check,  " LipJ ", LipJ, " -------- ")
 
     x0_p_ = x0_p_.reshape(n_cameras_, 9)
     x0_l_ = x0_l_.reshape(n_points_, 3)
@@ -1789,7 +1802,8 @@ def bundle_adjust(
         bp = J_pose.transpose() * fx0
         #JJ_mult = 1 + np.maximum(minimumL, np.minimum(L_in_cluster_ * 2, L)) # might have changed .. must be off sigh
         blockEigenvalueJtJ = blockEigenvalue(JtJ, 9) # TODO: what if this is only needed for 0-eigen directions? return !=0 only if in small eigendir
-        stepSize = JJ_mult * JtJ.copy() + blockEigMult * blockEigenvalueJtJ
+        #stepSize = JJ_mult * JtJ.copy() + blockEigMult * blockEigenvalueJtJ
+        stepSize = LipJ * JtJ.copy() + blockEigMult * blockEigenvalueJtJ
 
         if not newVersion:
             JtJDiag = 1/L * stepSize.copy() # max 1, 1/L, line-search dre fails -> increase
@@ -1814,7 +1828,8 @@ def bundle_adjust(
         xTest = x0_l_ - (diag_present*(x0_l_.flatten() - s_l_)).reshape(-1,3)
         return costEnd, x0_p_, xTest, L, diag_present + Rho
 
-    L_out = np.maximum(minimumL, np.minimum(L_in_cluster_ * 2, L)) # not clear if generally ok, or 2 or 4 should be used.
+    #L_out = np.maximum(minimumL, np.minimum(L_in_cluster_ * 2, L)) # not clear if generally ok, or 2 or 4 should be used.
+    L_out = np.maximum(minimumL, (L_in_cluster_ + L) / 2) # not clear if generally ok, or 2 or 4 should be used.
     return costEnd, x0_p_, x0_l_, L_out, Rho, nabla_p
 
     # recall solution wo. splitting is
@@ -2243,7 +2258,8 @@ if basic_version:
             camera_indices_in_cluster, poses_in_cluster, poses_s_in_cluster, L_in_cluster, Ul_in_cluster, nabla_p_in_cluster) # old_poses for costs?
 
         #DRE cost BEFORE s update, always lower than AFTER update.
-        dre = cost_DRE(camera_indices_in_cluster, poses_in_cluster, poses_s_in_cluster, L_in_cluster, Ul_in_cluster, poses_v, nabla_p_in_cluster) + currentCost
+        dre, dre_per_part = cost_DRE(camera_indices_in_cluster, poses_in_cluster, poses_s_in_cluster, \
+                                     L_in_cluster, Ul_in_cluster, poses_v, nabla_p_in_cluster) + currentCost
 
         tau = 1 # 2 is best ? does not generalize!
         for ci in range(kClusters):
@@ -2277,7 +2293,9 @@ if basic_version:
             round(lastCostDRE - dre), "==== f(v)= ", round(primal_cost_v), " f(u)= ", round(primal_cost_u))
 
         if lastCostDRE < dre:
-            LipJ += 0.2 * np.ones(kClusters)
+            #LipJ += 0.2 * np.ones(kClusters)
+            partid = np.argmax(dre_per_part)
+            LipJ[partid] *= np.sqrt(2)
 
         lastCost = currentCost
         # print(" output shapes ", x0_p_c.shape, " ", x0_l_c.shape, " takes ", end-start , " s")
@@ -2531,7 +2549,7 @@ else:
                 bfgs_rhos[it % bfgs_mem] = np.maximum(0., 1./ bfgs_qs[it % bfgs_mem].dot(bfgs_ps[it % bfgs_mem]))
 
             # eval cost
-            dre_bfgs = cost_DRE(camera_indices_in_cluster, poses_in_cluster_bfgs, poses_s_in_cluster_bfgs, 
+            dre_bfgs, dre_per_part = cost_DRE(camera_indices_in_cluster, poses_in_cluster_bfgs, poses_s_in_cluster_bfgs, 
                                 L_in_cluster_bfgs, Ul_in_cluster_bfgs, poses_v_bfgs, nabla_p_in_cluster_bfgs)
             dre_bfgs += currentCost_bfgs
 
@@ -2558,11 +2576,13 @@ else:
                 round(lastCostDRE_bfgs - dre_bfgs), "==== f(v)= ", round(primal_cost_v), " f(u)= ", round(primal_cost_u), " ~= ", currentCost_bfgs)
 
             if lastCostDRE_bfgs < dre_bfgs and ls_it == line_search_iterations-1:
-                LipJ += 0.2 * np.ones(kClusters)
+                #LipJ += 0.2 * np.ones(kClusters)
+                partid = np.argmax(dre_per_part)
+                LipJ[partid] *= np.sqrt(2) # maybe just the LARGEST dre cost.
 
             # accept / reject, reject all but drs and see
             # if ls_it == line_search_iterations-1 :
-            if dre_bfgs <= lastCostDRE_bfgs or 1000 * (dre_bfgs-lastCostDRE_bfgs) <= lastCostDRE_bfgs or ls_it == line_search_iterations-1 : # not correct yet, must be <= last - c/gamma |u-v|
+            if dre_bfgs <= lastCostDRE_bfgs or 10000 * (dre_bfgs-lastCostDRE_bfgs) <= lastCostDRE_bfgs or ls_it == line_search_iterations-1 : # not correct yet, must be <= last - c/gamma |u-v|
                 # TODO: save and use best wrt. cost: new fct?
                 # 
                 steplength = 0 # currently printed
