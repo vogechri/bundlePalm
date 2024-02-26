@@ -35,14 +35,14 @@ BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/dubrovnik/"
 # 28 it. cost 0       841047 with blockeig
 FILE_NAME = "problem-356-226730-pre.txt.bz2"
 #FILE_NAME = "problem-237-154414-pre.txt.bz2"
-#FILE_NAME = "problem-173-111908-pre.txt.bz2" # ex where power its are worse ->493669
+FILE_NAME = "problem-173-111908-pre.txt.bz2" # ex where power its are worse ->493669
 
 # # test problem with / without removal of far points.
 # # ~702k, with far: 737k jeps=1e-4
 # FILE_NAME = "problem-135-90642-pre.txt.bz2"
 
-BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/venice/"
-FILE_NAME = "problem-52-64053-pre.txt.bz2"
+#BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/venice/"
+#FILE_NAME = "problem-52-64053-pre.txt.bz2"
 # super tough apparently .. WTF? 49 it. cost 1      623672 -- differ pcg & replace it to exact
 # 99 it. cost 0      540860 pcg/non-it. check sci-py
 #FILE_NAME = "problem-1778-993923-pre.txt.bz2"
@@ -84,6 +84,10 @@ FILE_NAME = "problem-138-19878-pre.txt.bz2"
 # 26 it. cost 1      120979, stuck
 FILE_NAME = "problem-646-73584-pre.txt.bz2"
 #22 it. cost 0       377834, stuck
+
+#BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/dubrovnik/"
+#FILE_NAME = "problem-173-111908-pre.txt.bz2" # on/off remove far points 498296 (37 its) off 524180
+
 
 URL = BASE_URL + FILE_NAME
 old_c = 0
@@ -140,8 +144,8 @@ def read_bal_data(file_name):
         points_3d = points_3d.reshape((n_points, -1))
 
     # remove all residuals of points and all points with this property
-    (points_3d, camera_indices, points_2d, point_indices) = \
-        remove_large_points(points_3d, camera_indices, points_2d, point_indices)
+    # (points_3d, camera_indices, points_2d, point_indices) = \
+    #     remove_large_points(points_3d, camera_indices, points_2d, point_indices)
 
     return camera_params, points_3d, camera_indices, point_indices, points_2d
 
@@ -1493,6 +1497,7 @@ it = 0
 while it < iterations:
     print("Using L = ", L)
     if updateJacobian: # not needed if rejected
+        L_increased_in_run = False
         start = time.time()
         J_pose, J_land, fx0 = ComputeDerivativeMatricesNew()
         #J_pose, J_land, fx0 = ComputeDerivativeMatrices() # takes x0_t
@@ -1801,9 +1806,10 @@ while it < iterations:
     tr_check = (costStart - costEndPenalty) / (costStart - costQuadPenalty)
     eta_1 = 0.8
     eta_2 = 0.25
-    if tr_check > eta_1:
+    if tr_check > eta_1 and not L_increased_in_run == True:
         L = L / 2
     if tr_check < eta_2:
+        L_increased_in_run = True
         L = L * 2
 
     print("s focal distance ", np.min(camera_params[:,6].numpy()), " - ", np.max(camera_params[:,6].numpy()))
