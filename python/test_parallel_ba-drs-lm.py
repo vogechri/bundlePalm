@@ -1523,11 +1523,11 @@ def bundle_adjust(
                 x0_t_cam, x0_t_land, camera_indices_, point_indices_, torch_points_2d, unique_poses_in_c_, unique_landmarks_in_c_ )
 
 
-            fx1 = funx0_st1(
-                x0_t_cam[camera_indices_[:]],
-                x0_t_land[point_indices_[:]],
-                torch_points_2d)
-            print("Cost test ", np.sum(fx1.numpy() ** 2))
+            # fx1 = funx0_st1(
+            #     x0_t_cam[camera_indices_[:]],
+            #     x0_t_land[point_indices_[:]],
+            #     torch_points_2d)
+            # print("Cost test ", np.sum(fx1.numpy() ** 2))
 
 
             # 2 * JtJ majorizes, note JtJ:=(UW|W^TV), so W part majorized by *2:
@@ -2117,6 +2117,29 @@ def BFGS_direction(r, ps, qs, rhos, k, mem, mu):
     return dk_
 
 ##############################################################################
+
+kClusters = 3 # 10
+its = 1
+
+import sys
+# total arguments
+num_args = len(sys.argv)
+if num_args > 2:
+    print("Total arguments passed:", num_args)
+    # Arguments passed
+    print("\nName of Python script:", sys.argv[0], "url ", sys.argv[1], "file ", sys.argv[2])
+    BASE_URL =  sys.argv[1]
+    FILE_NAME = sys.argv[2]
+
+    if num_args > 3:
+        its = int(sys.argv[3])
+    if num_args > 4:
+        kClusters = int(sys.argv[4])
+
+    URL = BASE_URL + FILE_NAME
+    if not os.path.isfile(FILE_NAME):
+        urllib.request.urlretrieve(URL, FILE_NAME)
+
 cameras, points_3d, camera_indices, point_indices, points_2d = read_bal_data(FILE_NAME)
 
 n_cameras = cameras.shape[0]
@@ -2249,12 +2272,12 @@ x0_p = x0_p.reshape(n_cameras, 9)
 
 # 1. take problem and split, sort indices by camera, define local global map and test it.
 startL = 1
-kClusters = 3 # 10
 innerIts = 1  # change to get an update, not 1 iteration
-its = 120
 cost = np.zeros(kClusters)
 lastCost = np.sum(fx0**2) #1e20
 lastCostDRE = np.sum(fx0**2) #1e20
+bestCost = np.sum(fx0**2) #1e20
+bestIt = 0
 basic_version = False #True # accelerated or basic
 sequential = True
 linearize_at_last_solution = True # linearize at uk or v. maybe best to check energy. at u or v. DRE:
@@ -2668,6 +2691,8 @@ else:
             dre_bfgs = max(dre_bfgs, primal_cost_v) # sandwich lemma 
             print( it, "/", ls_it, " ======== DRE BFGS ====== ", round(dre_bfgs) , " ========= gain " , \
                 round(lastCostDRE_bfgs - dre_bfgs), "==== f(v)= ", round(primal_cost_v), " f(u)= ", round(primal_cost_u), " ~= ", currentCost_bfgs)
+            bestCost = np.minimum(primal_cost_v, bestCost)
+            bestIt = it
 
             if lastCostDRE_bfgs < dre_bfgs and ls_it == line_search_iterations-1:
                 #LipJ += 0.2 * np.ones(kClusters)
@@ -2736,8 +2761,15 @@ else:
 # <=> f(x) < f(y) + <nabla fy + nabla fx, x-y>
 
 if o3d_defined:
-    vis, cameras_vis1, landmarks_vis = render_points_cameras(camera_indices_in_cluster, point_indices_in_cluster, poses_v, landmarks)
+    vis, cameras_vis1, landmarks_vis = \
+        render_points_cameras(camera_indices_in_cluster, point_indices_in_cluster, poses_v, landmarks)
 
 if write_output:
     poses_v.tofile("camera_params_drs-lm.dat")
     landmarks.tofile("point_params_drs-lm.dat")
+
+import json
+result_dict = {"base_url": BASE_URL, "file_name": FILE_NAME, "iterations" : its, \
+               "bestCost" : round(bestCost), "bestIt": bestIt, "kClusters" : kClusters }
+with open('results_lm.json', 'a') as json_file:
+    json.dump(result_dict, json_file)

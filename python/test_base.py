@@ -467,6 +467,26 @@ def torchSingleResiduumY(camera_params, point_params, p2d) :
 #     residual = jnp.concatenate([resX[:,], resY[:,]], axis=1)
 #     return residual
 
+import sys
+# total arguments
+num_args = len(sys.argv)
+if num_args > 2:
+    print("Total arguments passed:", num_args)
+    # Arguments passed
+    print("\nName of Python script:", sys.argv[0], "url ", sys.argv[1], "file ", sys.argv[2])
+    BASE_URL =  sys.argv[1]
+    FILE_NAME = sys.argv[2]
+
+    if num_args > 3:
+        its = int(sys.argv[3])
+    if num_args > 4:
+        kClusters = int(sys.argv[4])
+
+    URL = BASE_URL + FILE_NAME
+    if not os.path.isfile(FILE_NAME):
+        urllib.request.urlretrieve(URL, FILE_NAME)
+
+
 cameras, points_3d, camera_indices, point_indices, points_2d = read_bal_data(FILE_NAME)
 
 c02_mult = 1
@@ -1822,3 +1842,9 @@ while it < iterations:
     if write_output:
         camera_params.numpy().tofile("camera_params_base.dat")
         point_params.numpy().tofile("point_params_base.dat")
+
+import json
+result_dict = {"base_url": BASE_URL, "file_name": FILE_NAME, "iterations" : its, \
+               "bestCost" : round(costEnd), "bestIt": its-1 }
+with open('results_lm.json', 'a') as json_file:
+    json.dump(result_dict, json_file)
