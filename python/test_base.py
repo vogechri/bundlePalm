@@ -467,6 +467,7 @@ def torchSingleResiduumY(camera_params, point_params, p2d) :
 #     residual = jnp.concatenate([resX[:,], resY[:,]], axis=1)
 #     return residual
 
+iterations = 100
 import sys
 # total arguments
 num_args = len(sys.argv)
@@ -478,7 +479,8 @@ if num_args > 2:
     FILE_NAME = sys.argv[2]
 
     if num_args > 3:
-        its = int(sys.argv[3])
+        print("\nIterations:", sys.argv[3])
+        iterations = int(sys.argv[3])
     if num_args > 4:
         kClusters = int(sys.argv[4])
 
@@ -1469,7 +1471,6 @@ bfgs_rhos = np.zeros([bfgs_mem, 1])
 useExtInCost = True # with using extrapolation, does it lead to lower cost, how much? -- must use with TR as well?
 L0 = 1.0 #e-3
 L = L0
-iterations = 100
 verbose = False
 debug = False
 useInvSolver = False
@@ -1844,7 +1845,7 @@ while it < iterations:
         point_params.numpy().tofile("point_params_base.dat")
 
 import json
-result_dict = {"base_url": BASE_URL, "file_name": FILE_NAME, "iterations" : its, \
-               "bestCost" : round(costEnd), "bestIt": its-1 }
-with open('results_lm.json', 'a') as json_file:
+result_dict = {"base_url": BASE_URL, "file_name": FILE_NAME, "iterations" : iterations, \
+               "bestCost" : round(costEnd), "bestIt": iterations-1 }
+with open('results_base.json', 'a') as json_file:
     json.dump(result_dict, json_file)
