@@ -1403,17 +1403,17 @@ def primal_cost(
 
     camScale = 1./Unorm.data.reshape(-1,9)
     camScale = from_numpy(camScale[cameras_indices_in_c_])
+    camScale.requires_grad_(False)
     # print("camScale ", camScale.shape)
     # print("x0_t_cam ", x0_t_cam.shape)
     # print("cameras ", camScale * x0_t_cam)
-
     landScale = 1./Vnorm.data.reshape(-1,3)
     landScale = from_numpy(landScale[unique_points_in_c_])
     landScale.requires_grad_(False)
 
-    camScale.requires_grad_(False)
     funx0_st1 = lambda X0, X1, X2: \
-        torchSingleResiduumScaled(X0.view(-1, 9), X1.view(-1, 3), X2.view(-1, 2), camScale[camera_indices_[:]], landScale[point_indices_[:]])
+        torchSingleResiduumScaled(X0.view(-1, 9), X1.view(-1, 3), X2.view(-1, 2), \
+                                  camScale[camera_indices_[:]], landScale[point_indices_[:]])
 
     fx1 = funx0_st1(
         x0_t_cam[camera_indices_[:]],
@@ -1522,13 +1522,11 @@ def bundle_adjust(
             J_pose, J_land, fx0 = ComputeDerivativeMatricesNew (
                 x0_t_cam, x0_t_land, camera_indices_, point_indices_, torch_points_2d, unique_poses_in_c_, unique_landmarks_in_c_ )
 
-
             # fx1 = funx0_st1(
             #     x0_t_cam[camera_indices_[:]],
             #     x0_t_land[point_indices_[:]],
             #     torch_points_2d)
             # print("Cost test ", np.sum(fx1.numpy() ** 2))
-
 
             # 2 * JtJ majorizes, note JtJ:=(UW|W^TV), so W part majorized by *2:
             # clearly: 2a^2+b^2 > (a+b)^2 = a^2 + b^2 + 2ab. Since (a-b)^2 = a^2 + b^2 - 2ab > 0, so a^2 + b^2 > 2ab.
@@ -1734,7 +1732,7 @@ def bundle_adjust(
         # LfkQuad = delta_p.dot(stepSize * delta_p)) / decent_lemma_divisor
         only_function_of_p = True
         if newVersion and only_function_of_p:
-            Lfklin = bp.dot(delta_p) + bl.dot(delta_l + Vli * bl)
+            Lfklin = bp.dot(delta_p) + bl.dot(delta_l + Vli * bl) # '-'?
             LfkQuad = delta_p.dot(stepSize * delta_p) / decent_lemma_divisor
 
         LfkDistance  = Lfkconst - Lfklin - LfkQuad
@@ -1878,14 +1876,25 @@ def bundle_adjust(
         xTest = x0_l_ - (diag_present*(x0_l_.flatten() - s_l_)).reshape(-1,3)
         return costEnd, x0_p_, xTest, L, diag_present + Rho
 
+    if True:
+        Vnorm_ = diag_sparse(np.squeeze(np.asarray(np.sqrt( (np.abs(JltJl)/10).sum(axis=0) ))))
+        temp   = Vnorm_.data
+        x0_l_ = Vnorm_ * x0_l_.flatten()
+        x0_l_ = x0_l_.reshape(-1,3)
+        temp_ = Vnorm.data.reshape(-1,3)
+        #print( temp_.shape, " ", unique_landmarks_in_c_.shape, " ", temp.shape, " ", points_3d_in.shape, " ",x0_l_.shape)
+        temp_[unique_landmarks_in_c_,:] *= temp.reshape(-1,3)
+        Vnorm.data = temp_.flatten()
+        # breaks if rejected. must use last Vnorm then
+
     #L_out = np.maximum(minimumL, np.minimum(L_in_cluster_ * 2, L)) # not clear if generally ok, or 2 or 4 should be used.
     L_out = np.maximum(minimumL, (L_in_cluster_ + L) / 2) # not clear if generally ok, or 2 or 4 should be used.
     return costEnd, x0_p_, x0_l_, L_out, Rho, nabla_p, np.minimum(1e-2, np.maximum(1e-5, blockEigMult))
 
     # recall solution wo. splitting is
     # solve Vl x + bS + Vd ()
-    #bl_s = bl + L * JltJlDiag * (x0_l_ - s_l_) # TODO: + or -. '+', see above
-    #delta_l = -Vli * ((W.transpose() * delta_p).flatten() + bl_s).flatten()
+    # bl_s = bl + L * JltJlDiag * (x0_l_ - s_l_) # TODO: + or -. '+', see above
+    # delta_l = -Vli * ((W.transpose() * delta_p).flatten() + bl_s).flatten()
     # sum_k delta_l Vlk delta_l + delta_l ((Wk.transpose() * delta_p) + bl_sk) argmin
     # all this is local per block. k blocks: sum_k Vlk = 3x3, we could instead
     # return Vlk and bk = ((Wk.transpose() * delta_p) + bl_sk): 4 times #landmarks floats.
@@ -2119,7 +2128,7 @@ def BFGS_direction(r, ps, qs, rhos, k, mem, mu):
 ##############################################################################
 
 kClusters = 3 # 10
-its = 1
+its = 120
 
 import sys
 # total arguments
@@ -2613,7 +2622,9 @@ else:
 
         line_search_iterations = 3 # 3 appears ok
         print(" ..... step length ", steplength, " bfgs step ", dk_stepLength, " ratio ", multiplier)
+        Vnorm_safe = Vnorm.copy()
         for ls_it in range(line_search_iterations):
+            Vnorm = Vnorm_safe.copy()
             if line_search_iterations >1:
                 tk = ls_it / (line_search_iterations-1)
             else: # debug
@@ -2693,6 +2704,10 @@ else:
                 round(lastCostDRE_bfgs - dre_bfgs), "==== f(v)= ", round(primal_cost_v), " f(u)= ", round(primal_cost_u), " ~= ", currentCost_bfgs)
             bestCost = np.minimum(primal_cost_v, bestCost)
             bestIt = it
+            if it < 60:
+                bestCost60 = bestCost
+            if it < 30:
+                bestCost30 = bestCost
 
             if lastCostDRE_bfgs < dre_bfgs and ls_it == line_search_iterations-1:
                 #LipJ += 0.2 * np.ones(kClusters)
@@ -2770,6 +2785,7 @@ if write_output:
 
 import json
 result_dict = {"base_url": BASE_URL, "file_name": FILE_NAME, "iterations" : its, \
-               "bestCost" : round(bestCost), "bestIt": bestIt, "kClusters" : kClusters }
+               "bestCost" : round(bestCost), "bestIt": bestIt, "kClusters" : kClusters, \
+               "bestCost60" : round(bestCost60), "bestCost30" : round(bestCost30) }
 with open('results_lm.json', 'a') as json_file:
     json.dump(result_dict, json_file)
