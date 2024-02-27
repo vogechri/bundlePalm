@@ -79,8 +79,8 @@ FILE_NAME = "problem-52-64053-pre.txt.bz2"
 # 3 clusters
 #119 / 0  ======== DRE BFGS ======  513433  ========= gain  171 ==== f(v)=  513433  f(u)=  513207  ~
 
-#BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/dubrovnik/"
-#FILE_NAME = "problem-173-111908-pre.txt.bz2"
+BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/dubrovnik/"
+FILE_NAME = "problem-173-111908-pre.txt.bz2"
 # without remove_large_points: 1e-5!
 # 71 / 0  ======== DRE BFGS ======  520390  ========= gain  -47 ==== f(v)=  520387  f(u)=
 
@@ -1585,7 +1585,8 @@ def bundle_adjust(
             #stepSize = LipJ * JtJ.copy() + diag_sparse(np.fmax(JtJ.diagonal(), 1e-4))
 
             JltJl = J_land.transpose() * J_land
-            print( "Diag pseudo HessL (max/min/med/mean)",  np.max(np.abs(JltJl.diagonal()).reshape(-1,3), axis=0), " ", np.min(np.abs(JltJl.diagonal()).reshape(-1,3), axis=0), " ", np.median(np.abs(JltJl.diagonal()).reshape(-1,3), axis=0), " ", np.sum(np.abs(JltJl.diagonal()).reshape(-1,3))  ) # this is not desired. better min/max/med
+            absDiagJltJl = np.abs(JltJl.diagonal()).reshape(-1,3)
+            print( "Diag pseudo HessL (max/min/med/mean)",  np.max(absDiagJltJl, axis=0), " ", np.min(absDiagJltJl, axis=0),  " ", np.median(absDiagJltJl, axis=0), " ", np.sum(absDiagJltJl) )
             # JltJlDiag = JltJl + J_eps * diag_sparse(np.ones(JltJl.shape[0]))
             # maybe more appropriate?
             #blockEigenvalueJltJl = blockEigenvalue(JltJl, 3)
@@ -1631,7 +1632,8 @@ def bundle_adjust(
                 # blockEigenvalueJtJ = blockEigenvalue(JtJ, 9) + 1e-15 * JtJ
                 # stepSize = blockEigenvalueJtJ #
 
-                blockEigenvalueJtJ = blockEigenvalueWhereNeeded(JtJ, 9, 1e-4) # !
+                blockEigenvalueJtJ = blockEigenvalueWhereNeeded(JtJ, 9, 1e-4) # ! 1e-4 1e-5 als works. problem 52, 1e-6 does not 173 performance bad if not 1e-6?
+                #blockEigenvalueJtJ = 1e-1 * blockEigenvalue(JtJ, 9) # ! try 173 & 52, fails at 1e-2, 10 clusters. 1e-1 ok for 173 & 52. (not dead)
 
                 # TODO: LipJ for both? or only JJ?
                 #stepSize = JJ_mult * JtJ.copy() + blockEigMult * blockEigenvalueJtJ
