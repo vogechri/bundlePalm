@@ -1486,6 +1486,7 @@ def bundle_adjust(
         JJ_mult = 1 #+ L # YES! .. should i add tr thing instead, no? use first in computing deriv 2nd time (simple test to lower this here.)
         blockEigMult = 1e-5 # 1e-7 fails with venice'52' 173 demands 1e-3/1e-4/1e-5? 52:1e-6 totally fails. Maybe also True below (recomp jacobian): yes stable
         blockEigMultJtJ = 1e-4 # 173: little effect 1e-6/4/8. just 173 or always not mattering much?
+        blockEigMultLimit = 1e-5 # maybe now can be more lose? 5 cluster needed blockEigenvalueWhereNeeded(JtJ, 9, 1e-4)
         # blockEigMult not import for 173 but 52 yes
         # adapt blockEigMult based on check? pass up and down hierarchy?
         # problem 1e-3/4/5 good for 173, not for 52. 52: better for 1e-6 bad for 1e-5 etc.
@@ -1629,6 +1630,8 @@ def bundle_adjust(
                 # traditional ADMM: not good -- also return
                 # blockEigenvalueJtJ = blockEigenvalue(JtJ, 9) + 1e-15 * JtJ
                 # stepSize = blockEigenvalueJtJ #
+
+                blockEigenvalueJtJ = blockEigenvalueWhereNeeded(JtJ, 9, 1e-4) # !
 
                 # TODO: LipJ for both? or only JJ?
                 #stepSize = JJ_mult * JtJ.copy() + blockEigMult * blockEigenvalueJtJ
@@ -1889,7 +1892,7 @@ def bundle_adjust(
 
     #L_out = np.maximum(minimumL, np.minimum(L_in_cluster_ * 2, L)) # not clear if generally ok, or 2 or 4 should be used.
     L_out = np.maximum(minimumL, (L_in_cluster_ + L) / 2) # not clear if generally ok, or 2 or 4 should be used.
-    return costEnd, x0_p_, x0_l_, L_out, Rho, nabla_p, np.minimum(1e-2, np.maximum(1e-5, blockEigMult))
+    return costEnd, x0_p_, x0_l_, L_out, Rho, nabla_p, np.minimum(1e-2, np.maximum(blockEigMultLimit, blockEigMult))
 
     # recall solution wo. splitting is
     # solve Vl x + bS + Vd ()
@@ -2127,8 +2130,8 @@ def BFGS_direction(r, ps, qs, rhos, k, mem, mu):
 
 ##############################################################################
 
-kClusters = 3 # 10
-its = 120
+kClusters = 5 # 10
+its = 30
 
 import sys
 # total arguments
@@ -2419,6 +2422,7 @@ if basic_version:
             #LipJ += 0.2 * np.ones(kClusters)
             partid = np.argmax(dre_per_part)
             LipJ[partid] = np.minimum(LipJ[partid] * np.sqrt(2), 6)
+        # if f(u) < f(v) also raise? not lip but smth else.
 
         lastCost = currentCost
         # print(" output shapes ", x0_p_c.shape, " ", x0_l_c.shape, " takes ", end-start , " s")
