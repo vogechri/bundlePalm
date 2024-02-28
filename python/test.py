@@ -23,8 +23,8 @@ FILE_NAME = "problem-49-7776-pre.txt.bz2"
 #FILE_NAME = "problem-73-11032-pre.txt.bz2"
 #FILE_NAME = "problem-138-19878-pre.txt.bz2"
 
-BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/dubrovnik/"
-FILE_NAME = "problem-173-111908-pre.txt.bz2"
+#BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/dubrovnik/"
+#FILE_NAME = "problem-173-111908-pre.txt.bz2"
 
 # BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/final/"
 # FILE_NAME = "problem-93-61203-pre.txt.bz2"
@@ -130,6 +130,9 @@ def init_lib():
     lib.recluster_cameras.argtypes = [ctypes.c_int, ctypes.c_void_p, ctypes.c_void_p,
                                       ctypes.c_void_p] # in&out]
 
+    lib.cluster_cameras_degeneracy.restype = None
+    lib.cluster_cameras_degeneracy.argtypes = [ctypes.c_int, ctypes.c_void_p, ctypes.c_void_p,
+                                               ctypes.c_void_p] # in&out]
 
 def process_cluster_lib(num_lands_, num_res_, kClusters__, point_indices_in_cluster__, res_indices_in_cluster__, point_indices__):
 
@@ -287,6 +290,10 @@ def post_process_cluster_lib(num_lands_, num_res_, kClusters__, point_indices_in
     lib.recluster_cameras(c_kClusters_, c_camera_indices_cpp, c_point_indices_cpp,
                           res_to_cluster_by_landmark_out)
 
+    # todo should operate similarly, put in own
+    #res_to_cluster_by_landmark_deg_out = lib.new_vector()
+    #lib.cluster_cameras_degeneracy(c_kClusters_, c_camera_indices_cpp, c_point_indices_cpp, res_to_cluster_by_landmark_deg_out)
+
     #print("lib.vector_get(res_toadd_sizes_out, i) ", 0, " : ", lib.vector_get(res_toadd_sizes_out, 0))
     #res_toadd_to_c_ = fillPythonVec(res_toadd_out, res_toadd_sizes_out, kClusters)
     point_indices_already_covered_ = fillPythonVec(point_indices_already_covered_out, point_indices_already_covered_sizes, kClusters)
@@ -296,6 +303,25 @@ def post_process_cluster_lib(num_lands_, num_res_, kClusters__, point_indices_in
     res_to_cluster_by_landmark_out_ = fillPythonVecSimple(res_to_cluster_by_landmark_out)
     # only first needed: res_to_cluster_by_landmark_out_
     return res_to_cluster_by_landmark_out_, point_indices_already_covered_, covered_landmark_indices_c_
+
+def deg_process_cluster_lib(kClusters__, point_indices__, camera_indices__):
+
+    c_kClusters_ = ctypes.c_int(kClusters__)
+
+    c_point_indices_ptr = (ctypes.c_int * len(point_indices__))(*point_indices__)
+    c_camera_indices_ptr = (ctypes.c_int * len(camera_indices__))(*camera_indices__)
+
+    c_point_indices_cpp = lib.new_vector_by_copy(c_point_indices_ptr, len(c_point_indices_ptr))
+    c_camera_indices_cpp = lib.new_vector_by_copy(c_camera_indices_ptr, len(c_camera_indices_ptr))
+
+    # todo should operate similarly, put in own
+    res_to_cluster_by_landmark_deg_out = lib.new_vector()
+    lib.cluster_cameras_degeneracy(c_kClusters_, c_camera_indices_cpp, c_point_indices_cpp, res_to_cluster_by_landmark_deg_out)
+
+    res_to_cluster_by_landmark_out_ = fillPythonVecSimple(res_to_cluster_by_landmark_deg_out)
+
+    return res_to_cluster_by_landmark_out_
+
 
 def cluster_covis_lib_flip(kClusters, pre_merges_, camera_indices__, point_indices__, old_vtxsToPart_=0):
     c_kClusters_ = ctypes.c_int(kClusters)
@@ -460,6 +486,22 @@ print(res_indices_in_cluster_[0].shape)
 point_indices_in_cluster = point_indices_in_cluster_
 point_indices = point_indices_ #np.array(point_indices_)
 #res_indices_in_cluster = res_indices_in_cluster_
+
+### NEW not debugged
+print("deg_process_cluster_lib")
+res_to_cluster_by_landmark_, = deg_process_cluster_lib(kClusters, point_indices, camera_indices_)
+for ci in range(kClusters):
+    ids_of_res_in_cluster = res_to_cluster_by_landmark_ == ci
+    camera_indices_in_cluster_[ci] = camera_indices_[ids_of_res_in_cluster]
+    points_2d_in_cluster_[ci] = points_2d_[ids_of_res_in_cluster]
+    point_indices_in_cluster_[ci] = point_indices_[ids_of_res_in_cluster]
+    print("===== Cluster ", ci , " covers ", points_2d_in_cluster_[ci].shape, "residuals ",
+            np.unique(point_indices_in_cluster_[ci]).shape, " of ", num_lands, " landmarks ",
+            np.unique(camera_indices_in_cluster_[ci]).shape, " of ", num_cams, "cameras ")
+
+exit()
+
+###
 
 print("Starting process_cluster_lib")
 res_toadd_to_c_, point_indices_already_covered_, covered_landmark_indices_c_, num_res_per_c_ = \

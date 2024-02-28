@@ -45,6 +45,13 @@ recluster_cameras(
     const std::vector<int>& landmark_indices_in,
     std::vector<int>& res_to_cluster_by_landmark);
 
+extern "C" void
+cluster_cameras_degeneracy(
+    int kClusters,
+    const std::vector<int>& camera_indices_in,  // per res -> cam involved
+    const std::vector<int>& landmark_indices_in,// per res -> landmark involved
+    std::vector<int>& res_to_cluster_by_landmark_out);
+
 // simplify removing inputs
 // extern "C"
 // void cluster_covis_full(
