@@ -1473,7 +1473,7 @@ void cluster_cameras_degeneracy(
       }
 
       // per part to try find best match(es).
-      if(!partsToTry.empty() && partsToTry.begin()->second >=0) {
+      if(!partsToTry.empty() && (partsToTry.begin()->second.first >=0)) {
       std::pair<int,int> partsToMerge = partsToTry.begin()->second; // 
       std::cout << " Merge  " << partsToMerge.first << " " << partsToMerge.second << " gain " << partsToTry.begin()->first << " \n";
       const double newCost = MergeParts(partsToMerge.first, partsToMerge.second,
