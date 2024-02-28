@@ -2,6 +2,7 @@
 // the latter are point_indices_already_covered and also returned
 #include "process_clusters.h"
 
+#include <assert.h>
 #include <iostream>
 #include <vector>
 #include <unordered_set>
@@ -1210,7 +1211,7 @@ void recluster_cameras(
 
 // for a part receive landmark from camera: cam -> landmarks oberserved.
 // go over cams, for landmarks with only few observations -> merge
-double GetCost(const std::map<int, std::set<int>> &landmarkFromCameraOfPart,
+double GetCost(const std::map<int, std::set<int>> &landmarkFromCameraOfPart, int res_per_cluster, 
                int maxLmPerCam, double temperature) {
   double cost = 0;
   for(const auto& [cam, landmarksFromCam] : landmarkFromCameraOfPart){
@@ -1218,7 +1219,7 @@ double GetCost(const std::map<int, std::set<int>> &landmarkFromCameraOfPart,
     if (numLandmarks > maxLmPerCam) {continue;}
     cost += std::exp(-numLandmarks / static_cast<double>(maxLmPerCam) * temperature);
   }
-  return cost; // could also return mean cost
+  return cost + 1e-1 / static_cast<double>(res_per_cluster); // could also return mean cost
 }
 
 double GetAverageCost(const std::map<int, std::set<int>> &landmarkFromCameraOfPart,
@@ -1264,7 +1265,7 @@ std::vector<int> GetLowestKCameras(const std::map<int, std::set<int>> &landmarkF
   // best cams are in pq.
   std::vector<int> ids;
   while (!pq.empty()) {
-    std::cout << "Top k Cam  " << lmsInPartOfCam[pq.top()].first << " with " << lmsInPartOfCam[pq.top()].second << " lms in part selected\n";
+    //std::cout << "Top k Cam  " << lmsInPartOfCam[pq.top()].first << " with " << lmsInPartOfCam[pq.top()].second << " lms in part selected\n";
     ids.push_back(lmsInPartOfCam[pq.top()].first);
     pq.pop();
   }
@@ -1274,8 +1275,8 @@ std::vector<int> GetLowestKCameras(const std::map<int, std::set<int>> &landmarkF
 // 2nd part and CostGain
 std::pair<int, double> FindbestMatchForPart(int partId, const std::vector<std::set<int>>& cams_from_lm, 
   const std::vector<std::set<int>>& lms_from_cam, const std::map<int, std::set<int>> &landmarkFromCameraOfPart, 
-  const std::vector<std::map<int, std::set<int>>>& landmarkFromCameraPerPart,
-  const std::vector<int>& lmToPart, const std::vector<double>& costOfPart, int maxLmPerCam, double temperature) {
+  const std::vector<std::map<int, std::set<int>>>& landmarkFromCameraPerPart, int res_in_cluster,
+  const std::vector<int>& lmToPart, const std::vector<double>& costOfPart, int maxLmPerCam, double temperature, bool verbose = false) {
   // idea: find k cams with fewest landmarks in part.
   const int topK = 3;
   const int topL = 10;
@@ -1283,19 +1284,21 @@ std::pair<int, double> FindbestMatchForPart(int partId, const std::vector<std::s
   std::vector<int> camsToTryInPart = GetLowestKCameras(landmarkFromCameraOfPart, topK, lms_from_cam);
   // for each cam find a second different part also observing it, pick one with low costs
 
-  std::cout << "Lowest k ";
-  for(const auto& cam: camsToTryInPart) {
-    std::cout << " cam " << cam <<  " ";
+  if (verbose) {
+    std::cout << "Lowest k ";
+    for(const auto& cam: camsToTryInPart) {
+      std::cout << " cam " << cam <<  " ";
+    }
+    std::cout << "\n";
   }
-  std::cout << "\n";
 
   std::set<int> partToTryMerge;
 
   // Again keep top k possibilities in Q ?
   for(int camToTry : camsToTryInPart) { // this cam has these 
-    std::cout << "At camToTry " << camToTry << std::endl;
+    //std::cout << "At camToTry " << camToTry << std::endl;
     std::set<int> landmarksInPart = landmarkFromCameraOfPart.at(camToTry); // the landmarks observed by the cam, can be just 1
-    std::cout << "Ok\n";
+    //std::cout << "Ok\n";
     // for each lm here, find a potential partner.
     std::set<int> otherLandmarksObservedByCam = lms_from_cam[camToTry];
 
@@ -1306,7 +1309,7 @@ std::pair<int, double> FindbestMatchForPart(int partId, const std::vector<std::s
     };
     std::priority_queue<int, std::vector<int>, decltype(cmp)> pq(cmp);
 
-    std::cout << "Go over other landmarks observed by cam " << camToTry << "\n";
+    //std::cout << "Go over other landmarks observed by cam " << camToTry << "\n";
     std::set<int> checkedParts = {partId}; // TODO could keep outside! and / or even fill pq from all at once.
     for(int lmId : otherLandmarksObservedByCam) {
       int otherPartId = lmToPart[lmId];
@@ -1335,7 +1338,7 @@ std::pair<int, double> FindbestMatchForPart(int partId, const std::vector<std::s
 
     for (const auto [id, cost] : otherPartCost) {
       partToTryMerge.insert(id);
-      std::cout << "Using part "  << id << " with " << cost << " for possible merge top cost: " << otherPartCost[pq.top()].second << "\n";
+      // std::cout << "Using part "  << id << " with " << cost << " for possible merge top cost: " << otherPartCost[pq.top()].second << "\n";
       pq.pop();
     }
   }
@@ -1350,17 +1353,21 @@ std::pair<int, double> FindbestMatchForPart(int partId, const std::vector<std::s
     for(const auto&[cam, lms] : landmarkFromCameraOfPart) {
       landmarkFromCameraOfOtherPart[cam].insert(lms.begin(), lms.end());
     }
-    const double newCost = GetCost(landmarkFromCameraOfOtherPart, maxLmPerCam, temperature);
+    const double newCost = GetCost(landmarkFromCameraOfOtherPart, res_in_cluster, maxLmPerCam, temperature);
     const double costGain = oldCost - newCost;
-    std::cout << "Own part "  << partId << " with cost " << costOfPart[partId] << " and merge  Part " << otherPartId 
-              << " with cost " << costOfPart[otherPartId] << " for possible merge with new cost " << newCost << " = " << costGain << " vs " << bestCostGain << "\n";
+    // std::cout << "Own part "  << partId << " with cost " << costOfPart[partId] << " and merge  Part " << otherPartId 
+    //           << " with cost " << costOfPart[otherPartId] << " for possible merge with new cost " << newCost << " = " << costGain << " vs " << bestCostGain << "\n";
 
     if(oldCost - newCost > bestCostGain){
       bestCostGain = oldCost - newCost;
       bestPartToMerge = otherPartId;
+      //  std::cout << "Own part "  << partId << " with cost " << costOfPart[partId] << " and merge  Part " << otherPartId 
+      //            << " with cost " << costOfPart[otherPartId] << " for possible merge with new cost " << newCost << " = " << costGain << " vs " << bestCostGain << "\n";
     }
   }
-  std::cout << "Found Best part " << bestPartToMerge << " and cost gain " << bestCostGain << "\n";
+  if (verbose)
+    std::cout << "Found Best part to " << partId << " cost " << costOfPart[partId] << " " << bestPartToMerge 
+              << " cost " << costOfPart[bestPartToMerge] << " and cost gain " << bestCostGain << "\n";
    return {bestPartToMerge, bestCostGain};
   }
 
@@ -1381,10 +1388,11 @@ double MergeParts(int partId, int otherPartId,
       }
     }
     
-    costOfPart[otherPartId] = -100;
+    //costOfPart[otherPartId] = -100; // invalidats q invariant: do not do like this
     landmarkFromCameraOfOtherPart.clear();
     res_per_cluster[partId] += res_per_cluster[otherPartId];
-    return GetCost(landmarkFromCameraPerPart[partId], maxLmPerCam, temperature);
+    res_per_cluster[otherPartId] = 0; // invalid
+    return GetCost(landmarkFromCameraPerPart[partId], res_per_cluster[partId], maxLmPerCam, temperature);
     // 'disable' one part. update the other. 
     // i popped one already, push this back in. Set cost to -inf for other part [we can drop this one, when popping it just looking up its cost]
 }
@@ -1400,7 +1408,7 @@ void cluster_cameras_degeneracy(
     const int num_cams = std::set<int>( camera_indices_in.begin(), camera_indices_in.end() ).size();
     const int num_lands = std::set<int>( landmark_indices_in.begin(), landmark_indices_in.end() ).size();
 
-    if (true || camera_indices_in.size() != num_res || verbose) {
+    if (camera_indices_in.size() != num_res || verbose) {
       std::cout << "Start #res " << num_res<< " " << kClusters << " #lnds" << num_lands << "  #cams " << num_cams << "\n";
       std::cout << " camera_indices_in " <<"\n";
       std::cout << " camera_indices_in " << camera_indices_in.size() << "\n";
@@ -1431,7 +1439,8 @@ void cluster_cameras_degeneracy(
         res_per_cluster[partId]++;
         landmarkFromCameraPerPart[partId][cam_id].insert(lm_id);
     }
-    std::cout << " landmarkFromCameraPerPart  " << landmarkFromCameraPerPart.size() << " done\n";
+    if (verbose)
+      std::cout << " landmarkFromCameraPerPart  " << landmarkFromCameraPerPart.size() << " done\n";
 
     // 3. cluster to cam involved and counts use landmarkFromCameraPerPart
     // 4. compute cost per part. init.
@@ -1443,7 +1452,7 @@ void cluster_cameras_degeneracy(
     std::priority_queue<int, std::vector<int>, decltype(cmp)> pq(cmp);
 
     for(int partId=0;partId < num_lands; partId++ ) {
-      const double cost = GetCost(landmarkFromCameraPerPart[partId], maxLmPerCam, temperature);
+      const double cost = GetCost(landmarkFromCameraPerPart[partId], res_per_cluster[partId], maxLmPerCam, temperature); // also prefer small parts ?!
       //std::cout << "Insert PartId  " << partId << " cost " << cost << " \n";
       costOfPart.push_back(cost);
       pq.push(partId);
@@ -1453,42 +1462,61 @@ void cluster_cameras_degeneracy(
     while (!pq.empty() && num_parts > kClusters) {
 
       const int partId = pq.top();
-      if(costOfPart[partId] < 0) {pq.pop();continue;} // invalid.
+      if(res_per_cluster[partId] <= 0) {pq.pop();continue;} // invalid / merged
 
-      std::cout << "PartId  " << partId << " cost " << costOfPart[partId] << " \n";
+      //std::cout << "PartId  " << partId << " cost " << costOfPart[partId] << " \n";
 
       // 0. select part to try for a merge
       // 1. select parts to merge     
       // 2. merge & update costs
       std::map<double, std::pair<int,int>> partsToTry;
-      for(int partToTryId = 0; partToTryId < std::min(nLowestPartsToTry, num_parts-1); partToTryId++){
+      for(int partToTryId = 0; partToTryId < std::min(nLowestPartsToTry, num_parts-1); partToTryId++) {
         const int partId = pq.top();
         pq.pop();
-        std::cout << "Try PartId  " << partId << " cost " << costOfPart[partId] << " \n";
+        if (verbose)
+          std::cout << "Try PartId  " << partId << " cost " << costOfPart[partId] << " pq-size " << pq.size() << " \n";
         std::pair<int, double> partAndGain = // 2nd part and CostGain
           FindbestMatchForPart(partId, cams_from_lm, lms_from_cam, landmarkFromCameraPerPart[partId], 
-            landmarkFromCameraPerPart, lmToPart, costOfPart, maxLmPerCam,temperature);
-        std::cout << " partAndGain  " << partAndGain.first << " gain " << partAndGain.second << " \n";
+            landmarkFromCameraPerPart, res_per_cluster[partId], lmToPart, costOfPart, maxLmPerCam,temperature, verbose);
+        if (verbose)
+          std::cout << " partAndGain  " << partAndGain.first << " gain " << partAndGain.second << " \n";
         partsToTry[partAndGain.second] = {partId, partAndGain.first};
       }
 
       // per part to try find best match(es).
-      if(!partsToTry.empty() && (partsToTry.begin()->second.first >=0)) {
+      if(!partsToTry.empty() && (partsToTry.begin()->second.second >=0)) {
       std::pair<int,int> partsToMerge = partsToTry.begin()->second; // 
-      std::cout << " Merge  " << partsToMerge.first << " " << partsToMerge.second << " gain " << partsToTry.begin()->first << " \n";
+      const double gain = partsToTry.begin()->first;
+      if (verbose)
+        std::cout << " Merge  " << partsToMerge.first << " " << partsToMerge.second 
+                  << " gain " << gain << " parts " << num_parts-1 << " #res "
+                  << res_per_cluster[partsToMerge.first] << " + "<<  res_per_cluster[partsToMerge.second] << " = "
+                  << res_per_cluster[partsToMerge.first] + res_per_cluster[partsToMerge.second] << " \n";
+
+      const int numCamsBefore1 = landmarkFromCameraPerPart[partId].size();
+      const int numCamsBefore2 = landmarkFromCameraPerPart[partsToMerge.second ].size();
+
       const double newCost = MergeParts(partsToMerge.first, partsToMerge.second,
             landmarkFromCameraPerPart,
             res_per_cluster,
             lmToPart, 
-            costOfPart,
+            costOfPart, // if set to -1 blocks other parts to go up in q. must invalidate extra.
             maxLmPerCam, 
             temperature);
 
+      const int numCamsAfter = landmarkFromCameraPerPart[partId].size();
+      if (verbose)
+        std::cout << " Merge num Cams " << numCamsBefore1 << " & " << numCamsBefore2 << " = " << numCamsAfter << " newCost " << newCost << " \n";
+
+      assert(partsToMerge.first == partId);
+
       costOfPart[partId] = newCost;
       pq.push(partId);
+      num_parts--;
       }
       else {
-        std::cout << "Did not find overlap !? for part " <<  partId << " to cover\n"; // 0 cost parts should be allowed?
+        if (verbose)
+          std::cout << "Did not find overlap !? for part " <<  partId << " to cover\n"; // 0 cost parts should be allowed?
       }
     }
 

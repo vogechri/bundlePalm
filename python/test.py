@@ -317,11 +317,11 @@ def deg_process_cluster_lib(kClusters__, point_indices__, camera_indices__):
     # todo should operate similarly, put in own
     res_to_cluster_by_landmark_deg_out = lib.new_vector()
     lib.cluster_cameras_degeneracy(c_kClusters_, c_camera_indices_cpp, c_point_indices_cpp, res_to_cluster_by_landmark_deg_out)
+    lib.recluster_cameras(c_kClusters_, c_camera_indices_cpp, c_point_indices_cpp, res_to_cluster_by_landmark_deg_out)
 
     res_to_cluster_by_landmark_out_ = fillPythonVecSimple(res_to_cluster_by_landmark_deg_out)
 
     return res_to_cluster_by_landmark_out_
-
 
 def cluster_covis_lib_flip(kClusters, pre_merges_, camera_indices__, point_indices__, old_vtxsToPart_=0):
     c_kClusters_ = ctypes.c_int(kClusters)
@@ -489,7 +489,7 @@ point_indices = point_indices_ #np.array(point_indices_)
 
 ### NEW not debugged
 print("deg_process_cluster_lib")
-res_to_cluster_by_landmark_, = deg_process_cluster_lib(kClusters, point_indices, camera_indices_)
+res_to_cluster_by_landmark_ = deg_process_cluster_lib(kClusters, point_indices, camera_indices_)
 for ci in range(kClusters):
     ids_of_res_in_cluster = res_to_cluster_by_landmark_ == ci
     camera_indices_in_cluster_[ci] = camera_indices_[ids_of_res_in_cluster]
