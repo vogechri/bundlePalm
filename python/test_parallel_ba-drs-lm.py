@@ -79,8 +79,8 @@ FILE_NAME = "problem-52-64053-pre.txt.bz2"
 # 3 clusters
 #119 / 0  ======== DRE BFGS ======  513433  ========= gain  171 ==== f(v)=  513433  f(u)=  513207  ~
 
-#BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/dubrovnik/"
-#FILE_NAME = "problem-173-111908-pre.txt.bz2"
+BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/dubrovnik/"
+FILE_NAME = "problem-173-111908-pre.txt.bz2"
 # without remove_large_points: 1e-5!
 # 71 / 0  ======== DRE BFGS ======  520390  ========= gain  -47 ==== f(v)=  520387  f(u)=
 
@@ -1403,17 +1403,17 @@ def primal_cost(
 
     camScale = 1./Unorm.data.reshape(-1,9)
     camScale = from_numpy(camScale[cameras_indices_in_c_])
+    camScale.requires_grad_(False)
     # print("camScale ", camScale.shape)
     # print("x0_t_cam ", x0_t_cam.shape)
     # print("cameras ", camScale * x0_t_cam)
-
     landScale = 1./Vnorm.data.reshape(-1,3)
     landScale = from_numpy(landScale[unique_points_in_c_])
     landScale.requires_grad_(False)
 
-    camScale.requires_grad_(False)
     funx0_st1 = lambda X0, X1, X2: \
-        torchSingleResiduumScaled(X0.view(-1, 9), X1.view(-1, 3), X2.view(-1, 2), camScale[camera_indices_[:]], landScale[point_indices_[:]])
+        torchSingleResiduumScaled(X0.view(-1, 9), X1.view(-1, 3), X2.view(-1, 2), \
+                                  camScale[camera_indices_[:]], landScale[point_indices_[:]])
 
     fx1 = funx0_st1(
         x0_t_cam[camera_indices_[:]],
@@ -1486,6 +1486,7 @@ def bundle_adjust(
         JJ_mult = 1 #+ L # YES! .. should i add tr thing instead, no? use first in computing deriv 2nd time (simple test to lower this here.)
         blockEigMult = 1e-5 # 1e-7 fails with venice'52' 173 demands 1e-3/1e-4/1e-5? 52:1e-6 totally fails. Maybe also True below (recomp jacobian): yes stable
         blockEigMultJtJ = 1e-4 # 173: little effect 1e-6/4/8. just 173 or always not mattering much?
+        blockEigMultLimit = 1e-5 # maybe now can be more lose? 5 cluster needed blockEigenvalueWhereNeeded(JtJ, 9, 1e-4)
         # blockEigMult not import for 173 but 52 yes
         # adapt blockEigMult based on check? pass up and down hierarchy?
         # problem 1e-3/4/5 good for 173, not for 52. 52: better for 1e-6 bad for 1e-5 etc.
@@ -1522,13 +1523,11 @@ def bundle_adjust(
             J_pose, J_land, fx0 = ComputeDerivativeMatricesNew (
                 x0_t_cam, x0_t_land, camera_indices_, point_indices_, torch_points_2d, unique_poses_in_c_, unique_landmarks_in_c_ )
 
-
             # fx1 = funx0_st1(
             #     x0_t_cam[camera_indices_[:]],
             #     x0_t_land[point_indices_[:]],
             #     torch_points_2d)
             # print("Cost test ", np.sum(fx1.numpy() ** 2))
-
 
             # 2 * JtJ majorizes, note JtJ:=(UW|W^TV), so W part majorized by *2:
             # clearly: 2a^2+b^2 > (a+b)^2 = a^2 + b^2 + 2ab. Since (a-b)^2 = a^2 + b^2 - 2ab > 0, so a^2 + b^2 > 2ab.
@@ -1586,7 +1585,8 @@ def bundle_adjust(
             #stepSize = LipJ * JtJ.copy() + diag_sparse(np.fmax(JtJ.diagonal(), 1e-4))
 
             JltJl = J_land.transpose() * J_land
-            print( "Diag pseudo HessL (max/min/med/mean)",  np.max(np.abs(JltJl.diagonal()).reshape(-1,3), axis=0), " ", np.min(np.abs(JltJl.diagonal()).reshape(-1,3), axis=0), " ", np.median(np.abs(JltJl.diagonal()).reshape(-1,3), axis=0), " ", np.sum(np.abs(JltJl.diagonal()).reshape(-1,3))  ) # this is not desired. better min/max/med
+            absDiagJltJl = np.abs(JltJl.diagonal()).reshape(-1,3)
+            print( "Diag pseudo HessL (max/min/med/mean)",  np.max(absDiagJltJl, axis=0), " ", np.min(absDiagJltJl, axis=0),  " ", np.median(absDiagJltJl, axis=0), " ", np.sum(absDiagJltJl) )
             # JltJlDiag = JltJl + J_eps * diag_sparse(np.ones(JltJl.shape[0]))
             # maybe more appropriate?
             #blockEigenvalueJltJl = blockEigenvalue(JltJl, 3)
@@ -1631,6 +1631,9 @@ def bundle_adjust(
                 # traditional ADMM: not good -- also return
                 # blockEigenvalueJtJ = blockEigenvalue(JtJ, 9) + 1e-15 * JtJ
                 # stepSize = blockEigenvalueJtJ #
+
+                blockEigenvalueJtJ = blockEigenvalueWhereNeeded(JtJ, 9, 1e-4) # ! 1e-4 1e-5 als works. problem 52, 1e-6 does not 173 performance bad if not 1e-6?
+                #blockEigenvalueJtJ = 1e-1 * blockEigenvalue(JtJ, 9) # ! try 173 & 52, fails at 1e-2, 10 clusters. 1e-1 ok for 173 & 52. (not dead)
 
                 # TODO: LipJ for both? or only JJ?
                 #stepSize = JJ_mult * JtJ.copy() + blockEigMult * blockEigenvalueJtJ
@@ -1734,7 +1737,7 @@ def bundle_adjust(
         # LfkQuad = delta_p.dot(stepSize * delta_p)) / decent_lemma_divisor
         only_function_of_p = True
         if newVersion and only_function_of_p:
-            Lfklin = bp.dot(delta_p) + bl.dot(delta_l + Vli * bl)
+            Lfklin = bp.dot(delta_p) + bl.dot(delta_l + Vli * bl) # '-'?
             LfkQuad = delta_p.dot(stepSize * delta_p) / decent_lemma_divisor
 
         LfkDistance  = Lfkconst - Lfklin - LfkQuad
@@ -1878,14 +1881,25 @@ def bundle_adjust(
         xTest = x0_l_ - (diag_present*(x0_l_.flatten() - s_l_)).reshape(-1,3)
         return costEnd, x0_p_, xTest, L, diag_present + Rho
 
+    if True:
+        Vnorm_ = diag_sparse(np.squeeze(np.asarray(np.sqrt( (np.abs(JltJl)/10).sum(axis=0) ))))
+        temp   = Vnorm_.data
+        x0_l_ = Vnorm_ * x0_l_.flatten()
+        x0_l_ = x0_l_.reshape(-1,3)
+        temp_ = Vnorm.data.reshape(-1,3)
+        #print( temp_.shape, " ", unique_landmarks_in_c_.shape, " ", temp.shape, " ", points_3d_in.shape, " ",x0_l_.shape)
+        temp_[unique_landmarks_in_c_,:] *= temp.reshape(-1,3)
+        Vnorm.data = temp_.flatten()
+        # breaks if rejected. must use last Vnorm then
+
     #L_out = np.maximum(minimumL, np.minimum(L_in_cluster_ * 2, L)) # not clear if generally ok, or 2 or 4 should be used.
     L_out = np.maximum(minimumL, (L_in_cluster_ + L) / 2) # not clear if generally ok, or 2 or 4 should be used.
-    return costEnd, x0_p_, x0_l_, L_out, Rho, nabla_p, np.minimum(1e-2, np.maximum(1e-5, blockEigMult))
+    return costEnd, x0_p_, x0_l_, L_out, Rho, nabla_p, np.minimum(1e-2, np.maximum(blockEigMultLimit, blockEigMult))
 
     # recall solution wo. splitting is
     # solve Vl x + bS + Vd ()
-    #bl_s = bl + L * JltJlDiag * (x0_l_ - s_l_) # TODO: + or -. '+', see above
-    #delta_l = -Vli * ((W.transpose() * delta_p).flatten() + bl_s).flatten()
+    # bl_s = bl + L * JltJlDiag * (x0_l_ - s_l_) # TODO: + or -. '+', see above
+    # delta_l = -Vli * ((W.transpose() * delta_p).flatten() + bl_s).flatten()
     # sum_k delta_l Vlk delta_l + delta_l ((Wk.transpose() * delta_p) + bl_sk) argmin
     # all this is local per block. k blocks: sum_k Vlk = 3x3, we could instead
     # return Vlk and bk = ((Wk.transpose() * delta_p) + bl_sk): 4 times #landmarks floats.
@@ -2118,8 +2132,8 @@ def BFGS_direction(r, ps, qs, rhos, k, mem, mu):
 
 ##############################################################################
 
-kClusters = 3 # 10
-its = 1
+kClusters = 5 # 10
+its = 30
 
 import sys
 # total arguments
@@ -2410,6 +2424,7 @@ if basic_version:
             #LipJ += 0.2 * np.ones(kClusters)
             partid = np.argmax(dre_per_part)
             LipJ[partid] = np.minimum(LipJ[partid] * np.sqrt(2), 6)
+        # if f(u) < f(v) also raise? not lip but smth else.
 
         lastCost = currentCost
         # print(" output shapes ", x0_p_c.shape, " ", x0_l_c.shape, " takes ", end-start , " s")
@@ -2613,7 +2628,9 @@ else:
 
         line_search_iterations = 3 # 3 appears ok
         print(" ..... step length ", steplength, " bfgs step ", dk_stepLength, " ratio ", multiplier)
+        Vnorm_safe = Vnorm.copy()
         for ls_it in range(line_search_iterations):
+            Vnorm = Vnorm_safe.copy()
             if line_search_iterations >1:
                 tk = ls_it / (line_search_iterations-1)
             else: # debug
@@ -2693,6 +2710,10 @@ else:
                 round(lastCostDRE_bfgs - dre_bfgs), "==== f(v)= ", round(primal_cost_v), " f(u)= ", round(primal_cost_u), " ~= ", currentCost_bfgs)
             bestCost = np.minimum(primal_cost_v, bestCost)
             bestIt = it
+            if it < 60:
+                bestCost60 = bestCost
+            if it < 30:
+                bestCost30 = bestCost
 
             if lastCostDRE_bfgs < dre_bfgs and ls_it == line_search_iterations-1:
                 #LipJ += 0.2 * np.ones(kClusters)
@@ -2770,6 +2791,7 @@ if write_output:
 
 import json
 result_dict = {"base_url": BASE_URL, "file_name": FILE_NAME, "iterations" : its, \
-               "bestCost" : round(bestCost), "bestIt": bestIt, "kClusters" : kClusters }
+               "bestCost" : round(bestCost), "bestIt": bestIt, "kClusters" : kClusters, \
+               "bestCost60" : round(bestCost60), "bestCost30" : round(bestCost30) }
 with open('results_lm.json', 'a') as json_file:
     json.dump(result_dict, json_file)
