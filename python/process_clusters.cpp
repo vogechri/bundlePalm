@@ -1307,7 +1307,7 @@ std::pair<int, double> FindbestMatchForPart(int partId, //const std::vector<std:
     // for each lm here, find a potential partner.
     const std::vector<int>& otherLandmarksObservedByCam = lms_from_cam[camToTry]; // do part from cam
     const int numObservations = otherLandmarksObservedByCam.size();
-    std::uniform_int_distribution dist{ 0, numObservations };
+    std::uniform_int_distribution dist{ 0, numObservations-1 };
 
     std::vector<std::pair<int, double>> otherPartCost;
     otherPartCost.reserve(topL);
@@ -1344,7 +1344,7 @@ std::pair<int, double> FindbestMatchForPart(int partId, //const std::vector<std:
 
       if(pq.size() < topL) { // always push if less than desired
         otherPartCost.push_back({otherPartId, cost});
-        //std::cout << "Pushing "  << otherPartId << " with " << cost << " for merge\n";
+        std::cout << "Pushing "  << otherPartId << " with " << cost << " for merge\n";
         pq.push(otherPartCost.size() - 1);
         continue;
       }
@@ -1352,15 +1352,14 @@ std::pair<int, double> FindbestMatchForPart(int partId, //const std::vector<std:
       if(otherPartCost[pq.top()].second < cost) { // new is better (== random pick?)
         const int id = pq.top();
         pq.pop();
-        //std::cout << "Considering "  << otherPartId << " with " << cost << " for merge replacing " << otherPartCost[id].first << " c: " << otherPartCost[id].second << "\n";
+        std::cout << "Considering "  << otherPartId << " with " << cost << " for merge replacing " << otherPartCost[id].first << " c: " << otherPartCost[id].second << "\n";
         otherPartCost[id] = {otherPartId, cost}; // overwrite
         pq.push(id); // re enter in a new place
       }
     }
-
     for (const auto [id, cost] : otherPartCost) {
       partToTryMerge.insert(id);
-      // std::cout << "Using part "  << id << " with " << cost << " for possible merge top cost: " << otherPartCost[pq.top()].second << "\n";
+      std::cout << "Using part "  << id << " with " << cost << " for possible merge top cost: " << otherPartCost[pq.top()].second << "\n";
       pq.pop();
     }
   }
@@ -1489,7 +1488,6 @@ void cluster_cameras_degeneracy(
 
     int num_parts = num_lands;
     while (!pq.empty() && num_parts > kClusters) {
-
       const int partId = pq.top();
       if(res_per_cluster[partId] <= 0) {pq.pop();continue;} // invalid / merged
 
