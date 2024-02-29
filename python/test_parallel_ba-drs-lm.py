@@ -142,6 +142,12 @@ def read_bal_data(file_name):
 
     return camera_params, points_3d_, camera_indices_, point_indices_, points_2d_
 
+def round_int(x):
+    if x in [float('inf'), float('-inf')]:
+        return x
+    else:
+        return int(round(x))
+
 def float_to_rgb(f):
     a=(1-f)/0.2
     x = np.floor(a)
@@ -283,6 +289,10 @@ def init_lib():
     lib.recluster_cameras.restype = None
     lib.recluster_cameras.argtypes = [ctypes.c_int, ctypes.c_void_p, ctypes.c_void_p,
                                       ctypes.c_void_p] # in&out]
+
+    lib.cluster_cameras_degeneracy.restype = None
+    lib.cluster_cameras_degeneracy.argtypes = [ctypes.c_int, ctypes.c_void_p, ctypes.c_void_p,
+                                               ctypes.c_void_p] # in&out]
 
 def cluster_covis_lib(kClusters, pre_merges_, camera_indices__, point_indices__):
     c_kClusters_ = ctypes.c_int(kClusters)
@@ -450,6 +460,25 @@ def post_process_cluster_lib(num_lands_, num_res_, kClusters__, point_indices_in
     res_to_cluster_by_landmark_out_ = fillPythonVecSimple(res_to_cluster_by_landmark_out)
     # only first needed: res_to_cluster_by_landmark_out_
     return res_to_cluster_by_landmark_out_, point_indices_already_covered_, covered_landmark_indices_c_
+
+def deg_process_cluster_lib(kClusters__, point_indices__, camera_indices__):
+
+    c_kClusters_ = ctypes.c_int(kClusters__)
+
+    c_point_indices_ptr = (ctypes.c_int * len(point_indices__))(*point_indices__)
+    c_camera_indices_ptr = (ctypes.c_int * len(camera_indices__))(*camera_indices__)
+
+    c_point_indices_cpp = lib.new_vector_by_copy(c_point_indices_ptr, len(c_point_indices_ptr))
+    c_camera_indices_cpp = lib.new_vector_by_copy(c_camera_indices_ptr, len(c_camera_indices_ptr))
+
+    # todo should operate similarly, put in own
+    res_to_cluster_by_landmark_deg_out = lib.new_vector()
+    lib.cluster_cameras_degeneracy(c_kClusters_, c_camera_indices_cpp, c_point_indices_cpp, res_to_cluster_by_landmark_deg_out)
+    lib.recluster_cameras(c_kClusters_, c_camera_indices_cpp, c_point_indices_cpp, res_to_cluster_by_landmark_deg_out)
+
+    res_to_cluster_by_landmark_out_ = fillPythonVecSimple(res_to_cluster_by_landmark_deg_out)
+
+    return res_to_cluster_by_landmark_out_
 
 def AngleAxisRotatePoint(angleAxis, pt):
     theta2 = (angleAxis * angleAxis).sum(dim=1)
@@ -1087,7 +1116,6 @@ def cluster_by_camera_smarter(
         kClusters
     )
 
-
 def cluster_by_landmark(
     camera_indices_, points_2d_, point_indices_, kClusters_, pre_merges, old_vtxsToPart=0
 ):
@@ -1149,6 +1177,48 @@ def cluster_by_landmark(
         kClusters
     )
 
+def cluster_deg_by_landmark(camera_indices_, points_2d_, point_indices_, kClusters_):
+    num_res = camera_indices_.shape[0]
+    num_cams = np.unique(camera_indices_).shape[0]
+    num_lands = np.unique(point_indices_).shape[0]
+    print("number of residuum: ", num_res)
+
+    res_to_cluster_by_landmark_ = deg_process_cluster_lib(kClusters_, point_indices_, camera_indices_)
+
+    # we only case about covered_landmark_indices_c_
+    # 1. distribute residuals by occurence of above per cluster: res_to_cluster_by_landmark_: res -> cluster covers all landmarks exculsively. to test.
+    # 2. landmarks per cluster are exclusive, but use whole cams per cluster (simpler)
+    # 3. need indices of cameras utilized in cluster and stepsizes per cam in cluster
+    # point_indices_already_covered_ : here exclusively covered by cluster
+    camera_indices_in_cluster_ = []
+    points_2d_in_cluster_ = []
+    point_indices_in_cluster_ = []
+    for ci in range(kClusters):
+        ids_of_res_in_cluster = res_to_cluster_by_landmark_ == ci
+        camera_indices_in_cluster_.append(camera_indices_[ids_of_res_in_cluster])
+        points_2d_in_cluster_.append(points_2d_[ids_of_res_in_cluster])
+        point_indices_in_cluster_.append(point_indices_[ids_of_res_in_cluster])
+        print("===== Cluster ", ci , " covers ", points_2d_in_cluster_[ci].shape, "residuals ",
+              np.unique(point_indices_in_cluster_[ci]).shape, " of ", num_lands, " landmarks ",
+              np.unique(camera_indices_in_cluster_[ci]).shape, " of ", num_cams, "cameras ")
+
+    # check if indices are disjoint / local vs global / sums up to n_points
+    sum_cams_cover = 0
+    sum_landmarks_cover = 0
+    for ci in range(kClusters):
+        sum_cams_cover += np.unique(camera_indices_in_cluster_[ci]).shape[0]
+        sum_landmarks_cover += np.unique(point_indices_in_cluster_[ci]).shape[0]
+    if sum_landmarks_cover < num_lands or sum_cams_cover < num_cams:
+        print("sum_cams_cover ", sum_cams_cover, " / ", num_cams)
+        print("sum_landmarks_cover ", sum_landmarks_cover, " / ", num_lands)
+        return
+
+    return (
+        camera_indices_in_cluster_,
+        point_indices_in_cluster_,
+        points_2d_in_cluster_,
+        kClusters
+    )
 
 # Afterwards landmarks only present in 1 cluster should equal points_3d_in_cluster_ afterwards.
 # For those input s = old_lm. out put is 2 new - old.
@@ -1553,7 +1623,7 @@ def bundle_adjust(
 
             # TODO: cam hessian scaled awfully. degenerate.
             maxE, minE = minmaxEv(JtJ, 9)
-            JtJSpec = [round(np.max(maxE/minE)), np.min(maxE/minE), round(np.median(maxE/minE))]
+            JtJSpec = [round_int(np.max(maxE/minE)), np.min(maxE/minE), round_int(np.median(maxE/minE))]
             print("minmax ev JtJ ", np.max(maxE), " ", np.max(minE), " ", np.min(maxE), " ",  np.min(minE), " spec ", JtJSpec )
             #maxE, minE = minmaxEv(stepSize, 9)
             #print("minmax ev stepSz ", np.max(maxE), " ", np.max(minE), " ", np.min(maxE), " ",  np.min(minE), " spec ", np.max(maxE/minE) )
@@ -1597,9 +1667,9 @@ def bundle_adjust(
 
             maxE, minE = minmaxEv(JltJl, 3)
             #print("minmax ev JltJl ", np.max(maxE), " ", np.max(minE), " ", np.min(maxE), " ",  np.min(minE), " spec ", np.max(maxE/minE) )
-            JltJlSpec = [round(np.max(maxE/minE)), np.min(maxE/minE), round(np.median(maxE/minE))]
+            JltJlSpec = [round_int(np.max(maxE/minE)), np.min(maxE/minE), round_int(np.median(maxE/minE))]
             maxE, minE = minmaxEv(JltJlDiag, 3)
-            JltJlDiagSpec = [round(np.max(maxE/minE)), np.min(maxE/minE), round(np.median(maxE/minE))]
+            JltJlDiagSpec = [round_int(np.max(maxE/minE)), np.min(maxE/minE), round_int(np.median(maxE/minE))]
             print("minmax ev JltJlD ", np.max(maxE), " ", np.max(minE), " ", np.min(maxE), " ",  np.min(minE), " spec ", JltJlSpec, " -> ", JltJlDiagSpec )
 
             #JtJDiag = diag_sparse(np.fmax(JtJ.diagonal(), 1e-4)) # diagonal is solid. slower than JtJ + something though
@@ -1642,7 +1712,7 @@ def bundle_adjust(
 
                 #JtJDiag = 1e-4 * blockEigMult * blockEigenvalueJtJ # this could also work?
                 maxE, minE = minmaxEv(stepSize, 9)
-                StepSizeSpec = [round(np.max(maxE/minE)), np.min(maxE/minE), round(np.median(maxE/minE))]
+                StepSizeSpec = [round_int(np.max(maxE/minE)), np.min(maxE/minE), round_int(np.median(maxE/minE))]
                 print("minmax ev stepSz ", np.max(maxE), " ", np.max(minE), " ", np.min(maxE), " ",  np.min(minE), " spec ", StepSizeSpec)
                 #maxE, minE = minmaxEv(JtJDiag, 9)
                 #print("minmax ev JtJDiag ", np.max(maxE), " ", np.max(minE), " ", np.min(maxE), " ",  np.min(minE), " spec ", np.max(maxE/minE))
@@ -1759,13 +1829,13 @@ def bundle_adjust(
         #if LfkViolated and not steSizeTouched or (steSizeTouched and costStart + penaltyStart < costEnd + penaltyL): # violated -- should revert update.
             steSizeTouched = True
             print(" |||||||  Lfk distance ", LfkDistance, " -nabla^Tdelta=" , -bp.dot(delta_p) - bl.dot(delta_l), " LipJ ", LipJ, " blockEigMult ", blockEigMult , " |||||||")
-            print(" |||||||  f(x) <= f(y) + <nabla(f(y) x-y> + Lf/2 |x-y|^2: ", costEnd, " <= ", costStart, " + ", Lfklin, " + ", LfkQuad, " |||||||")
+            #print(" |||||||  f(x) <= f(y) + <nabla(f(y) x-y> + Lf/2 |x-y|^2: ", costEnd, " <= ", costStart, " + ", Lfklin, " + ", LfkQuad, " |||||||")
 
             #stepSize = stepSize * 2
             # other idea, initially we only add 1/2^k eg 0.125, times the needed value and inc if necessary, maybe do not add anything if not needed.
 
             # indeed reliable to get over.
-            stepSize += blockEigMult * blockEigenvalueJtJ
+            stepSize += 3 * blockEigMult * blockEigenvalueJtJ
             blockEigMult *= 4
             #blockEigenvalueJtJ.data *= 2 # appears slow but safe
 
@@ -1866,8 +1936,13 @@ def bundle_adjust(
 
     nabla_p = bp.copy()
     Rho = L * JtJDiag #+ 1e-12 * Ul
+    if (newVersion and LfkSafe and not steSizeTouched):
+        blockEigMult = np.minimum(1e-2, np.maximum(blockEigMultLimit, 2*blockEigMult))
+    else:
+        blockEigMult = np.minimum(1e-2, np.maximum(blockEigMultLimit, blockEigMult))
     if newVersion:
-        Rho = stepSize
+        stepSize = LipJ * JtJ.copy() + blockEigMult * blockEigenvalueJtJ
+        Rho = stepSize # is this an issue if we adjust stepsize?
 
     # TODO: preconditioning should influence this.
     # this should be less communication, where do we get to? 518k vs 875k. With PCG does work now.
@@ -1894,7 +1969,7 @@ def bundle_adjust(
 
     #L_out = np.maximum(minimumL, np.minimum(L_in_cluster_ * 2, L)) # not clear if generally ok, or 2 or 4 should be used.
     L_out = np.maximum(minimumL, (L_in_cluster_ + L) / 2) # not clear if generally ok, or 2 or 4 should be used.
-    return costEnd, x0_p_, x0_l_, L_out, Rho, nabla_p, np.minimum(1e-2, np.maximum(blockEigMultLimit, blockEigMult))
+    return costEnd, x0_p_, x0_l_, L_out, Rho, nabla_p, blockEigMult
 
     # recall solution wo. splitting is
     # solve Vl x + bS + Vd ()
@@ -2133,7 +2208,7 @@ def BFGS_direction(r, ps, qs, rhos, k, mem, mu):
 ##############################################################################
 
 kClusters = 5 # 10
-its = 30
+its = 60
 
 import sys
 # total arguments
@@ -2179,7 +2254,6 @@ if read_output:
     points_3d = x0_l.reshape(n_points,3)
     print("READ DATA")
 
-# totally stcuk solution in base has BS values as solution k1 = 600k, k2 =-200
 print("min focal distance ", np.min(cameras[:,6].flatten()), " ", np.max(cameras[:,6].flatten()) )
 print("min k1 distance ", np.min(cameras[:,7].flatten()), " ", np.max(cameras[:,7].flatten()) )
 print("min k2 distance ", np.min(cameras[:,8].flatten()), " ", np.max(cameras[:,8].flatten()) )
@@ -2304,6 +2378,7 @@ for ci in range(kClusters):
 
 pre_merges = 0
 #pre_merges = int(0.4 * n_cameras) # play to get 'best' cluster. Depends quite a lot
+#pre_merges = int(0.02 * n_cameras) # play to get 'best' cluster. This little can induce no deg parts. Those showed 173 & 52 like non deg parts.
 
 # f(x) + 1/2 (v^T Vlk * v - v^T 2 * Vlk (2x - sk) ) for x=u/v. Does not look right .. haeh
 #
@@ -2320,13 +2395,27 @@ values, counts = np.unique(camera_indices, return_counts=True)
 minCount = np.min(counts)
 print(". minimum camera observations in total ", minCount, " cams with < 5 landmarks ", np.sum(counts < 5))
 
+# what if clustering must avoid degenrate clusters?
+# e.g. 173 with 6 clusters is much better than with 5! but 5 with! good distribution is better than 6.
+# max_c min_i,j in c #(cam_i, lm_j).
+# could pick max c s.t. at least 10 are present.
+# alternative cams occur in least # clusters.
+
+# (
+#     camera_indices_in_cluster,
+#     point_indices_in_cluster,
+#     points_2d_in_cluster,
+#     kClusters,
+# ) = cluster_by_landmark(
+#     camera_indices, points_2d, point_indices, kClusters, pre_merges)
+
 (
     camera_indices_in_cluster,
     point_indices_in_cluster,
     points_2d_in_cluster,
     kClusters,
-) = cluster_by_landmark(
-    camera_indices, points_2d, point_indices, kClusters, pre_merges)
+) = cluster_deg_by_landmark(
+    camera_indices, points_2d, point_indices, kClusters)
 
 for ci in range(kClusters):
     values, counts = np.unique(camera_indices_in_cluster[ci], return_counts=True)
@@ -2640,9 +2729,10 @@ else:
                 #print(" bfgs_r ", bfgs_r[ci * 3 * n_points: (ci+1) * 3 * n_points].reshape(n_points, 3))
                 #print(" search_direction[ci] ", search_direction[ci])
 
-                print("s focal distance ", np.min(poses_s_in_cluster_bfgs[ci][:,6]), " - ", np.max(poses_s_in_cluster_bfgs[ci][:,6]))
-                print("s k1 distance ", np.min(poses_s_in_cluster_bfgs[ci][:,7]), " - ", np.max(poses_s_in_cluster_bfgs[ci][:,7]))
-                print("s k2 distance ", np.min(poses_s_in_cluster_bfgs[ci][:,8]), " - ", np.max(poses_s_in_cluster_bfgs[ci][:,8]))
+                if False: # totally stcuk solution in base has BS values as solution k1 = 600k, k2 =-200
+                    print("s focal distance ", np.min(poses_s_in_cluster_bfgs[ci][:,6]), " - ", np.max(poses_s_in_cluster_bfgs[ci][:,6]))
+                    print("s k1 distance ", np.min(poses_s_in_cluster_bfgs[ci][:,7]), " - ", np.max(poses_s_in_cluster_bfgs[ci][:,7]))
+                    print("s k2 distance ", np.min(poses_s_in_cluster_bfgs[ci][:,8]), " - ", np.max(poses_s_in_cluster_bfgs[ci][:,8]))
 
             # prox on line search s:
             #print("1. x0_p", "points_3d_in_cluster", points_3d_in_cluster)
