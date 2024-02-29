@@ -357,6 +357,49 @@ def cluster_covis_lib_flip(kClusters, pre_merges_, camera_indices__, point_indic
     # copy data, free c++ mem
 
 
+def cluster_deg_by_landmark(camera_indices_, points_2d_, point_indices_, kClusters_):
+    num_res = camera_indices_.shape[0]
+    num_cams = np.unique(camera_indices_).shape[0]
+    num_lands = np.unique(point_indices_).shape[0]
+    print("number of residuum: ", num_res)
+
+    res_to_cluster_by_landmark_ = deg_process_cluster_lib(kClusters_, point_indices_, camera_indices_)
+
+    # we only case about covered_landmark_indices_c_
+    # 1. distribute residuals by occurence of above per cluster: res_to_cluster_by_landmark_: res -> cluster covers all landmarks exculsively. to test.
+    # 2. landmarks per cluster are exclusive, but use whole cams per cluster (simpler)
+    # 3. need indices of cameras utilized in cluster and stepsizes per cam in cluster
+    # point_indices_already_covered_ : here exclusively covered by cluster
+    camera_indices_in_cluster_ = []
+    points_2d_in_cluster_ = []
+    point_indices_in_cluster_ = []
+    for ci in range(kClusters):
+        ids_of_res_in_cluster = res_to_cluster_by_landmark_ == ci
+        camera_indices_in_cluster_.append(camera_indices_[ids_of_res_in_cluster])
+        points_2d_in_cluster_.append(points_2d_[ids_of_res_in_cluster])
+        point_indices_in_cluster_.append(point_indices_[ids_of_res_in_cluster])
+        print("===== Cluster ", ci , " covers ", points_2d_in_cluster_[ci].shape, "residuals ",
+              np.unique(point_indices_in_cluster_[ci]).shape, " of ", num_lands, " landmarks ",
+              np.unique(camera_indices_in_cluster_[ci]).shape, " of ", num_cams, "cameras ")
+
+    # check if indices are disjoint / local vs global / sums up to n_points
+    sum_cams_cover = 0
+    sum_landmarks_cover = 0
+    for ci in range(kClusters):
+        sum_cams_cover += np.unique(camera_indices_in_cluster_[ci]).shape[0]
+        sum_landmarks_cover += np.unique(point_indices_in_cluster_[ci]).shape[0]
+    if sum_landmarks_cover < num_lands or sum_cams_cover < num_cams:
+        print("sum_cams_cover ", sum_cams_cover, " / ", num_cams)
+        print("sum_landmarks_cover ", sum_landmarks_cover, " / ", num_lands)
+        return
+
+    return (
+        camera_indices_in_cluster_,
+        point_indices_in_cluster_,
+        points_2d_in_cluster_,
+        kClusters
+    )
+
 cameras, points_3d, camera_indices, point_indices, points_2d = read_bal_data(FILE_NAME)
 n_cameras = cameras.shape[0]
 n_points = points_3d.shape[0]
