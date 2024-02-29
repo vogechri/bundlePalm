@@ -114,3 +114,20 @@ extern "C" {
 // g++ -c -O3 -fPIC process_clusters.cpp -o process_clusters.o
 // g++ -shared -o libprocess_clusters.so process_clusters.o -Wl,--export-dynamic
 // clang++-15 -O3 -c -fPIC -std=c++17 process_clusters.cpp -o process_clusters.o;clang++-15 -shared -o libprocess_clusters.so process_clusters.o -Wl,--export-dynamic
+
+// clang++-15 -std=c++17 -g process_clusters.cpp -fprofile-instr-generate -fcoverage-mapping -o process_clusters
+
+// clang++-15 -g -fprofile-instr-generate -std=c++17 process_clusters.cpp -o process_clusters.o ??
+// clang++-15  -fcoverage-mapping -shared -o libprocess_clusters.so process_clusters.o -Wl,--export-dynamic ??
+// -fprofile-instr-generate
+
+// maybe 
+// clang++-15 -c -std=c++17 -fPIC -fprofile-instr-generate -fcoverage-mapping process_clusters.cpp -o process_clusters.o 
+// clang++-15 -c -std=c++17 -fPIC -fprofile-generate -fcoverage-mapping process_clusters.cpp -o process_clusters.o 
+// clang++-15 -fcoverage-mapping -shared -o libprocess_clusters.so process_clusters.o -Wl,--export-dynamic
+// export LLVM_PROFILE_FILE=./llvm_new.prof
+// llvm-profdata-15 merge -output=merge_mew.out -instr llvm_new.prof
+// llvm-profdata-15 show -all-functions -counts -ic-targets  merge_mew.out >  profdata_show.log
+// llvm-cov-15 show profile_coverage  -instr-profile=merge_mew.out
+
+// no: clang++-15 -c -std=c++17 -o process_clusters.o process_clusters.cpp -fPIC -fprofile-instr-generate -femit-coverage-data -femit-coverage-notes

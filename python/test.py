@@ -15,16 +15,16 @@ import numpy as np
 #g++ -shared -o libprocess_clusters.so process_clusters.o -Wl,--export-dynamic
 
 BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/dubrovnik/"
-FILE_NAME = "problem-16-22106-pre.txt.bz2"
-FILE_NAME = "problem-135-90642-pre.txt.bz2"
+FILE_NAME = "problem-16-22106-pre.txt.bz2" # high branch cam - lm is high, so slow
+#FILE_NAME = "problem-135-90642-pre.txt.bz2"
 
-BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/ladybug/"
-FILE_NAME = "problem-49-7776-pre.txt.bz2"
+#BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/ladybug/"
+#FILE_NAME = "problem-49-7776-pre.txt.bz2"
 #FILE_NAME = "problem-73-11032-pre.txt.bz2"
-#FILE_NAME = "problem-138-19878-pre.txt.bz2"
+#FILE_NAME = "problem-138-19878-pre.txt.bz2" # 6s
 
-#BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/dubrovnik/"
-#FILE_NAME = "problem-173-111908-pre.txt.bz2"
+BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/dubrovnik/"
+FILE_NAME = "problem-173-111908-pre.txt.bz2"
 
 # BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/final/"
 # FILE_NAME = "problem-93-61203-pre.txt.bz2"
@@ -407,6 +407,24 @@ cluster_to_landmarks_ = []
 # make map cam id to landmark indices seen by cam as set.
 cam_idx_to_lms = [ set(point_indices_[camera_indices_ == cam_idx]) for cam_idx in range(num_cams) ]
 
+### NEW not debugged
+camera_indices_in_cluster_ = []
+point_indices_in_cluster_ = []
+points_2d_in_cluster_ = []
+print("deg_process_cluster_lib")
+res_to_cluster_by_landmark_ = deg_process_cluster_lib(kClusters, point_indices_, camera_indices_)
+for ci in range(kClusters):
+    ids_of_res_in_cluster = res_to_cluster_by_landmark_ == ci
+    camera_indices_in_cluster_.append(camera_indices_[ids_of_res_in_cluster])
+    points_2d_in_cluster_.append(points_2d_[ids_of_res_in_cluster])
+    point_indices_in_cluster_.append(point_indices_[ids_of_res_in_cluster])
+    print("===== Cluster ", ci , " covers ", points_2d_in_cluster_[ci].shape, "residuals ",
+            np.unique(point_indices_in_cluster_[ci]).shape, " of ", num_lands, " landmarks ",
+            np.unique(camera_indices_in_cluster_[ci]).shape, " of ", num_cams, "cameras ")
+
+exit()
+###
+
 # init pick
 cameras_available = set(range(num_cams))
 #print("cameras_available ", cameras_available, " num_cams ", num_cams)
@@ -486,22 +504,6 @@ print(res_indices_in_cluster_[0].shape)
 point_indices_in_cluster = point_indices_in_cluster_
 point_indices = point_indices_ #np.array(point_indices_)
 #res_indices_in_cluster = res_indices_in_cluster_
-
-### NEW not debugged
-print("deg_process_cluster_lib")
-res_to_cluster_by_landmark_ = deg_process_cluster_lib(kClusters, point_indices, camera_indices_)
-for ci in range(kClusters):
-    ids_of_res_in_cluster = res_to_cluster_by_landmark_ == ci
-    camera_indices_in_cluster_[ci] = camera_indices_[ids_of_res_in_cluster]
-    points_2d_in_cluster_[ci] = points_2d_[ids_of_res_in_cluster]
-    point_indices_in_cluster_[ci] = point_indices_[ids_of_res_in_cluster]
-    print("===== Cluster ", ci , " covers ", points_2d_in_cluster_[ci].shape, "residuals ",
-            np.unique(point_indices_in_cluster_[ci]).shape, " of ", num_lands, " landmarks ",
-            np.unique(camera_indices_in_cluster_[ci]).shape, " of ", num_cams, "cameras ")
-
-exit()
-
-###
 
 print("Starting process_cluster_lib")
 res_toadd_to_c_, point_indices_already_covered_, covered_landmark_indices_c_, num_res_per_c_ = \
