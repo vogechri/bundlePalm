@@ -18,13 +18,19 @@ BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/dubrovnik/"
 FILE_NAME = "problem-16-22106-pre.txt.bz2" # high branch cam - lm is high, so slow
 #FILE_NAME = "problem-135-90642-pre.txt.bz2"
 
-#BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/ladybug/"
+BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/ladybug/"
 #FILE_NAME = "problem-49-7776-pre.txt.bz2"
-#FILE_NAME = "problem-73-11032-pre.txt.bz2"
+FILE_NAME = "problem-73-11032-pre.txt.bz2"
 #FILE_NAME = "problem-138-19878-pre.txt.bz2" # 6s
 
-BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/dubrovnik/"
-FILE_NAME = "problem-173-111908-pre.txt.bz2"
+BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/trafalgar/"
+FILE_NAME = "problem-21-11315-pre.txt.bz2"
+FILE_NAME = "problem-50-20431-pre.txt.bz2"
+FILE_NAME = "problem-126-40037-pre.txt.bz2"
+FILE_NAME = "problem-257-65132-pre.txt.bz2" # does not work? takes AGES
+
+#BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/dubrovnik/"
+#FILE_NAME = "problem-173-111908-pre.txt.bz2"
 
 # BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/final/"
 # FILE_NAME = "problem-93-61203-pre.txt.bz2"
@@ -450,7 +456,7 @@ cluster_to_landmarks_ = []
 # make map cam id to landmark indices seen by cam as set.
 cam_idx_to_lms = [ set(point_indices_[camera_indices_ == cam_idx]) for cam_idx in range(num_cams) ]
 
-### NEW not debugged
+### NEW not debugged 
 camera_indices_in_cluster_ = []
 point_indices_in_cluster_ = []
 points_2d_in_cluster_ = []
@@ -464,6 +470,11 @@ for ci in range(kClusters):
     print("===== Cluster ", ci , " covers ", points_2d_in_cluster_[ci].shape, "residuals ",
             np.unique(point_indices_in_cluster_[ci]).shape, " of ", num_lands, " landmarks ",
             np.unique(camera_indices_in_cluster_[ci]).shape, " of ", num_cams, "cameras ")
+
+for ci in range(kClusters):
+    values, counts = np.unique(camera_indices_in_cluster_[ci], return_counts=True)
+    minCount = np.min(counts)
+    print(ci, ". minimum camera observations in cluster ", minCount, " cams with < 5 landmarks ", np.sum(counts < 5))
 
 exit()
 ###

@@ -973,7 +973,7 @@ void FillRelevantCameras(const std::vector<std::map<int, std::set<int>>> &landma
   relevantCameras.clear();
   relevantCameras.resize(maxLmPerCam);
   for (int partId = 0; partId < landmarkFromCameraPerPart.size(); partId++) {
-    std::map<int, std::set<int>> camToLmsInPart = landmarkFromCameraPerPart[partId];
+    const std::map<int, std::set<int>>& camToLmsInPart = landmarkFromCameraPerPart[partId];
     for (const auto &[camId, lms] : camToLmsInPart) {
       if (lms.size() < std::min(static_cast<int>(lms_from_cam[camId].size()), maxLmPerCam) && lms.size() > 0 )  {
         relevantCameras[lms.size()].push_back({partId, camId});
@@ -1018,7 +1018,7 @@ std::pair<double, int> GetMoveCost(int lmId, int partFromTo, int kClusters,
   for (int partId = 0; partId < kClusters; ++partId) {
     for (int camId : cams_from_lm[lmId]) { // go over all cams observing lm.
       const auto landmarkFromCameraIt = landmarkFromCameraPerPart[partId].find(camId);
-      int lmOfCaminPart = landmarkFromCameraIt == landmarkFromCameraPerPart[partId].end() ? 0 : landmarkFromCameraIt->second.size();
+      int lmOfCaminPart = (landmarkFromCameraIt == landmarkFromCameraPerPart[partId].end()) ? 0 : landmarkFromCameraIt->second.size();
       // lmOfCaminPart holds #observations of cam in part.
       if (partId == partFromTo) { // remove the lm from part yields this cost.
         if(!receive)
@@ -1094,6 +1094,22 @@ int GetClusterByNumRes(int res_id, std::vector<int> res_per_cluster) {
   return nCluster - 1;
 }
 
+template <typename T>
+std::vector<int> SortIndices(const std::vector<T> &v) {
+
+  // initialize original index locations
+  std::vector<int> idx(v.size());
+  std::iota(idx.begin(), idx.end(), 0);
+
+  // sort indexes based on comparing values in v
+  // using std::stable_sort instead of std::sort
+  // to avoid unnecessary index re-orderings
+  // when v contains elements of equal values 
+  std::stable_sort(idx.begin(), idx.end(),
+       [&v](int i1, int i2) {return v[i1] < v[i2];});
+
+  return idx;
+}
 // res_to_cluster_by_landmark from post cluster. 
 void recluster_cameras(
     int kClusters,
@@ -1280,21 +1296,29 @@ void recluster_cameras(
 
   std::vector<int> lm_to_part(num_lands, 0);
   for (int partId = 0; partId < landmarkFromCameraPerPart.size(); ++partId) {
-    for (const auto [camIdx, lmIdSet] : landmarkFromCameraPerPart[partId]) {
+    for (const auto& [camIdx, lmIdSet] : landmarkFromCameraPerPart[partId]) {
       for (const int lmIdx : lmIdSet) {
         lm_to_part[lmIdx] = partId;
       }
     }
   }
 
-  constexpr int n_LmSamples = 20; // will hit often a lm in larger cl. 
+  for (int partId = 0; partId < res_per_cluster.size(); ++partId) {
+    std::cout << "Part " << partId << " with " << res_per_cluster[partId] << " residuals\n";
+  }
+#ifdef __old_version__
+  constexpr int n_LmSamples = 10; // will hit often a lm in larger cl. 
   constexpr int max_consecutive_failures = 100;
   int consecutive_failures = 0;
   const int maxMoves = 500000;
   int moves = 0;
-  while(consecutive_failures < max_consecutive_failures && moves < maxMoves) {
+  int passes = 0;
+  std::vector<int> res_order = SortIndices(res_per_cluster);
+  while (consecutive_failures < max_consecutive_failures && moves < maxMoves) {
     ++consecutive_failures;
-    const int receive_candidate_cluster_id = sample_cl(mt);
+    //const int receive_candidate_cluster_id = sample_cl(mt); // maybe better in order, smallest 1st?
+    const int receive_candidate_cluster_id = res_order[passes++ % res_order.size()];
+
     //std::cout << " Receive Candidate cl " << receive_candidate_cluster_id << " with " << res_per_cluster[receive_candidate_cluster_id] << " res \n";    
     bool noCandidates = true;
     for (int c = 0; c < kClusters; ++c) {
@@ -1308,15 +1332,17 @@ void recluster_cameras(
 
     // N times: sample lmid, or cand + lm from cand. test all cams present in this cl.
     // if yes check if cams of cand cl would remain ok.
-    int candidate_lm_id = -1;
-
     int consecutive_samples_fail = 0;
     while(consecutive_samples_fail < n_LmSamples && moves < maxMoves) {
       consecutive_samples_fail++;
-      candidate_lm_id = sample_lm(mt);
+      const int candidate_lm_id = sample_lm(mt);
       const int move_candidate_cluster_id = lm_to_part[candidate_lm_id];
 
-      if (res_per_cluster[receive_candidate_cluster_id] + 2 * cams_from_lm[candidate_lm_id].size() > res_per_cluster[move_candidate_cluster_id]) {
+      // why not sample lm -> moving part
+      // sample receiving part / or try all possible? 
+
+      if (move_candidate_cluster_id == receive_candidate_cluster_id || 
+          res_per_cluster[receive_candidate_cluster_id] + 2 * cams_from_lm[candidate_lm_id].size() > res_per_cluster[move_candidate_cluster_id]) {
         //std::cout << " move_candidate_cluster_id " << move_candidate_cluster_id  << " skipped\n";
         continue;
       }
@@ -1324,14 +1350,14 @@ void recluster_cameras(
       //   std::cout << " move_candidate_cluster_id " << move_candidate_cluster_id  << " accepted \n";
       // }
 
-      bool fail = false;
       const int num_cams_in_receive_cluster = landmarkFromCameraPerPart[receive_candidate_cluster_id].size();
-      if(num_cams_in_receive_cluster <= cams_from_lm[candidate_lm_id].size()) {
+      if (num_cams_in_receive_cluster <= cams_from_lm[candidate_lm_id].size()) {
           continue;
       };
 
-      // test 1 are ALL cams observed by lm are present in receive cluster. Those cams are rare i suppose. 
-      for(int camIdx : cams_from_lm[candidate_lm_id]) {
+      bool fail = false;
+      // test 1 are ALL cams observed by lm present in receive cluster. Those cams are rare i suppose. 
+      for (int camIdx : cams_from_lm[candidate_lm_id]) {
         if (landmarkFromCameraPerPart[receive_candidate_cluster_id].find(camIdx) ==
             landmarkFromCameraPerPart[receive_candidate_cluster_id].end()) {
               fail = true;
@@ -1341,7 +1367,7 @@ void recluster_cameras(
       if (fail) {continue;}
 
       // test 2: removing the lm from this cluster does not lead to degenerate situations.
-      for (const auto [camIdx, lmIdSet] : landmarkFromCameraPerPart[move_candidate_cluster_id]) {
+      for (const auto& [camIdx, lmIdSet] : landmarkFromCameraPerPart[move_candidate_cluster_id]) {
         if (lmIdSet.size() < minLmObsPerCamInPart + 1 && lmIdSet.find(candidate_lm_id) != lmIdSet.end()) {
           fail = true;
           break; // not a candidate.
@@ -1360,11 +1386,93 @@ void recluster_cameras(
       lm_to_part[candidate_lm_id] = receive_candidate_cluster_id;
       consecutive_failures = 0;
       moves++;
-      consecutive_samples_fail=0;
+      consecutive_samples_fail = 0;
       // break; // or maybe not as this cluster appears movable?
     } // samples
 
+    std::cout << "Expanding " << receive_candidate_cluster_id << "\n";
+    for (int partId = 0; partId < res_per_cluster.size(); ++partId) {
+      std::cout << "Part " << partId << " with " << res_per_cluster[partId] << " residuals\n";
+    }
+
   } // while trying to move landmarks.
+
+#else
+
+  constexpr int max_consecutive_failures = 500;
+  int consecutive_failures = 0;
+  const int maxMoves = 500000;
+  int moves = 0;
+  int last_receive_cluster = 0;
+  while (consecutive_failures < max_consecutive_failures && moves < maxMoves) {
+    ++consecutive_failures;
+
+    const int candidate_lm_id = sample_lm(mt);
+    const int move_candidate_cluster_id = lm_to_part[candidate_lm_id];
+
+    // try last succesful cl again?
+    const int receive_candidate_cluster_id = (consecutive_failures == 1) ? last_receive_cluster : sample_cl(mt);
+
+    if (move_candidate_cluster_id == receive_candidate_cluster_id || 
+        res_per_cluster[receive_candidate_cluster_id] + 2 * cams_from_lm[candidate_lm_id].size() > res_per_cluster[move_candidate_cluster_id]) {
+      //std::cout << " move_candidate_cluster_id " << move_candidate_cluster_id  << " skipped\n";
+      continue;
+    }
+      // else{
+      //   std::cout << " move_candidate_cluster_id " << move_candidate_cluster_id  << " accepted \n";
+      // }
+
+      const int num_cams_in_receive_cluster = landmarkFromCameraPerPart[receive_candidate_cluster_id].size();
+      if (num_cams_in_receive_cluster <= cams_from_lm[candidate_lm_id].size()) {
+          continue;
+      };
+
+      bool fail = false;
+      // test 1 are ALL cams observed by lm present in receive cluster. Those cams are rare i suppose. 
+      for (int camIdx : cams_from_lm[candidate_lm_id]) {
+        if (landmarkFromCameraPerPart[receive_candidate_cluster_id].find(camIdx) ==
+            landmarkFromCameraPerPart[receive_candidate_cluster_id].end()) {
+              fail = true;
+              break; // not a candidate.
+          }
+      }
+      if (fail) {continue;}
+
+      // test 2: removing the lm from this cluster does not lead to degenerate situations.
+      for (const auto& [camIdx, lmIdSet] : landmarkFromCameraPerPart[move_candidate_cluster_id]) {
+        if (lmIdSet.size() < minLmObsPerCamInPart + 1 && lmIdSet.find(candidate_lm_id) != lmIdSet.end()) {
+          fail = true;
+          break; // not a candidate.
+        }
+      }
+      if(fail) {continue;}
+
+      // std::cout << consecutive_failures << "/" << consecutive_samples_fail 
+      //           << " Moving lm " << candidate_lm_id << " from "<< move_candidate_cluster_id << " to " << receive_candidate_cluster_id 
+      //           << " #res: " << cams_from_lm[candidate_lm_id].size() << " of " << res_per_cluster[move_candidate_cluster_id] 
+      //           << " -> " << res_per_cluster[receive_candidate_cluster_id] << "\n";
+
+      // per form move 
+      ApplyMove(candidate_lm_id, move_candidate_cluster_id, receive_candidate_cluster_id, 
+                cams_from_lm, landmarkFromCameraPerPart, res_per_cluster);
+      lm_to_part[candidate_lm_id] = receive_candidate_cluster_id;
+      consecutive_failures = 0;
+      last_receive_cluster = receive_candidate_cluster_id;
+      moves++;
+
+    // std::cout << "Expanding " << receive_candidate_cluster_id << "\n";
+    // for (int partId = 0; partId < res_per_cluster.size(); ++partId) {
+    //   std::cout << "Part " << partId << " with " << res_per_cluster[partId] << " residuals\n";
+    // }
+
+  } // while trying to move landmarks.
+
+#endif
+
+  std::cout << "After " << moves << " moves\n";
+  for(int partId=0;partId < res_per_cluster.size(); ++partId) {
+    std::cout << "Part " << partId << " with " << res_per_cluster[partId] << " residuals\n";
+  }
 
   /////////////// Finish output /////////////
   // map from cam/lm id to resid:
@@ -1376,7 +1484,7 @@ void recluster_cameras(
   }
 
   for (int partId = 0; partId < landmarkFromCameraPerPart.size(); ++partId) {
-    for (const auto [camIdx, lmIdSet] : landmarkFromCameraPerPart[partId]) {
+    for (const auto& [camIdx, lmIdSet] : landmarkFromCameraPerPart[partId]) {
       for (const int lmIdx : lmIdSet) {
         res_to_cluster_by_landmark[camIdTimesLmIdToResId[camIdx * num_lands + lmIdx]] = partId;
       }
