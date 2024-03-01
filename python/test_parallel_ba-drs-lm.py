@@ -1702,7 +1702,10 @@ def bundle_adjust(
                 # blockEigenvalueJtJ = blockEigenvalue(JtJ, 9) + 1e-15 * JtJ
                 # stepSize = blockEigenvalueJtJ #
 
-                blockEigenvalueJtJ = blockEigenvalueWhereNeeded(JtJ, 9, 1e-4) # ! 1e-4 1e-5 als works. problem 52, 1e-6 does not 173 performance bad if not 1e-6?
+                # default 1e-4. 1e-6 for 173: slightly worse| 1e-6 for 52: also worse now (maybe was the other way round).
+                #               1e-3 for 173: | 1e-3 for 52: ok 1e-3 or 1e-4? might be highly random based on clustering.
+                # 1e-3 appears a bit better.
+                blockEigenvalueJtJ = blockEigenvalueWhereNeeded(JtJ, 9, 1e-3) # ! 1e-4 1e-5 als works. problem 52, 1e-6 does not 173 performance bad if not 1e-6?
                 #blockEigenvalueJtJ = 1e-1 * blockEigenvalue(JtJ, 9) # ! try 173 & 52, fails at 1e-2, 10 clusters. 1e-1 ok for 173 & 52. (not dead)
 
                 # TODO: LipJ for both? or only JJ?
