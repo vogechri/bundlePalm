@@ -986,7 +986,8 @@ void FillRelevantCameras(const std::vector<std::map<int, std::set<int>>> &landma
 
 // for(int  relevantCameras
 
-double CostGain(int numLmsBefore, int numLmsAfter, 
+// this is twisted for removal of lms towards 0 (ideal), yet 1 has to better than 2, to reach 0
+double CostGainDecrease(int numLmsBefore, int numLmsAfter, 
                 int maxLmPerCam, double temperature) {
   if (std::min(numLmsBefore, numLmsAfter) > maxLmPerCam ||
       numLmsBefore == 0 && numLmsAfter <= 0) {
@@ -994,8 +995,25 @@ double CostGain(int numLmsBefore, int numLmsAfter,
   }
   // 0/1: 1 - exp(-t/5), should be bad. 1/0 should be good.
   // 1/2 exp(-t/5) - exp(-2t/5)
+  // exp(-6) - exp(-5) is negative. 
   return std::exp(-numLmsAfter / static_cast<double>(maxLmPerCam) * temperature) - 
          std::exp(-numLmsBefore / static_cast<double>(maxLmPerCam) * temperature);
+}
+
+// adding a lm is positive 5 better 4 but 0 better 1 (much better)
+double CostGainIncrease(int numLmsBefore, int numLmsAfter, 
+                int maxLmPerCam, double temperature) {
+  if (std::min(numLmsBefore, numLmsAfter) > maxLmPerCam ||
+      numLmsBefore == 0 && numLmsAfter <= 0) {
+    return 0.0;
+  }
+
+  if (numLmsBefore == 0) return - 100;// - std::exp(-numLmsAfter / static_cast<double>(maxLmPerCam) * temperature);
+  // 0/1: 1 - exp(-t/5), should be bad. 1/0 should be good.
+  // 1/2 exp(-t/5) - exp(-2t/5)
+  // exp(-6) - exp(-5) is negative. 
+  return std::exp(-numLmsBefore / static_cast<double>(maxLmPerCam) * temperature) - 
+         std::exp(-numLmsAfter / static_cast<double>(maxLmPerCam) * temperature);
 }
 
 // cost with known lmid. move lmId from partFrom to the best cluster wrt. cost.
@@ -1004,11 +1022,11 @@ std::pair<double, int> GetMoveCost(int lmId, int partFromTo, int kClusters,
                                    const std::vector<std::map<int, std::set<int>>> &landmarkFromCameraPerPart,
                                    const std::vector<std::set<int>>& cams_from_lm,
                                    const std::vector<int>& res_per_cluster,
-                                   int maxLmPerCam, double temperature, bool receive = false) {
+                                   int maxLmPerCam, double temperature) {
   // per part getCostGain: here just the new min number of landmarks in the part.
   std::vector<double> moveCost(kClusters); // cost per part to move to?
   double gainFromTo = 0;
-  constexpr double eps = 1e-6; // prefer cluster with fewer res, tiny bias?
+  constexpr double eps = 1e-6; // prefer cluster with fewer res, tiny bias? 
   int min_res_per_cluster = res_per_cluster[partFromTo]; // TODO: this appears weird.
   for (int partId = 0; partId < kClusters; ++partId) {
     min_res_per_cluster = std::min(min_res_per_cluster, res_per_cluster[partId]);
@@ -1021,18 +1039,13 @@ std::pair<double, int> GetMoveCost(int lmId, int partFromTo, int kClusters,
       int lmOfCaminPart = (landmarkFromCameraIt == landmarkFromCameraPerPart[partId].end()) ? 0 : landmarkFromCameraIt->second.size();
       // lmOfCaminPart holds #observations of cam in part.
       if (partId == partFromTo) { // remove the lm from part yields this cost.
-        if(!receive)
-          gainFromTo += CostGain(lmOfCaminPart, lmOfCaminPart - 1, maxLmPerCam, temperature) - eps * lmOfCaminPart / min_res_per_cluster;
-        else
-          gainFromTo += CostGain(lmOfCaminPart, lmOfCaminPart + 1, maxLmPerCam, temperature) + eps * lmOfCaminPart / min_res_per_cluster;
+          gainFromTo += CostGainDecrease(lmOfCaminPart, lmOfCaminPart - 1, maxLmPerCam, temperature) - eps * lmOfCaminPart / min_res_per_cluster;
       }
-      if(!receive)       // Adding the lm to part yields this cost.
-        moveCost[partId] += CostGain(lmOfCaminPart, lmOfCaminPart + 1, maxLmPerCam, temperature) - eps * lmOfCaminPart / res_per_cluster[partId];
-      else       // Removing the lm from partId yields this cost.
-        moveCost[partId] += CostGain(lmOfCaminPart, lmOfCaminPart - 1, maxLmPerCam, temperature) + eps * lmOfCaminPart / res_per_cluster[partId];
+      moveCost[partId] += CostGainDecrease(lmOfCaminPart, lmOfCaminPart + 1, maxLmPerCam, temperature) - eps * lmOfCaminPart / res_per_cluster[partId];
     }
   }
 
+  moveCost[partFromTo] = -gainFromTo; // TODO was this important to get better results?
   int argmax = distance(moveCost.begin(), std::max_element(moveCost.begin(), moveCost.end()));
   return {gainFromTo + moveCost[argmax], argmax};
 }
@@ -1042,7 +1055,7 @@ std::pair<int, int> GetBestMoveCost(int partId, int camId, int kClusters,
                                     const std::vector<std::map<int, std::set<int>>> &landmarkFromCameraPerPart,
                                     const std::vector<std::set<int>>& cams_from_lm,
                                     const std::vector<int>& res_per_cluster,
-                                    int maxLmPerCam, double temperature, bool receive = false) {
+                                    int maxLmPerCam, double temperature) {
   std::pair<int, int> bestLmAndPartId = {-1, -1};
   double bestCost = 0;
   const auto landmarkFromCameraIt = landmarkFromCameraPerPart[partId].find(camId);
@@ -1054,7 +1067,7 @@ std::pair<int, int> GetBestMoveCost(int partId, int camId, int kClusters,
     // if receive: cost to receive lm to partId from anthoer part.
     // else cost to move lm from partId to another part.
     std::pair<double, int> costAndPart = GetMoveCost(lmId, partId, kClusters, landmarkFromCameraPerPart, 
-                                                     cams_from_lm, res_per_cluster, maxLmPerCam, temperature, receive);
+                                                     cams_from_lm, res_per_cluster, maxLmPerCam, temperature);
 
     // cost to move lmId from partId to another part OR to receive lmId from another part.
     if (costAndPart.first > bestCost) {
@@ -1066,11 +1079,61 @@ std::pair<int, int> GetBestMoveCost(int partId, int camId, int kClusters,
   return bestLmAndPartId;
 }
 
+// move from partId to return first part lmid return second. as the cost is positive.
+std::pair<int, int> GetBestMoveCostToCamInPart(int partId, int inCamId, int kClusters,
+                                    const std::vector<std::map<int, std::set<int>>> &landmarkToCameraPerPart,
+                                    const std::vector<std::set<int>>& cams_from_lm,
+                                    const std::vector<int>& res_per_cluster,
+                                    int maxLmPerCam, double temperature) {
+  std::pair<int, int> bestLmAndPartId = {-1, -1};
+  double bestCost = 0;
+  //const double eps = 0;
+  const auto landmarkToCameraIt = landmarkToCameraPerPart[partId].find(inCamId);
+  if (landmarkToCameraIt == landmarkToCameraPerPart[partId].end()){
+    return bestLmAndPartId; // invalid since no landmarks observed by cam in part.
+  };
+
+  // go over lms not present in cluster, but in seen by cam. go over cluster find cam, go over the landmarks in this cluster, compute the cost
+  for (int fromPartId = 0; fromPartId < kClusters; ++fromPartId) {
+    if (fromPartId == partId) {continue;}
+    const auto landmarkFromCameraIt = landmarkToCameraPerPart[fromPartId].find(inCamId);
+    if (landmarkFromCameraIt == landmarkToCameraPerPart[fromPartId].end()) { continue;}
+
+    // only consider lms that exist in other part. 
+    for (int lmId : landmarkFromCameraIt->second) { // cost change remove lm from frompart, add to to partId
+      double costForMovingLm = 0;
+      for (int camId : cams_from_lm[lmId]) { // go over all cams observing lm.
+
+        const auto landmarkFromCameraIt = landmarkToCameraPerPart[fromPartId].find(camId);
+        const auto landmarkToCameraIt = landmarkToCameraPerPart[partId].find(camId);
+
+        int lmFromCaminPart = (landmarkFromCameraIt == landmarkToCameraPerPart[fromPartId].end()) ? 0 : landmarkFromCameraIt->second.size();
+        int lmToCaminPart = (landmarkToCameraIt == landmarkToCameraPerPart[partId].end()) ? 0 : landmarkToCameraIt->second.size();
+
+        costForMovingLm += CostGainIncrease(lmFromCaminPart, lmFromCaminPart - 1, maxLmPerCam, temperature);// - eps * lmOfCaminPart / min_res_per_cluster;
+        costForMovingLm += CostGainIncrease(lmToCaminPart, lmToCaminPart + 1, maxLmPerCam, temperature);// - eps * lmOfCaminPart / res_per_cluster[partId];
+
+         //std::cout << "Cam " << camId << " lmFromCaminPart " << lmFromCaminPart << "-1 " << " lmToCaminPart " << lmToCaminPart << "+1 , costForMovingLm: " <<  costForMovingLm<< std::endl;
+
+        }
+      // cost to move lmId from partId to another part OR to receive lmId from another part.
+      //std::cout << " Total Cost " << costForMovingLm << std::endl;
+      if (costForMovingLm > bestCost) {
+        bestCost = costForMovingLm;
+        bestLmAndPartId.first = fromPartId;
+        bestLmAndPartId.second = lmId;
+      }
+    }
+  }
+  return bestLmAndPartId;
+}
+
 // res_per_cluster adjust !
 void ApplyMove(int lmId, int partFrom, int partTo,
                const std::vector<std::set<int>>& cams_from_lm,
                std::vector<std::map<int, std::set<int>>> &landmarkFromCameraPerPart,
                std::vector<int>& res_per_cluster) {
+  if(partFrom ==partTo) return;
   for (int camId : cams_from_lm[lmId]) { // all cams from lm are in partFrom. 
     landmarkFromCameraPerPart[partFrom][camId].erase(lmId);
     landmarkFromCameraPerPart[partTo][camId].insert(lmId); // can be new part, but unlikely as cost high.
@@ -1213,7 +1276,7 @@ void recluster_cameras(
 
 //#endif
 
-#ifdef __disabled__for__testing__
+//#ifdef __disabled__for__testing__
 
   // TODO:
   // 1.
@@ -1225,7 +1288,7 @@ void recluster_cameras(
 
     // a. find cluster with cam with < K obs in cluster
     // b. go over .. see above
-    maxLmPerCam = 6;
+    maxLmPerCam = 11;
     relevantCameras.clear();
     relevantCameras.resize(maxLmPerCam); // cam obs in part -> part and camId
     movable = 0;
@@ -1244,13 +1307,23 @@ void recluster_cameras(
         // now inverse: find a lm in other part to move into this part.
         for (std::pair<int, int> partAndCamIdx : relevantCamerasPerLm) {
           int toPartId = partAndCamIdx.first;
-          int camId = partAndCamIdx.second;
+          int camId = partAndCamIdx.second; // this might belong to toPartId, not from partid now. So add a lm seen by this cam in this part to the part, from some other part.
           const auto [fromPartId, lmIdx] =
-            GetBestMoveCost(toPartId, camId, kClusters, // should consider # res in cluster as tie breaker.
-              landmarkFromCameraPerPart, cams_from_lm, res_per_cluster, maxLmPerCam, temperature, /*receive=*/true);
+            GetBestMoveCostToCamInPart(toPartId, camId, kClusters, // should consider # res in cluster as tie breaker.
+              landmarkFromCameraPerPart, cams_from_lm, res_per_cluster, maxLmPerCam, temperature);
           if (toPartId >= 0 && lmIdx >= 0) {
-            //std::cout << " Moving " << lmIdx << " from " << fromPartId << " observed by cam " << camId << " to " << toPartId << "\n";
+  
+            // std::cout << "Part " << fromPartId << " contains in cam " << camId << " " << (landmarkFromCameraPerPart[fromPartId].at(camId).find(lmIdx) != landmarkFromCameraPerPart[fromPartId].at(camId).end()) <<
+            // " and Part " << toPartId << " contains in cam " << camId << " " << (landmarkFromCameraPerPart[toPartId].at(camId).find(lmIdx) != landmarkFromCameraPerPart[toPartId].at(camId).end()) << "\n";
+
+            // std::cout << " Moving " << lmIdx << " from part " << fromPartId << " observed by cam " << camId << " to part " << toPartId << 
+            // " from cam obs " << landmarkFromCameraPerPart[fromPartId].at(camId).size() << " to cam obs  " << landmarkFromCameraPerPart[toPartId].at(camId).size() << "\n";
+            
             ApplyMove(lmIdx, fromPartId, toPartId, cams_from_lm, landmarkFromCameraPerPart, res_per_cluster);
+
+            // std::cout << " After Moving " << lmIdx << " from part " << fromPartId << " observed by cam " << camId << " to part " << toPartId << 
+            // " from cam obs " << landmarkFromCameraPerPart[fromPartId].at(camId).size() << " to cam obs  " << landmarkFromCameraPerPart[toPartId].at(camId).size() << "\n";
+
             // could break if enters here after for loop end, to ensure we process small 1st. also could use pq.
           }
         }
@@ -1274,7 +1347,7 @@ void recluster_cameras(
   }
   std::cout << " left " << movable << std::endl;
 
-#endif
+//#endif
 
   // inverse: find cams in small clusters. those cams observe lms in other clusters.
   // those lms are candidates to move over to the small cluster if
@@ -1634,10 +1707,10 @@ std::pair<int, double> FindbestMatchForPart(int partId, //const std::vector<std:
   const std::vector<int>& lmToPart, const std::vector<double>& costOfPart, 
   int maxLmPerCam, double temperature, int num_res, int kClusters, bool verbose = false) {
   // idea: find k cams with fewest landmarks in part.
-  constexpr int topK = 1;
-  constexpr int topL = 20;  // change to 20 does 4s -> 5s .. + 25% likely trade off with below.
+  constexpr int topK = 1; // 1 -> 3: 24 -> 38s
+  constexpr int topL = 30;  // change to 20 does 4s -> 5s .. + 25% likely trade off with below.
   // test: 3000 replacing 1500. run on probem 52.
-  constexpr int topM = 1500;// 1500; // we do not use all but 700 random landmarks for a cam -- there can be 30k.
+  constexpr int topM = 1500;// 1500 -> 4500: 24s ->27s // we do not use all but 700 random landmarks for a cam -- there can be 30k.
   // cam in part with fewest landamrk observations in part.
   const std::map<int, std::set<int>> &landmarkFromCameraOfPart = landmarkFromCameraPerPart[partId];
   std::vector<int> camsToTryInPart = GetLowestKCameras(landmarkFromCameraOfPart, topK, lms_from_cam);
