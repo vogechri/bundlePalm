@@ -19,6 +19,9 @@
 #include <random> // for std::mt19937
 #include <chrono> // for std::chrono
 
+//#define _rngseed_ 999 // 529k
+#define _rngseed_ 123 // 527k, but intermediate (60 its) results bad.
+
 // Speedup, very little worse, else retries rejected merges.
 #define inheritInvalidEdgeness_
 // if undefined: maxWeight (much faster & better than sumWeight)? - sum overestimates overlap.
@@ -464,8 +467,9 @@ int RandomMerge(int number_merges,
     int num_vtx = vtxsToPart.size();
     int num_edges = edgeWeightMap.size();
 
-    std::mt19937 mt{ static_cast<std::mt19937::result_type>(
-		std::chrono::steady_clock::now().time_since_epoch().count() ) };
+    // std::mt19937 mt{ static_cast<std::mt19937::result_type>(
+		// std::chrono::steady_clock::now().time_since_epoch().count() ) };
+    std::mt19937 mt{ static_cast<std::mt19937::result_type>( _rngseed_ ) };
     std::uniform_int_distribution dist{ 0, num_edges-1 };
     // build prefered set, permute, pick from until merges reached or empty
     std::vector<int> preferedEdgeIds;
@@ -1288,7 +1292,7 @@ void recluster_cameras(
 
     // a. find cluster with cam with < K obs in cluster
     // b. go over .. see above
-    maxLmPerCam = 11;
+    maxLmPerCam = 15;
     relevantCameras.clear();
     relevantCameras.resize(maxLmPerCam); // cam obs in part -> part and camId
     movable = 0;
@@ -1358,11 +1362,12 @@ void recluster_cameras(
   // go over cams of cl. [cam, lms] map
   // pick one with lm not in cluster but: lm -> cluster and lm->cam all these cams are already present in cluster
   // needs lm -> cluster map = vector
-  const int minLmObsPerCamInPart = 10;
-  const int num_res_tresh = 1.1 * num_res / kClusters; // consider as balanced.
-  const int av_res_tresh = num_res / kClusters; // consider as balanced.
-  std::mt19937 mt{ static_cast<std::mt19937::result_type>(
-    std::chrono::steady_clock::now().time_since_epoch().count() ) };
+  const int minLmObsPerCamInPart = maxLmPerCam;
+  //const int num_res_tresh = 1.1 * num_res / kClusters; // consider as balanced.
+  //const int av_res_tresh = num_res / kClusters; // consider as balanced.
+  // std::mt19937 mt{ static_cast<std::mt19937::result_type>(
+  //   std::chrono::steady_clock::now().time_since_epoch().count() ) };
+  std::mt19937 mt{ static_cast<std::mt19937::result_type>( _rngseed_ ) };
   std::uniform_int_distribution sample_cl{ 0, kClusters-1 };
   //std::uniform_int_distribution sample_cam{ 0, num_cams-1 };
   std::uniform_int_distribution sample_lm{ 0, num_lands-1 };
@@ -1724,8 +1729,9 @@ std::pair<int, double> FindbestMatchForPart(int partId, //const std::vector<std:
     std::cout << "\n";
   }
 
-  std::mt19937 mt{ static_cast<std::mt19937::result_type>(
-  std::chrono::steady_clock::now().time_since_epoch().count() ) }; // maybe repeatable -> seed =0.
+  // std::mt19937 mt{ static_cast<std::mt19937::result_type>(
+  // std::chrono::steady_clock::now().time_since_epoch().count() ) }; // maybe repeatable -> seed =0.
+  std::mt19937 mt{ static_cast<std::mt19937::result_type>( _rngseed_ ) };
 
   std::set<int> partToTryMerge;
   // Again keep top k possibilities in Q ?

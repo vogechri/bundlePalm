@@ -8,7 +8,12 @@ import numpy as np
 from joblib import Parallel, delayed
 from scipy.sparse import csr_array, csr_matrix, issparse
 from scipy.sparse import diags as diag_sparse
-from scipy.sparse.linalg import inv as inv_sparse
+from scipy.sparse import hstack as sparse_hstack
+#from scipy.sparse.linalg import splu # slow as FUCK
+from scipy.sparse.linalg import spsolve # slow as FUCK
+#from scipy.linalg import cholesky, cho_solve, cho_factor
+#from sksparse.cholmod import cholesky # install suitesparse and ... and .. 
+from scipy.sparse.linalg import inv as inv_sparse # Slowest ever.
 from numpy.linalg import pinv as inv_dense
 from numpy.linalg import eigvalsh, eigh
 # idea reimplement projection with torch to get a jacobian -> numpy then
@@ -34,6 +39,7 @@ FILE_NAME = "problem-16-22106-pre.txt.bz2"
 # acc. x 100: fluctuates
 FILE_NAME = "problem-173-111908-pre.txt.bz2"
 #FILE_NAME = "problem-135-90642-pre.txt.bz2" # this appears incredibly bad
+# problem-253-163691-pre.txt.bz2 90 10  uneven
 
 #BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/trafalgar/"
 # 71k
@@ -41,6 +47,7 @@ FILE_NAME = "problem-173-111908-pre.txt.bz2"
 #59 / 0  ======== DRE BFGS ======  207468  ========= gain  102
 # newVersion worse .. 60 / 0  ======== DRE BFGS ======  208439, 100 its 204k
 #FILE_NAME = "problem-257-65132-pre.txt.bz2"
+# uneven problem-257-65132-pre.txt.bz2 90 10
 
 # RNA is best, other awful. in general cams as shared vars very bad.
 # 59 / 0  ======== DRE BFGS ======  1203190  ========= gain  1391 ==== f(v)=  1203133  f(u)=  1203208  ~=  1203207.857094867
@@ -917,6 +924,7 @@ def copy_selected_blocks(M, block_selection_, bs):
     return Mi
 
 def stop_criterion(delta, delta_i, i):
+    # lower (1e-4) can be worse? maybe just the parts / how parts are.
     eps = 1e-3 #1e-2 used in paper, tune. might allow smaller as faster?
     return (i+1) * delta_i / delta < eps
 
@@ -1341,7 +1349,7 @@ def cost_DRE(
     num_cams =  poses_in_cluster_[0].shape[0]
     #sum_Ds_2u = np.zeros(num_cams * 9)
     #sum_constant_term = 0
-    sum_u_s =0
+    sum_u_s = 0
     sum_u_v = 0
     sum_u_v_ = 0
     sum_2u_s_v = 0
@@ -1421,8 +1429,8 @@ def cost_DRE(
     # i want |u-s|_D |u-v|_D, also |v-2u-s|_D
     #cost_input  = 0.5 * (pose_v_.flatten().dot(Ul_all * pose_v_.flatten() - 2 * sum_Ds_2u) + sum_constant_term)
     print("---- |u-s|^2_D ", round(sum_u_s), "|u-v|^2_D ", round(sum_u_v), "|2u-s-v|^2_D ", round(sum_2u_s_v), 
-          "|u-v|^2 ", round(sum_u_v_), " cost_dre ", cost_dre)
-    print("---- dre_per_part --- ", dre_per_part)
+          "|u-v|^2 ", round(sum_u_v_), " cost_dre ", cost_dre, file=sys.stderr)
+    print("---- dre_per_part --- ", dre_per_part, file=sys.stderr)
     return cost_dre, dre_per_part
 
 # TODO: shorten
@@ -1557,11 +1565,14 @@ def bundle_adjust(
         blockEigMult = 1e-5 # 1e-7 fails with venice'52' 173 demands 1e-3/1e-4/1e-5? 52:1e-6 totally fails. Maybe also True below (recomp jacobian): yes stable
         blockEigMultJtJ = 1e-4 # 173: little effect 1e-6/4/8. just 173 or always not mattering much?
         blockEigMultLimit = 1e-5 # maybe now can be more lose? 5 cluster needed blockEigenvalueWhereNeeded(JtJ, 9, 1e-4)
+        # limit lower -> major effect from partitioning only?
+        # 1e-5 even better than 1e-7. 
+        # 1. fix rng, 2. is there structure, how identify if good or bad part?
         # blockEigMult not import for 173 but 52 yes
         # adapt blockEigMult based on check? pass up and down hierarchy?
         # problem 1e-3/4/5 good for 173, not for 52. 52: better for 1e-6 bad for 1e-5 etc.
         blockEigMult = blockEig_in_c_
-        print("blockEig_in_c_ ", blockEig_in_c_)
+        print("blockEig_in_c_ ", blockEig_in_c_, file=sys.stderr)
 
     it_ = 0
     funx0_st1 = lambda X0, X1, X2: \
@@ -1624,10 +1635,13 @@ def bundle_adjust(
             # TODO: cam hessian scaled awfully. degenerate.
             maxE, minE = minmaxEv(JtJ, 9)
             JtJSpec = [round_int(np.max(maxE/minE)), np.min(maxE/minE), round_int(np.median(maxE/minE))]
-            print("minmax ev JtJ ", np.max(maxE), " ", np.max(minE), " ", np.min(maxE), " ",  np.min(minE), " spec ", JtJSpec )
+            print("minmax ev JtJ ", np.max(maxE), " ", np.max(minE), " ", np.min(maxE), " ",  np.min(minE), " spec ", JtJSpec, file=sys.stderr )
             #maxE, minE = minmaxEv(stepSize, 9)
             #print("minmax ev stepSz ", np.max(maxE), " ", np.max(minE), " ", np.min(maxE), " ",  np.min(minE), " spec ", np.max(maxE/minE) )
-            print( "Mean diagonal of pseudo Hessian ",  np.sum(np.abs(JtJ.diagonal()).reshape(-1,9) / (1000 * n_cameras_), 0))
+
+            #print( "Mean diagonal of pseudo Hessian ",  np.sum(np.abs(JtJ.diagonal()).reshape(-1,9) / (1000 * n_cameras_), 0))
+            absDiagJtJ = np.abs(JtJ.diagonal()).reshape(-1,9)
+            print( "Diag pseudo HessP (max/min/med)",  np.max(absDiagJtJ, axis=0), " ", np.min(absDiagJtJ, axis=0),  " ", np.median(absDiagJtJ, axis=0), file=sys.stderr )
 
             # TODO: here, also write min/max Eigenvec and spec to debug
             # blockEigenvalueJtJ = blockEigenvalueFull(JtJ, 9) # print eval/vec structure
@@ -1656,7 +1670,7 @@ def bundle_adjust(
 
             JltJl = J_land.transpose() * J_land
             absDiagJltJl = np.abs(JltJl.diagonal()).reshape(-1,3)
-            print( "Diag pseudo HessL (max/min/med/mean)",  np.max(absDiagJltJl, axis=0), " ", np.min(absDiagJltJl, axis=0),  " ", np.median(absDiagJltJl, axis=0), " ", np.sum(absDiagJltJl) )
+            print( "Diag pseudo HessL (max/min/med)",  np.max(absDiagJltJl, axis=0), " ", np.min(absDiagJltJl, axis=0),  " ", np.median(absDiagJltJl, axis=0), file=sys.stderr )
             # JltJlDiag = JltJl + J_eps * diag_sparse(np.ones(JltJl.shape[0]))
             # maybe more appropriate?
             #blockEigenvalueJltJl = blockEigenvalue(JltJl, 3)
@@ -1670,7 +1684,7 @@ def bundle_adjust(
             JltJlSpec = [round_int(np.max(maxE/minE)), np.min(maxE/minE), round_int(np.median(maxE/minE))]
             maxE, minE = minmaxEv(JltJlDiag, 3)
             JltJlDiagSpec = [round_int(np.max(maxE/minE)), np.min(maxE/minE), round_int(np.median(maxE/minE))]
-            print("minmax ev JltJlD ", np.max(maxE), " ", np.max(minE), " ", np.min(maxE), " ",  np.min(minE), " spec ", JltJlSpec, " -> ", JltJlDiagSpec )
+            print("minmax ev JltJlD ", np.max(maxE), " ", np.max(minE), " ", np.min(maxE), " ",  np.min(minE), " spec ", JltJlSpec, " -> ", JltJlDiagSpec, file=sys.stderr )
 
             #JtJDiag = diag_sparse(np.fmax(JtJ.diagonal(), 1e-4)) # diagonal is solid. slower than JtJ + something though
             if newForUnique:
@@ -1716,10 +1730,13 @@ def bundle_adjust(
                 #JtJDiag = 1e-4 * blockEigMult * blockEigenvalueJtJ # this could also work?
                 maxE, minE = minmaxEv(stepSize, 9)
                 StepSizeSpec = [round_int(np.max(maxE/minE)), np.min(maxE/minE), round_int(np.median(maxE/minE))]
-                print("minmax ev stepSz ", np.max(maxE), " ", np.max(minE), " ", np.min(maxE), " ",  np.min(minE), " spec ", StepSizeSpec)
+                print("minmax ev stepSz ", np.max(maxE), " ", np.max(minE), " ", np.min(maxE), " ",  np.min(minE), " spec ", StepSizeSpec, file=sys.stderr)
                 #maxE, minE = minmaxEv(JtJDiag, 9)
                 #print("minmax ev JtJDiag ", np.max(maxE), " ", np.max(minE), " ", np.min(maxE), " ",  np.min(minE), " spec ", np.max(maxE/minE))
                 penaltyStartConst = prox_rhs.dot(stepSize * prox_rhs)
+
+        # TODO: solve the whole! thing with cholesky and compare. maybe this is better.
+        # Advantage DRS in parts: can be parallelized, no memory issues. Disadvantage: not as good as a whole -- maybe.
 
         # start_ = time.time()
         Vl = JltJl + L * JltJlDiag
@@ -1741,10 +1758,55 @@ def bundle_adjust(
             bp_s = bp + stepSize * prox_rhs
         bS = (bp_s - W * Vli * bl).flatten()
 
+
         #delta_p = -solvePowerIts(Ul, W, Vli, bS, powerits)
         delta_p, powerits_run = solveByGDNesterov(Ul, W, Vli, bS, powerits)
         delta_p = -delta_p
         delta_l = -Vli * ((W.transpose() * delta_p).flatten() + bl)
+
+        use_cholesky = False # incredibly slow.
+        if use_cholesky:
+            # matrix is
+            # [JtJ + L * JtJDiag + stepSize | W                     ] * [delta_p] = [bp_s]
+            # [W^T                          | JltJl + L * JltJlDiag ] * [delta_l] = [bl]
+            # how to set this up? 
+            # 1. J^tJ and add diag parts
+            # J^tJ + L * JtJDiag + stepSize
+            # for L * JltJlDiag, add 9 * n_cams to indices
+            # delta = - inv_sparse(S) * bS
+            Jall = sparse_hstack((J_pose, J_land))
+            Mat = Jall.transpose() * Jall
+            #Mat += (L * JtJDiag + stepSize).resize(Mat.shape)
+            Matpart = L * JtJDiag + stepSize
+            #print("Mat.shape " , Mat.shape)
+            Matpart.resize(Mat.shape)
+            #print("Matpart.shape " , Matpart.shape)
+            Mat = Mat + Matpart
+            #print("Mat.shape " , Mat.shape)
+            #JltJlDiag_all = L * JltJlDiag
+            # not sure:
+            # JltJlDiag_all.indices += J_pose.shape[1] # add 9 * n_cams 
+            # so .. ? hstack diag of 0 and Jl
+            JltJlDiag_all = sparse_hstack((0 * J_pose, J_land))
+            JltJlDiag_all = L * JltJlDiag_all.transpose() * JltJlDiag_all
+            #print("JltJlDiag_all.shape " , JltJlDiag_all.shape)
+            #JltJlDiag_all.resize(Mat.shape)
+            Mat = Mat + JltJlDiag_all
+            ball = np.hstack((bp_s, bl))
+            #print("cholesky ")
+            #lu = splu(Mat)
+            #factor = cholesky(Mat)
+            #print("cholesky done")
+            #fac,low = cho_factor(Mat) # dense
+            #delta = cho_solve((fac,low), ball) # dense
+            #delta = -factor(ball)
+            #delta = -factor.solve_A(ball)
+            #delta = -lu.solve(ball)
+            delta = - spsolve(Mat, ball)
+            #delta = - inv_sparse(Mat) * ball
+            delta_p = delta[:n_cameras_ * 9]
+            delta_l = delta[n_cameras_ * 9:]
+
         penaltyL = L * (delta_l).dot(JltJlDiag * delta_l)
         penaltyP = L * (delta_p + prox_rhs).dot(JtJDiag * (delta_p + prox_rhs))
         if newVersion:
@@ -1755,8 +1817,8 @@ def bundle_adjust(
 
         fx0_new = fx0 + (J_pose * delta_p + J_land * delta_l)
         costQuad = np.sum(fx0_new**2)
-        print(it_, "it. cost 0     ", round(costStart)," cost + penalty ", round(costStart + penaltyStart), " === using L = ", L)
-        print(it_, "it. cost 0/new ", round(costQuad), " cost + penalty ", round(costQuad + penaltyL + penaltyP),)
+        print(it_, "it. cost 0     ", round(costStart)," cost + penalty ", round(costStart + penaltyStart), " === using L = ", L, file=sys.stderr)
+        print(it_, "it. cost 0/new ", round(costQuad), " cost + penalty ", round(costQuad + penaltyL + penaltyP), " Pits ", powerits_run, file=sys.stderr)
 
         # update and compute cost
         x0_p_ = x0_p_ + delta_p
@@ -1772,7 +1834,7 @@ def bundle_adjust(
             x0_t_land[point_indices_[:]],
             torch_points_2d)
         costEnd = np.sum(fx1.numpy() ** 2)
-        print(it_, "it. cost 1     ", round(costEnd), "      + penalty ", round(costEnd + penaltyL + penaltyP),)
+        print(it_, "it. cost 1     ", round(costEnd), "      + penalty ", round(costEnd + penaltyL + penaltyP), file=sys.stderr,)
 
         tr_check = (costStart + penaltyStart - costEnd - penaltyP - penaltyL) / (costStart + penaltyStart - costQuad - penaltyP - penaltyL)
         #tr_check = (costStart - costEnd) / (costStart - costQuad) # does not help.
@@ -1789,7 +1851,7 @@ def bundle_adjust(
             # f(x) is costEnd
             decent_lemma_divisor = 4
 
-        nablaXp = L * JtJDiag * delta_p  # actual gradient. discussable TODO
+        #nablaXp = L * JtJDiag * delta_p  # actual gradient. discussable TODO
         nablaXl = JltJlDiag * delta_l  # actual gradient: J^t fx0 = bp|bl
         Lfkconst = costEnd - costStart
         Lfklin = bp.dot(delta_p) + bl.dot(delta_l)
@@ -1818,20 +1880,20 @@ def bundle_adjust(
         LfkSafe = Lfklin < 0 # for any phi ok.
 
         if tr_check < tr_eta_2: # and False: # TR should not help here. Maybe apply differently? TR checks if approx w. JtJ is ok within region.
-            print(" //////  tr_check " , tr_check, " Lfk distance ", LfkDistance, " -nabla^Tdelta=" , -Lfklin, " /////")
+            print(" //////  tr_check " , tr_check, " Lfk distance ", LfkDistance, " -nabla^Tdelta=" , -Lfklin, " /////", file=sys.stderr)
             L = L * 2
             if not newVersion:
                 JtJDiag = 1/2 * JtJDiag # why that? tr only for landmarks here..
             # else:
             #     stepSize = JtJ.copy() + L * JtJDiag
             #     penaltyStartConst = prox_rhs.dot(stepSize * prox_rhs)
-                
-        #LfkViolated = False # todo remove?
+
+        # LfkViolated = False # todo remove? What happens? all tested ok so far. example 646 failed without.
         if tr_check >= tr_eta_2 and LfkViolated: # violated -- should revert update.
         #if tr_check >= tr_eta_2 and LfkViolated and not steSizeTouched or (steSizeTouched and costStart + penaltyStart < costEnd + penaltyL + penaltyP): # violated -- should revert update.
         #if LfkViolated and not steSizeTouched or (steSizeTouched and costStart + penaltyStart < costEnd + penaltyL): # violated -- should revert update.
             steSizeTouched = True
-            print(" |||||||  Lfk distance ", LfkDistance, " -nabla^Tdelta=" , -bp.dot(delta_p) - bl.dot(delta_l), " LipJ ", LipJ, " blockEigMult ", blockEigMult , " |||||||")
+            print(" |||||||  Lfk distance ", LfkDistance, " -nabla^Tdelta=" , -bp.dot(delta_p) - bl.dot(delta_l), " LipJ ", LipJ, " blockEigMult ", blockEigMult , " |||||||", file=sys.stderr)
             #print(" |||||||  f(x) <= f(y) + <nabla(f(y) x-y> + Lf/2 |x-y|^2: ", costEnd, " <= ", costStart, " + ", Lfklin, " + ", LfkQuad, " |||||||")
 
             #stepSize = stepSize * 2
@@ -1884,7 +1946,7 @@ def bundle_adjust(
             it_ = it_ + 1
             updateJacobian = True
 
-        print(" ------- Lfk distance ", LfkDistance, " tr_check ", tr_check,  " LipJ ", LipJ, " blockEig ", blockEigMult, " -------- ")
+        print(" ------- Lfk distance ", LfkDistance, " tr_check ", tr_check,  " LipJ ", LipJ, " blockEig ", blockEigMult, " -------- ", file=sys.stderr)
 
     x0_p_ = x0_p_.reshape(n_cameras_, 9)
     x0_l_ = x0_l_.reshape(n_points_, 3)
@@ -2173,7 +2235,7 @@ def RNA(G, F, g, f, it_, m_, Fe, fe, lamda, h, res_pcg):
     extrapolation = Gs_.dot(c)
     extrapolationF = Fes_.dot(c)
 
-    print("c ", c, " ", c.shape, id_)
+    print("c ", c, " ", c.shape, id_, file=sys.stderr)
 
     #print("extrapolation ", extrapolation.shape, " ", g.shape)
     return (G, F, Fe, np.squeeze(extrapolation - h * extrapolationF))
@@ -2608,7 +2670,7 @@ else:
                 # recall best working was maybe similar to problem this was on v! directly.
                 # sk+1 + (dk + dk-1) or so.
 
-            print("Debug info bfgs_r=u-v: |bfgs_r| ", np.linalg.norm(bfgs_r, 2))
+            print("Debug info bfgs_r=u-v: |bfgs_r| ", np.linalg.norm(bfgs_r, 2), file=sys.stderr)
 
             if use_bfgs:
                 dk = BFGS_direction(bfgs_r, bfgs_ps, bfgs_qs, bfgs_rhos, it, bfgs_mem, bfgs_mu)
@@ -2665,7 +2727,7 @@ else:
                     dk = dk - (rna_s - bfgs_r)
                 else:
                     dk = dk - rna_s
-                print("Stepsizes taken dk |bfgs_r| ", np.linalg.norm(bfgs_r, 2), " |dk| ", np.linalg.norm(dk, 2))
+                print("Stepsizes taken dk |bfgs_r| ", np.linalg.norm(bfgs_r, 2), " |dk| ", np.linalg.norm(dk, 2), file=sys.stderr )
                 dk_stepLength = np.linalg.norm(dk, 2)
                 multiplier = 1
 
@@ -2719,7 +2781,7 @@ else:
 
 
         line_search_iterations = 3 # 3 appears ok
-        print(" ..... step length ", steplength, " bfgs step ", dk_stepLength, " ratio ", multiplier)
+        print(" ..... step length ", steplength, " bfgs step ", dk_stepLength, " ratio ", multiplier, file=sys.stderr )
         Vnorm_safe = Vnorm.copy()
         for ls_it in range(line_search_iterations):
             Vnorm = Vnorm_safe.copy()
@@ -2782,14 +2844,17 @@ else:
 
             # debugging cost block ################
             primal_cost_v = 0
+            primal_cost_v_all = []
             for ci in range(kClusters):
-                primal_cost_v += primal_cost(
+                primal_cost_v_all.append(primal_cost(
                     poses_v_bfgs, # v not u
                     camera_indices_in_cluster[ci],
                     point_indices_in_cluster[ci],
                     points_2d_in_cluster[ci],
-                    landmarks_bfgs)
-            primal_cost_u = 0
+                    landmarks_bfgs))
+            primal_cost_v = np.sum(primal_cost_v_all)
+            primal_cost_v_all = [round(cost) for cost in primal_cost_v_all]
+            primal_cost_u = 0 # = currentCost_bfgs
             for ci in range(kClusters):
                 primal_cost_u += primal_cost(
                     poses_in_cluster_bfgs[ci],
@@ -2800,7 +2865,8 @@ else:
 
             dre_bfgs = max(dre_bfgs, primal_cost_v) # sandwich lemma 
             print( it, "/", ls_it, " ======== DRE BFGS ====== ", round(dre_bfgs) , " ========= gain " , \
-                round(lastCostDRE_bfgs - dre_bfgs), "==== f(v)= ", round(primal_cost_v), " f(u)= ", round(primal_cost_u), " ~= ", currentCost_bfgs)
+                round(lastCostDRE_bfgs - dre_bfgs), "==== f(v)= ", round(primal_cost_v), " f(u)= ", round(primal_cost_u))
+            print( it, "/", ls_it, " f(v) = ", primal_cost_v_all )
             bestCost = np.minimum(primal_cost_v, bestCost)
             bestIt = it
             if it < 60:

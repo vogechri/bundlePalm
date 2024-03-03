@@ -45,8 +45,8 @@ FILE_NAME = "problem-257-65132-pre.txt.bz2"
 # 52 / 2  ======== DRE BFGS ======  481560  ========= gain  175
 # 52 / 2  ======== DRE BFGS ======  480851  ========= gain  3452 w pcg .. 'last turn' not clear
 # 59 / 2  ======== DRE BFGS ======  475798  ========= gain  1601
-#BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/venice/"
-#FILE_NAME = "problem-52-64053-pre.txt.bz2"
+BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/venice/"
+FILE_NAME = "problem-52-64053-pre.txt.bz2"
 
 # 59 / 0  ======== DRE BFGS ======  291177  ========= gain  938
 #BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/final/"
@@ -110,6 +110,12 @@ def read_bal_data(file_name):
         remove_large_points(points_3d_, camera_indices_, points_2d_, point_indices_)
 
     return camera_params, points_3d_, camera_indices_, point_indices_, points_2d_
+
+def round_int(x):
+    if x in [float('inf'), float('-inf')]:
+        return x
+    else:
+        return int(round(x))
 
 def float_to_rgb(f):
     a=(1-f)/0.2
@@ -443,7 +449,6 @@ def AngleAxisRotatePoint(angleAxis, pt):
 
     return res1 * mask + res2 * (1 - mask)
 
-
 def torchSingleResiduum(camera_params_, point_params_, p2d):
     angle_axis = camera_params_[:, :3] * c02_mult
     points_cam = AngleAxisRotatePoint(angle_axis, point_params_)
@@ -480,6 +485,60 @@ def torchSingleResiduumX(camera_params, point_params, p2d) :
     return resX
 
 def torchSingleResiduumY(camera_params, point_params, p2d) :
+    angle_axis = camera_params[:,:3] * c02_mult
+    points_cam = AngleAxisRotatePoint(angle_axis, point_params)
+    points_cam[:,0:2] = points_cam[:,0:2] + camera_params[:, 3:5] * c34_mult
+    points_cam[:,2] = points_cam[:,2] + camera_params[:, 5] * c5_mult
+    points_projX = -points_cam[:, 0] / points_cam[:, 2]
+    points_projY = -points_cam[:, 1] / points_cam[:, 2]
+    f  = camera_params[:, 6] * c6_mult
+    k1 = camera_params[:, 7] * c7_mult
+    k2 = camera_params[:, 8] * c8_mult
+    r2 = points_projX*points_projX + points_projY*points_projY
+    distortion = 1. + r2 * (k1 + k2 * r2)
+    points_reprojY = points_projY * distortion * f
+    resY = (points_reprojY-p2d[:,1])
+    return resY
+
+def torchSingleResiduumScaled(camera_params_, point_params_, p2d, scalingP):
+    point_params_ = point_params_ * scalingP
+    angle_axis = camera_params_[:, :3] * c02_mult
+    points_cam = AngleAxisRotatePoint(angle_axis, point_params_)
+    points_cam[:,0:2] = points_cam[:,0:2] + camera_params_[:, 3:5] * c34_mult
+    points_cam[:,2] = points_cam[:,2] + camera_params_[:, 5] * c5_mult
+    points_projX = -points_cam[:, 0] / points_cam[:, 2]
+    points_projY = -points_cam[:, 1] / points_cam[:, 2]
+    f = camera_params_[:, 6] * c6_mult
+    k1 = camera_params_[:, 7] * c7_mult
+    k2 = camera_params_[:, 8] * c8_mult
+    r2 = points_projX * points_projX + points_projY * points_projY
+    distortion = 1.0 + r2 * (k1 + k2 * r2)
+    points_reprojX = points_projX * distortion * f
+    points_reprojY = points_projY * distortion * f
+    resX = (points_reprojX - p2d[:, 0]).reshape((p2d.shape[0], 1))
+    resY = (points_reprojY - p2d[:, 1]).reshape((p2d.shape[0], 1))
+    residual = torch.cat([resX[:,], resY[:,]], dim=1)
+    return residual
+
+def torchSingleResiduumXScaled(camera_params, point_params, p2d, scalingP) :
+    point_params = point_params * scalingP
+    angle_axis = camera_params[:,:3] * c02_mult
+    points_cam = AngleAxisRotatePoint(angle_axis, point_params)
+    points_cam[:,0:2] = points_cam[:,0:2] + camera_params[:, 3:5] * c34_mult
+    points_cam[:,2] = points_cam[:,2] + camera_params[:, 5] * c5_mult
+    points_projX = -points_cam[:, 0] / points_cam[:, 2]
+    points_projY = -points_cam[:, 1] / points_cam[:, 2]
+    f  = camera_params[:, 6] * c6_mult
+    k1 = camera_params[:, 7] * c7_mult
+    k2 = camera_params[:, 8] * c8_mult
+    r2 = points_projX*points_projX + points_projY*points_projY
+    distortion = 1. + r2 * (k1 + k2 * r2)
+    points_reprojX = points_projX * distortion * f
+    resX = (points_reprojX-p2d[:,0])
+    return resX
+
+def torchSingleResiduumYScaled(camera_params, point_params, p2d, scalingP) :
+    point_params = point_params * scalingP
     angle_axis = camera_params[:,:3] * c02_mult
     points_cam = AngleAxisRotatePoint(angle_axis, point_params)
     points_cam[:,0:2] = points_cam[:,0:2] + camera_params[:, 3:5] * c34_mult
@@ -808,7 +867,7 @@ def ComputeDerivativeMatrices(
     # print(J_pose.shape)
     return (J_pose, J_land, fx0)
 
-def ComputeDerivativeMatricesNew(x0_t_cam, x0_t_land, camera_indices_, point_indices_, torch_points_2d
+def ComputeDerivativeMatricesNew(x0_t_cam, x0_t_land, camera_indices_, point_indices_, torch_points_2d, unique_landmarks_in_c_
 ):
     verbose = False
     if verbose:
@@ -816,6 +875,15 @@ def ComputeDerivativeMatricesNew(x0_t_cam, x0_t_land, camera_indices_, point_ind
 
     funx0_st1 = lambda X0, X1, X2: torchSingleResiduumX(X0.view(-1,9), X1.view(-1,3), X2.view(-1,2)) # 1d fucntion -> grad possible
     funy0_st1 = lambda X0, X1, X2: torchSingleResiduumY(X0.view(-1,9), X1.view(-1,3), X2.view(-1,2)) # 1d fucntion -> grad possible
+
+    # TODO new, check
+    landScale = 1./Vnorm.data.reshape(-1,3)
+    landScale = landScale[unique_landmarks_in_c_]
+    landScale = from_numpy(landScale[point_indices_[:]]) # here direct, or not?
+    landScale.requires_grad_(False)
+
+    funx0_st1 = lambda X0, X1, X2: torchSingleResiduumXScaled(X0.view(-1,9), X1.view(-1,3), X2.view(-1,2), landScale)
+    funy0_st1 = lambda X0, X1, X2: torchSingleResiduumYScaled(X0.view(-1,9), X1.view(-1,3), X2.view(-1,2), landScale)
 
     torch_cams = x0_t_cam[camera_indices_[:],:] #x0_t[:n_cameras*9].reshape(n_cameras,9)[camera_indices[:],:]
     torch_lands = x0_t_land[point_indices_[:],:] #x0_t[n_cameras*9:].reshape(n_points,3)[point_indices[:],:]
@@ -1524,6 +1592,15 @@ def primal_cost(
     x0_t_land = x0_t[n_cameras_ * 9 :].reshape(n_points_, 3)
     funx0_st1 = lambda X0, X1, X2: \
         torchSingleResiduum(X0.view(-1, 9), X1.view(-1, 3), X2.view(-1, 2))
+
+    landScale = 1. / Vnorm.data.reshape(-1,3)
+    landScale = from_numpy(landScale[unique_points_in_c_])
+    #landScale = from_numpy(landScale)
+    #print("landScale ", landScale)
+    landScale.requires_grad_(False)
+    funx0_st1 = lambda X0, X1, X2: \
+        torchSingleResiduumScaled(X0.view(-1, 9), X1.view(-1, 3), X2.view(-1, 2), landScale[point_indices_[:]])
+
     fx1 = funx0_st1(
         x0_t_cam[camera_indices_[:]],
         x0_t_land[point_indices_[:]],
@@ -1539,6 +1616,7 @@ def bundle_adjust(
     cameras_in,
     points_3d_in,
     landmark_s_, # taylor expand at point_3d_in -> prox on landmark_s_ - points_3d = lambda (multiplier)
+    unique_points_in_c_,
     Vl_in_c_,
     L_in_cluster_,
     LipJ, # start with 1.0. externally increase if dre increases
@@ -1575,6 +1653,13 @@ def bundle_adjust(
     funx0_st1 = lambda X0, X1, X2: \
         torchSingleResiduum(X0.view(-1, 9), X1.view(-1, 3), X2.view(-1, 2))
 
+    landScale = 1./Vnorm.data.reshape(-1,3)
+    landScale = landScale[unique_points_in_c_]
+    landScale = from_numpy(landScale[point_indices_[:]]) # here direct?
+    landScale.requires_grad_(False)
+    funx0_st1 = lambda X0, X1, X2: \
+        torchSingleResiduumScaled(X0.view(-1, 9), X1.view(-1, 3), X2.view(-1, 2), landScale)
+
     #stepSize = diag_sparse(np.zeros(n_points_))
     # make diagonal again.
     if issparse(Vl_in_c_):
@@ -1595,7 +1680,7 @@ def bundle_adjust(
             x0_t_cam = x0_t[: n_cameras_ * 9].reshape(n_cameras_, 9) # not needed?
             x0_t_land = x0_t[n_cameras_ * 9 :].reshape(n_points_, 3) # another idea, start at s, see below, unifies TR and Descent Lemma check. See above replace u_l with sl
             J_pose, J_land, fx0 = ComputeDerivativeMatricesNew(
-                x0_t_cam, x0_t_land, camera_indices_, point_indices_, torch_points_2d
+                x0_t_cam, x0_t_land, camera_indices_, point_indices_, torch_points_2d, unique_points_in_c_
             )
 
             JtJ = J_pose.transpose() * J_pose
@@ -1616,15 +1701,18 @@ def bundle_adjust(
             JtJDiag = JtJ + 1e-9 * blockEigenvalueJtJ # alot worse at 1e6, bit better 1e-9, but hmm 59 / 0  ======== DRE BFGS ======  501565
 
             maxE, minE = minmaxEv(JtJDiag, 9)
-            print("min max ev JtJDiag ", np.max(maxE), " ", np.max(minE), " ", np.min(maxE), " ",  np.min(minE), " spectral ", np.max(maxE/minE) )
+            print("min max ev JtJDiag ", np.max(maxE), " ", np.max(minE), " ", np.min(maxE), " ",  np.min(minE), " spectral ", np.max(maxE/minE), file=sys.stderr )
 
             #print(" min/max JtJ.diagonal() ", np.min(JtJ.diagonal()), " ", np.max(JtJ.diagonal()), " adjusted ", np.min(JtJDiag.diagonal()), " ", np.max(JtJDiag.diagonal()), " ", np.min(blockEigenvalueJtJ.diagonal()) ," ", np.max(blockEigenvalueJtJ.diagonal()) )
 
             #JtJDiag = diag_sparse(np.fmax(JtJ.diagonal(), 1e1)) # sensible not clear maybe lower.
             JltJl = J_land.transpose() * J_land
+            absDiagJltJl = np.abs(JltJl.diagonal()).reshape(-1,3)
+            print( "Diag pseudo HessL (max/min/med)",  np.max(absDiagJltJl, axis=0), " ", np.min(absDiagJltJl, axis=0),  " ", np.median(absDiagJltJl, axis=0))
+
             blockEigenvalueJltJl = blockEigenvalue(JltJl, 3)
             maxE, minE = minmaxEv(JltJl, 3)
-            print("min max ev JltJl ", np.max(maxE), " ", np.max(minE), " ", np.min(maxE), " ",  np.min(minE), " spectral ", np.max(maxE/minE))
+            print("min max ev JltJl ", np.max(maxE), " ", np.max(minE), " ", np.min(maxE), " ",  np.min(minE), " spectral ", np.max(maxE/minE), file=sys.stderr)
             # if not issparse(Vl_in_c_) and it_ < 1:
             #     stepSize = blockEigenvalueJltJl
             # else: # increase where needed -- this here is WAY too slow?
@@ -1636,11 +1724,17 @@ def bundle_adjust(
             #81 / 0  ======== DRE BFGS ======  501076  ========= gain  139 ==== f(v)=  502339  f(u)=  499758  ~=  499713.50253538677
             stepSize = blockEigMult * blockEigenvalueJltJl + JJ_mult * JltJl.copy() # Todo '2 *' vs 1 by convex.
             maxE, minE = minmaxEv(stepSize, 3)
-            print("min max ev stepSize ", np.max(maxE), " ", np.max(minE), " ", np.min(maxE), " ",  np.min(minE), " spectral ", np.max(maxE/minE))
+            print("min max ev stepSize ", np.max(maxE), " ", np.max(minE), " ", np.min(maxE), " ",  np.min(minE), " spectral ", np.max(maxE/minE), file=sys.stderr )
             #stepSize = 1. * (blockEigMult * blockEigenvalueJltJl + LipJ * JltJl.copy()) # hmm
             
             #stepSize = 1. * (1e-0 * diag_sparse(np.ones(n_points_*3)) + 1.0 * JltJl.copy()) # not so good
             #stepSize = 1. * (blockEigMult * LipJ * blockEigenvalueJltJl + JltJl.copy()) # test use Lip here. did not work?
+
+            maxE, minE = minmaxEv(JltJl, 3)
+            JltJlSpec = [round_int(np.max(maxE/minE)), np.min(maxE/minE), round_int(np.median(maxE/minE))]
+            maxE, minE = minmaxEv(stepSize, 3)
+            JltJlDiagSpec = [round_int(np.max(maxE/minE)), np.min(maxE/minE), round_int(np.median(maxE/minE))]
+            print("minmax ev JltJlD ", np.max(maxE), " ", np.max(minE), " ", np.min(maxE), " ",  np.min(minE), " spec ", JltJlSpec, " -> ", JltJlDiagSpec)
 
             # problem blockinverse assume data is set in full 3x3
             # Problem: gets stuck. guess. a new, very large value for a coordinate hits a previously low one.
@@ -1657,7 +1751,7 @@ def bundle_adjust(
 
             JltJlDiag = stepSize.copy() # max 1, 1/L, line-search dre fails -> increase
 
-            print(" min/max JltJl.diagonal() ", np.min(JltJl.diagonal()), " ", np.max(JltJl.diagonal()), " adjusted ", np.min(JltJlDiag.diagonal()), " ", np.max(JltJlDiag.diagonal()))
+            print(" min/max JltJl.diagonal() ", np.min(JltJl.diagonal()), " ", np.max(JltJl.diagonal()), " adjusted ", np.min(JltJlDiag.diagonal()), " ", np.max(JltJlDiag.diagonal()), file=sys.stderr)
             #print("JltJlDiag.shape ", JltJlDiag.shape, JltJlDiag.shape[0]/3)
 
             # set to 1e-12+L * blockEigMult * blockEigenvalueJltJl all entries of completely covered lms.
@@ -1702,9 +1796,9 @@ def bundle_adjust(
                 stepSize = JJ_mult * JltJl.copy() + blockLip * blockEigenvalueJltJl
                 JltJlDiag = JltJl.copy() + 1e-6 * blockEigMult * blockEigenvalueJltJl
                 maxE, minE = minmaxEv(stepSize, 3)
-                print("min max ev stepSize ", np.max(maxE), " ", np.max(minE), " ", np.min(maxE), " ",  np.min(minE), " spectral ", np.max(maxE/minE))
+                print("min max ev stepSize ", np.max(maxE), " ", np.max(minE), " ", np.min(maxE), " ",  np.min(minE), " spectral ", np.max(maxE/minE), file=sys.stderr)
                 maxE, minE = minmaxEv(JltJlDiag, 3)
-                print("min max ev JltJlDiag ", np.max(maxE), " ", np.max(minE), " ", np.min(maxE), " ",  np.min(minE), " spectral ", np.max(maxE/minE))
+                print("min max ev JltJlDiag ", np.max(maxE), " ", np.max(minE), " ", np.min(maxE), " ",  np.min(minE), " spectral ", np.max(maxE/minE), file=sys.stderr)
                 if newForUnique:
                     stepSize = copy_selected_blocks(stepSize, landmarks_only_in_cluster_, 3)
                 penaltyStartConst = prox_rhs.dot(stepSize * prox_rhs)
@@ -1817,7 +1911,7 @@ def bundle_adjust(
         # for 3: so our cost is prox f(s) instead. Easy.
 
         if tr_check < tr_eta_2:
-            print(" //////  tr_check " , tr_check, " Lfk distance ", LfkDistance, " -nabla^Tdelta=" , -bp.dot(delta_p) - bl.dot(delta_l), " /////")
+            print(" //////  tr_check " , tr_check, " Lfk distance ", LfkDistance, " -nabla^Tdelta=" , -bp.dot(delta_p) - bl.dot(delta_l), " /////", file=sys.stderr)
             L = L * 2
             if not newVersion:
                 JltJlDiag = 1/2 * JltJlDiag
@@ -1843,7 +1937,7 @@ def bundle_adjust(
             else:
                 stepSize += blockLip * blockEigenvalueJltJl
                 blockLip *= 2
-            print(" |||||||  Lfk distance ", LfkDistance, " -nabla^Tdelta=" , -bp.dot(delta_p) - bl.dot(delta_l), " LipJ ", LipJ, " blockLip ", blockLip, " |||||||")
+            print(" |||||||  Lfk distance ", LfkDistance, " -nabla^Tdelta=" , -bp.dot(delta_p) - bl.dot(delta_l), " LipJ ", LipJ, " blockLip ", blockLip, " |||||||", file=sys.stderr)
 
             #blockEigenvalueJltJl.data *= 2 # appears slow but safe
             #stepSize.data = np.maximum(stepSize.data, blockEigenvalueJltJl.data) # else diagSparse of it
@@ -1865,7 +1959,7 @@ def bundle_adjust(
 
         if (newVersion and LfkSafe and not steSizeTouched):
             blockLip = blockLip / 2
-            print(" _________  Lfk distance ", LfkDistance, " -nabla^Tdelta=" , -bp.dot(delta_p) - bl.dot(delta_l), " LipJ ", LipJ, " blockLip ", blockLip, " _________")
+            print(" _________  Lfk distance ", LfkDistance, " -nabla^Tdelta=" , -bp.dot(delta_p) - bl.dot(delta_l), " LipJ ", LipJ, " blockLip ", blockLip, " _________", file=sys.stderr)
 
         # if LfkDiagonal < -2 and steSizeTouched:
         #     LfkDiagonal = -2
@@ -1934,7 +2028,7 @@ def bundle_adjust(
         # f(x) > f(y) + delta^t Diag delta = f(y) + <nabla f(x), x-y>
         # this implies descent lemma ALWAYS fulfilled.
 
-        print(" ------- Lfk distance ", LfkDistance, " tr_check ", tr_check, " blockLip ", blockLip, " -------- ")
+        print(" ------- Lfk distance ", LfkDistance, " tr_check ", tr_check, " blockLip ", blockLip, " -------- ", file=sys.stderr)
         # update TR -- 
         #if costStart + penaltyStart > costEnd + penaltyL
         #tr_check = (costStart - costEnd) / (costStart - costQuad)
@@ -1963,7 +2057,7 @@ def bundle_adjust(
     getBetterStepSize = False # this is used as approx of f in update of v and thus s. maybe change there u-v should be small. 
     if getBetterStepSize: # needs to set L correctly
         J_pose, J_land, fx0 = ComputeDerivativeMatricesNew(
-            x0_t_cam, x0_t_land, camera_indices_, point_indices_, torch_points_2d
+            x0_t_cam, x0_t_land, camera_indices_, point_indices_, torch_points_2d, unique_points_in_c_
         )
         # this is nabla, compare to estimation old (u-s)^T Jdiag (u-s)
         #bp = J_pose.transpose() * fx0
@@ -2014,7 +2108,7 @@ def bundle_adjust(
 
     if True:
         J_pose, J_land, fx0 = ComputeDerivativeMatricesNew(
-            x0_t_cam, x0_t_land, camera_indices_, point_indices_, torch_points_2d
+            x0_t_cam, x0_t_land, camera_indices_, point_indices_, torch_points_2d, unique_points_in_c_
         )
         JltJl = J_land.transpose() * J_land
         # ok maybe yes. I want to 'set those to a small value' only.
@@ -2217,6 +2311,7 @@ def updateCluster(
         cameras_in_c,
         points_3d_in_c,
         landmark_s_in_c,
+        unique_points_in_c_,
         Vl_in_cluster_,
         L_in_cluster_,
         LipJ,
@@ -2414,6 +2509,25 @@ def BFGS_direction(r, ps, qs, rhos, k, mem, mu, U_diag):
     return dk_
 
 ##############################################################################
+import sys
+# total arguments
+num_args = len(sys.argv)
+if num_args > 2:
+    print("Total arguments passed:", num_args)
+    # Arguments passed
+    print("\nName of Python script:", sys.argv[0], "url ", sys.argv[1], "file ", sys.argv[2])
+    BASE_URL =  sys.argv[1]
+    FILE_NAME = sys.argv[2]
+
+    if num_args > 3:
+        its = int(sys.argv[3])
+    if num_args > 4:
+        kClusters = int(sys.argv[4])
+
+    URL = BASE_URL + FILE_NAME
+    if not os.path.isfile(FILE_NAME):
+        urllib.request.urlretrieve(URL, FILE_NAME)
+
 cameras, points_3d, camera_indices, point_indices, points_2d = read_bal_data(FILE_NAME)
 
 n_cameras = cameras.shape[0]
@@ -2466,6 +2580,53 @@ if True:
     cameras[:,7] = cameras[:,7] / c7_mult
     cameras[:,8] = cameras[:,8] / c8_mult
 
+############################################
+def ComputeDerivativeMatrixInit(x0_c_, x0_l_, points_2d, camera_indices, point_indices):
+    funx0_st1 = lambda X0, X1, X2: torchSingleResiduumX(X0.view(-1,9), X1.view(-1,3), X2.view(-1,2)) # 1d fucntion -> grad possible
+    funy0_st1 = lambda X0, X1, X2: torchSingleResiduumY(X0.view(-1,9), X1.view(-1,3), X2.view(-1,2)) # 1d fucntion -> grad possible
+
+    torch_cams = from_numpy(x0_c_.reshape(-1,9)[camera_indices[:],:])
+    torch_lands = from_numpy(x0_l_.reshape(-1,3)[point_indices[:],:])
+    torch_lands.requires_grad_()
+    torch_cams.requires_grad_()
+    torch_cams.retain_grad()
+    torch_lands.retain_grad()
+
+    torch_points_2d = from_numpy(points_2d)
+    torch_points_2d.requires_grad_(False)
+
+    resX = funx0_st1(torch_cams, torch_lands, torch_points_2d[:,:]).flatten()
+    lossX = torch.sum(resX)
+    lossX.backward()
+
+    cam_grad_x = torch_cams.grad.detach().numpy().copy()
+    land_grad_x = torch_lands.grad.detach().numpy().copy()
+
+    torch_cams.grad.zero_()
+    torch_lands.grad.zero_()
+    resY = funy0_st1(torch_cams, torch_lands, torch_points_2d[:,:]).flatten()
+    lossY = torch.sum(resY)
+    lossY.backward()
+    cam_grad_y = torch_cams.grad.detach().numpy().copy()
+    land_grad_y = torch_lands.grad.detach().numpy().copy()
+
+    J_pose = buildMatrixNew(cam_grad_x, cam_grad_y, camera_indices, sz=9)
+    J_land = buildMatrixNew(land_grad_x, land_grad_y, point_indices, sz=3)
+    fx0 = buildResiduumNew(resX.detach(), resY.detach())
+
+    return (J_pose, J_land, fx0)
+
+# could also compute locally / all the time! 542: appears to 'go crazy' after 20 its.
+J_pose, J_land, fx0 = ComputeDerivativeMatrixInit(cameras, points_3d, points_2d, camera_indices, point_indices)
+JltJl = J_land.transpose() * J_land
+Vnorm = diag_sparse(np.squeeze(np.asarray( ( (np.abs(JltJl)/100).sum(axis=0) ))))
+temp = Vnorm.data.reshape(-1,3)
+temp = np.sqrt(temp)
+Vnorm = diag_sparse(temp.flatten())
+#Vnorm = 100 * diag_sparse(np.ones(points_3d.flatten().shape[0])) # 52: eval
+points_3d = (Vnorm * points_3d.flatten()).reshape(-1,3)
+############################################
+
 x0_p = cameras.ravel()
 # x0_l = points_3d.ravel()
 # x0 = np.hstack((x0_p, x0_l))
@@ -2493,8 +2654,9 @@ kClusters = 10 #5
 innerIts = 1  # change to get an update, not 1 iteration
 its = 60
 cost = np.zeros(kClusters)
-lastCost = 1e20
-lastCostDRE = 1e20
+bestCost = np.sum(fx0**2) #1e20
+lastCost = bestCost
+lastCostDRE = bestCost
 basic_version = False #True # accelerated or basic
 newForUnique = True
 sequential = True
@@ -2560,6 +2722,17 @@ landmark_s_in_cluster = [elem.copy() for elem in points_3d_in_cluster]
 landmark_v = points_3d_in_cluster[0].copy()
 LipJ = np.ones(kClusters)
 blockLip_in_cluster = 1e-3 * np.ones(kClusters)
+
+primal_cost_v = 0
+for ci in range(kClusters):
+    primal_cost_v += primal_cost(
+        x0_p,
+        camera_indices_in_cluster[ci],
+        point_indices_in_cluster[ci],
+        points_2d_in_cluster[ci],
+        landmark_v)
+print("DEBUG scaled cost ", primal_cost_v)
+#exit()
 
 o3d_defined = False
 if o3d_defined:
@@ -2841,7 +3014,7 @@ else:
         # rho(u-s)^2 is gigantic
         # line search:
         line_search_iterations = 3
-        print(" ..... step length ", steplength, " bfgs step ", dk_stepLength, " ratio ", multiplier)
+        print(" ..... step length ", steplength, " bfgs step ", dk_stepLength, " ratio ", multiplier, file=sys.stderr)
         for ls_it in range(line_search_iterations):
             tk = ls_it / max(1,line_search_iterations-1)
             for ci in range(kClusters):
@@ -2917,6 +3090,12 @@ else:
             dre_bfgs = max(dre_bfgs, primal_cost_v) # sandwich lemma 
             print( it, "/", ls_it, " ======== DRE BFGS ====== ", round(dre_bfgs) , " ========= gain " , \
                 round(lastCostDRE_bfgs - dre_bfgs), "==== f(v)= ", round(primal_cost_v), " f(u)= ", round(primal_cost_u), " ~= ", currentCost_bfgs)
+            bestCost = np.minimum(primal_cost_v, bestCost)
+            bestIt = it
+            if it < 60:
+                bestCost60 = bestCost
+            if it < 30:
+                bestCost30 = bestCost
 
             # appears better to do globally .. hm. not used any more.
             if lastCostDRE_bfgs < dre_bfgs and ls_it == line_search_iterations-1:
@@ -2961,7 +3140,7 @@ else:
 
                 x0_p = x0_p_bfgs.copy()
                 #print("A landmark_s_in_cluster", landmark_s_in_cluster)
-                print("x0_p ", x0_p)
+                #print("x0_p ", x0_p, file=sys.stderr)
                 if o3d_defined:
                     rerender(vis, camera_indices_in_cluster, point_indices_in_cluster, x0_p, landmark_v)
 
@@ -3000,3 +3179,10 @@ if o3d_defined:
 if write_output:
     x0_p.tofile("camera_params_drs.dat")
     landmark_v.tofile("point_params_drs.dat")
+
+import json
+result_dict = {"base_url": BASE_URL, "file_name": FILE_NAME, "iterations" : its, \
+               "bestCost" : round(bestCost), "bestIt": bestIt, "kClusters" : kClusters, \
+               "bestCost60" : round(bestCost60), "bestCost30" : round(bestCost30) }
+with open('results_drs.json', 'a') as json_file:
+    json.dump(result_dict, json_file)
