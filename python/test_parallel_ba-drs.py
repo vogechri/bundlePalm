@@ -1687,6 +1687,8 @@ def bundle_adjust(
             # TODO: flip if needed. likely not needed. since  adding a flipped and a non flipped matrix should deliver a non flipped one. This might lead to issues in every 'block' method
             #JtJ = flipIfNeeded(JtJ)
 
+            print("------- landmarks shared = ", n_points_ - np.sum(landmarks_only_in_cluster_), " ",  np.sum(landmarks_only_in_cluster_),  " of ", n_points_ , " are isloated in cluster " )
+
             # in test_base
             #JtJDiag = diag_sparse(JtJ.diagonal())
 
@@ -2509,6 +2511,8 @@ def BFGS_direction(r, ps, qs, rhos, k, mem, mu, U_diag):
     return dk_
 
 ##############################################################################
+kClusters = 10
+its = 60
 import sys
 # total arguments
 num_args = len(sys.argv)
@@ -2623,7 +2627,7 @@ Vnorm = diag_sparse(np.squeeze(np.asarray( ( (np.abs(JltJl)/100).sum(axis=0) )))
 temp = Vnorm.data.reshape(-1,3)
 temp = np.sqrt(temp)
 Vnorm = diag_sparse(temp.flatten())
-#Vnorm = 100 * diag_sparse(np.ones(points_3d.flatten().shape[0])) # 52: eval
+Vnorm = 1 * diag_sparse(np.ones(points_3d.flatten().shape[0])) # 52: eval
 points_3d = (Vnorm * points_3d.flatten()).reshape(-1,3)
 ############################################
 
@@ -2650,9 +2654,7 @@ x0_p = x0_p.reshape(n_cameras, 9)
 
 # 1. take problem and split, sort indices by camera, define local global map and test it.
 startL = 1
-kClusters = 10 #5
 innerIts = 1  # change to get an update, not 1 iteration
-its = 60
 cost = np.zeros(kClusters)
 bestCost = np.sum(fx0**2) #1e20
 lastCost = bestCost
