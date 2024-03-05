@@ -16,3 +16,4 @@
 {"base_url": "http://grail.cs.washington.edu/projects/bal/data/dubrovnik/", "file_name": "problem-356-226730-pre.txt.bz2", "iterations": 70, "bestCost": 883522, "bestIt": 69, "kClusters": 10, "bestCost60": 889445, "bestCost30": 1251818}
 {"base_url": "http://grail.cs.washington.edu/projects/bal/data/dubrovnik/", "file_name": "problem-135-90642-pre.txt.bz2", "iterations": 70, "bestCost": 709496, "bestIt": 69, "kClusters": 10, "bestCost60": 709778, "bestCost30": 711687}
 {"base_url": "http://grail.cs.washington.edu/projects/bal/data/ladybug/", "file_name": "problem-931-102699-pre.txt.bz2", "iterations": 70, "bestCost": 526977, "bestIt": 69, "kClusters": 10, "bestCost60": 527136, "bestCost30": 528225}
+{"base_url": "http://grail.cs.washington.edu/projects/bal/data/final/", "file_name": "problem-961-187103-pre.txt.bz2", "iterations": 70, "bestCost": 3176082, "bestIt": 69, "kClusters": 10, "bestCost60": 3176476, "bestCost30": 3181439}
