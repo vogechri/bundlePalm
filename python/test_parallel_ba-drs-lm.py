@@ -1557,6 +1557,8 @@ def bundle_adjust(
 
     # False: 59 / 0  ======== DRE BFGS ======  536487
     newVersion = True
+    # TODO: This parameter block is ok blockEigMultJtJ 1e-5, LipJ = 2, blockEigenvalueWhereNeeded 1e-2, might be slightly better than blockEigMultJtJ 1e-4 ? / use LipJ = 2 * np.ones(kClusters) appears safe.
+    # also try 'True' below (maybe speed up). Try restart with L increased for all.
     if newVersion:
         # JJ_mult = 2 less flipping much slower in ladybug646, 
         # but 119 / 1  ======== DRE BFGS ======  391600  ========= gain  531 ==== f(v)=  374313  f(u)=  376802  ~=  376801.807411641 
@@ -1719,7 +1721,7 @@ def bundle_adjust(
                 # default 1e-4. 1e-6 for 173: slightly worse| 1e-6 for 52: also worse now (maybe was the other way round).
                 #               1e-3 for 173: | 1e-3 for 52: ok 1e-3 or 1e-4? might be highly random based on clustering.
                 # 1e-3 appears a bit better.
-                blockEigenvalueJtJ = blockEigenvalueWhereNeeded(JtJ, 9, 1e-3) # ! 1e-4 1e-5 als works. problem 52, 1e-6 does not 173 performance bad if not 1e-6?
+                blockEigenvalueJtJ = blockEigenvalueWhereNeeded(JtJ, 9, 1e-3) # ! 1e-2, 1e-4 1e-5 als works. problem 52, 1e-6 does not 173 performance bad if not 1e-6?
                 #blockEigenvalueJtJ = 1e-1 * blockEigenvalue(JtJ, 9) # ! try 173 & 52, fails at 1e-2, 10 clusters. 1e-1 ok for 173 & 52. (not dead)
 
                 # TODO: LipJ for both? or only JJ?
@@ -1893,7 +1895,8 @@ def bundle_adjust(
         #if tr_check >= tr_eta_2 and LfkViolated and not steSizeTouched or (steSizeTouched and costStart + penaltyStart < costEnd + penaltyL + penaltyP): # violated -- should revert update.
         #if LfkViolated and not steSizeTouched or (steSizeTouched and costStart + penaltyStart < costEnd + penaltyL): # violated -- should revert update.
             steSizeTouched = True
-            print(" |||||||  Lfk distance ", LfkDistance, " -nabla^Tdelta=" , -bp.dot(delta_p) - bl.dot(delta_l), " LipJ ", LipJ, " blockEigMult ", blockEigMult , " |||||||", file=sys.stderr)
+            print(" |||||||  Lfk distance ", LfkDistance, " -nabla^Tdelta=" , -bp.dot(delta_p) - bl.dot(delta_l), " LipJ ", \
+                  LipJ, " blockEigMult ", blockEigMult , " tr_check, " , tr_check, "  |||||||", file=sys.stderr)
             #print(" |||||||  f(x) <= f(y) + <nabla(f(y) x-y> + Lf/2 |x-y|^2: ", costEnd, " <= ", costStart, " + ", Lfklin, " + ", LfkQuad, " |||||||")
 
             #stepSize = stepSize * 2
@@ -2021,7 +2024,7 @@ def bundle_adjust(
         xTest = x0_l_ - (diag_present*(x0_l_.flatten() - s_l_)).reshape(-1,3)
         return costEnd, x0_p_, xTest, L, diag_present + Rho
 
-    if True:
+    if False:
         Vnorm_ = diag_sparse(np.squeeze(np.asarray(np.sqrt( (np.abs(JltJl)/10).sum(axis=0) ))))
         temp   = Vnorm_.data
         x0_l_ = Vnorm_ * x0_l_.flatten()
@@ -2436,7 +2439,7 @@ sequential = True
 linearize_at_last_solution = True # linearize at uk or v. maybe best to check energy. at u or v. DRE:
 lib = ctypes.CDLL("./libprocess_clusters.so")
 init_lib()
-LipJ = np.ones(kClusters)
+LipJ = 1 * np.ones(kClusters)
 blockEig_in_cluster_ = 1e-5 * np.ones(kClusters)
 for ci in range(kClusters):
     print("input blockEig_in_cluster_[ci] ", blockEig_in_cluster_[ci])
@@ -2641,9 +2644,18 @@ else:
         #steplength += update_flat.dot(Ul_all * update_flat)
     steplength = np.sqrt(steplength)
 
-    for it in range(its):
+    for it in range(its): ##########################################################################################
         # get line search direction and update bfgs data
         # operate with np concatenate to get large vector and reshape search_direction here?
+
+        print("********************** NEW AT IT  ", it, " / ", its, " **********************")
+        # print("poses_v ", poses_v)
+        # print("poses_s_in_cluster[0] ", poses_s_in_cluster[0])
+        # print("landmarks ", landmarks)
+        # print("poses_in_cluster[0] ", poses_in_cluster[0])
+        # print("poses_s_in_cluster_pre[0] ", poses_s_in_cluster_pre[0])
+
+
         RNA_or_bfgs = True # RNA is best here ?! ok. else nesterov
         if RNA_or_bfgs:
             use_bfgs = False # maybe full u,v?
@@ -2712,7 +2724,10 @@ else:
                 U_diag = diag_sparse(U_diag)
                 U_diag.data = np.ones(U_diag.data.shape) # appears better .. ? why?
                 #U_diag = np.ones(rna_s.shape)
-                lambdaScale = np.sqrt(np.mean(U_diag.diagonal()))
+                #lambdaScale = np.sqrt(np.mean(U_diag.diagonal()))
+                #lambdaScale *= 10.
+                #lambdaScale = np.mean(U_diag.diagonal()) # does this make any sense? scale by smth. done inside.
+                lambdaScale = 1
 
                 Gs, Fs, Fes, dk = RNA(Gs, Fs, rna_s, bfgs_r, it, rnaBufferSize, Fes, bfgs_r,
                                       lamda = 0.001 * lambdaScale, h = -1, res_pcg = U_diag) # has changed likely, 0.001 before
@@ -2838,13 +2853,14 @@ else:
                 bfgs_rhos[it % bfgs_mem] = np.maximum(0., 1./ bfgs_qs[it % bfgs_mem].dot(bfgs_ps[it % bfgs_mem]))
 
             # eval cost
-            dre_bfgs, dre_per_part = cost_DRE(camera_indices_in_cluster, poses_in_cluster_bfgs, poses_s_in_cluster_bfgs, 
+            dre_bfgs, dre_per_part = cost_DRE(camera_indices_in_cluster, poses_in_cluster_bfgs, poses_s_in_cluster_bfgs,
                                 L_in_cluster_bfgs, Ul_in_cluster_bfgs, poses_v_bfgs, nabla_p_in_cluster_bfgs)
             dre_bfgs += currentCost_bfgs
 
             # debugging cost block ################
             primal_cost_v = 0
             primal_cost_v_all = []
+            primal_cost_u_all = []
             for ci in range(kClusters):
                 primal_cost_v_all.append(primal_cost(
                     poses_v_bfgs, # v not u
@@ -2856,17 +2872,19 @@ else:
             primal_cost_v_all = [round(cost) for cost in primal_cost_v_all]
             primal_cost_u = 0 # = currentCost_bfgs
             for ci in range(kClusters):
-                primal_cost_u += primal_cost(
+                primal_cost_u_all.append(primal_cost(
                     poses_in_cluster_bfgs[ci],
                     camera_indices_in_cluster[ci],
                     point_indices_in_cluster[ci],
                     points_2d_in_cluster[ci],
-                    landmarks_bfgs)
+                    landmarks_bfgs))
+            primal_cost_u = np.sum(primal_cost_u_all)
+            primal_cost_u_all = [round(cost) for cost in primal_cost_u_all]
 
             dre_bfgs = max(dre_bfgs, primal_cost_v) # sandwich lemma 
             print( it, "/", ls_it, " ======== DRE BFGS ====== ", round(dre_bfgs) , " ========= gain " , \
                 round(lastCostDRE_bfgs - dre_bfgs), "==== f(v)= ", round(primal_cost_v), " f(u)= ", round(primal_cost_u))
-            print( it, "/", ls_it, " f(v) = ", primal_cost_v_all )
+            print( it, "/", ls_it, " f(v) = ", primal_cost_v_all, " f(u) = ", primal_cost_u_all)
             bestCost = np.minimum(primal_cost_v, bestCost)
             bestIt = it
             if it < 60:
@@ -2874,44 +2892,114 @@ else:
             if it < 30:
                 bestCost30 = bestCost
 
-            if lastCostDRE_bfgs < dre_bfgs and ls_it == line_search_iterations-1:
-                #LipJ += 0.2 * np.ones(kClusters)
-                partid = np.argmax(dre_per_part)
-                LipJ[partid] *= np.sqrt(2) # maybe just the LARGEST dre cost.
+            if ls_it == line_search_iterations-1 and (1.03 * lastCostDRE_bfgs < dre_bfgs or primal_cost_v > 1.03 * primal_cost_u):
+                # revert ! Not clear how to do this.
+                before, _ = cost_DRE(camera_indices_in_cluster, poses_in_cluster, poses_s_in_cluster,
+                                   L_in_cluster, Ul_in_cluster, poses_v, nabla_p_in_cluster_bfgs)
+                # should be same as poses_v, so not needed./debug: ok.
+                poses_v_before, Ul_all_bfgs, U_cluster_zeros = average_cameras_new(
+                    camera_indices_in_cluster, poses_in_cluster, poses_s_in_cluster, L_in_cluster, Ul_in_cluster, nabla_p_in_cluster_bfgs)
+                print("|poses_v_before - poses_v| = ", np.linalg.norm(poses_v_before - poses_v, 2))
 
-            # accept / reject, reject all but drs and see
-            # if ls_it == line_search_iterations-1 :
-            if dre_bfgs <= lastCostDRE_bfgs or 10000 * (dre_bfgs-lastCostDRE_bfgs) <= lastCostDRE_bfgs or ls_it == line_search_iterations-1 : # not correct yet, must be <= last - c/gamma |u-v|
-                # TODO: save and use best wrt. cost: new fct?
-                # 
-                steplength = 0 # currently printed
+                if 1.03 * lastCostDRE_bfgs > dre_bfgs: # only adjust part.
+                    for cin in range(kClusters):
+                        if dre_per_part[ci] > 0:
+                            LipJ[ci] *= np.sqrt(2)
+                            Ul_in_cluster[ci] *= np.sqrt(2) # approx
+                    print("Ul_in_cluster[i] *= sqrt(2)")
+                else: # adjust all
+                    LipJ *= np.sqrt(2) # there could one 1 particularly bad one
+                    for cin in range(kClusters):
+                        Ul_in_cluster[ci] *= np.sqrt(2) # approx
+                    print("Ul_in_cluster *= sqrt(2)")
+                # revert whole iteration.
+                it = it - 1
+                its = its - 1
+                print(" ************** REVERTED iteration ************** ")
+                # must update costs as well. if LipJ increased, then costs are not valid. Recompute how?
+                # u and v and s known, but not step size change.
+
+                poses_v, Ul_all_bfgs, U_cluster_zeros = average_cameras_new(# same if all U are adjusted / multiplied by a factor.
+                    camera_indices_in_cluster, poses_in_cluster, poses_s_in_cluster, L_in_cluster, Ul_in_cluster, nabla_p_in_cluster_bfgs)
+                print("|poses_v_before - poses_v| = ", np.linalg.norm(poses_v_before - poses_v, 2)) # v does not change Since multiplied by same value!
+                after, _ = cost_DRE(camera_indices_in_cluster, poses_in_cluster, poses_s_in_cluster,
+                                   L_in_cluster, Ul_in_cluster, poses_v, nabla_p_in_cluster_bfgs)
+                primal_cost_v_before = 0
                 for ci in range(kClusters):
-                    poses_s_in_cluster[ci] = poses_s_in_cluster_bfgs[ci].copy()
-                    s_step_cluster = poses_v_bfgs - poses_in_cluster_bfgs[ci]
-                    poses_s_in_cluster_pre[ci] = poses_s_in_cluster[ci] + tau * s_step_cluster # update s = s + v - u.
-                    steplength += np.linalg.norm(s_step_cluster.flatten(), 2)**2
-                    #update_flat = (poses_s_in_cluster_pre[ci] - poses_s_in_cluster[ci]).flatten()
-                    #steplength += update_flat.dot(Ul_all * update_flat)
-                steplength = np.sqrt(steplength)
+                    primal_cost_v_before += primal_cost(
+                        poses_v, # pose are different now? Should be after changing U.
+                        camera_indices_in_cluster[ci],
+                        point_indices_in_cluster[ci],
+                        points_2d_in_cluster[ci],
+                        landmarks)
+                print("lastCostDRE_bfgs", lastCostDRE_bfgs, " primal_cost_v_before ", primal_cost_v_before, " dre after/before changing U ", after, " - ", before, " = ", after - before )
+                if primal_cost_v_before > lastCostDRE_bfgs: # cost did not update. use v to replace u.
+                    for ci in range(kClusters):
+                        poses_in_cluster[ci] = poses_v.copy()
 
                 for ci in range(kClusters):
-                    poses_in_cluster[ci] = poses_in_cluster_bfgs[ci].copy()
-                    Ul_in_cluster[ci] = Ul_in_cluster_bfgs[ci].copy()
-                    blockEig_in_cluster_[ci] = blockEig_in_cluster_bfgs[ci].copy()
-                L_in_cluster = L_in_cluster_bfgs.copy()
-                landmarks = landmarks_bfgs.copy()
-                lastCostDRE_bfgs = dre_bfgs.copy()
-                poses_v = poses_v_bfgs.copy()
+                    poses_in_cluster[ci] = poses_v.copy()
+                    poses_s_in_cluster[ci] = poses_v.copy()
+                # TODO: reset RNA memory to 0 = forget past.
 
-                # for ci in range(kClusters):
-                #     print(ci, " poses_v ", poses_in_cluster[ci])
+                lastCostDRE_bfgs = max(lastCostDRE_bfgs + after - before, primal_cost_v_before) # this should be different. Canot be the same. but it is.
 
-                #print("poses_v ", poses_v)
-                if o3d_defined:
-                    rerender(vis, camera_indices_in_cluster, point_indices_in_cluster, poses_in_cluster, landmarks, save_image=False)
-                
-                #print("A landmark_s_in_cluster", landmark_s_in_cluster)
-                break
+                # what is different?
+                # s = (v-u). U is U * sqrt(2)? 
+                # if f(v) < f(u), and f(u) + (u-s)^T U (u-s) -> 
+                # pulls towards v, f(v) has lower cost, so good? Haeh?
+                # s can be far beyond v though
+                # u ... v .... s "drawing a line"
+                # I can do a restart at u=v, s=0 and start at v. for all part with f(v)<f(u) ?
+                # use s = s + (u-v)?
+
+                # ************** REVERTED iteration **************
+                # ---- |u-s|^2_D  1131028 |u-v|^2_D  1294132 |2u-s-v|^2_D  167405 |u-v|^2  43936  cost_dre  -481811.5150287446
+                # ---- dre_per_part ---  [-980, -5893, -204140, -6156, -5824, -6608, -6747, -5595, -6263, -233605]
+                # lastCostDRE_bfgs 719617.989097168  primal_cost_v_before  930026.222556065  dre after/before changing U  -481811.5150287446   -264417.30638654006
+                # ********************** NEW AT IT   10  /  89  **********************
+
+            else:
+
+                if lastCostDRE_bfgs < dre_bfgs and ls_it == line_search_iterations-1:
+                    #LipJ += 0.2 * np.ones(kClusters)
+                    partid = np.argmax(dre_per_part)
+                    LipJ[partid] *= np.sqrt(2) # maybe just the LARGEST dre cost.
+
+                # accept / reject, reject all but drs and see
+                # if ls_it == line_search_iterations-1 :
+                if dre_bfgs <= lastCostDRE_bfgs or 10000 * (dre_bfgs-lastCostDRE_bfgs) <= lastCostDRE_bfgs or ls_it == line_search_iterations-1 : # not correct yet, must be <= last - c/gamma |u-v|
+                    # TODO: save and use best wrt. cost: new fct?
+                    #
+                    steplength = 0 # currently printed
+                    for ci in range(kClusters):
+                        poses_s_in_cluster[ci] = poses_s_in_cluster_bfgs[ci].copy()
+                        s_step_cluster = poses_v_bfgs - poses_in_cluster_bfgs[ci]
+                        poses_s_in_cluster_pre[ci] = poses_s_in_cluster[ci] + tau * s_step_cluster # update s = s + v - u.
+                        steplength += np.linalg.norm(s_step_cluster.flatten(), 2)**2
+                        #update_flat = (poses_s_in_cluster_pre[ci] - poses_s_in_cluster[ci]).flatten()
+                        #steplength += update_flat.dot(Ul_all * update_flat)
+                    steplength = np.sqrt(steplength)
+
+                    for ci in range(kClusters):
+                        poses_in_cluster[ci] = poses_in_cluster_bfgs[ci].copy()
+                        Ul_in_cluster[ci] = Ul_in_cluster_bfgs[ci].copy()
+                        blockEig_in_cluster_[ci] = blockEig_in_cluster_bfgs[ci].copy()
+                    L_in_cluster = L_in_cluster_bfgs.copy()
+                    landmarks = landmarks_bfgs.copy()
+                    lastCostDRE_bfgs = dre_bfgs.copy()
+                    poses_v = poses_v_bfgs.copy()
+
+                    # for ci in range(kClusters):
+                    #     print(ci, " poses_v ", poses_in_cluster[ci])
+
+                    #print("poses_v ", poses_v)
+                    if o3d_defined:
+                        rerender(vis, camera_indices_in_cluster, point_indices_in_cluster, poses_in_cluster, landmarks, save_image=False)
+
+                    #print("A landmark_s_in_cluster", landmark_s_in_cluster)
+                    break # next full iteration
+
 # here bfgs is better, but dre has better cost for the drs solution.
 
 # either adjust points_3d_in_cluster -> copy over output.
