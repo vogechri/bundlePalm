@@ -834,6 +834,35 @@ def blockEigenvalue(M, bs):
 
     return Ei
 
+# analysis
+def blockEigenvalueSet(M, bs):
+    Ei = np.zeros((bs, int(M.data.shape[0] / bs)))
+    if bs > 1:
+        bs2 = bs * bs
+        for i in range(int(M.data.shape[0] / bs2)):
+            mat = M.data[bs2 * i : bs2 * i + bs2].reshape(bs, bs).copy()
+            if not check_symmetric(mat):
+                mat = np.fliplr(mat)
+            # print(i, " ", mat)
+            evs = eigvalsh(mat)
+            # if evs[0] <0:
+            #    mat = np.fliplr(mat)
+            #    evs = eigvalsh(mat)
+            Ei[:, i] = evs
+    return Ei
+
+def minEigenvalues(M, bs):
+    Ei = np.zeros((1, int(M.data.shape[0] / bs)))
+    bs2 = bs * bs
+    for i in range(int(M.data.shape[0] / bs2)):
+        mat = M.data[bs2 * i : bs2 * i + bs2].reshape(bs, bs).copy()
+        if not check_symmetric(mat):
+            mat = np.fliplr(mat)
+        # print(i, " ", mat)
+        evs = eigvalsh(mat)
+        Ei[:, i] = np.maximum(1e-16, evs[0])
+    return Ei
+
 def blockEigenvalueWhereNeeded(M, bs, thresh = 1e-6):
     Ei = np.zeros(M.shape[0])
     if bs > 1:
@@ -1356,6 +1385,7 @@ def cost_DRE(
     cost_dre = 0
     dre_per_part = []
     penalty_per_cluster = []
+    EV = []
     for i in range(len(Ul_in_cluster_)):
         camera_indices_ = np.unique(camera_indices_in_cluster_[i])
         indices = np.repeat(np.array([9 * camera_indices_ + j for j in range(9)]).transpose(), 9, axis=0).flatten()
@@ -1424,6 +1454,16 @@ def cost_DRE(
         else:
             Ul_all += U_pose
 
+    # analyis 646 small and large mixed. 
+    #     EV.append(blockEigenvalueSet(U_pose, 9))
+    # EV.append(blockEigenvalueSet(Ul_all, 9))
+    # print("-----------")
+    # for c in range(num_cams):
+    #     #evs = np.zeros(len(EV))
+    #     for ci in range(len(EV)):
+    #         print(EV[ci][:,c])
+    #     print("-----------")
+
     # TODO: I use a different Vl to compute the cost here than in the update of prox u.
     #       Since I want to work with a new Vl already. Problem.
     # i want |u-s|_D |u-v|_D, also |v-2u-s|_D
@@ -1476,8 +1516,8 @@ def primal_cost(
     n_points_ = int(x0_l_.shape[0] / 3)
     x0_t_cam = x0_t__[: n_cameras_ * 9].reshape(n_cameras_, 9) # not needed?
     x0_t_land = x0_t__[n_cameras_ * 9 :].reshape(n_points_, 3)
-    funx0_st1 = lambda X0, X1, X2: \
-        torchSingleResiduum(X0.view(-1, 9), X1.view(-1, 3), X2.view(-1, 2))
+    # funx0_st1 = lambda X0, X1, X2: \
+    #     torchSingleResiduum(X0.view(-1, 9), X1.view(-1, 3), X2.view(-1, 2))
 
     camScale = 1./Unorm.data.reshape(-1,9)
     camScale = from_numpy(camScale[cameras_indices_in_c_])
@@ -1514,7 +1554,7 @@ def primal_cost(
 # we get jac at dist s-u, so |nabla f(u) - nabla f(s)|^2 <= L/2 |s-u|^2
 # upper bound f(s) <= f(u) + <nabla f(u), s-u> + L/2|s-u|^2. in other words f(s) should be accepted, delta_u = s-u.
 # in particular L > 2 nabla f(u) on s-u. nabla f(u) = J^t f(u).
-# So disable TR? and understand why my J fails? 
+# So disable TR? and understand why my J fails?
 def bundle_adjust(
     point_indices_,
     camera_indices_,
@@ -1525,7 +1565,7 @@ def bundle_adjust(
     cameras_s_, # taylor expand at point_3d_in -> prox on landmark_s_ - points_3d = lambda (multiplier)
     Ul_in_c_,
     L_in_cluster_,
-    LipJ, # start with 1.0. externally increase if dre increases
+    LipJ_, # start with 1.0. externally increase if dre increases
     blockEig_in_c_,
     unique_poses_in_c_, # global indices, needed for pcg
     unique_landmarks_in_c_,
@@ -1567,8 +1607,9 @@ def bundle_adjust(
         blockEigMult = 1e-5 # 1e-7 fails with venice'52' 173 demands 1e-3/1e-4/1e-5? 52:1e-6 totally fails. Maybe also True below (recomp jacobian): yes stable
         blockEigMultJtJ = 1e-4 # 173: little effect 1e-6/4/8. just 173 or always not mattering much?
         blockEigMultLimit = 1e-5 # maybe now can be more lose? 5 cluster needed blockEigenvalueWhereNeeded(JtJ, 9, 1e-4)
+        blockEigLowerMultLimit = 1e-1 # 1e-2?
         # limit lower -> major effect from partitioning only?
-        # 1e-5 even better than 1e-7. 
+        # 1e-5 even better than 1e-7.
         # 1. fix rng, 2. is there structure, how identify if good or bad part?
         # blockEigMult not import for 173 but 52 yes
         # adapt blockEigMult based on check? pass up and down hierarchy?
@@ -1593,8 +1634,8 @@ def bundle_adjust(
     funx0_st1 = lambda X0, X1, X2: \
         torchSingleResiduumScaled(X0.view(-1, 9), X1.view(-1, 3), X2.view(-1, 2), camScale, landScale)
 
-    if issparse(Ul_in_c_): # only increase -- if needed.
-        stepSize = diag_sparse(Ul_in_c_.diagonal())
+    # if issparse(Ul_in_c_): # only increase -- if needed.
+    #     stepSize = diag_sparse(Ul_in_c_.diagonal())
 
     steSizeTouched = False
 
@@ -1631,6 +1672,8 @@ def bundle_adjust(
             blockEigenvalueJtJ = blockEigenvalueWhereNeeded(JtJ, 9, 1e-6) # here ok? 173: 1e-6
             stepSize = blockEigMult * blockEigenvalueJtJ + JJ_mult * JtJ.copy() # Todo '2 *' vs 1 by convex.
 
+            # [globalIt][clusterId] minEigenvalues(JtJ, 9)
+
             #blockEigenvalueJtJ = blockEigenvalueFull(JtJ, 9, x0_t_cam)
             #stepSize = blockEigenvalueJtJ + JJ_mult * JtJ.copy() # Todo '2 *' vs 1 by convex.
 
@@ -1641,7 +1684,7 @@ def bundle_adjust(
             #maxE, minE = minmaxEv(stepSize, 9)
             #print("minmax ev stepSz ", np.max(maxE), " ", np.max(minE), " ", np.min(maxE), " ",  np.min(minE), " spec ", np.max(maxE/minE) )
 
-            #print( "Mean diagonal of pseudo Hessian ",  np.sum(np.abs(JtJ.diagonal()).reshape(-1,9) / (1000 * n_cameras_), 0))
+            print( "Mean diagonal of pseudo Hessian ",  np.sum(np.abs(JtJ.diagonal()).reshape(-1,9) / (1000 * n_cameras_), 0), file=sys.stderr )
             absDiagJtJ = np.abs(JtJ.diagonal()).reshape(-1,9)
             print( "Diag pseudo HessP (max/min/med)",  np.max(absDiagJtJ, axis=0), " ", np.min(absDiagJtJ, axis=0),  " ", np.median(absDiagJtJ, axis=0), file=sys.stderr )
 
@@ -1726,7 +1769,7 @@ def bundle_adjust(
 
                 # TODO: LipJ for both? or only JJ?
                 #stepSize = JJ_mult * JtJ.copy() + blockEigMult * blockEigenvalueJtJ
-                stepSize = LipJ * JtJ.copy() + blockEigMult * blockEigenvalueJtJ
+                stepSize = LipJ_ * JtJ.copy() + blockEigMult * blockEigenvalueJtJ
                 JtJDiag = JtJ.copy() + blockEigMultJtJ * blockEigenvalueJtJ
 
                 #JtJDiag = 1e-4 * blockEigMult * blockEigenvalueJtJ # this could also work?
@@ -1759,7 +1802,6 @@ def bundle_adjust(
         if newVersion:
             bp_s = bp + stepSize * prox_rhs
         bS = (bp_s - W * Vli * bl).flatten()
-
 
         #delta_p = -solvePowerIts(Ul, W, Vli, bS, powerits)
         delta_p, powerits_run = solveByGDNesterov(Ul, W, Vli, bS, powerits)
@@ -1841,17 +1883,20 @@ def bundle_adjust(
         tr_check = (costStart + penaltyStart - costEnd - penaltyP - penaltyL) / (costStart + penaltyStart - costQuad - penaltyP - penaltyL)
         #tr_check = (costStart - costEnd) / (costStart - costQuad) # does not help.
 
-        old_descent_lemma = True
+        old_descent_lemma = True # TODO: test this with 4 on some examples.
         if old_descent_lemma:
             decent_lemma_divisor = 2
         else:
             # f(x) <= f(y) + <nabla(f(y) x-y> + Lf/2 |x-y|^2
             # we demand stepsize phi >= 2 Lf. Then even
             # f(x) <= f(y) + <nabla(f(y) x-y> + phi/4 |x-y|^2
-            # (f(x) - f(y) - <nabla(f(y) x-y>) * 4 / |x-y|^2  <= phi
-            # recall actual gradient: J^t fx0 = bp|bl , no L. grad at f(x) is L * JtJDiag * delta_p - s
+            # (f(x) - f(y) - <nabla(f(y) x-y>) * 4 / |x-y|^2  <= phi, recall actual gradient:
+            # J^t fx0 = bp|bl , no L. grad at f(x) is L * JtJDiag * delta_p - s
             # f(x) is costEnd
-            decent_lemma_divisor = 4
+            # still runs into 646 problem
+            decent_lemma_divisor = 6 #4 # 4 does indeed delay flow over, but result is worse.
+            # another problem when dre is set to prim_v (since dre<primv) this can be lower than
+            # true dre. so we should inc or not use this as best dre?
 
         #nablaXp = L * JtJDiag * delta_p  # actual gradient. discussable TODO
         nablaXl = JltJlDiag * delta_l  # actual gradient: J^t fx0 = bp|bl
@@ -1865,10 +1910,10 @@ def bundle_adjust(
 
         # TODO actually not clear. I look at at as if l part is not there or implicit.
         LfkQuad = (delta_l.dot(nablaXl) + delta_p.dot(stepSize * delta_p)) / decent_lemma_divisor
-        # Model could be f(x(y), y), where x(y) := argmax_x f(x,y), with p=y, l=x
-        # we have x=x-delta_l <=> x = x - Vli * ((W.transpose() * delta_p).flatten() + bl), bl = Jl^t f0
-        # derivative as df/dx * dx/dy = <bl, Vli * W^T * dy> = <xl, delta_l + Vli * bl> ? looks weird
-        # but assume nabla_l = 0. Then changing y only has this effect.
+        # Model could be f(x(y), y), where x(y) := argmax_x f(x,y), with p=y, l=x we have
+        # x=x-delta_l <=> x = x - Vli * ((W.transpose() * delta_p).flatten() + bl), bl = Jl^t f0
+        # derivative as df/dx * dx/dy = <bl, Vli * W^T * dy> = <xl, delta_l + Vli * bl> ? looks
+        # weird but assume nabla_l = 0. Then changing y only has this effect.
         # now look at changing y only leads to a change in x as follows
         # Lfklin = (costEnd - costStart - bp.dot(delta_p) - bl.dot(delta_l + Vli * bl))
         # LfkQuad = delta_p.dot(stepSize * delta_p)) / decent_lemma_divisor
@@ -1896,7 +1941,7 @@ def bundle_adjust(
         #if LfkViolated and not steSizeTouched or (steSizeTouched and costStart + penaltyStart < costEnd + penaltyL): # violated -- should revert update.
             steSizeTouched = True
             print(" |||||||  Lfk distance ", LfkDistance, " -nabla^Tdelta=" , -bp.dot(delta_p) - bl.dot(delta_l), " LipJ ", \
-                  LipJ, " blockEigMult ", blockEigMult , " tr_check, " , tr_check, "  |||||||", file=sys.stderr)
+                  LipJ_, " blockEigMult ", blockEigMult , " tr_check, " , tr_check, "  |||||||", file=sys.stderr)
             #print(" |||||||  f(x) <= f(y) + <nabla(f(y) x-y> + Lf/2 |x-y|^2: ", costEnd, " <= ", costStart, " + ", Lfklin, " + ", LfkQuad, " |||||||")
 
             #stepSize = stepSize * 2
@@ -1949,7 +1994,7 @@ def bundle_adjust(
             it_ = it_ + 1
             updateJacobian = True
 
-        print(" ------- Lfk distance ", LfkDistance, " tr_check ", tr_check,  " LipJ ", LipJ, " blockEig ", blockEigMult, " -------- ", file=sys.stderr)
+        print(" ------- Lfk distance ", LfkDistance, " tr_check ", tr_check,  " LipJ ", LipJ_, " blockEig ", blockEigMult, " -------- ", file=sys.stderr)
 
     x0_p_ = x0_p_.reshape(n_cameras_, 9)
     x0_l_ = x0_l_.reshape(n_points_, 3)
@@ -1958,8 +2003,7 @@ def bundle_adjust(
     getBetterStepSize = False # this is used as approx of f in update of v and thus s. maybe change there u-v should be small. 
     if getBetterStepSize: # needs to set L correctly
         J_pose, J_land, fx0 = ComputeDerivativeMatricesNew(
-            x0_t_cam, x0_t_land, camera_indices_, point_indices_, torch_points_2d
-        )
+            x0_t_cam, x0_t_land, camera_indices_, point_indices_, torch_points_2d, unique_poses_in_c_, unique_landmarks_in_c_)
         bp = J_pose.transpose() * fx0
         JtJ = J_pose.transpose() * J_pose
         #stepSize.data = np.maximum(stepSize.data, blockEigenvalue(JltJl, 3).data) # else diagSparse of it
@@ -1986,15 +2030,17 @@ def bundle_adjust(
         print(" nablas 2", - L * nabla_p_approx2) # So nabla_l_approx = JtJDiag * (u-s), hence return (i use s-u), JtJDiag * L, the 2 DELIVERS a better cost!
         print(" nablas b", bp) # TINY
 
-    if False and True:
+    # acceptance this can be reused, rejection the above can be reused.
+    if False: # 646 more constrained but not better. maybe can lower some stuff.
         J_pose, J_land, fx0 = ComputeDerivativeMatricesNew (
-            x0_t_cam, x0_t_land, camera_indices_, point_indices_, torch_points_2d, unique_poses_in_c_ )
+            x0_t_cam, x0_t_land, camera_indices_, point_indices_, torch_points_2d, unique_poses_in_c_, unique_landmarks_in_c_)
         JtJ = J_pose.transpose() * J_pose
         bp = J_pose.transpose() * fx0
         #JJ_mult = 1 + np.maximum(minimumL, np.minimum(L_in_cluster_ * 2, L)) # might have changed .. must be off sigh
-        blockEigenvalueJtJ = blockEigenvalue(JtJ, 9) # TODO: what if this is only needed for 0-eigen directions? return !=0 only if in small eigendir
+        #blockEigenvalueJtJ = blockEigenvalue(JtJ, 9) # TODO: what if this is only needed for 0-eigen directions? return !=0 only if in small eigendir
+        blockEigenvalueJtJ = blockEigenvalueWhereNeeded(JtJ, 9, 1e-3) # ! 1e-2, 1e-4 1e-5 als works. problem 52, 1e-6 does not 173 performance bad if not 1e-6?
         #stepSize = JJ_mult * JtJ.copy() + blockEigMult * blockEigenvalueJtJ
-        stepSize = LipJ * JtJ.copy() + blockEigMult * blockEigenvalueJtJ
+        stepSize = LipJ_ * JtJ.copy() + blockEigMult * blockEigenvalueJtJ
 
         if not newVersion:
             JtJDiag = 1/L * stepSize.copy() # max 1, 1/L, line-search dre fails -> increase
@@ -2005,11 +2051,11 @@ def bundle_adjust(
     nabla_p = bp.copy()
     Rho = L * JtJDiag #+ 1e-12 * Ul
     if (newVersion and LfkSafe and not steSizeTouched):
-        blockEigMult = np.minimum(1e-2, np.maximum(blockEigMultLimit, 2*blockEigMult))
+        blockEigMult = np.minimum(blockEigLowerMultLimit, np.maximum(blockEigMultLimit, 2*blockEigMult))
     else:
-        blockEigMult = np.minimum(1e-2, np.maximum(blockEigMultLimit, blockEigMult))
+        blockEigMult = np.minimum(blockEigLowerMultLimit, np.maximum(blockEigMultLimit, blockEigMult))
     if newVersion:
-        stepSize = LipJ * JtJ.copy() + blockEigMult * blockEigenvalueJtJ
+        stepSize = LipJ_ * JtJ.copy() + blockEigMult * blockEigenvalueJtJ
         Rho = stepSize # is this an issue if we adjust stepsize?
 
     # TODO: preconditioning should influence this.
@@ -2018,13 +2064,13 @@ def bundle_adjust(
     # Rho = 2 * JtJ.copy() + 1e-12 * Ul # this here means we just use safe bet. Likely multiplier, '2' does not matter anyway. stable but slower. FUCK
 
     # TODO change 2
-    if newForUnique:
-        diag_present = 0.5 * diag_sparse( np.repeat((np.ones(n_points_) * landmarks_only_in_cluster_).reshape(-1,1), 3).flatten() )
-        # see above, compensate for averaging
-        xTest = x0_l_ - (diag_present*(x0_l_.flatten() - s_l_)).reshape(-1,3)
-        return costEnd, x0_p_, xTest, L, diag_present + Rho
+    # if newForUnique:
+    #     diag_present = 0.5 * diag_sparse( np.repeat((np.ones(n_points_) * landmarks_only_in_cluster_).reshape(-1,1), 3).flatten() )
+    #     # see above, compensate for averaging
+    #     xTest = x0_l_ - (diag_present*(x0_l_.flatten() - s_l_)).reshape(-1,3)
+    #     return costEnd, x0_p_, xTest, L, diag_present + Rho
 
-    if False:
+    if False: # leads to numerical issues -> influences the results (can only be numerical?).
         Vnorm_ = diag_sparse(np.squeeze(np.asarray(np.sqrt( (np.abs(JltJl)/10).sum(axis=0) ))))
         temp   = Vnorm_.data
         x0_l_ = Vnorm_ * x0_l_.flatten()
@@ -2191,7 +2237,7 @@ def prox_f(camera_indices_in_cluster_, point_indices_in_cluster_, points_2d_in_c
 # g = x0, f = delta. Actullay xnew = xold + delta.
 def RNA(G, F, g, f, it_, m_, Fe, fe, lamda, h, res_pcg):
     #lamda = 0.05 # reasonable 0.01-0.1
-    crefVersion = True
+    crefVersion = True # TODO
     #lamda = 0.05 # cref version needs larger 
     # h = -1 #-0.1 # 2 / (L+mu) -- should 1/diag * F^t F * c
     id_ = it_ % m_
@@ -2243,7 +2289,6 @@ def RNA(G, F, g, f, it_, m_, Fe, fe, lamda, h, res_pcg):
     #print("extrapolation ", extrapolation.shape, " ", g.shape)
     return (G, F, Fe, np.squeeze(extrapolation - h * extrapolationF))
 
-
 def BFGS_direction(r, ps, qs, rhos, k, mem, mu):
     # r = -r # not needed with below
     # lookup k-1, k-mem entries. 
@@ -2272,6 +2317,108 @@ def BFGS_direction(r, ps, qs, rhos, k, mem, mu):
             print(j, " 2nd. al ", alpha[j], " rh ", rhos[j], " be ", beta, " qs " , np.linalg.norm(qs[j],2), " ps " , np.linalg.norm(ps[j],2) )
 
     return dk_
+
+
+def perform_full_iteration(camera_indices_in_cluster_, point_indices_in_cluster_, points_2d_in_cluster_,
+            poses_in_cluster_, landmarks_, poses_s_in_cluster_, L_in_cluster_, Ul_in_cluster_, blockEig_in_cluster__,
+            kClusters_, LipJ_, innerIts_, lastCost_, outerit = -1):
+    # Only it 0: update s,u,v.
+    startT = time.time()
+    (
+        primal_cost_,
+        L_in_cluster_,
+        Ul_in_cluster_,
+        poses_in_cluster_,
+        landmarks_,
+        nabla_p_in_cluster_,
+        blockEig_in_cluster__
+    ) = prox_f(
+        camera_indices_in_cluster_, point_indices_in_cluster_, points_2d_in_cluster_,
+        poses_in_cluster_, landmarks_, poses_s_in_cluster_, L_in_cluster_, Ul_in_cluster_, blockEig_in_cluster__,
+        kClusters_, LipJ_, innerIts=innerIts_, sequential=True,
+        )
+    endT = time.time()
+    primalCost_u = np.sum(primal_cost_)
+    print(outerit, " ", round(primalCost_u), " gain ", round(lastCost_ - primalCost_u), ". ============= sum fk update takes ", endT - startT," s",)
+
+    poses_v_, _, U_cluster_zeros_ = average_cameras_new(
+        camera_indices_in_cluster_, poses_in_cluster_, poses_s_in_cluster_, L_in_cluster_, Ul_in_cluster_, nabla_p_in_cluster_)
+    # TODO: not updated poses are treated how? v - v old.
+    #DRE cost BEFORE s update, always lower than AFTER update.
+    dre_, dre_per_part__ = cost_DRE(camera_indices_in_cluster_, poses_in_cluster_, poses_s_in_cluster_, \
+                                    L_in_cluster_, Ul_in_cluster_, poses_v_, nabla_p_in_cluster_)
+    dre_ += primalCost_u
+    steplength_ = 0
+    poses_s_in_cluster_pre_ = [0 for e in range(kClusters_)]
+    tau_ = 1 # todo sqrt(2), not sure what is happening here.
+    for ci in range(kClusters_):
+        s_step_cluster_ = poses_v_ - poses_in_cluster_[ci]
+        poses_s_in_cluster_pre_[ci] = poses_s_in_cluster_[ci] + tau_ * s_step_cluster_ # update s = s + v - u.
+        steplength_ += np.linalg.norm(s_step_cluster_.flatten(), 2)**2
+        #update_flat = (poses_s_in_cluster_pre[ci] - poses_s_in_cluster[ci]).flatten()
+        #steplength += update_flat.dot(Ul_all * update_flat)
+    steplength_ = np.sqrt(steplength_)
+
+    primal_cost_v_ = 0
+    for ci in range(kClusters_):
+        primal_cost_v_ += primal_cost(
+            poses_v_,
+            camera_indices_in_cluster_[ci],
+            point_indices_in_cluster_[ci],
+            points_2d_in_cluster_[ci],
+            landmarks_)
+    primal_cost_u_ = 0
+    for ci in range(kClusters_):
+        primal_cost_u_ += primal_cost(
+            poses_in_cluster_[ci],
+            camera_indices_in_cluster_[ci],
+            point_indices_in_cluster_[ci],
+            points_2d_in_cluster_[ci],
+            landmarks_)
+    dre_ = max( primal_cost_v_, dre_ ) # sandwich lemma, prevent maybe chaos
+    print("=== DRE = ", dre_, " ==== f(v)= ", round(primal_cost_v_), " f(u)= ", round(primal_cost_u_), "dre_per_part__ ", dre_per_part__)
+
+    return primalCost_u, dre_, L_in_cluster_, Ul_in_cluster_, poses_in_cluster_, poses_v_, landmarks_, \
+        nabla_p_in_cluster_, blockEig_in_cluster__, poses_s_in_cluster_pre_, U_cluster_zeros_, steplength_
+
+def GetPreconditioners(cameras_, points_3d_, points_2d_, camera_indices_, point_indices_):
+    J_pose, J_land, fx0_ = ComputeDerivativeMatrixInit(cameras_, points_3d_, points_2d_, camera_indices_, point_indices_)
+
+    JtJ = J_pose.transpose() * J_pose
+    Unorm_ = diag_sparse(np.squeeze(np.asarray(0.0001 * ( (np.abs(JtJ)/1000).sum(axis=0) )))) # best
+    temp_  = Unorm_.data.reshape(-1,9)
+    temp_[:,0:5] *= 0.4 # 59 / 1  ======== DRE BFGS ======  495619, 173
+    temp_ = np.fmax(temp_, 1-14) # TODO. pick most singular example? 646? 
+    Unorm_ = diag_sparse(temp_.flatten())
+    #print(Unorm.shape, " ", Unorm.data.shape)
+    #Unorm = diag_sparse(np.squeeze(np.asarray(0.01 * np.sqrt( (np.abs(JtJ)/1000).sum(axis=0) ))))
+    #Unorm = diag_sparse(np.ones(cameras.flatten().shape[0])) * 100 # ok.
+    #print(Unorm)
+    # print("Unorm.data.reshape(-1,9)", Unorm.data.reshape(-1,9))
+    # print("np.sum(fx0**2) ", np.sum(fx0**2))
+    # print("cameras ", cameras )
+
+    #print("cameras ", cameras ) # looks ok ..
+
+    # could also compute locally / all the time! 542: appears to 'go crazy' after 20 its.
+    JltJl = J_land.transpose() * J_land
+    Vnorm_ = diag_sparse(np.squeeze(np.asarray(1 * ( (np.abs(JltJl)/10).sum(axis=0) ))))
+    temp_  = Vnorm_.data.reshape(-1,3)
+    temp_ = np.sqrt(temp_)
+    temp_ = np.fmax(temp_, 1-14) # TODO. pick most singular example? 646? 
+    #temp = np.max(np.sqrt(temp), axis=1) # max or mean? sqrt
+    # Diag pseudo HessL (max/min/med/mean) [ 13.04  13.93  11.30]   [ 0.59  3.49  0.38]   [ 7.13  7.08  3.95]   635351.3855933357
+    # Diag pseudo HessL (max/min/med/mean) [ 3.15  1.89  1.89]   [ 0.00  0.00  0.00]   [ 0.02  0.01  0.01]   3575.420359064994
+    # max
+    # Diag pseudo HessL (max/min/med/mean) [ 13.04  13.28  11.30]   [ 0.03  2.59  0.01]   [ 7.05  6.89  3.21]   580241.0680950251
+    # mean
+    # [ 20.68  20.74  19.20]   [ 0.05  3.03  0.03]   [ 8.18  7.93  3.45]   715861.9186395196
+    # min
+    # Diag pseudo HessL (max/min/med/mean) [ 1383.44  1380.07  436.03]   [ 0.59  3.49  0.38]   [ 9.55  9.84  3.95]   1345250.7481203536
+    #temp_ = np.repeat(temp_[:,np.newaxis], 3, axis=1)
+    Vnorm_ = diag_sparse(temp_.flatten())
+    #Vnorm_ = diag_sparse(np.ones(points_3d.flatten().shape[0])) # 52: this is better -- could be random
+    return Unorm_, Vnorm_, fx0_
 
 ##############################################################################
 
@@ -2332,46 +2479,9 @@ print("min k2 distance ", np.min(cameras[:,8].flatten()), " ", np.max(cameras[:,
 # torchSingleResiduum X/Y alternative with diag term as input.
 # alternative: this defines a basis. then we return not 9x9 but 9 values wrt basis bounding the actual
 
-c02_mult = 1
-c34_mult = 1
-c5_mult = 1
-c6_mult = 1
-c7_mult = 1
-c8_mult = 1
-J_pose, J_land, fx0 = ComputeDerivativeMatrixInit(cameras, points_3d, points_2d, camera_indices, point_indices)
-
-JtJ = J_pose.transpose() * J_pose
-Unorm = diag_sparse(np.squeeze(np.asarray(0.0001 * ( (np.abs(JtJ)/1000).sum(axis=0) )))) # best
-temp  = Unorm.data.reshape(-1,9)
-temp[:,0:5] *= 0.4 # 59 / 1  ======== DRE BFGS ======  495619, 173
-Unorm = diag_sparse(temp.flatten())
-#print(Unorm.shape, " ", Unorm.data.shape)
-#Unorm = diag_sparse(np.squeeze(np.asarray(0.01 * np.sqrt( (np.abs(JtJ)/1000).sum(axis=0) ))))
-#Unorm = diag_sparse(np.ones(cameras.flatten().shape[0])) * 100 # ok.
-#print(Unorm)
-# print("Unorm.data.reshape(-1,9)", Unorm.data.reshape(-1,9))
-# print("np.sum(fx0**2) ", np.sum(fx0**2))
-# print("cameras ", cameras )
+c02_mult = 1; c34_mult = 1; c5_mult = 1; c6_mult = 1; c7_mult = 1; c8_mult = 1
+Unorm, Vnorm, fx0 = GetPreconditioners(cameras, points_3d, points_2d, camera_indices, point_indices)
 cameras = (Unorm * cameras.flatten()).reshape(-1,9)
-#print("cameras ", cameras ) # looks ok ..
-
-# could also compute locally / all the time! 542: appears to 'go crazy' after 20 its.
-JltJl = J_land.transpose() * J_land
-Vnorm = diag_sparse(np.squeeze(np.asarray(1 * ( (np.abs(JltJl)/10).sum(axis=0) ))))
-temp  = Vnorm.data.reshape(-1,3)
-temp = np.sqrt(temp)
-#temp = np.max(np.sqrt(temp), axis=1) # max or mean? sqrt
-# Diag pseudo HessL (max/min/med/mean) [ 13.04  13.93  11.30]   [ 0.59  3.49  0.38]   [ 7.13  7.08  3.95]   635351.3855933357
-# Diag pseudo HessL (max/min/med/mean) [ 3.15  1.89  1.89]   [ 0.00  0.00  0.00]   [ 0.02  0.01  0.01]   3575.420359064994
-# max
-# Diag pseudo HessL (max/min/med/mean) [ 13.04  13.28  11.30]   [ 0.03  2.59  0.01]   [ 7.05  6.89  3.21]   580241.0680950251
-# mean
-# [ 20.68  20.74  19.20]   [ 0.05  3.03  0.03]   [ 8.18  7.93  3.45]   715861.9186395196
-# min
-# Diag pseudo HessL (max/min/med/mean) [ 1383.44  1380.07  436.03]   [ 0.59  3.49  0.38]   [ 9.55  9.84  3.95]   1345250.7481203536
-#temp = np.repeat(temp[:,np.newaxis], 3, axis=1)
-Vnorm = diag_sparse(temp.flatten())
-Vnorm = diag_sparse(np.ones(points_3d.flatten().shape[0])) # 52: this is better
 points_3d = (Vnorm * points_3d.flatten()).reshape(-1,3)
 
 # can i do this?
@@ -2517,7 +2627,7 @@ if o3d_defined:
 
 if basic_version:
 
-    for it in range(its):
+    for globalIt in range(its):
         start = time.time()
         (
             cost,
@@ -2537,14 +2647,15 @@ if basic_version:
         #print("++++++++++++++++++ globalSingleLandmarksB_in_c[0].shape ", globalSingleLandmarksB_in_c[0].shape)
 
         currentCost = np.sum(cost)
-        print(it, " ", round(currentCost), " gain ", round(lastCost - currentCost), ". ============= sum fk update takes ", end - start," s",)
+        print(globalIt, " ", round(currentCost), " gain ", round(lastCost - currentCost), ". ============= sum fk update takes ", end - start," s",)
 
         poses_v, _, Up_cluster = average_cameras_new(
             camera_indices_in_cluster, poses_in_cluster, poses_s_in_cluster, L_in_cluster, Ul_in_cluster, nabla_p_in_cluster) # old_poses for costs?
 
         #DRE cost BEFORE s update, always lower than AFTER update.
         dre, dre_per_part = cost_DRE(camera_indices_in_cluster, poses_in_cluster, poses_s_in_cluster, \
-                                     L_in_cluster, Ul_in_cluster, poses_v, nabla_p_in_cluster) + currentCost
+                                     L_in_cluster, Ul_in_cluster, poses_v, nabla_p_in_cluster)
+        dre += currentCost
 
         tau = 1 # 2 is best ? does not generalize!
         for ci in range(kClusters):
@@ -2574,7 +2685,7 @@ if basic_version:
                 landmarks)
 
         dre = max( primal_cost_v, dre ) # sandwich lemma, prevent maybe chaos
-        print( it, " ======== DRE ====== ", round(dre) , " ========= gain " , \
+        print( globalIt, " ======== DRE ====== ", round(dre) , " ========= gain " , \
             round(lastCostDRE - dre), "==== f(v)= ", round(primal_cost_v), " f(u)= ", round(primal_cost_u))
 
         if lastCostDRE < dre:
@@ -2596,6 +2707,7 @@ if basic_version:
 
 else:
 
+    tau = 1
     bfgs_mem = 6 # 2:Cost @50:  -12.87175888983266, 6: cost @ 50: 12.871757400143322
     bfgs_mu = 1.0
     bfgs_qs = np.zeros([bfgs_mem, kClusters * 9 * n_cameras]) # access/write with % mem
@@ -2611,51 +2723,50 @@ else:
     Fes = []
     rnaBufferSize = 6
 
+    (cost, dre, L_in_cluster, Ul_in_cluster, poses_in_cluster, poses_v, landmarks, \
+     nabla_p_in_cluster, blockEig_in_cluster_, poses_s_in_cluster_pre, U_cluster_zeros, steplength) = \
+        perform_full_iteration(camera_indices_in_cluster, point_indices_in_cluster,
+            points_2d_in_cluster, poses_in_cluster, landmarks, poses_s_in_cluster, L_in_cluster,
+            Ul_in_cluster, blockEig_in_cluster_, kClusters, LipJ, innerIts, lastCost)
+    restartIteration = 0
+
     # Only it 0: update s,u,v.
-    start = time.time()
-    (
-        cost,
-        L_in_cluster,
-        Ul_in_cluster,
-        poses_in_cluster,
-        landmarks,
-        nabla_p_in_cluster,
-        blockEig_in_cluster_
-    ) = prox_f(
-        camera_indices_in_cluster, point_indices_in_cluster, points_2d_in_cluster,
-        poses_in_cluster, landmarks, poses_s_in_cluster, L_in_cluster, Ul_in_cluster, blockEig_in_cluster_,
-        kClusters, LipJ, innerIts=innerIts, sequential=True,
-        )
-    end = time.time()
-    currentCost = np.sum(cost)
-    print(-1, " ", round(currentCost), " gain ", round(lastCost - currentCost), ". ============= sum fk update takes ", end - start," s",)
+    # start = time.time()
+    # (
+    #     cost,
+    #     L_in_cluster,
+    #     Ul_in_cluster,
+    #     poses_in_cluster,
+    #     landmarks,
+    #     nabla_p_in_cluster,
+    #     blockEig_in_cluster_
+    # ) = prox_f(
+    #     camera_indices_in_cluster, point_indices_in_cluster, points_2d_in_cluster,
+    #     poses_in_cluster, landmarks, poses_s_in_cluster, L_in_cluster, Ul_in_cluster, blockEig_in_cluster_,
+    #     kClusters, LipJ, innerIts=innerIts, sequential=True,
+    #     )
+    # end = time.time()
+    # currentCost = np.sum(cost)
+    # print(-1, " ", round(currentCost), " gain ", round(lastCost - currentCost), ". ============= sum fk update takes ", end - start," s",)
 
-    poses_v, _, U_cluster_zeros = average_cameras_new(
-        camera_indices_in_cluster, poses_in_cluster, poses_s_in_cluster, L_in_cluster, Ul_in_cluster, nabla_p_in_cluster)
-    # TODO: not updated poses are treated how? v - v old.
+    # poses_v, _, U_cluster_zeros = average_cameras_new(
+    #     camera_indices_in_cluster, poses_in_cluster, poses_s_in_cluster, L_in_cluster, Ul_in_cluster, nabla_p_in_cluster)
+    # # TODO: not updated poses are treated how? v - v old.
 
-    steplength = 0
-    tau = 1 # todo sqrt(2), not sure what is happening here.
-    for ci in range(kClusters):
-        s_step_cluster = poses_v - poses_in_cluster[ci]
-        poses_s_in_cluster_pre[ci] = poses_s_in_cluster[ci] + tau * s_step_cluster # update s = s + v - u.
-        steplength += np.linalg.norm(s_step_cluster.flatten(), 2)**2
-        #update_flat = (poses_s_in_cluster_pre[ci] - poses_s_in_cluster[ci]).flatten()
-        #steplength += update_flat.dot(Ul_all * update_flat)
-    steplength = np.sqrt(steplength)
+    # steplength = 0
+    # tau = 1 # todo sqrt(2), not sure what is happening here.
+    # restartIteration = 0
+    # for ci in range(kClusters):
+    #     s_step_cluster = poses_v - poses_in_cluster[ci]
+    #     poses_s_in_cluster_pre[ci] = poses_s_in_cluster[ci] + tau * s_step_cluster # update s = s + v - u.
+    #     steplength += np.linalg.norm(s_step_cluster.flatten(), 2)**2
+    #     #update_flat = (poses_s_in_cluster_pre[ci] - poses_s_in_cluster[ci]).flatten()
+    #     #steplength += update_flat.dot(Ul_all * update_flat)
+    # steplength = np.sqrt(steplength)
 
-    for it in range(its): ##########################################################################################
+    for globalIt in range(its): ##########################################################################################
         # get line search direction and update bfgs data
         # operate with np concatenate to get large vector and reshape search_direction here?
-
-        print("********************** NEW AT IT  ", it, " / ", its, " **********************")
-        # print("poses_v ", poses_v)
-        # print("poses_s_in_cluster[0] ", poses_s_in_cluster[0])
-        # print("landmarks ", landmarks)
-        # print("poses_in_cluster[0] ", poses_in_cluster[0])
-        # print("poses_s_in_cluster_pre[0] ", poses_s_in_cluster_pre[0])
-
-
         RNA_or_bfgs = True # RNA is best here ?! ok. else nesterov
         if RNA_or_bfgs:
             use_bfgs = False # maybe full u,v?
@@ -2674,7 +2785,7 @@ else:
 
                 # somewhat unclear: s+ or s to use?
                 if not use_s_in_rna:
-                    rna_s[ci * 9 * n_cameras: (ci+1) * 9 * n_cameras] = temp *  poses_s_in_cluster_pre[ci].flatten() # TODO: check if not s is used.
+                    rna_s[ci * 9 * n_cameras: (ci+1) * 9 * n_cameras] = temp * poses_s_in_cluster_pre[ci].flatten() # TODO: check if not s is used.
                 else:
                     # also not stable:
                     # YET this is clearly with h=-1 and lambda high delivering s+.
@@ -2685,12 +2796,12 @@ else:
             print("Debug info bfgs_r=u-v: |bfgs_r| ", np.linalg.norm(bfgs_r, 2), file=sys.stderr)
 
             if use_bfgs:
-                dk = BFGS_direction(bfgs_r, bfgs_ps, bfgs_qs, bfgs_rhos, it, bfgs_mem, bfgs_mu)
+                dk = BFGS_direction(bfgs_r, bfgs_ps, bfgs_qs, bfgs_rhos, globalIt, bfgs_mem, bfgs_mu)
                 dk_stepLength = np.linalg.norm(dk, 2)
                 # debug Hessian H fulfills H * (xt+1-xt) = nabla f (xt+1) - nabla f (xt)
                 # learn H^-1 and apply on nabla f(x): update delta = - eta * H^-1 nabla f. xt+1 = xt + delta
                 # inverse Hess does here fulfill? (test)  delta = (st+1 - st) = H^-1 * ()
-                # how does this make sense actually? 
+                # how does this make sense actually?
                 # implemented is    H^-1 * bfgs_qs[it % bfgs_mem] = bfgs_ps[it % bfgs_mem]
                 # test:
                 #ps_maybe = BFGS_direction(bfgs_qs[(it-1) % bfgs_mem], bfgs_ps, bfgs_qs, bfgs_rhos, it, bfgs_mem, bfgs_mu)
@@ -2708,7 +2819,7 @@ else:
                 # Ui_all = blockInverse(U_all, 9)
                 # dk = rna_s.copy()
                 # print("dk", dk, " ", bfgs_r, " |bfgs_r| ", np.linalg.norm(bfgs_r, 2), " |dk| ", np.linalg.norm(dk, 2), " |rna_s| ", np.linalg.norm(rna_s, 2))
-                
+
                 # idea does not work. likely too different over time.
                 # could input U_all and use for all instead.
 
@@ -2728,8 +2839,7 @@ else:
                 #lambdaScale *= 10.
                 #lambdaScale = np.mean(U_diag.diagonal()) # does this make any sense? scale by smth. done inside.
                 lambdaScale = 1
-
-                Gs, Fs, Fes, dk = RNA(Gs, Fs, rna_s, bfgs_r, it, rnaBufferSize, Fes, bfgs_r,
+                Gs, Fs, Fes, dk = RNA(Gs, Fs, rna_s, bfgs_r, globalIt - restartIteration, rnaBufferSize, Fes, bfgs_r,
                                       lamda = 0.001 * lambdaScale, h = -1, res_pcg = U_diag) # has changed likely, 0.001 before
                 # dk = rna_s + bfgs_r
                 # Ui_all = blockInverse(U_all, 9)
@@ -2760,12 +2870,12 @@ else:
                 s_new[ci * 9 * n_cameras: (ci+1) * 9 * n_cameras] = poses_s_in_cluster_pre[ci].flatten()
                 s_cur[ci * 9 * n_cameras: (ci+1) * 9 * n_cameras] = poses_s_in_cluster[ci].flatten()
 
-            if it <= 0: # s_prev is known
+            if globalIt <= 0: # s_prev is known
                 dk = s_new - s_cur #+ delta_s
             else:
                 delta_s_ = s_new - s_prev
                 dk = s_new - s_cur + delta_s_
-                if it > 1: # delta_s_old_ is known
+                if globalIt > 1: # delta_s_old_ is known
                     #dk = delta_s + delta_s_old_ # last 3 steps this is similar to palm. s^k+1 = sk + sum_i=0^2 delta^k-i
                     dk = delta_s_ + delta_s_old_ # last 3 + 2nd step (so 2nd twice).
                 # if it > 2: # delta_s_old_ is known
@@ -2776,7 +2886,7 @@ else:
                 delta_s_old_ = delta_s_.copy()
 
                 # momentum simple, same for v? about same
-                beta_nesterov = (it-1) / (it+2) # 0.7
+                beta_nesterov = (globalIt-1) / (globalIt+2) # 0.7
                 #beta_nesterov = 0.7
                 dk = s_new - s_cur + beta_nesterov * prev_dk
                 #vk = s_new - s_cur + 0.7 * prev_vk
@@ -2844,13 +2954,13 @@ else:
 
             # update buffers
             if RNA_or_bfgs and use_bfgs and ls_it == 0: # todo: the one we accept put here, no?
-                #bfgs_ps[it % bfgs_mem] = -dk * multiplier
-                bfgs_ps[it % bfgs_mem] = -bfgs_r # this is not so much overshooting as dk
+                #bfgs_ps[globalIt % bfgs_mem] = -dk * multiplier
+                bfgs_ps[globalIt % bfgs_mem] = -bfgs_r # this is not so much overshooting as dk
                 bfgs_rr = np.zeros(kClusters * 9 * n_cameras)
                 for ci in range(kClusters):
                     bfgs_rr[ci * 9 * n_cameras: (ci+1) * 9 * n_cameras] = poses_v_bfgs.flatten() - poses_in_cluster_bfgs[ci].flatten() # flatten?
-                bfgs_qs[it % bfgs_mem] = bfgs_rr - bfgs_r
-                bfgs_rhos[it % bfgs_mem] = np.maximum(0., 1./ bfgs_qs[it % bfgs_mem].dot(bfgs_ps[it % bfgs_mem]))
+                bfgs_qs[globalIt % bfgs_mem] = bfgs_rr - bfgs_r
+                bfgs_rhos[globalIt % bfgs_mem] = np.maximum(0., 1./ bfgs_qs[globalIt % bfgs_mem].dot(bfgs_ps[globalIt % bfgs_mem]))
 
             # eval cost
             dre_bfgs, dre_per_part = cost_DRE(camera_indices_in_cluster, poses_in_cluster_bfgs, poses_s_in_cluster_bfgs,
@@ -2882,76 +2992,168 @@ else:
             primal_cost_u_all = [round(cost) for cost in primal_cost_u_all]
 
             dre_bfgs = max(dre_bfgs, primal_cost_v) # sandwich lemma 
-            print( it, "/", ls_it, " ======== DRE BFGS ====== ", round(dre_bfgs) , " ========= gain " , \
+            print( globalIt, "/", ls_it, " ======== DRE BFGS ====== ", round(dre_bfgs) , " ========= gain " , \
                 round(lastCostDRE_bfgs - dre_bfgs), "==== f(v)= ", round(primal_cost_v), " f(u)= ", round(primal_cost_u))
-            print( it, "/", ls_it, " f(v) = ", primal_cost_v_all, " f(u) = ", primal_cost_u_all)
+            print( globalIt, "/", ls_it, " f(v) = ", primal_cost_v_all, " f(u) = ", primal_cost_u_all)
             bestCost = np.minimum(primal_cost_v, bestCost)
-            bestIt = it
-            if it < 60:
+            bestIt = globalIt
+            if globalIt < 60:
                 bestCost60 = bestCost
-            if it < 30:
+            if globalIt < 30:
                 bestCost30 = bestCost
+            
+            LipJMax = 16 # 6.x was computed
+            iteration_factor      = (1 - (globalIt / its))**4 # 1 at start, ~0 at end.
+            iteration_factor_five = (1 - (5 / its))**4 #, could also running mean of gains and use 5% of those (positive gains, if < - (5% of mean) ).
+            maxPct = 1 + 0.01 * iteration_factor/iteration_factor_five # aim at 1% at 5 iterations?
+            startFromU = False
+            # normally use u,v. Forgot example why / where v is better.
+            # likely 'things' go 'wild'. hmm.
 
-            if ls_it == line_search_iterations-1 and (1.03 * lastCostDRE_bfgs < dre_bfgs or primal_cost_v > 1.03 * primal_cost_u):
-                # revert ! Not clear how to do this.
-                before, _ = cost_DRE(camera_indices_in_cluster, poses_in_cluster, poses_s_in_cluster,
-                                   L_in_cluster, Ul_in_cluster, poses_v, nabla_p_in_cluster_bfgs)
-                # should be same as poses_v, so not needed./debug: ok.
-                poses_v_before, Ul_all_bfgs, U_cluster_zeros = average_cameras_new(
-                    camera_indices_in_cluster, poses_in_cluster, poses_s_in_cluster, L_in_cluster, Ul_in_cluster, nabla_p_in_cluster_bfgs)
-                print("|poses_v_before - poses_v| = ", np.linalg.norm(poses_v_before - poses_v, 2))
-
-                if 1.03 * lastCostDRE_bfgs > dre_bfgs: # only adjust part.
-                    for cin in range(kClusters):
-                        if dre_per_part[ci] > 0:
-                            LipJ[ci] *= np.sqrt(2)
-                            Ul_in_cluster[ci] *= np.sqrt(2) # approx
-                    print("Ul_in_cluster[i] *= sqrt(2)")
-                else: # adjust all
-                    LipJ *= np.sqrt(2) # there could one 1 particularly bad one
-                    for cin in range(kClusters):
-                        Ul_in_cluster[ci] *= np.sqrt(2) # approx
-                    print("Ul_in_cluster *= sqrt(2)")
-                # revert whole iteration.
-                it = it - 1
-                its = its - 1
-                print(" ************** REVERTED iteration ************** ")
-                # must update costs as well. if LipJ increased, then costs are not valid. Recompute how?
-                # u and v and s known, but not step size change.
-
-                poses_v, Ul_all_bfgs, U_cluster_zeros = average_cameras_new(# same if all U are adjusted / multiplied by a factor.
-                    camera_indices_in_cluster, poses_in_cluster, poses_s_in_cluster, L_in_cluster, Ul_in_cluster, nabla_p_in_cluster_bfgs)
-                print("|poses_v_before - poses_v| = ", np.linalg.norm(poses_v_before - poses_v, 2)) # v does not change Since multiplied by same value!
-                after, _ = cost_DRE(camera_indices_in_cluster, poses_in_cluster, poses_s_in_cluster,
-                                   L_in_cluster, Ul_in_cluster, poses_v, nabla_p_in_cluster_bfgs)
-                primal_cost_v_before = 0
+            # idea accept if primal v cost is very close.
+            # can happen that best primal cost is about same as current and dre was set to this as correction. 
+            # TODO if dre < primal_v also increase LipJ or so.
+            if (np.min(LipJ) < LipJMax) and (ls_it == line_search_iterations-1) and (maxPct * lastCostDRE_bfgs < dre_bfgs):
+                primal_cost_v_before = 0 # should be fixed also
                 for ci in range(kClusters):
                     primal_cost_v_before += primal_cost(
-                        poses_v, # pose are different now? Should be after changing U.
+                        poses_v, # v not u
                         camera_indices_in_cluster[ci],
                         point_indices_in_cluster[ci],
                         points_2d_in_cluster[ci],
                         landmarks)
-                print("lastCostDRE_bfgs", lastCostDRE_bfgs, " primal_cost_v_before ", primal_cost_v_before, " dre after/before changing U ", after, " - ", before, " = ", after - before )
-                if primal_cost_v_before > lastCostDRE_bfgs: # cost did not update. use v to replace u.
+            # do not if primal_v best and current are about the same.
+                    
+            maxPctV = np.sqrt(maxPct)
+            if (np.min(LipJ) < LipJMax) and (ls_it == line_search_iterations-1) and (maxPct * lastCostDRE_bfgs < dre_bfgs) and (primal_cost_v > maxPctV * primal_cost_v_before): # or primal_cost_v > maxPct * primal_cost_u):
+                print("Why enter is priaml v that bad or what", primal_cost_v, " ", primal_cost_v_before, " ", maxPctV * primal_cost_v_before)
+
+                # revert ! Not clear how to do this.
+                # before, _ = cost_DRE(camera_indices_in_cluster, poses_in_cluster, poses_s_in_cluster,
+                #                    L_in_cluster, Ul_in_cluster, poses_v, nabla_p_in_cluster_bfgs)
+                # # should be same as poses_v, so not needed./debug: ok.
+                # poses_v_before, Ul_all_bfgs, U_cluster_zeros = average_cameras_new(
+                #     camera_indices_in_cluster, poses_in_cluster, poses_s_in_cluster, L_in_cluster, Ul_in_cluster, nabla_p_in_cluster_bfgs)
+                # print("|poses_v_before - poses_v| = ", np.linalg.norm(poses_v_before - poses_v, 2))
+
+                num_positive_elements = sum(1 for element in dre_per_part if element > 0)
+                if False and maxPct * lastCostDRE_bfgs > dre_bfgs and 4 * num_positive_elements < kClusters: # only adjust few parts.
+                    print("dre_per_part ", dre_per_part, " adjust those >0.")
                     for ci in range(kClusters):
-                        poses_in_cluster[ci] = poses_v.copy()
+                        if dre_per_part[ci] > 0:
+                            LipJ[ci] *= np.sqrt(2)
+                            #Ul_in_cluster[ci] *= np.sqrt(2) # approx
+                            print("LipJ[" , ci, "] *= sqrt(2)") # 
 
-                for ci in range(kClusters):
-                    poses_in_cluster[ci] = poses_v.copy()
-                    poses_s_in_cluster[ci] = poses_v.copy()
-                # TODO: reset RNA memory to 0 = forget past.
+                else: # adjust all
+                    print("LipJ *= sqrt(2)")
+                    # if i use u, the cost is likely to grow instead, since i increase the penalty?
+                    # for ci in range(kClusters):
+                    #     poses_in_cluster[ci] = poses_v.copy() # 'best_v' instead != last_v? this alone is bfgs_r = u-v =0.
+                    #     poses_s_in_cluster[ci] = poses_v.copy() # this alone is killing RNA fnorm = 0.
 
-                lastCostDRE_bfgs = max(lastCostDRE_bfgs + after - before, primal_cost_v_before) # this should be different. Canot be the same. but it is.
+                    # TODO: either LipJ does not work or other ? 
+                    oneRound = True # loop has an issue that it is not only dependent on the input, but more. blockEig ?
+                    # so more needs to be reset than I do.
+
+                    # if 1 fails alawya will.
+                    while oneRound and (np.min(LipJ) < LipJMax) and (maxPct * lastCostDRE_bfgs < dre_bfgs) and (primal_cost_v > maxPctV * primal_cost_v_before): # while since LipJ must be large enough.
+                        oneRound = False
+                        LipJ *= np.sqrt(2) # there could one 1 particularly bad one
+                        # if np.min(LipJ) > 128:
+                        #     exit()
+                        # for cin in range(kClusters):
+                        #     Ul_in_cluster[ci] *= np.sqrt(2) # approx
+                        print("executed LipJ *= sqrt(2) = ", np.mean(LipJ))
+                        # all of this fails.
+                        primal_cost_v_before = 0 # TODO out of loop if correct
+                        for ci in range(kClusters):
+                            primal_cost_v_before += primal_cost(
+                                poses_v, # v not u
+                                camera_indices_in_cluster[ci],
+                                point_indices_in_cluster[ci],
+                                points_2d_in_cluster[ci],
+                                landmarks)
+                        # this outside maybe? maybe not even enter here at all.
+                        # if primal_cost_v_before > primal_cost_v: # primal_cost_v is last bfgs step.
+                        #     poses_v = poses_v_bfgs.copy()
+                        #     landmarks = landmarks_bfgs.copy()
+                        #     primal_cost_v_before = primal_cost_v 
+                        #     print("Copy over bfgs cost, new primal_cost_v_before ", primal_cost_v_before)
+
+                        # copy wither all the time as those get overwritten.
+                        if not startFromU: # else from v
+                            poses_in_cluster_test = [poses_v.copy() for _ in poses_in_cluster]
+                            for ci in range(kClusters):
+                                poses_s_in_cluster[ci] = poses_v.copy()
+                            # clearly the best one can reach is the primal v cost.
+                        else:
+                            poses_s_in_cluster = [elem.copy() for elem in poses_s_in_cluster_pre]
+                            poses_in_cluster_test = [elem.copy() for elem in poses_in_cluster]
+                        blockEig_in_cluster_in = [elem.copy() for elem in blockEig_in_cluster_]
+
+                        # TODO: better was to not do this additional step for some reason. test 427, also look 646
+                        print("TODO: Big riddle, redo it primal_cost_v_before changes in loop ", round(primal_cost_v_before) )
+                        # TODO: reset RNA memory to 0 = forget past ?!
+                        # correct: 1 it wo. linesearch. skip somehow.
+                        # restartIteration = it;Gs = [Gs[it%rnaBufferSize]]; Fs = [[it%rnaBufferSize]]; Fes = [[it%rnaBufferSize]] # ? it+1?
+                        # TODO: poses_v can be much worse than the input poses_v.
+                        # Also poses_v may not be the best solution observed. (poses/landmarks)
+                        landmarks_test = landmarks.copy() # below overwrites landmarks internally.
+                        (cost, dre, L_in_cluster, Ul_in_cluster, poses_in_cluster_test, poses_v_test, landmarks_test, \
+                        nabla_p_in_cluster, blockEig_in_cluster_test, poses_s_in_cluster_pre_test, U_cluster_zeros, steplength) = \
+                            perform_full_iteration(camera_indices_in_cluster, point_indices_in_cluster,
+                                points_2d_in_cluster, poses_in_cluster_test, landmarks_test, poses_s_in_cluster, L_in_cluster,
+                                Ul_in_cluster, blockEig_in_cluster_in, kClusters, LipJ, innerIts, lastCostDRE_bfgs, outerit = globalIt)
+                        print("========== dre/dre_bfgs/lastCostDRE_bfgs  ===========", round(dre), " / " , round(dre_bfgs), " / ", round(lastCostDRE_bfgs))
+                        if maxPct * lastCostDRE_bfgs >= dre and (primal_cost_v > maxPctV * primal_cost_v_before): # better: overwrite
+                            print("Overwrite poses/landmarks/bl-eig")
+                            poses_v = poses_v_test
+                            landmarks = landmarks_test
+                            blockEig_in_cluster_ = [elem.copy() for elem in blockEig_in_cluster_test]
+                            poses_in_cluster = [elem.copy() for elem in poses_in_cluster_test]
+                            poses_s_in_cluster_pre = [elem.copy() for elem in poses_s_in_cluster_pre_test]
+
+                        dre_bfgs = dre # while loop uses this
+                    if True:
+                        lastCostDRE_bfgs = dre_bfgs # does not happen? needed to not keep running in it. Yet demanding Lip < X to enter should work
+
+                # revert whole iteration.
+                #it = it - 1
+                #its = its - 1
+                print(" ************** REVERTED iteration **************, DRE cost set to ", lastCostDRE_bfgs, " min LipJ", np.min(LipJ))
+                # must update costs as well. if LipJ increased, then costs are not valid. Recompute how?
+                # u and v and s known, but not step size change.
+
+                # poses_v, Ul_all_bfgs, U_cluster_zeros = average_cameras_new(# same if all U are adjusted / multiplied by a factor.
+                #     camera_indices_in_cluster, poses_in_cluster, poses_s_in_cluster, L_in_cluster, Ul_in_cluster, nabla_p_in_cluster_bfgs)
+                # print("|poses_v_before - poses_v| = ", np.linalg.norm(poses_v_before - poses_v, 2)) # v does not change Since multiplied by same value!
+                # after, _ = cost_DRE(camera_indices_in_cluster, poses_in_cluster, poses_s_in_cluster,
+                #                    L_in_cluster, Ul_in_cluster, poses_v, nabla_p_in_cluster_bfgs)
+                # primal_cost_v_before = 0
+                # for ci in range(kClusters):
+                #     primal_cost_v_before += primal_cost(
+                #         poses_v, # pose are different now? Should be after changing U.
+                #         camera_indices_in_cluster[ci],
+                #         point_indices_in_cluster[ci],
+                #         points_2d_in_cluster[ci],
+                #         landmarks)
+                #print("lastCostDRE_bfgs", lastCostDRE_bfgs, " primal_cost_v_before ", primal_cost_v_before, " dre after/before changing U ", after, " - ", before, " = ", after - before )
+                # if primal_cost_v_before > lastCostDRE_bfgs: # cost did not update. use v to replace u.
+                #     for ci in range(kClusters):
+                #         poses_in_cluster[ci] = poses_v.copy()
+
+
+                #lastCostDRE_bfgs = max(lastCostDRE_bfgs + after - before, primal_cost_v_before) # this should be different. Canot be the same. but it is.
 
                 # what is different?
-                # s = (v-u). U is U * sqrt(2)? 
-                # if f(v) < f(u), and f(u) + (u-s)^T U (u-s) -> 
+                # s = (v-u). U is U * sqrt(2)?
+                # if f(v) < f(u), and f(u) + (u-s)^T U (u-s) ->
                 # pulls towards v, f(v) has lower cost, so good? Haeh?
                 # s can be far beyond v though
                 # u ... v .... s "drawing a line"
                 # I can do a restart at u=v, s=0 and start at v. for all part with f(v)<f(u) ?
-                # use s = s + (u-v)?
+                # use s = s + (u-v)? could also work.
 
                 # ************** REVERTED iteration **************
                 # ---- |u-s|^2_D  1131028 |u-v|^2_D  1294132 |2u-s-v|^2_D  167405 |u-v|^2  43936  cost_dre  -481811.5150287446
@@ -2961,10 +3163,10 @@ else:
 
             else:
 
-                if lastCostDRE_bfgs < dre_bfgs and ls_it == line_search_iterations-1:
-                    #LipJ += 0.2 * np.ones(kClusters)
-                    partid = np.argmax(dre_per_part)
-                    LipJ[partid] *= np.sqrt(2) # maybe just the LARGEST dre cost.
+                # if lastCostDRE_bfgs < dre_bfgs and ls_it == line_search_iterations-1:
+                #     #LipJ += 0.2 * np.ones(kClusters)
+                #     partid = np.argmax(dre_per_part)
+                #     LipJ[partid] *= np.sqrt(2) # maybe just the LARGEST dre cost.
 
                 # accept / reject, reject all but drs and see
                 # if ls_it == line_search_iterations-1 :
@@ -3042,3 +3244,239 @@ result_dict = {"base_url": BASE_URL, "file_name": FILE_NAME, "iterations" : its,
                "bestCost60" : round(bestCost60), "bestCost30" : round(bestCost30) }
 with open('results_lm.json', 'a') as json_file:
     json.dump(result_dict, json_file)
+
+
+# This happens: f(v) explodes, f(u) is ok. unclear why. f(v) on 2s-u, so on, with  s=v
+# v + (v-u), i update Unorm, or not? No.
+#
+# 38 / 2  ======== DRE BFGS ======  380241  ========= gain  -142 ==== f(v)=  380241  f(u)=  379590
+# 38 / 2  f(v) =  [37134, 44380, 37415, 37653, 35927, 35316, 37948, 38194, 38007, 38267]  f(u) =  [36121, 44413, 37467, 37716, 35980, 35357, 38000, 38230, 38061, 38244]
+# dre_per_part  [142, -17, -27, -33, -27, -21, -27, -18, -28, 124]  adjust those >0.
+# LipJ[ 0 ] *= sqrt(2)
+# LipJ[ 9 ] *= sqrt(2)
+#  ************** REVERTED iteration ************** 
+# 39 / 0  ======== DRE BFGS ======  383443  ========= gain  -3345 ==== f(v)=  379796  f(u)=  384377
+# 39 / 0  f(v) =  [36552, 44437, 37389, 37689, 35957, 35330, 37951, 38204, 38035, 38254]  f(u) =  [39304, 44385, 37425, 37669, 35940, 35324, 37966, 38207, 38021, 40136]
+# 39 / 1  ======== DRE BFGS ======  383569  ========= gain  -3470 ==== f(v)=  379914  f(u)=  384545
+# 39 / 1  f(v) =  [36567, 44448, 37404, 37707, 35972, 35343, 37966, 38214, 38052, 38241]  f(u) =  [39323, 44400, 37444, 37691, 35961, 35342, 37984, 38218, 38042, 40139]
+# 39 / 2  ======== DRE BFGS ======  383696  ========= gain  -3597 ==== f(v)=  380035  f(u)=  384710
+# 39 / 2  f(v) =  [36583, 44459, 37422, 37727, 35987, 35355, 37980, 38224, 38067, 38230]  f(u) =  [39342, 44413, 37467, 37716, 35980, 35357, 38000, 38230, 38061, 40143]
+# LipJ *= sqrt(2)
+# redo it primal_cost_v_before  379830
+# 39   343490  gain  36609 . ============= sum fk update takes  4.0279059410095215  s
+# === DRE =  190757010.53807777  ==== f(v)=  190757011  f(u)=  343490
+# ========== dre/dre_bfgs/lastCostDRE_bfgs  =========== 190757011  /  383696  /  380098
+# LipJ *= sqrt(2)
+# redo it primal_cost_v_before  384510
+# 39   349627  gain  30471 . ============= sum fk update takes  4.036327123641968  s
+# === DRE =  450150.33285304083  ==== f(v)=  450150  f(u)=  349627
+# ========== dre/dre_bfgs/lastCostDRE_bfgs  =========== 450150  /  190757011  /  380098
+# LipJ *= sqrt(2)
+# redo it primal_cost_v_before  381911
+# 39   355877  gain  24221 . ============= sum fk update takes  4.030081033706665  s
+# === DRE =  630502.5129508901  ==== f(v)=  405035  f(u)=  355877
+# ========== dre/dre_bfgs/lastCostDRE_bfgs  =========== 630503  /  450150  /  380098
+# LipJ *= sqrt(2)
+# redo it primal_cost_v_before  380691
+# 39   361267  gain  18832 . ============= sum fk update takes  4.0222227573394775  s
+# === DRE =  1337173.691175914  ==== f(v)=  383432  f(u)=  361267
+# ========== dre/dre_bfgs/lastCostDRE_bfgs  =========== 1337174  /  630503  /  380098
+# LipJ *= sqrt(2)
+# redo it primal_cost_v_before  380041
+# 39   365685  gain  14414 . ============= sum fk update takes  4.049550294876099  s
+# === DRE =  583323.4647506168  ==== f(v)=  379592  f(u)=  365685
+# ========== dre/dre_bfgs/lastCostDRE_bfgs  =========== 583323  /  1337174  /  380098
+# LipJ *= sqrt(2)
+# redo it primal_cost_v_before  379680
+# 39   369143  gain  10956 . ============= sum fk update takes  4.013684034347534  s
+# === DRE =  14884050.365852276  ==== f(v)=  697845  f(u)=  369143
+# ========== dre/dre_bfgs/lastCostDRE_bfgs  =========== 14884050  /  583323  /  380098
+# LipJ *= sqrt(2)
+# redo it primal_cost_v_before  379457
+# 39   371829  gain  8269 . ============= sum fk update takes  4.029646635055542  s
+# === DRE =  69299090.5966848  ==== f(v)=  395303  f(u)=  371829
+# ========== dre/dre_bfgs/lastCostDRE_bfgs  =========== 69299091  /  14884050  /  380098
+# LipJ *= sqrt(2)
+# redo it primal_cost_v_before  379349
+# 39   373856  gain  6242 . ============= sum fk update takes  4.004608869552612  s
+# === DRE =  428102830.46147233  ==== f(v)=  501939  f(u)=  373856
+# ========== dre/dre_bfgs/lastCostDRE_bfgs  =========== 428102830  /  69299091  /  380098
+# LipJ *= sqrt(2)
+# redo it primal_cost_v_before  379292
+# 39   375297  gain  4801 . ============= sum fk update takes  3.998518705368042  s
+# === DRE =  568651258.2949247  ==== f(v)=  791120  f(u)=  375297
+# ========== dre/dre_bfgs/lastCostDRE_bfgs  =========== 568651258  /  428102830  /  380098
+# LipJ *= sqrt(2)
+# redo it primal_cost_v_before  379201
+# 39   376539  gain  3560 . ============= sum fk update takes  6.173205375671387  s
+# === DRE =  59344538113.72661  ==== f(v)=  864176  f(u)=  376539
+# ========== dre/dre_bfgs/lastCostDRE_bfgs  =========== 59344538114  /  568651258  /  380098
+# LipJ *= sqrt(2)
+# redo it primal_cost_v_before  379323
+# 39   377159  gain  2940 . ============= sum fk update takes  4.023008823394775  s
+# === DRE =  6873109835.247847  ==== f(v)=  630102  f(u)=  377159
+# ========== dre/dre_bfgs/lastCostDRE_bfgs  =========== 6873109835  /  59344538114  /  380098
+# LipJ *= sqrt(2)
+# redo it primal_cost_v_before  379147
+# 39   377716  gain  2382 . ============= sum fk update takes  4.019780158996582  s
+# === DRE =  854884423129.5579  ==== f(v)=  5310275264  f(u)=  377716
+# ========== dre/dre_bfgs/lastCostDRE_bfgs  =========== 854884423130  /  6873109835  /  380098
+# LipJ *= sqrt(2)
+# redo it primal_cost_v_before  379131
+# 39   378123  gain  1975 . ============= sum fk update takes  4.010003089904785  s
+# === DRE =  2549837182875.775  ==== f(v)=  2549837182876  f(u)=  378123
+# ========== dre/dre_bfgs/lastCostDRE_bfgs  =========== 2549837182876  /  854884423130  /  380098
+# LipJ *= sqrt(2)
+# redo it primal_cost_v_before  379128
+# 39   378414  gain  1684 . ============= sum fk update takes  3.9873905181884766  s
+# === DRE =  6.155338399720628e+18  ==== f(v)=  6155338399720628224  f(u)=  378414
+# ========== dre/dre_bfgs/lastCostDRE_bfgs  =========== 6155338399720628224  /  2549837182876  /  380098
+# LipJ *= sqrt(2)
+# redo it primal_cost_v_before  379128
+# 39   378621  gain  1477 . ============= sum fk update takes  4.014617443084717  s
+# === DRE =  14225204183377.303  ==== f(v)=  391086268123  f(u)=  378621
+# ========== dre/dre_bfgs/lastCostDRE_bfgs  =========== 14225204183377  /  6155338399720628224  /  380098
+# LipJ *= sqrt(2)
+# redo it primal_cost_v_before  379127
+# 39   378768  gain  1330 . ============= sum fk update takes  4.0474629402160645  s
+# === DRE =  91443863861521.16  ==== f(v)=  422243  f(u)=  378768
+# ========== dre/dre_bfgs/lastCostDRE_bfgs  =========== 91443863861521  /  14225204183377  /  380098
+# LipJ *= sqrt(2)
+# redo it primal_cost_v_before  379127
+# 39   378881  gain  1218 . ============= sum fk update takes  4.054133176803589  s
+# === DRE =  69844126218253.766  ==== f(v)=  585217  f(u)=  378881
+# ========== dre/dre_bfgs/lastCostDRE_bfgs  =========== 69844126218254  /  91443863861521  /  380098
+# LipJ *= sqrt(2)
+# redo it primal_cost_v_before  379135
+# 39   378947  gain  1152 . ============= sum fk update takes  4.043706178665161  s
+# === DRE =  2938257902659800.5  ==== f(v)=  916300  f(u)=  378947
+# ========== dre/dre_bfgs/lastCostDRE_bfgs  =========== 2938257902659800  /  69844126218254  /  380098
+# LipJ *= sqrt(2)
+# redo it primal_cost_v_before  379127
+# 39   379002  gain  1097 . ============= sum fk update takes  3.980386972427368  s
+# === DRE =  1.9562921182453336e+16  ==== f(v)=  3206060256  f(u)=  379002
+# ========== dre/dre_bfgs/lastCostDRE_bfgs  =========== 19562921182453336  /  2938257902659800  /  380098
+# LipJ *= sqrt(2)
+# redo it primal_cost_v_before  379129
+# 39   379042  gain  1057 . ============= sum fk update takes  3.978736400604248  s
+# === DRE =  9.386613697769077e+16  ==== f(v)=  476118  f(u)=  379042
+# ========== dre/dre_bfgs/lastCostDRE_bfgs  =========== 93866136977690768  /  19562921182453336  /  380098
+# LipJ *= sqrt(2)
+# redo it primal_cost_v_before  379132
+# 39   379065  gain  1034 . ============= sum fk update takes  4.113620758056641  s
+# === DRE =  4.917406285770662e+18  ==== f(v)=  757104888775  f(u)=  379065
+# ========== dre/dre_bfgs/lastCostDRE_bfgs  =========== 4917406285770661888  /  93866136977690768  /  380098
+# LipJ *= sqrt(2)
+# redo it primal_cost_v_before  379129
+# 39   379081  gain  1017 . ============= sum fk update takes  3.968573570251465  s
+# === DRE =  4.1664978721082e+18  ==== f(v)=  835322858579212800  f(u)=  379081
+# ========== dre/dre_bfgs/lastCostDRE_bfgs  =========== 4166497872108199936  /  4917406285770661888  /  380098
+# LipJ *= sqrt(2)
+# redo it primal_cost_v_before  379127
+# 39   379096  gain  1002 . ============= sum fk update takes  4.816242218017578  s
+# === DRE =  1.399766965618797e+19  ==== f(v)=  547004  f(u)=  379096
+# ========== dre/dre_bfgs/lastCostDRE_bfgs  =========== 13997669656187969536  /  4166497872108199936  /  380098
+# LipJ *= sqrt(2)
+# redo it primal_cost_v_before  379128
+# 39   379104  gain  994 . ============= sum fk update takes  4.154132127761841  s
+# === DRE =  1.7053747852430865e+20  ==== f(v)=  328351230560  f(u)=  379104
+# ========== dre/dre_bfgs/lastCostDRE_bfgs  =========== 170537478524308652032  /  13997669656187969536  /  380098
+# LipJ *= sqrt(2)
+# redo it primal_cost_v_before  379127
+# 39   379111  gain  988 . ============= sum fk update takes  4.142840623855591  s
+# === DRE =  5.2424358932343797e+20  ==== f(v)=  674913  f(u)=  379111
+# ========== dre/dre_bfgs/lastCostDRE_bfgs  =========== 524243589323437965312  /  170537478524308652032  /  380098
+# LipJ *= sqrt(2)
+# redo it primal_cost_v_before  379127
+# 39   379115  gain  983 . ============= sum fk update takes  3.9944612979888916  s
+# === DRE =  5.85540734559051e+20  ==== f(v)=  660620  f(u)=  379115
+# ========== dre/dre_bfgs/lastCostDRE_bfgs  =========== 585540734559050989568  /  524243589323437965312  /  380098
+# LipJ *= sqrt(2)
+# redo it primal_cost_v_before  379127
+# 39   379118  gain  980 . ============= sum fk update takes  4.000832557678223  s
+# === DRE =  2.797836453299929e+20  ==== f(v)=  311815516166954  f(u)=  379118
+# ========== dre/dre_bfgs/lastCostDRE_bfgs  =========== 279783645329992908800  /  585540734559050989568  /  380098
+# LipJ *= sqrt(2)
+# redo it primal_cost_v_before  379127
+# 39   379121  gain  977 . ============= sum fk update takes  4.402195692062378  s
+# === DRE =  4.577395605227692e+20  ==== f(v)=  821036  f(u)=  379121
+# ========== dre/dre_bfgs/lastCostDRE_bfgs  =========== 457739560522769170432  /  279783645329992908800  /  380098
+# LipJ *= sqrt(2)
+# redo it primal_cost_v_before  379127
+# 39   379122  gain  976 . ============= sum fk update takes  5.446583032608032  s
+# === DRE =  7.613400552515596e+20  ==== f(v)=  17852520  f(u)=  379122
+# ========== dre/dre_bfgs/lastCostDRE_bfgs  =========== 761340055251559645184  /  457739560522769170432  /  380098
+# LipJ *= sqrt(2)
+# redo it primal_cost_v_before  379127
+# 39   379124  gain  975 . ============= sum fk update takes  3.9413695335388184  s
+# === DRE =  1.1985122341107112e+22  ==== f(v)=  465098265  f(u)=  379124
+# ========== dre/dre_bfgs/lastCostDRE_bfgs  =========== 11985122341107112345600  /  761340055251559645184  /  380098
+# LipJ *= sqrt(2)
+# redo it primal_cost_v_before  379126
+# 39   379124  gain  974 . ============= sum fk update takes  3.95048189163208  s
+# === DRE =  2.290522796086007e+23  ==== f(v)=  792870919  f(u)=  379124
+# ========== dre/dre_bfgs/lastCostDRE_bfgs  =========== 229052279608600694882304  /  11985122341107112345600  /  380098
+# LipJ *= sqrt(2)
+# redo it primal_cost_v_before  379126
+# 39   379125  gain  973 . ============= sum fk update takes  3.9529242515563965  s
+# === DRE =  1.516478790864768e+24  ==== f(v)=  552770160  f(u)=  379125
+# ========== dre/dre_bfgs/lastCostDRE_bfgs  =========== 1516478790864767962578944  /  229052279608600694882304  /  380098
+# LipJ *= sqrt(2)
+# redo it primal_cost_v_before  379127
+# 39   379125  gain  973 . ============= sum fk update takes  3.9773995876312256  s
+# === DRE =  1.8385442494739986e+24  ==== f(v)=  11345624198648  f(u)=  379125
+# ========== dre/dre_bfgs/lastCostDRE_bfgs  =========== 1838544249473998591623168  /  1516478790864767962578944  /  380098
+# LipJ *= sqrt(2)
+# redo it primal_cost_v_before  379126
+# 39   379126  gain  973 . ============= sum fk update takes  4.262331485748291  s
+# === DRE =  2.966383134063178e+24  ==== f(v)=  603195  f(u)=  379126
+# ========== dre/dre_bfgs/lastCostDRE_bfgs  =========== 2966383134063177890791424  /  1838544249473998591623168  /  380098
+# LipJ *= sqrt(2)
+# redo it primal_cost_v_before  379126
+# 39   379126  gain  973 . ============= sum fk update takes  3.9998159408569336  s
+# === DRE =  9.986598309942735e+24  ==== f(v)=  721393  f(u)=  379126
+# ========== dre/dre_bfgs/lastCostDRE_bfgs  =========== 9986598309942734509572096  /  2966383134063177890791424  /  380098
+# LipJ *= sqrt(2)
+# redo it primal_cost_v_before  379126
+# 39   379126  gain  972 . ============= sum fk update takes  4.004295110702515  s
+# === DRE =  1.3456102991690093e+25  ==== f(v)=  653088  f(u)=  379126
+# ========== dre/dre_bfgs/lastCostDRE_bfgs  =========== 13456102991690092658032640  /  9986598309942734509572096  /  380098
+# LipJ *= sqrt(2)
+# redo it primal_cost_v_before  379126
+# 39   379126  gain  972 . ============= sum fk update takes  3.9681057929992676  s
+# === DRE =  9.395730635533765e+25  ==== f(v)=  665623  f(u)=  379126
+# ========== dre/dre_bfgs/lastCostDRE_bfgs  =========== 93957306355337647546695680  /  13456102991690092658032640  /  380098
+# LipJ *= sqrt(2)
+# redo it primal_cost_v_before  379126
+# 39   379126  gain  972 . ============= sum fk update takes  3.99131441116333  s
+# === DRE =  1.724430730719231e+26  ==== f(v)=  88007220151806704222208  f(u)=  379126
+# ========== dre/dre_bfgs/lastCostDRE_bfgs  =========== 172443073071923096492965888  /  93957306355337647546695680  /  380098
+# LipJ *= sqrt(2)
+# redo it primal_cost_v_before  379126
+# 39   379126  gain  972 . ============= sum fk update takes  3.9638092517852783  s
+# === DRE =  2.788136277600267e+26  ==== f(v)=  543831  f(u)=  379126
+# ========== dre/dre_bfgs/lastCostDRE_bfgs  =========== 278813627760026710412623872  /  172443073071923096492965888  /  380098
+# LipJ *= sqrt(2)
+# redo it primal_cost_v_before  379126
+# 39   379126  gain  972 . ============= sum fk update takes  3.9993371963500977  s
+# === DRE =  2.144377220202073e+26  ==== f(v)=  536186  f(u)=  379126
+# ========== dre/dre_bfgs/lastCostDRE_bfgs  =========== 214437722020207306987274240  /  278813627760026710412623872  /  380098
+# LipJ *= sqrt(2)
+# redo it primal_cost_v_before  379126
+# 39   379126  gain  972 . ============= sum fk update takes  3.9874825477600098  s
+# === DRE =  5.905861254345779e+27  ==== f(v)=  1787120  f(u)=  379126
+# ========== dre/dre_bfgs/lastCostDRE_bfgs  =========== 5905861254345778829675462656  /  214437722020207306987274240  /  380098
+# LipJ *= sqrt(2)
+# redo it primal_cost_v_before  379126
+# 39   379126  gain  972 . ============= sum fk update takes  4.806380987167358  s
+# === DRE =  5.718378460055632e+27  ==== f(v)=  186230840192008  f(u)=  379126
+# ========== dre/dre_bfgs/lastCostDRE_bfgs  =========== 5718378460055632378157072384  /  5905861254345778829675462656  /  380098
+# LipJ *= sqrt(2)
+# redo it primal_cost_v_before  379126
+# 39   379126  gain  972 . ============= sum fk update takes  4.016084909439087  s
+# === DRE =  2.9365408889761576e+28  ==== f(v)=  331922979  f(u)=  379126
+# ========== dre/dre_bfgs/lastCostDRE_bfgs  =========== 29365408889761575698484428800  /  5718378460055632378157072384  /  380098
+# LipJ *= sqrt(2)
+
+# Another issue 646 occurs, likely in focal length vs z-coord or kappa?
+# local optimization jumps big in 1 part. there is a huge gap parameter space from 1 part to the rest.

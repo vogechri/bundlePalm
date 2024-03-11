@@ -1,5 +1,5 @@
 {"base_url": "http://grail.cs.washington.edu/projects/bal/data/venice/", "file_name": "problem-52-64053-pre.txt.bz2", "iterations": 60, "bestCost": 478716, "bestIt": 59, "kClusters": 10, "bestCost60": 478716, "bestCost30": 508629}
-# n ovnorm
+# no vnorm
 {"base_url": "http://grail.cs.washington.edu/projects/bal/data/dubrovnik/", "file_name": "problem-173-111908-pre.txt.bz2", "iterations": 60, "bestCost": 504000, "bestIt": 59, "kClusters": 10, "bestCost60": 504000, "bestCost30": 505323}
 {"base_url": "http://grail.cs.washington.edu/projects/bal/data/venice/", "file_name": "problem-52-64053-pre.txt.bz2", "iterations": 60, "bestCost": 479851, "bestIt": 59, "kClusters": 10, "bestCost60": 479851, "bestCost30": 521465}
 {"base_url": "http://grail.cs.washington.edu/projects/bal/data/venice/", "file_name": "problem-89-110973-pre.txt.bz2", "iterations": 60, "bestCost": 566926, "bestIt": 59, "kClusters": 10, "bestCost60": 566926, "bestCost30": 568301}

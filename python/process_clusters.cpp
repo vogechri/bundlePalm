@@ -1662,7 +1662,9 @@ double GetOrderCost(const std::map<int, std::set<int>> &landmarkFromCameraOfPart
   double p = static_cast<double>(res_in_cluster) / static_cast<double>(total_res);
   double costKlDivEquality = - std::log(p * static_cast<double>(kClusters)) / static_cast<double>(kClusters); // quite strong yet impacts degeneracy
   // mean 
-  return cost / static_cast<double>(std::max(1, entries)) + 1e-0 / static_cast<double>(res_in_cluster) + 1e-3 * costKlDivEquality;
+  // TODO: 356 was 1e-3 one component remains. 1e-2: better, still 4 large 6 small cluster.
+  // Could also use 1e-3, eval if not recompute with 1e-2, etc.
+  return cost / static_cast<double>(std::max(1, entries)) + 1e-0 / static_cast<double>(res_in_cluster) + 1e-1 * costKlDivEquality;
   // return cost / std::sqrt(static_cast<double>(std::max(1, entries))) + 1e-0 / static_cast<double>(res_in_cluster);
 }
 
