@@ -1566,7 +1566,7 @@ def bundle_adjust(
         blockEigMultJtJ = 1e-4 # 173: little effect 1e-6/4/8. just 173 or always not mattering much?
         blockEigMultLimit = 1e-5 # maybe now can be more lose? 5 cluster needed blockEigenvalueWhereNeeded(JtJ, 9, 1e-4)
         # limit lower -> major effect from partitioning only?
-        # 1e-5 even better than 1e-7. 
+        # 1e-5 even better than 1e-7.
         # 1. fix rng, 2. is there structure, how identify if good or bad part?
         # blockEigMult not import for 173 but 52 yes
         # adapt blockEigMult based on check? pass up and down hierarchy?
@@ -1719,7 +1719,7 @@ def bundle_adjust(
                 # default 1e-4. 1e-6 for 173: slightly worse| 1e-6 for 52: also worse now (maybe was the other way round).
                 #               1e-3 for 173: | 1e-3 for 52: ok 1e-3 or 1e-4? might be highly random based on clustering.
                 # 1e-3 appears a bit better.
-                blockEigenvalueJtJ = blockEigenvalueWhereNeeded(JtJ, 9, 1e-3) # ! 1e-4 1e-5 als works. problem 52, 1e-6 does not 173 performance bad if not 1e-6?
+                blockEigenvalueJtJ = blockEigenvalueWhereNeeded(JtJ, 9, 1e-2) # ! 1e-4 1e-5 als works. problem 52, 1e-6 does not 173 performance bad if not 1e-6?
                 #blockEigenvalueJtJ = 1e-1 * blockEigenvalue(JtJ, 9) # ! try 173 & 52, fails at 1e-2, 10 clusters. 1e-1 ok for 173 & 52. (not dead)
 
                 # TODO: LipJ for both? or only JJ?
@@ -2436,7 +2436,7 @@ sequential = True
 linearize_at_last_solution = True # linearize at uk or v. maybe best to check energy. at u or v. DRE:
 lib = ctypes.CDLL("./libprocess_clusters.so")
 init_lib()
-LipJ = np.ones(kClusters)
+LipJ = 2 * np.ones(kClusters)
 blockEig_in_cluster_ = 1e-5 * np.ones(kClusters)
 for ci in range(kClusters):
     print("input blockEig_in_cluster_[ci] ", blockEig_in_cluster_[ci])
