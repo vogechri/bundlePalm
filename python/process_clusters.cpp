@@ -19,6 +19,7 @@
 #include <random> // for std::mt19937
 #include <chrono> // for std::chrono
 
+#define  _orderKLDiv_ 1e-1
 //#define _rngseed_ 999 // 529k
 #define _rngseed_ 123 // 527k, but intermediate (60 its) results bad.
 
@@ -1664,7 +1665,7 @@ double GetOrderCost(const std::map<int, std::set<int>> &landmarkFromCameraOfPart
   // mean 
   // TODO: 356 was 1e-3 one component remains. 1e-2: better, still 4 large 6 small cluster.
   // Could also use 1e-3, eval if not recompute with 1e-2, etc.
-  return cost / static_cast<double>(std::max(1, entries)) + 1e-0 / static_cast<double>(res_in_cluster) + 1e-1 * costKlDivEquality;
+   return cost / static_cast<double>(std::max(1, entries)) + 1e-0 / static_cast<double>(res_in_cluster) + _orderKLDiv_ * costKlDivEquality;
   // return cost / std::sqrt(static_cast<double>(std::max(1, entries))) + 1e-0 / static_cast<double>(res_in_cluster);
 }
 

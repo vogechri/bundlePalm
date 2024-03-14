@@ -1594,28 +1594,38 @@ def bundle_adjust(
     powerits = 100 # kind of any value works here? > =5?
     tr_eta_1 = 0.8
     tr_eta_2 = 0.25
-
+    decent_lemma_divisor = 2 #6 #4 # 4 does indeed delay flow over, but result is worse.
+    
     # False: 59 / 0  ======== DRE BFGS ======  536487
     newVersion = True
     # TODO: This parameter block is ok blockEigMultJtJ 1e-5, LipJ = 2, blockEigenvalueWhereNeeded 1e-2, might be slightly better than blockEigMultJtJ 1e-4 ? / use LipJ = 2 * np.ones(kClusters) appears safe.
     # also try 'True' below (maybe speed up). Try restart with L increased for all.
     if newVersion:
-        # JJ_mult = 2 less flipping much slower in ladybug646, 
-        # but 119 / 1  ======== DRE BFGS ======  391600  ========= gain  531 ==== f(v)=  374313  f(u)=  376802  ~=  376801.807411641 
+        # JJ_mult = 2 less flipping much slower in ladybug646,
+        # but 119 / 1  ======== DRE BFGS ======  391600  ========= gain  531 ==== f(v)=  374313  f(u)=  376802  ~=  376801
         # Lesson appears to be: use LipJ, maybe * sqrt(2) instead.
         JJ_mult = 1 #+ L # YES! .. should i add tr thing instead, no? use first in computing deriv 2nd time (simple test to lower this here.)
         blockEigMult = 1e-5 # 1e-7 fails with venice'52' 173 demands 1e-3/1e-4/1e-5? 52:1e-6 totally fails. Maybe also True below (recomp jacobian): yes stable
         blockEigMultJtJ = 1e-4 # 173: little effect 1e-6/4/8. just 173 or always not mattering much?
         blockEigMultLimit = 1e-5 # maybe now can be more lose? 5 cluster needed blockEigenvalueWhereNeeded(JtJ, 9, 1e-4)
         blockEigLowerMultLimit = 1e-1 # 1e-2?
+        blockEigenvalueWhereNeededThresh = 1e-2
         # limit lower -> major effect from partitioning only?
         # 1e-5 even better than 1e-7.
         # 1. fix rng, 2. is there structure, how identify if good or bad part?
         # blockEigMult not import for 173 but 52 yes
         # adapt blockEigMult based on check? pass up and down hierarchy?
         # problem 1e-3/4/5 good for 173, not for 52. 52: better for 1e-6 bad for 1e-5 etc.
-        blockEigMult = blockEig_in_c_
-        print("blockEig_in_c_ ", blockEig_in_c_, file=sys.stderr)
+
+        old = True #False
+        if old:
+            blockEigMult = blockEig_in_c_ # fixed
+        else:
+            stepMult = blockEig_in_c_ # this varies now changing setpSize fully (not just eigenvalue part)
+            blockEigMultLimit = 1 # maybe now can be more lose? 5 cluster needed blockEigenvalueWhereNeeded(JtJ, 9, 1e-4)
+            blockEigLowerMultLimit = 16 # 1e-2?
+
+        #print(" ######################## stepMult / blockEig_in_c_ ", blockEig_in_c_, file=sys.stderr)
 
     it_ = 0
     funx0_st1 = lambda X0, X1, X2: \
@@ -1764,13 +1774,17 @@ def bundle_adjust(
                 # default 1e-4. 1e-6 for 173: slightly worse| 1e-6 for 52: also worse now (maybe was the other way round).
                 #               1e-3 for 173: | 1e-3 for 52: ok 1e-3 or 1e-4? might be highly random based on clustering.
                 # 1e-3 appears a bit better.
-                blockEigenvalueJtJ = blockEigenvalueWhereNeeded(JtJ, 9, 1e-3) # ! 1e-2, 1e-4 1e-5 als works. problem 52, 1e-6 does not 173 performance bad if not 1e-6?
+                blockEigenvalueJtJ = blockEigenvalueWhereNeeded(JtJ, 9, blockEigenvalueWhereNeededThresh) # ! 1e-2, 1e-4 1e-5 als works. problem 52, 1e-6 does not 173 performance bad if not 1e-6?
                 #blockEigenvalueJtJ = 1e-1 * blockEigenvalue(JtJ, 9) # ! try 173 & 52, fails at 1e-2, 10 clusters. 1e-1 ok for 173 & 52. (not dead)
 
                 # TODO: LipJ for both? or only JJ?
                 #stepSize = JJ_mult * JtJ.copy() + blockEigMult * blockEigenvalueJtJ
                 stepSize = LipJ_ * JtJ.copy() + blockEigMult * blockEigenvalueJtJ
                 JtJDiag = JtJ.copy() + blockEigMultJtJ * blockEigenvalueJtJ
+
+                # TODO new
+                if not old:
+                    stepSize *= stepMult
 
                 #JtJDiag = 1e-4 * blockEigMult * blockEigenvalueJtJ # this could also work?
                 maxE, minE = minmaxEv(stepSize, 9)
@@ -1883,30 +1897,21 @@ def bundle_adjust(
         tr_check = (costStart + penaltyStart - costEnd - penaltyP - penaltyL) / (costStart + penaltyStart - costQuad - penaltyP - penaltyL)
         #tr_check = (costStart - costEnd) / (costStart - costQuad) # does not help.
 
-        old_descent_lemma = True # TODO: test this with 4 on some examples.
-        if old_descent_lemma:
-            decent_lemma_divisor = 2
-        else:
-            # f(x) <= f(y) + <nabla(f(y) x-y> + Lf/2 |x-y|^2
-            # we demand stepsize phi >= 2 Lf. Then even
-            # f(x) <= f(y) + <nabla(f(y) x-y> + phi/4 |x-y|^2
-            # (f(x) - f(y) - <nabla(f(y) x-y>) * 4 / |x-y|^2  <= phi, recall actual gradient:
-            # J^t fx0 = bp|bl , no L. grad at f(x) is L * JtJDiag * delta_p - s
-            # f(x) is costEnd
-            # still runs into 646 problem
-            decent_lemma_divisor = 6 #4 # 4 does indeed delay flow over, but result is worse.
-            # another problem when dre is set to prim_v (since dre<primv) this can be lower than
-            # true dre. so we should inc or not use this as best dre?
+        # f(x) <= f(y) + <nabla(f(y) x-y> + Lf/2 |x-y|^2
+        # we demand stepsize phi >= 2 Lf. Then even
+        # f(x) <= f(y) + <nabla(f(y) x-y> + phi/4 |x-y|^2
+        # (f(x) - f(y) - <nabla(f(y) x-y>) * 4 / |x-y|^2  <= phi, recall actual gradient:
+        # J^t fx0 = bp|bl , no L. grad at f(x) is L * JtJDiag * delta_p - s
+        # f(x) is costEnd
+        # still runs into 646 problem
+        # another problem when dre is set to prim_v (since dre<primv) this can be lower than
+        # true dre. so we should inc or not use this as best dre?
 
         #nablaXp = L * JtJDiag * delta_p  # actual gradient. discussable TODO
         nablaXl = JltJlDiag * delta_l  # actual gradient: J^t fx0 = bp|bl
         Lfkconst = costEnd - costStart
         Lfklin = bp.dot(delta_p) + bl.dot(delta_l)
         # The tr part? Deriv of (delta_l).dot(JltJlDiag * delta_l) at delta_l=0 is 0
-        if newVersion:
-            nablaXp = JtJDiag * delta_p # idea here 1/L is dropped so no need to correct this.
-            # TODO This does not belong here, no? DL is not including prox term. It is plain function only.
-            #Lfklin = Lfklin + (delta_p + prox_rhs).dot(stepSize * (delta_p + prox_rhs)) - penaltyStartConst
 
         # TODO actually not clear. I look at at as if l part is not there or implicit.
         LfkQuad = (delta_l.dot(nablaXl) + delta_p.dot(stepSize * delta_p)) / decent_lemma_divisor
@@ -1924,10 +1929,12 @@ def bundle_adjust(
 
         LfkDistance  = Lfkconst - Lfklin - LfkQuad
         LfkViolated = LfkDistance > 0
-        LfkSafe = Lfklin < 0 # for any phi ok.
+        # LfkSafe = Lfklin < 0 # for any phi ok. TODO haeh?
+        # TODO ?
+        LfkSafe = Lfkconst < Lfklin
 
         if tr_check < tr_eta_2: # and False: # TR should not help here. Maybe apply differently? TR checks if approx w. JtJ is ok within region.
-            print(" //////  tr_check " , tr_check, " Lfk distance ", LfkDistance, " -nabla^Tdelta=" , -Lfklin, " /////", file=sys.stderr)
+            print(" //////  tr_check " , tr_check, " Lfk distance ", LfkDistance, " Lfklin=" , Lfklin, " /////", file=sys.stderr)
             L = L * 2
             if not newVersion:
                 JtJDiag = 1/2 * JtJDiag # why that? tr only for landmarks here..
@@ -1948,9 +1955,14 @@ def bundle_adjust(
             # other idea, initially we only add 1/2^k eg 0.125, times the needed value and inc if necessary, maybe do not add anything if not needed.
 
             # indeed reliable to get over.
-            stepSize += 3 * blockEigMult * blockEigenvalueJtJ
-            blockEigMult *= 4
-            #blockEigenvalueJtJ.data *= 2 # appears slow but safe
+            if old:
+                stepSize += 3 * blockEigMult * blockEigenvalueJtJ
+                blockEigMult *= 4
+                #blockEigenvalueJtJ.data *= 2 # appears slow but safe
+            else:
+                stepMult *= 2
+                stepSize *= 2
+                print("############# stepMult changed ", stepMult )
 
             # try this
             #minDiag *= 2
@@ -1977,7 +1989,10 @@ def bundle_adjust(
                 JtJDiag = 2 * JtJDiag # we return this maybe -- of course stupid to do in a release version
 
         if (newVersion and LfkSafe and not steSizeTouched):
-            blockEigMult /= 2
+            if old:
+                blockEigMult /= 2
+            else:
+                stepMult /=2
 
         # version with penalty check for ADMM convergence / descent lemma. Problem: slower?
         if costStart + penaltyStart < costEnd + penaltyL  + penaltyP or LfkViolated:
@@ -1994,13 +2009,13 @@ def bundle_adjust(
             it_ = it_ + 1
             updateJacobian = True
 
-        print(" ------- Lfk distance ", LfkDistance, " tr_check ", tr_check,  " LipJ ", LipJ_, " blockEig ", blockEigMult, " -------- ", file=sys.stderr)
+        print(" ------- Lfk distance ", round(LfkDistance), " tr_check ", tr_check, " Lfkconst - Lfklin ", round(Lfkconst - Lfklin),  " LipJ ", LipJ_, " blockEig ", blockEigMult, " -------- ", file=sys.stderr)
 
     x0_p_ = x0_p_.reshape(n_cameras_, 9)
     x0_l_ = x0_l_.reshape(n_points_, 3)
 
     # idea use latest for better control ?
-    getBetterStepSize = False # this is used as approx of f in update of v and thus s. maybe change there u-v should be small. 
+    getBetterStepSize = False # this is used as approx of f in update of v and thus s. maybe change there u-v should be small.
     if getBetterStepSize: # needs to set L correctly
         J_pose, J_land, fx0 = ComputeDerivativeMatricesNew(
             x0_t_cam, x0_t_land, camera_indices_, point_indices_, torch_points_2d, unique_poses_in_c_, unique_landmarks_in_c_)
@@ -2038,9 +2053,19 @@ def bundle_adjust(
         bp = J_pose.transpose() * fx0
         #JJ_mult = 1 + np.maximum(minimumL, np.minimum(L_in_cluster_ * 2, L)) # might have changed .. must be off sigh
         #blockEigenvalueJtJ = blockEigenvalue(JtJ, 9) # TODO: what if this is only needed for 0-eigen directions? return !=0 only if in small eigendir
-        blockEigenvalueJtJ = blockEigenvalueWhereNeeded(JtJ, 9, 1e-3) # ! 1e-2, 1e-4 1e-5 als works. problem 52, 1e-6 does not 173 performance bad if not 1e-6?
+        blockEigenvalueJtJ = blockEigenvalueWhereNeeded(JtJ, 9, blockEigenvalueWhereNeededThresh) # ! 1e-2, 1e-4 1e-5 als works. problem 52, 1e-6 does not 173 performance bad if not 1e-6?
         #stepSize = JJ_mult * JtJ.copy() + blockEigMult * blockEigenvalueJtJ
-        stepSize = LipJ_ * JtJ.copy() + blockEigMult * blockEigenvalueJtJ
+
+        if (newVersion and LfkSafe and not steSizeTouched):  # address that parameter was reduced
+            if old:
+                stepSize = LipJ_ * JtJ.copy() + blockEigMult / 2 * blockEigenvalueJtJ
+            else:
+                stepSize = stepMult / 2 * (LipJ_ * JtJ.copy() + blockEigMult * blockEigenvalueJtJ)
+        else:
+            if old:
+                stepSize = LipJ_ * JtJ.copy() + blockEigMult * blockEigenvalueJtJ
+            else:
+                stepSize = stepMult * (LipJ_ * JtJ.copy() + blockEigMult * blockEigenvalueJtJ)
 
         if not newVersion:
             JtJDiag = 1/L * stepSize.copy() # max 1, 1/L, line-search dre fails -> increase
@@ -2050,13 +2075,32 @@ def bundle_adjust(
 
     nabla_p = bp.copy()
     Rho = L * JtJDiag #+ 1e-12 * Ul
-    if (newVersion and LfkSafe and not steSizeTouched):
-        blockEigMult = np.minimum(blockEigLowerMultLimit, np.maximum(blockEigMultLimit, 2*blockEigMult))
-    else:
-        blockEigMult = np.minimum(blockEigLowerMultLimit, np.maximum(blockEigMultLimit, blockEigMult))
+    # if (newVersion and LfkSafe and not steSizeTouched): # appears to be wrong correct for computing stepSize
+    #     if old:
+    #         blockEigMult = 2 * blockEigMult
+    #     else:
+    #         stepMult = 2 * stepMult
+
+    # why not at start?
+    # if old:
+    #     blockEigMult = np.minimum(blockEigLowerMultLimit, np.maximum(blockEigMultLimit, blockEigMult))
+    # else:
+    #     stepMult = np.minimum(blockEigLowerMultLimit, np.maximum(blockEigMultLimit, stepMult))
+
     if newVersion:
-        stepSize = LipJ_ * JtJ.copy() + blockEigMult * blockEigenvalueJtJ
+        #stepSize = LipJ_ * JtJ.copy() + blockEigMult * blockEigenvalueJtJ # why recompute?
         Rho = stepSize # is this an issue if we adjust stepsize?
+
+    if not old:
+        # Rho = stepMult * stepSize # is this an issue if we adjust stepsize?
+        blockEigMult = stepMult # return this
+
+    # if (newVersion and LfkSafe and not steSizeTouched): # appears to be wrong correct for computing
+    #     if old:
+    #         blockEigMult = blockEigMult / 2 # supposedly safe to lower ? not at all.
+    #     else:
+    #         stepMult = stepMult / 2
+    #         blockEigMult = stepMult # return this
 
     # TODO: preconditioning should influence this.
     # this should be less communication, where do we get to? 518k vs 875k. With PCG does work now.
@@ -2083,6 +2127,7 @@ def bundle_adjust(
 
     #L_out = np.maximum(minimumL, np.minimum(L_in_cluster_ * 2, L)) # not clear if generally ok, or 2 or 4 should be used.
     L_out = np.maximum(minimumL, (L_in_cluster_ + L) / 2) # not clear if generally ok, or 2 or 4 should be used.
+    blockEigMult = np.minimum(blockEigLowerMultLimit, np.maximum(blockEigMultLimit, blockEigMult))
     return costEnd, x0_p_, x0_l_, L_out, Rho, nabla_p, blockEigMult
 
     # recall solution wo. splitting is
@@ -2550,7 +2595,10 @@ linearize_at_last_solution = True # linearize at uk or v. maybe best to check en
 lib = ctypes.CDLL("./libprocess_clusters.so")
 init_lib()
 LipJ = 1 * np.ones(kClusters)
+
 blockEig_in_cluster_ = 1e-5 * np.ones(kClusters)
+#blockEig_in_cluster_ = np.ones(kClusters) # old -> False
+
 for ci in range(kClusters):
     print("input blockEig_in_cluster_[ci] ", blockEig_in_cluster_[ci])
 
@@ -2639,15 +2687,15 @@ if basic_version:
             blockEig_in_cluster_
         ) = prox_f(
             camera_indices_in_cluster, point_indices_in_cluster, points_2d_in_cluster,
-            poses_in_cluster, landmarks, poses_s_in_cluster, L_in_cluster, Ul_in_cluster, blockEig_in_cluster_,
-            kClusters, LipJ, innerIts=innerIts, sequential=True,
+            poses_in_cluster, landmarks, poses_s_in_cluster, L_in_cluster, Ul_in_cluster,
+            blockEig_in_cluster_, kClusters, LipJ, innerIts=innerIts, sequential=True,
             )
         end = time.time()
 
         #print("++++++++++++++++++ globalSingleLandmarksB_in_c[0].shape ", globalSingleLandmarksB_in_c[0].shape)
 
         currentCost = np.sum(cost)
-        print(globalIt, " ", round(currentCost), " gain ", round(lastCost - currentCost), ". ============= sum fk update takes ", end - start," s",)
+        print(globalIt, " ", round(currentCost), " gain ", round(lastCost - currentCost), ". ============= sum fk update takes ", end - start," s")
 
         poses_v, _, Up_cluster = average_cameras_new(
             camera_indices_in_cluster, poses_in_cluster, poses_s_in_cluster, L_in_cluster, Ul_in_cluster, nabla_p_in_cluster) # old_poses for costs?
@@ -2686,7 +2734,7 @@ if basic_version:
 
         dre = max( primal_cost_v, dre ) # sandwich lemma, prevent maybe chaos
         print( globalIt, " ======== DRE ====== ", round(dre) , " ========= gain " , \
-            round(lastCostDRE - dre), "==== f(v)= ", round(primal_cost_v), " f(u)= ", round(primal_cost_u))
+            round(lastCostDRE - dre), "==== f(v)= ", round(primal_cost_v), " f(u)= ", round(primal_cost_u), " BE ", blockEig_in_cluster_ )
 
         if lastCostDRE < dre:
             #LipJ += 0.2 * np.ones(kClusters)
@@ -2993,7 +3041,7 @@ else:
 
             dre_bfgs = max(dre_bfgs, primal_cost_v) # sandwich lemma 
             print( globalIt, "/", ls_it, " ======== DRE BFGS ====== ", round(dre_bfgs) , " ========= gain " , \
-                round(lastCostDRE_bfgs - dre_bfgs), "==== f(v)= ", round(primal_cost_v), " f(u)= ", round(primal_cost_u))
+                round(lastCostDRE_bfgs - dre_bfgs), "==== f(v)= ", round(primal_cost_v), " f(u)= ", round(primal_cost_u), " BE ", blockEig_in_cluster_bfgs)
             print( globalIt, "/", ls_it, " f(v) = ", primal_cost_v_all, " f(u) = ", primal_cost_u_all)
             bestCost = np.minimum(primal_cost_v, bestCost)
             bestIt = globalIt
@@ -3001,7 +3049,12 @@ else:
                 bestCost60 = bestCost
             if globalIt < 30:
                 bestCost30 = bestCost
+
+            # todo find eaxmple where quickly does not work.
+            # lip is for both or multiplied with both?
+            # is the DL check. the DL check works on both with fixed ratio maybe?
             
+
             LipJMax = 16 # 6.x was computed
             iteration_factor      = (1 - (globalIt / its))**4 # 1 at start, ~0 at end.
             iteration_factor_five = (1 - (5 / its))**4 #, could also running mean of gains and use 5% of those (positive gains, if < - (5% of mean) ).
@@ -3105,7 +3158,7 @@ else:
                             perform_full_iteration(camera_indices_in_cluster, point_indices_in_cluster,
                                 points_2d_in_cluster, poses_in_cluster_test, landmarks_test, poses_s_in_cluster, L_in_cluster,
                                 Ul_in_cluster, blockEig_in_cluster_in, kClusters, LipJ, innerIts, lastCostDRE_bfgs, outerit = globalIt)
-                        print("========== dre/dre_bfgs/lastCostDRE_bfgs  ===========", round(dre), " / " , round(dre_bfgs), " / ", round(lastCostDRE_bfgs))
+                        print("========== dre/dre_bfgs/lastCostDRE_bfgs  ===========", round(dre), " / " , round(dre_bfgs), " / ", round(lastCostDRE_bfgs), " BE ", blockEig_in_cluster_bfgs)
                         if maxPct * lastCostDRE_bfgs >= dre and (primal_cost_v > maxPctV * primal_cost_v_before): # better: overwrite
                             print("Overwrite poses/landmarks/bl-eig")
                             poses_v = poses_v_test
