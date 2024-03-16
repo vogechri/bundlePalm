@@ -851,16 +851,19 @@ def blockEigenvalueSet(M, bs):
             Ei[:, i] = evs
     return Ei
 
-def minEigenvalues(M, bs):
-    Ei = np.zeros((1, int(M.data.shape[0] / bs)))
+def minEigenvalues(M, bs, get_max_evs=False):
     bs2 = bs * bs
+    Ei = np.zeros(int(M.data.shape[0] / bs2))
     for i in range(int(M.data.shape[0] / bs2)):
         mat = M.data[bs2 * i : bs2 * i + bs2].reshape(bs, bs).copy()
         if not check_symmetric(mat):
             mat = np.fliplr(mat)
         # print(i, " ", mat)
         evs = eigvalsh(mat)
-        Ei[:, i] = np.maximum(1e-16, evs[0])
+        if get_max_evs:
+            Ei[i] = np.maximum(1e-16, evs[bs-1])
+        else:
+            Ei[i] = np.maximum(1e-16, evs[0])
     return Ei
 
 def blockEigenvalueWhereNeeded(M, bs, thresh = 1e-6):
@@ -1569,6 +1572,7 @@ def bundle_adjust(
     blockEig_in_c_,
     unique_poses_in_c_, # global indices, needed for pcg
     unique_landmarks_in_c_,
+    cluster_id,
     successfull_its_=1,
 ):
     newForUnique = False
@@ -1608,6 +1612,8 @@ def bundle_adjust(
         blockEigMultJtJ = 1e-4 # 173: little effect 1e-6/4/8. just 173 or always not mattering much?
         blockEigMultLimit = 1e-5 # maybe now can be more lose? 5 cluster needed blockEigenvalueWhereNeeded(JtJ, 9, 1e-4)
         blockEigLowerMultLimit = 1e-1 # 1e-2?
+        decent_lemma_divisor = 2 # 2/4: higher does indeed delay flow over, but result is worse.
+        Derivative_at_end = False # maybe negative to have update v and updte u differ.
         # limit lower -> major effect from partitioning only?
         # 1e-5 even better than 1e-7.
         # 1. fix rng, 2. is there structure, how identify if good or bad part?
@@ -1616,6 +1622,17 @@ def bundle_adjust(
         # problem 1e-3/4/5 good for 173, not for 52. 52: better for 1e-6 bad for 1e-5 etc.
         blockEigMult = blockEig_in_c_
         print("blockEig_in_c_ ", blockEig_in_c_, file=sys.stderr)
+
+    allowDecreaseBlockEig = False
+    use_be_memory = True
+    memory_be = 6 # here can shrink, below this only grow.
+    if use_be_memory and len(tempBlockEigen[cluster_id]) > 1:
+        if len(tempBlockEigen[cluster_id]) >= memory_be:
+            tempBlockEigen[cluster_id][globalIt % memory_be] = 0 # remove current
+        #tmp = np.array(tempBlockEigen[cluster_id])
+        #print("blockEigMult ", blockEigMult, " 1000 * tmp ", 1000 * tmp, " maxbe ", np.max(tmp, axis=0))
+        #blockEigMult = np.maximum(blockEigMult, np.max(tmp, axis=0)) # else always larger / pointless same as base version
+        blockEigMult = np.max(tempBlockEigen[cluster_id], axis=0)
 
     it_ = 0
     funx0_st1 = lambda X0, X1, X2: \
@@ -1638,7 +1655,6 @@ def bundle_adjust(
     #     stepSize = diag_sparse(Ul_in_c_.diagonal())
 
     steSizeTouched = False
-
     while it_ < successfull_its_:
 
         if updateJacobian:  # not needed if rejected
@@ -1671,8 +1687,6 @@ def bundle_adjust(
             #blockEigenvalueJtJ = blockEigenvalue(JtJ, 9) # TODO: what if this is only needed for 0-eigen directions? return !=0 only if in small eigendir
             blockEigenvalueJtJ = blockEigenvalueWhereNeeded(JtJ, 9, 1e-6) # here ok? 173: 1e-6
             stepSize = blockEigMult * blockEigenvalueJtJ + JJ_mult * JtJ.copy() # Todo '2 *' vs 1 by convex.
-
-            # [globalIt][clusterId] minEigenvalues(JtJ, 9)
 
             #blockEigenvalueJtJ = blockEigenvalueFull(JtJ, 9, x0_t_cam)
             #stepSize = blockEigenvalueJtJ + JJ_mult * JtJ.copy() # Todo '2 *' vs 1 by convex.
@@ -1772,6 +1786,27 @@ def bundle_adjust(
                 stepSize = LipJ_ * JtJ.copy() + blockEigMult * blockEigenvalueJtJ
                 JtJDiag = JtJ.copy() + blockEigMultJtJ * blockEigenvalueJtJ
 
+                if False:
+                    #print(np.repeat(maxmin_ev[:,np.newaxis], 9, axis=1).flatten())
+                    # TODO: new version different per of course
+                    # maybe write max min ev. or use this one.
+                    mev = minEigenvalues(JtJ, 9, True) # in that sense take largest bev of recent its?
+                    #print("mev ", mev.shape)
+                    memory_ev = 3
+                    if len(tempEigen[cluster_id]) < memory_ev:
+                        tempEigen[cluster_id].append(mev)
+                    else:
+                        tempEigen[cluster_id][globalIt % memory_ev] = mev
+
+                    tmp = np.concatenate(tempEigen[cluster_id])
+                    #print("tmp", tmp.shape)
+                    tmp = tmp.reshape(mev.shape[0], -1)
+                    maxmin_ev = np.max(tmp, axis=1)
+                    #print("max ev last 10 ", len(tempEigen[cluster_id]), " ", tmp.shape, " " , np.max(tmp, axis=1))
+                    blockEigenvalueJtJ = diag_sparse(np.repeat(maxmin_ev[:,np.newaxis], 9, axis=1).flatten())
+                    stepSize = LipJ_ * JtJ.copy() + blockEigMult * blockEigenvalueJtJ
+                    JtJDiag = JtJ.copy() + blockEigMultJtJ * blockEigenvalueJtJ
+
                 #JtJDiag = 1e-4 * blockEigMult * blockEigenvalueJtJ # this could also work?
                 maxE, minE = minmaxEv(stepSize, 9)
                 StepSizeSpec = [round_int(np.max(maxE/minE)), np.min(maxE/minE), round_int(np.median(maxE/minE))]
@@ -1807,13 +1842,14 @@ def bundle_adjust(
         delta_p, powerits_run = solveByGDNesterov(Ul, W, Vli, bS, powerits)
         delta_p = -delta_p
         delta_l = -Vli * ((W.transpose() * delta_p).flatten() + bl)
+        #delta_l  + Vli * bl = -Vli * ((W.transpose() * delta_p).flatten())
 
         use_cholesky = False # incredibly slow.
         if use_cholesky:
             # matrix is
             # [JtJ + L * JtJDiag + stepSize | W                     ] * [delta_p] = [bp_s]
             # [W^T                          | JltJl + L * JltJlDiag ] * [delta_l] = [bl]
-            # how to set this up? 
+            # how to set this up?
             # 1. J^tJ and add diag parts
             # J^tJ + L * JtJDiag + stepSize
             # for L * JltJlDiag, add 9 * n_cams to indices
@@ -1883,20 +1919,15 @@ def bundle_adjust(
         tr_check = (costStart + penaltyStart - costEnd - penaltyP - penaltyL) / (costStart + penaltyStart - costQuad - penaltyP - penaltyL)
         #tr_check = (costStart - costEnd) / (costStart - costQuad) # does not help.
 
-        old_descent_lemma = True # TODO: test this with 4 on some examples.
-        if old_descent_lemma:
-            decent_lemma_divisor = 2
-        else:
-            # f(x) <= f(y) + <nabla(f(y) x-y> + Lf/2 |x-y|^2
-            # we demand stepsize phi >= 2 Lf. Then even
-            # f(x) <= f(y) + <nabla(f(y) x-y> + phi/4 |x-y|^2
-            # (f(x) - f(y) - <nabla(f(y) x-y>) * 4 / |x-y|^2  <= phi, recall actual gradient:
-            # J^t fx0 = bp|bl , no L. grad at f(x) is L * JtJDiag * delta_p - s
-            # f(x) is costEnd
-            # still runs into 646 problem
-            decent_lemma_divisor = 6 #4 # 4 does indeed delay flow over, but result is worse.
-            # another problem when dre is set to prim_v (since dre<primv) this can be lower than
-            # true dre. so we should inc or not use this as best dre?
+        # f(x) <= f(y) + <nabla(f(y) x-y> + Lf/2 |x-y|^2
+        # we demand stepsize phi >= 2 Lf. Then even
+        # f(x) <= f(y) + <nabla(f(y) x-y> + phi/4 |x-y|^2
+        # (f(x) - f(y) - <nabla(f(y) x-y>) * 4 / |x-y|^2  <= phi, recall actual gradient:
+        # J^t fx0 = bp|bl , no L. grad at f(x) is L * JtJDiag * delta_p - s
+        # f(x) is costEnd
+        # still runs into 646 problem
+        # another problem when dre is set to prim_v (since dre<primv) this can be lower than
+        # true dre. so we should inc or not use this as best dre?
 
         #nablaXp = L * JtJDiag * delta_p  # actual gradient. discussable TODO
         nablaXl = JltJlDiag * delta_l  # actual gradient: J^t fx0 = bp|bl
@@ -1913,13 +1944,17 @@ def bundle_adjust(
         # Model could be f(x(y), y), where x(y) := argmax_x f(x,y), with p=y, l=x we have
         # x=x-delta_l <=> x = x - Vli * ((W.transpose() * delta_p).flatten() + bl), bl = Jl^t f0
         # derivative as df/dx * dx/dy = <bl, Vli * W^T * dy> = <xl, delta_l + Vli * bl> ? looks
+        # with df/dx = bl as before and, see above, dx/dy = Vli * W^T * dy (no bl, since not multiplied by delta_p)
+        # = delta_l + Vli * bl (added back).
+        # also follows from delta_l + Vli * bl = -Vli * ((W.transpose() * delta_p).flatten())
         # weird but assume nabla_l = 0. Then changing y only has this effect.
         # now look at changing y only leads to a change in x as follows
         # Lfklin = (costEnd - costStart - bp.dot(delta_p) - bl.dot(delta_l + Vli * bl))
         # LfkQuad = delta_p.dot(stepSize * delta_p)) / decent_lemma_divisor
         only_function_of_p = True
         if newVersion and only_function_of_p:
-            Lfklin = bp.dot(delta_p) + bl.dot(delta_l + Vli * bl) # '-'?
+            # TODO: - looks ok but maybe worse. try. also different divisors and 646?
+            Lfklin = bp.dot(delta_p) + bl.dot(delta_l + Vli * bl) # '+' or '-'? in +/- bl.dot
             LfkQuad = delta_p.dot(stepSize * delta_p) / decent_lemma_divisor
 
         LfkDistance  = Lfkconst - Lfklin - LfkQuad
@@ -1935,8 +1970,10 @@ def bundle_adjust(
             #     stepSize = JtJ.copy() + L * JtJDiag
             #     penaltyStartConst = prox_rhs.dot(stepSize * prox_rhs)
 
+        if tr_check >= tr_eta_2 and LfkViolated:
+            steSizeTouched = True
         # LfkViolated = False # todo remove? What happens? all tested ok so far. example 646 failed without.
-        if tr_check >= tr_eta_2 and LfkViolated: # violated -- should revert update.
+        if tr_check >= tr_eta_2 and LfkViolated and blockEigMult < blockEigLowerMultLimit: # violated -- should revert update.
         #if tr_check >= tr_eta_2 and LfkViolated and not steSizeTouched or (steSizeTouched and costStart + penaltyStart < costEnd + penaltyL + penaltyP): # violated -- should revert update.
         #if LfkViolated and not steSizeTouched or (steSizeTouched and costStart + penaltyStart < costEnd + penaltyL): # violated -- should revert update.
             steSizeTouched = True
@@ -1948,8 +1985,9 @@ def bundle_adjust(
             # other idea, initially we only add 1/2^k eg 0.125, times the needed value and inc if necessary, maybe do not add anything if not needed.
 
             # indeed reliable to get over.
-            stepSize += 3 * blockEigMult * blockEigenvalueJtJ
-            blockEigMult *= 4
+            blockEigMult_old = blockEigMult
+            blockEigMult = np.minimum(blockEigLowerMultLimit, np.maximum(blockEigMultLimit, 4 * blockEigMult))
+            stepSize += (blockEigMult - blockEigMult_old) * blockEigenvalueJtJ
             #blockEigenvalueJtJ.data *= 2 # appears slow but safe
 
             # try this
@@ -1976,8 +2014,9 @@ def bundle_adjust(
             if not newVersion:
                 JtJDiag = 2 * JtJDiag # we return this maybe -- of course stupid to do in a release version
 
-        if (newVersion and LfkSafe and not steSizeTouched):
-            blockEigMult /= 2
+        # TODO: this basically disables lowering blockEigMult !?
+        if (newVersion and LfkSafe and not steSizeTouched) and allowDecreaseBlockEig: # 394 escalates if True here. 
+            blockEigMult = np.minimum(blockEigLowerMultLimit, np.maximum(blockEigMultLimit, blockEigMult / 2))
 
         # version with penalty check for ADMM convergence / descent lemma. Problem: slower?
         if costStart + penaltyStart < costEnd + penaltyL  + penaltyP or LfkViolated:
@@ -2000,7 +2039,7 @@ def bundle_adjust(
     x0_l_ = x0_l_.reshape(n_points_, 3)
 
     # idea use latest for better control ?
-    getBetterStepSize = False # this is used as approx of f in update of v and thus s. maybe change there u-v should be small. 
+    getBetterStepSize = False # this is used as approx of f in update of v and thus s. maybe change there u-v should be small.
     if getBetterStepSize: # needs to set L correctly
         J_pose, J_land, fx0 = ComputeDerivativeMatricesNew(
             x0_t_cam, x0_t_land, camera_indices_, point_indices_, torch_points_2d, unique_poses_in_c_, unique_landmarks_in_c_)
@@ -2031,7 +2070,7 @@ def bundle_adjust(
         print(" nablas b", bp) # TINY
 
     # acceptance this can be reused, rejection the above can be reused.
-    if False: # 646 more constrained but not better. maybe can lower some stuff.
+    if Derivative_at_end: # 646 more constrained but not better. maybe can lower some stuff.
         J_pose, J_land, fx0 = ComputeDerivativeMatricesNew (
             x0_t_cam, x0_t_land, camera_indices_, point_indices_, torch_points_2d, unique_poses_in_c_, unique_landmarks_in_c_)
         JtJ = J_pose.transpose() * J_pose
@@ -2040,7 +2079,7 @@ def bundle_adjust(
         #blockEigenvalueJtJ = blockEigenvalue(JtJ, 9) # TODO: what if this is only needed for 0-eigen directions? return !=0 only if in small eigendir
         blockEigenvalueJtJ = blockEigenvalueWhereNeeded(JtJ, 9, 1e-3) # ! 1e-2, 1e-4 1e-5 als works. problem 52, 1e-6 does not 173 performance bad if not 1e-6?
         #stepSize = JJ_mult * JtJ.copy() + blockEigMult * blockEigenvalueJtJ
-        stepSize = LipJ_ * JtJ.copy() + blockEigMult * blockEigenvalueJtJ
+        stepSize = LipJ_ * JtJ.copy() + blockEigMult * blockEigenvalueJtJ # todo blockEigMult was maybe adjusted above, ok?
 
         if not newVersion:
             JtJDiag = 1/L * stepSize.copy() # max 1, 1/L, line-search dre fails -> increase
@@ -2050,12 +2089,25 @@ def bundle_adjust(
 
     nabla_p = bp.copy()
     Rho = L * JtJDiag #+ 1e-12 * Ul
-    if (newVersion and LfkSafe and not steSizeTouched):
-        blockEigMult = np.minimum(blockEigLowerMultLimit, np.maximum(blockEigMultLimit, 2*blockEigMult))
-    else:
-        blockEigMult = np.minimum(blockEigLowerMultLimit, np.maximum(blockEigMultLimit, blockEigMult))
+
+    if use_be_memory:
+        if len(tempBlockEigen[cluster_id]) < memory_be:
+            tempBlockEigen[cluster_id].append(np.minimum(blockEigLowerMultLimit, np.maximum(blockEigMultLimit, blockEigMult)))
+        else:
+            tempBlockEigen[cluster_id][globalIt % memory_be] = np.minimum(blockEigLowerMultLimit, np.maximum(blockEigMultLimit, blockEigMult))
+
+    ###################
+    # TODO this leads to blockEigMult not shrinking at all?!
+    # if important we maybe should never lower it to begin with !? see line 2019
+    #    blockEigMult = np.minimum(blockEigLowerMultLimit, np.maximum(blockEigMultLimit, blockEigMult / 2))
+    # if (newVersion and LfkSafe and not steSizeTouched):
+    #     blockEigMult = np.minimum(blockEigLowerMultLimit, np.maximum(blockEigMultLimit, 2*blockEigMult)) # TODOL if ok remove this.
+    # else:
+    #     blockEigMult = np.minimum(blockEigLowerMultLimit, np.maximum(blockEigMultLimit, blockEigMult))
+    ###################
+
     if newVersion:
-        stepSize = LipJ_ * JtJ.copy() + blockEigMult * blockEigenvalueJtJ
+        # stepSize = LipJ_ * JtJ.copy() + blockEigMult * blockEigenvalueJtJ # TODO unclear why this? here it's capped.
         Rho = stepSize # is this an issue if we adjust stepsize?
 
     # TODO: preconditioning should influence this.
@@ -2112,6 +2164,7 @@ def updateCluster(
     pose_occurences,
     LipJ,
     blockEig_in_c_,
+    cluster_id,
     its_,
 ):
     landmark_indices_in_c_ = np.unique(landmark_indices_in_cluster_)
@@ -2156,6 +2209,7 @@ def updateCluster(
         blockEig_in_c_,
         unique_poses_in_c_,
         landmark_indices_in_c_, # same as unique poses for pcg
+        cluster_id,
         its_,
     )
 
@@ -2179,14 +2233,14 @@ def prox_f(camera_indices_in_cluster_, point_indices_in_cluster_, points_2d_in_c
 
     num_poses = poses_in_cluster_[0].shape[0]
     pose_occurences = np.zeros(num_poses)
-    for ci in range(kClusters):
-        unique_poses_in_c_ = np.unique(camera_indices_in_cluster_[ci])
+    for ci_ in range(kClusters):
+        unique_poses_in_c_ = np.unique(camera_indices_in_cluster_[ci_])
         pose_occurences[unique_poses_in_c_] +=1
 
     # for ci in range(kClusters):
     #     print(ci, " 3d " ,points_3d_in_cluster_[ci][landmark_occurences==1, :])
 
-    for ci in range(kClusters):
+    for ci_ in range(kClusters):
         (
             cost_c_,
             x0_p_c_,
@@ -2198,33 +2252,34 @@ def prox_f(camera_indices_in_cluster_, point_indices_in_cluster_, points_2d_in_c
             nabla_p_c_,
             blockEig_in_c_
         ) = updateCluster(
-            poses_in_cluster_[ci],
-            camera_indices_in_cluster_[ci],
-            point_indices_in_cluster_[ci],
-            points_2d_in_cluster_[ci],
+            poses_in_cluster_[ci_],
+            camera_indices_in_cluster_[ci_],
+            point_indices_in_cluster_[ci_],
+            points_2d_in_cluster_[ci_],
             landmarks_,
-            poses_s_in_cluster_[ci],
-            Vl_in_cluster_[ci],
-            L_in_cluster_[ci],
+            poses_s_in_cluster_[ci_],
+            Vl_in_cluster_[ci_],
+            L_in_cluster_[ci_],
             pose_occurences, # haeh?
-            LipJ[ci],
-            blockEig_in_cluster_[ci],
+            LipJ[ci_],
+            blockEig_in_cluster_[ci_],
+            ci_,
             its_=innerIts,
         )
-        cost_[ci] = cost_c_
-        L_in_cluster_[ci] = Lnew_c_
-        Vl_in_cluster_[ci] = Vl_c_
-        poses_in_cluster_[ci][unique_poses_in_c_, :] = x0_p_c_
+        cost_[ci_] = cost_c_
+        L_in_cluster_[ci_] = Lnew_c_
+        Vl_in_cluster_[ci_] = Vl_c_
+        poses_in_cluster_[ci_][unique_poses_in_c_, :] = x0_p_c_
         landmarks_[landmark_indices_in_c_] = x0_l_c_
-        nabla_p_in_cluster_[ci] = nabla_p_c_
-        blockEig_in_cluster_[ci] = blockEig_in_c_
+        nabla_p_in_cluster_[ci_] = nabla_p_c_
+        blockEig_in_cluster_[ci_] = blockEig_in_c_
 
-    for ci in range(kClusters):
-        #vl = Vl_in_cluster_[ci]
-        unique_poses_in_c_ = np.unique(camera_indices_in_cluster_[ci])
-        poses_only_in_cluster_ = pose_occurences[unique_poses_in_c_] == 1
-        #globalSingleLandmarksA_in_c[ci] = poses_only_in_cluster_.copy()
-        #globalSingleLandmarksB_in_c[ci] = poses_only_in_cluster_==1
+    # for ci_ in range(kClusters):
+    #     #vl = Vl_in_cluster_[ci_]
+    #     unique_poses_in_c_ = np.unique(camera_indices_in_cluster_[ci_])
+    #     poses_only_in_cluster_ = pose_occurences[unique_poses_in_c_] == 1
+    #     #globalSingleLandmarksA_in_c[ci] = poses_only_in_cluster_.copy()
+    #     #globalSingleLandmarksB_in_c[ci] = poses_only_in_cluster_==1
 
         # print(ci, " 3d ", points_3d_in_cluster_[ci][landmark_occurences==1, :]) # indeed 1 changed rest is constant
         # print(ci, " vl ", vl.data.reshape(-1,9)[landmarks_only_in_cluster_,:])  # indeed diagonal
@@ -2405,7 +2460,7 @@ def GetPreconditioners(cameras_, points_3d_, points_2d_, camera_indices_, point_
     Vnorm_ = diag_sparse(np.squeeze(np.asarray(1 * ( (np.abs(JltJl)/10).sum(axis=0) ))))
     temp_  = Vnorm_.data.reshape(-1,3)
     temp_ = np.sqrt(temp_)
-    temp_ = np.fmax(temp_, 1-14) # TODO. pick most singular example? 646? 
+    temp_ = np.fmax(temp_, 1-8) # TODO. pick most singular example? 646 and 52? 1-10 was ok on 52 clust 1e-1, 1e-3 bad? check
     #temp = np.max(np.sqrt(temp), axis=1) # max or mean? sqrt
     # Diag pseudo HessL (max/min/med/mean) [ 13.04  13.93  11.30]   [ 0.59  3.49  0.38]   [ 7.13  7.08  3.95]   635351.3855933357
     # Diag pseudo HessL (max/min/med/mean) [ 3.15  1.89  1.89]   [ 0.00  0.00  0.00]   [ 0.02  0.01  0.01]   3575.420359064994
@@ -2417,7 +2472,7 @@ def GetPreconditioners(cameras_, points_3d_, points_2d_, camera_indices_, point_
     # Diag pseudo HessL (max/min/med/mean) [ 1383.44  1380.07  436.03]   [ 0.59  3.49  0.38]   [ 9.55  9.84  3.95]   1345250.7481203536
     #temp_ = np.repeat(temp_[:,np.newaxis], 3, axis=1)
     Vnorm_ = diag_sparse(temp_.flatten())
-    #Vnorm_ = diag_sparse(np.ones(points_3d.flatten().shape[0])) # 52: this is better -- could be random
+    #Vnorm_ = diag_sparse(np.ones(points_3d.flatten().shape[0])) # 52: this is much better -- could be random
     return Unorm_, Vnorm_, fx0_
 
 ##############################################################################
@@ -2550,10 +2605,12 @@ linearize_at_last_solution = True # linearize at uk or v. maybe best to check en
 lib = ctypes.CDLL("./libprocess_clusters.so")
 init_lib()
 LipJ = 1 * np.ones(kClusters)
-blockEig_in_cluster_ = 1e-5 * np.ones(kClusters)
+blockEig_in_cluster = 1e-5 * np.ones(kClusters)
 for ci in range(kClusters):
-    print("input blockEig_in_cluster_[ci] ", blockEig_in_cluster_[ci])
+    print("input blockEig_in_cluster[ci] ", blockEig_in_cluster[ci])
 
+tempEigen = [[] for i in range(kClusters)]
+tempBlockEigen = [[] for i in range(kClusters)] # last k multipliers for DL. take max
 pre_merges = 0
 #pre_merges = int(0.4 * n_cameras) # play to get 'best' cluster. Depends quite a lot
 #pre_merges = int(0.02 * n_cameras) # play to get 'best' cluster. This little can induce no deg parts. Those showed 173 & 52 like non deg parts.
@@ -2636,10 +2693,10 @@ if basic_version:
             poses_in_cluster,
             landmarks,
             nabla_p_in_cluster,
-            blockEig_in_cluster_
+            blockEig_in_cluster
         ) = prox_f(
             camera_indices_in_cluster, point_indices_in_cluster, points_2d_in_cluster,
-            poses_in_cluster, landmarks, poses_s_in_cluster, L_in_cluster, Ul_in_cluster, blockEig_in_cluster_,
+            poses_in_cluster, landmarks, poses_s_in_cluster, L_in_cluster, Ul_in_cluster, blockEig_in_cluster,
             kClusters, LipJ, innerIts=innerIts, sequential=True,
             )
         end = time.time()
@@ -2686,7 +2743,7 @@ if basic_version:
 
         dre = max( primal_cost_v, dre ) # sandwich lemma, prevent maybe chaos
         print( globalIt, " ======== DRE ====== ", round(dre) , " ========= gain " , \
-            round(lastCostDRE - dre), "==== f(v)= ", round(primal_cost_v), " f(u)= ", round(primal_cost_u))
+            round(lastCostDRE - dre), "==== f(v)= ", round(primal_cost_v), " f(u)= ", round(primal_cost_u), " BE ", blockEig_in_cluster)
 
         if lastCostDRE < dre:
             #LipJ += 0.2 * np.ones(kClusters)
@@ -2724,10 +2781,10 @@ else:
     rnaBufferSize = 6
 
     (cost, dre, L_in_cluster, Ul_in_cluster, poses_in_cluster, poses_v, landmarks, \
-     nabla_p_in_cluster, blockEig_in_cluster_, poses_s_in_cluster_pre, U_cluster_zeros, steplength) = \
+     nabla_p_in_cluster, blockEig_in_cluster, poses_s_in_cluster_pre, U_cluster_zeros, steplength) = \
         perform_full_iteration(camera_indices_in_cluster, point_indices_in_cluster,
             points_2d_in_cluster, poses_in_cluster, landmarks, poses_s_in_cluster, L_in_cluster,
-            Ul_in_cluster, blockEig_in_cluster_, kClusters, LipJ, innerIts, lastCost)
+            Ul_in_cluster, blockEig_in_cluster, kClusters, LipJ, innerIts, lastCost)
     restartIteration = 0
 
     # Only it 0: update s,u,v.
@@ -2739,10 +2796,10 @@ else:
     #     poses_in_cluster,
     #     landmarks,
     #     nabla_p_in_cluster,
-    #     blockEig_in_cluster_
+    #     blockEig_in_cluster
     # ) = prox_f(
     #     camera_indices_in_cluster, point_indices_in_cluster, points_2d_in_cluster,
-    #     poses_in_cluster, landmarks, poses_s_in_cluster, L_in_cluster, Ul_in_cluster, blockEig_in_cluster_,
+    #     poses_in_cluster, landmarks, poses_s_in_cluster, L_in_cluster, Ul_in_cluster, blockEig_in_cluster,
     #     kClusters, LipJ, innerIts=innerIts, sequential=True,
     #     )
     # end = time.time()
@@ -2933,7 +2990,7 @@ else:
 
             L_in_cluster_bfgs = L_in_cluster.copy()
             Ul_in_cluster_bfgs = [elem.copy() for elem in Ul_in_cluster]
-            blockEig_in_cluster_bfgs = [elem.copy() for elem in blockEig_in_cluster_]
+            blockEig_in_cluster_bfgs = [elem.copy() for elem in blockEig_in_cluster]
             (   cost_bfgs,
                 L_in_cluster_bfgs,
                 Ul_in_cluster_bfgs,
@@ -2993,7 +3050,7 @@ else:
 
             dre_bfgs = max(dre_bfgs, primal_cost_v) # sandwich lemma 
             print( globalIt, "/", ls_it, " ======== DRE BFGS ====== ", round(dre_bfgs) , " ========= gain " , \
-                round(lastCostDRE_bfgs - dre_bfgs), "==== f(v)= ", round(primal_cost_v), " f(u)= ", round(primal_cost_u))
+                round(lastCostDRE_bfgs - dre_bfgs), "==== f(v)= ", round(primal_cost_v), " f(u)= ", round(primal_cost_u), " BE ", blockEig_in_cluster_bfgs)
             print( globalIt, "/", ls_it, " f(v) = ", primal_cost_v_all, " f(u) = ", primal_cost_u_all)
             bestCost = np.minimum(primal_cost_v, bestCost)
             bestIt = globalIt
@@ -3007,6 +3064,7 @@ else:
             iteration_factor_five = (1 - (5 / its))**4 #, could also running mean of gains and use 5% of those (positive gains, if < - (5% of mean) ).
             maxPct = 1 + 0.01 * iteration_factor/iteration_factor_five # aim at 1% at 5 iterations?
             startFromU = False
+            reject = True # the general act.
             # normally use u,v. Forgot example why / where v is better.
             # likely 'things' go 'wild'. hmm.
 
@@ -3025,7 +3083,7 @@ else:
             # do not if primal_v best and current are about the same.
                     
             maxPctV = np.sqrt(maxPct)
-            if (np.min(LipJ) < LipJMax) and (ls_it == line_search_iterations-1) and (maxPct * lastCostDRE_bfgs < dre_bfgs) and (primal_cost_v > maxPctV * primal_cost_v_before): # or primal_cost_v > maxPct * primal_cost_u):
+            if reject and (np.min(LipJ) < LipJMax) and (ls_it == line_search_iterations-1) and (maxPct * lastCostDRE_bfgs < dre_bfgs) and (primal_cost_v > maxPctV * primal_cost_v_before): # or primal_cost_v > maxPct * primal_cost_u):
                 print("Why enter is priaml v that bad or what", primal_cost_v, " ", primal_cost_v_before, " ", maxPctV * primal_cost_v_before)
 
                 # revert ! Not clear how to do this.
@@ -3046,7 +3104,6 @@ else:
                             print("LipJ[" , ci, "] *= sqrt(2)") # 
 
                 else: # adjust all
-                    print("LipJ *= sqrt(2)")
                     # if i use u, the cost is likely to grow instead, since i increase the penalty?
                     # for ci in range(kClusters):
                     #     poses_in_cluster[ci] = poses_v.copy() # 'best_v' instead != last_v? this alone is bfgs_r = u-v =0.
@@ -3055,6 +3112,17 @@ else:
                     # TODO: either LipJ does not work or other ? 
                     oneRound = True # loop has an issue that it is not only dependent on the input, but more. blockEig ?
                     # so more needs to be reset than I do.
+
+                    # super basic?
+                    poses_in_cluster = [poses_v.copy() for _ in poses_in_cluster]
+                    for ci in range(kClusters):
+                        poses_in_cluster[ci][:,6] += 1e-6 # 1e-6 is enough to make it different.
+                        poses_s_in_cluster[ci] = poses_v.copy()
+                    # poses_s_in_cluster = [elem.copy() for elem in poses_s_in_cluster_pre]
+                    # poses_in_cluster_test = [elem.copy() for elem in poses_in_cluster]
+                    oneRound = False
+                    LipJ *= np.sqrt(2)
+                    print("LipJ *= sqrt(2) = ", np.mean(LipJ))
 
                     # if 1 fails alawya will.
                     while oneRound and (np.min(LipJ) < LipJMax) and (maxPct * lastCostDRE_bfgs < dre_bfgs) and (primal_cost_v > maxPctV * primal_cost_v_before): # while since LipJ must be large enough.
@@ -3090,7 +3158,7 @@ else:
                         else:
                             poses_s_in_cluster = [elem.copy() for elem in poses_s_in_cluster_pre]
                             poses_in_cluster_test = [elem.copy() for elem in poses_in_cluster]
-                        blockEig_in_cluster_in = [elem.copy() for elem in blockEig_in_cluster_]
+                        blockEig_in_cluster_in = [elem.copy() for elem in blockEig_in_cluster]
 
                         # TODO: better was to not do this additional step for some reason. test 427, also look 646
                         print("TODO: Big riddle, redo it primal_cost_v_before changes in loop ", round(primal_cost_v_before) )
@@ -3105,17 +3173,17 @@ else:
                             perform_full_iteration(camera_indices_in_cluster, point_indices_in_cluster,
                                 points_2d_in_cluster, poses_in_cluster_test, landmarks_test, poses_s_in_cluster, L_in_cluster,
                                 Ul_in_cluster, blockEig_in_cluster_in, kClusters, LipJ, innerIts, lastCostDRE_bfgs, outerit = globalIt)
-                        print("========== dre/dre_bfgs/lastCostDRE_bfgs  ===========", round(dre), " / " , round(dre_bfgs), " / ", round(lastCostDRE_bfgs))
+                        print("========== dre/dre_bfgs/lastCostDRE_bfgs  ===========", round(dre), " / " , round(dre_bfgs), " / ", round(lastCostDRE_bfgs), " BE ", blockEig_in_cluster_bfgs)
                         if maxPct * lastCostDRE_bfgs >= dre and (primal_cost_v > maxPctV * primal_cost_v_before): # better: overwrite
                             print("Overwrite poses/landmarks/bl-eig")
                             poses_v = poses_v_test
                             landmarks = landmarks_test
-                            blockEig_in_cluster_ = [elem.copy() for elem in blockEig_in_cluster_test]
+                            blockEig_in_cluster = [elem.copy() for elem in blockEig_in_cluster_test]
                             poses_in_cluster = [elem.copy() for elem in poses_in_cluster_test]
                             poses_s_in_cluster_pre = [elem.copy() for elem in poses_s_in_cluster_pre_test]
 
                         dre_bfgs = dre # while loop uses this
-                    if True:
+                    if True: # is True better maybe -> Does not do ANYTHING? 52/89, test smth else.
                         lastCostDRE_bfgs = dre_bfgs # does not happen? needed to not keep running in it. Yet demanding Lip < X to enter should work
 
                 # revert whole iteration.
@@ -3186,7 +3254,7 @@ else:
                     for ci in range(kClusters):
                         poses_in_cluster[ci] = poses_in_cluster_bfgs[ci].copy()
                         Ul_in_cluster[ci] = Ul_in_cluster_bfgs[ci].copy()
-                        blockEig_in_cluster_[ci] = blockEig_in_cluster_bfgs[ci].copy()
+                        blockEig_in_cluster[ci] = blockEig_in_cluster_bfgs[ci].copy()
                     L_in_cluster = L_in_cluster_bfgs.copy()
                     landmarks = landmarks_bfgs.copy()
                     lastCostDRE_bfgs = dre_bfgs.copy()
@@ -3194,6 +3262,16 @@ else:
 
                     # for ci in range(kClusters):
                     #     print(ci, " poses_v ", poses_in_cluster[ci])
+
+                    equalizeBlockEig = False #True
+                    if equalizeBlockEig:
+                        # all mem are forced equal in all clusters / maybe even better in time (so only grow or very long memory):
+                        for m in range(len(tempBlockEigen[ci])):
+                            maxM = 0
+                            for ci in range(kClusters):
+                                maxM = np.maximum(tempBlockEigen[ci][m], maxM)
+                            for ci in range(kClusters):
+                                tempBlockEigen[ci][m] = maxM
 
                     #print("poses_v ", poses_v)
                     if o3d_defined:
