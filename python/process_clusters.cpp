@@ -1,5 +1,6 @@
 // returns covered_landmark_indices_c: those in addition! -- which is weird -- to those covered by main residual split
 // the latter are point_indices_already_covered and also returned
+// Order landmark shift by 
 #define _select_by_even_cost_
 
 #include "process_clusters.h"
@@ -20,7 +21,10 @@
 #include <chrono> // for std::chrono
 
 //#define _rngseed_ 999 // 529k
-#define _rngseed_ 123 // 527k, but intermediate (60 its) results bad.
+#define _rngseed_ 123 // 527k, but intermediate (60 its) results bad. Still: BEST overall
+//#define _rngseed_ 456 works for large DL
+//#define _rngseed_ 837
+#define _order_div_mult_  1e-1
 
 // Speedup, very little worse, else retries rejected merges.
 #define inheritInvalidEdgeness_
@@ -1664,7 +1668,8 @@ double GetOrderCost(const std::map<int, std::set<int>> &landmarkFromCameraOfPart
   // mean 
   // TODO: 356 was 1e-3 one component remains. 1e-2: better, still 4 large 6 small cluster.
   // Could also use 1e-3, eval if not recompute with 1e-2, etc.
-  return cost / static_cast<double>(std::max(1, entries)) + 1e-0 / static_cast<double>(res_in_cluster) + 1e-1 * costKlDivEquality;
+
+  return cost / static_cast<double>(std::max(1, entries)) + 1e-0 / static_cast<double>(res_in_cluster) + _order_div_mult_ * costKlDivEquality;
   // return cost / std::sqrt(static_cast<double>(std::max(1, entries))) + 1e-0 / static_cast<double>(res_in_cluster);
 }
 
