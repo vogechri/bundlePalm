@@ -21,9 +21,11 @@
 #include <chrono> // for std::chrono
 
 //#define _rngseed_ 999 // 529k
-#define _rngseed_ 123 // 527k, but intermediate (60 its) results bad. Still: BEST overall
+//#define _rngseed_ 123 // 527k, but intermediate (60 its) results bad. Still: BEST overall
 //#define _rngseed_ 456 works for large DL
-//#define _rngseed_ 837
+//#define _rngseed_ 666 // be2 552k
+#define _rngseed_ 4567 // be2 547k
+//#define _rngseed_ 9753
 #define _order_div_mult_  1e-1
 
 // Speedup, very little worse, else retries rejected merges.
