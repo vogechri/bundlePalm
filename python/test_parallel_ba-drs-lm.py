@@ -12,7 +12,7 @@ from scipy.sparse import hstack as sparse_hstack
 #from scipy.sparse.linalg import splu # slow as FUCK
 from scipy.sparse.linalg import spsolve # slow as FUCK
 #from scipy.linalg import cholesky, cho_solve, cho_factor
-#from sksparse.cholmod import cholesky # install suitesparse and ... and .. 
+#from sksparse.cholmod import cholesky # install suitesparse and ... and ..
 from scipy.sparse.linalg import inv as inv_sparse # Slowest ever.
 from numpy.linalg import pinv as inv_dense
 from numpy.linalg import eigvalsh, eigh
@@ -49,15 +49,6 @@ FILE_NAME = "problem-173-111908-pre.txt.bz2"
 #FILE_NAME = "problem-257-65132-pre.txt.bz2"
 # uneven problem-257-65132-pre.txt.bz2 90 10
 
-# RNA is best, other awful. in general cams as shared vars very bad.
-# 59 / 0  ======== DRE BFGS ======  1203190  ========= gain  1391 ==== f(v)=  1203133  f(u)=  1203208  ~=  1203207.857094867
-# 12 / 0  ======== DRE BFGS ======  1318853  ========= gain  21411 ==== f(v)=  1318185  f(u)=  1319645  ~=  1319644.5758874172
-# 59 / 0  ======== DRE BFGS ======  682466  ========= gain  3123 ==== f(v)=  682399  f(u)=  682500  ~=  682499.5381159959
-# 1e-8: 59 / 0  ======== DRE BFGS ======  576626  ========= gain  1364 ==== f(v)=  576480  f(u)=  576687  ~=  576687.2452693246
-# 3rd largest ev 59 / 0  ======== DRE BFGS ======  548500  ========= gain  358 ==== f(v)=  548379  f(u)=  548553  ~=  548553.2643365501
-# NEEDS work : adjust pcg from mean diag of hess? differs here clearly. try manually
-# 59 / 0  ======== DRE BFGS ======  548142  ========= gain  601, very bad drs cam 475k
-# newVersion 59 / 0  ======== DRE BFGS ======  527787
 BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/venice/"
 FILE_NAME = "problem-52-64053-pre.txt.bz2"
 # TODO: fake: take best not last line search
@@ -65,26 +56,15 @@ FILE_NAME = "problem-52-64053-pre.txt.bz2"
 # restart s ? if f(v) - dre > 0.1 * dre.  s=u? BOTH .. ? This is likely total BS -> stepsize?
 # DRE: 78539 |2u-s-v|^2_D per component or <s-u,u-v>_D + |u-v|_D
 
-# # 53 / 0  ======== DRE BFGS ======  291195  ========= gain  0, jumps around after, ultra bad.
-# 59 / 0  ======== DRE BFGS ======  291111
-# 21 / 0  ======== DRE BFGS ======  291499  ========= gain  123 ==== f(v)=  291496  f(u)=  291502
-# completely stuck at 36. frozen.
 BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/final/"
 FILE_NAME = "problem-93-61203-pre.txt.bz2"
 
 BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/ladybug/"
 FILE_NAME = "problem-138-19878-pre.txt.bz2"
-# 61 / 0  ======== DRE BFGS ======  125095
-# 87 / 0  ======== DRE BFGS ======  123684
 FILE_NAME = "problem-646-73584-pre.txt.bz2"
-# 27 / 2  ======== DRE BFGS ======  403123  ========= gain  -13118 ==== f(v)=  382646  f(u)=  385660
-# issue jumps around and appears wrong. 377k testbase. is scipy better? why? what is different?
-# 44 / 0  ======== DRE BFGS ======  380727  ========= gain  38491 ==== f(v)=  380727  f(u)=  376607  ~=  376607.30596203764
 
 BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/venice/"
 FILE_NAME = "problem-52-64053-pre.txt.bz2"
-# 3 clusters
-#119 / 0  ======== DRE BFGS ======  513433  ========= gain  171 ==== f(v)=  513433  f(u)=  513207  ~
 
 BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/dubrovnik/"
 FILE_NAME = "problem-173-111908-pre.txt.bz2"
@@ -1010,7 +990,7 @@ def solveByGDNesterov(Ul, W, Vli, bS, m):
         if verbose:
             # eq is Ul [I - Uli * W * Vli * W.transpose()] x = b
             costk = xk.dot(Ul * xk - W * (Vli * (W.transpose() * xk)) - 2 * bS)
-            print(it, " gd cost ", costk)
+            print(it__, " gd cost ", costk)
 
         if stop_criterion(np.linalg.norm(xk, 2), np.linalg.norm(1/Lip * g, 2), it__):
             return xk, it__
@@ -1545,9 +1525,9 @@ def primal_cost(
 
 # there are cams with < 5 -- even 1 landmark only.
 # must invert 9x9 in ok manner. those also constrain the cam vectors to lie at s.
-# what if we constrain it to lie in BS place? k1,k2,f>0 e.g. 
+# what if we constrain it to lie in BS place? k1,k2,f>0 e.g.
 #
-# TODO maybe need to split prox and tr terms? So prox always JtJ and some other part is 
+# TODO maybe need to split prox and tr terms? So prox always JtJ and some other part is
 # to make underconstrained VLi work at to diag to invert? pseudo inverse?
 # cams are not full rank. swap cams? fill based on #cams present --
 # recall clustering 1. cams disjoint, 2. add res to make complete landmarks
@@ -1599,18 +1579,19 @@ def bundle_adjust(
     tr_eta_1 = 0.8
     tr_eta_2 = 0.25
     blockEigMultGain = 4 # 4 better than 2 at least if allowDecreaseBlockEig, feels random and weird
+    threshWhereNeeded = 1e-6
 
     newVersion = True
-    # TODO: This parameter block is ok blockEigMultJtJ 1e-5, LipJ = 2, blockEigenvalueWhereNeeded 1e-2, might be slightly better than blockEigMultJtJ 1e-4 ? / use LipJ = 2 * np.ones(kClusters) appears safe.
-    # also try 'True' below (maybe speed up). Try restart with L increased for all.
+    # TODO: This parameter block is ok blockEigMultJtJ 1e-5, LipJ = 2, blockEigenvalueWhereNeeded 1e-2,
+    # might be slightly better than blockEigMultJtJ 1e-4 ? / use LipJ = 2 * np.ones(kClusters) appears safe.
     if newVersion:
         # JJ_mult = 2 less flipping much slower in ladybug646,
-        # but 119 / 1  ======== DRE BFGS ======  391600  ========= gain  531 ==== f(v)=  374313  f(u)=  376802  ~=  376801.807411641
-        # Lesson appears to be: use LipJ, maybe * sqrt(2) instead.
         JJ_mult = 1 #+ L # YES! .. should i add tr thing instead, no? use first in computing deriv 2nd time (simple test to lower this here.)
         blockEigMult = 1e-5 # 1e-7 fails with venice'52' 173 demands 1e-3/1e-4/1e-5? 52:1e-6 totally fails. Maybe also True below (recomp jacobian): yes stable
+        # TODO: set to 1 and play with Limit. Set higher. is 1e-2 same 1e-1? is 1e-3 worse?
+        threshWhereNeeded = 1e-4 # this higher -> blockEigMult, blockEigMultLimit lower?
         blockEigMultJtJ = 1e-4 # 173: little effect 1e-6/4/8. just 173 or always not mattering much?
-        blockEigMultLimit = 1e-5 # maybe now can be more lose? 5 cluster needed blockEigenvalueWhereNeeded(JtJ, 9, 1e-4)
+        blockEigMultLimit = 1e-5
         blockEigLowerMultLimit = 1e-1 # 1e-2? # same as blockEigenMaxT
         decent_lemma_divisor = 2 # 2/4: higher does indeed delay flow over, but result is worse.
         Derivative_at_end = False # maybe negative to have update v and updte u differ.
@@ -1684,7 +1665,7 @@ def bundle_adjust(
             # R|T| f,d. especially d might have much different (smaller) eigenvalues.
 
             #blockEigenvalueJtJ = blockEigenvalue(JtJ, 9) # TODO: what if this is only needed for 0-eigen directions? return !=0 only if in small eigendir
-            blockEigenvalueJtJ = blockEigenvalueWhereNeeded(JtJ, 9, 1e-6) # here ok? 173: 1e-6
+            blockEigenvalueJtJ = blockEigenvalueWhereNeeded(JtJ, 9, threshWhereNeeded) # here ok? 173: 1e-6
             stepSize = blockEigMult * blockEigenvalueJtJ + JJ_mult * JtJ.copy() # Todo '2 *' vs 1 by convex.
 
             #blockEigenvalueJtJ = blockEigenvalueFull(JtJ, 9, x0_t_cam)
@@ -1777,7 +1758,7 @@ def bundle_adjust(
                 # default 1e-4. 1e-6 for 173: slightly worse| 1e-6 for 52: also worse now (maybe was the other way round).
                 #               1e-3 for 173: | 1e-3 for 52: ok 1e-3 or 1e-4? might be highly random based on clustering.
                 # 1e-3 appears a bit better.
-                blockEigenvalueJtJ = blockEigenvalueWhereNeeded(JtJ, 9, 1e-2) # ! 1e-2, 1e-4 1e-5 als works. problem 52, 1e-6 does not 173 performance bad if not 1e-6?
+                blockEigenvalueJtJ = blockEigenvalueWhereNeeded(JtJ, 9, threshWhereNeeded) # ! 1e-2, 1e-4 1e-5 als works. problem 52, 1e-6 does not 173 performance bad if not 1e-6?
                 #blockEigenvalueJtJ = 1e-1 * blockEigenvalue(JtJ, 9) # ! try 173 & 52, fails at 1e-2, 10 clusters. 1e-1 ok for 173 & 52. (not dead)
 
                 # TODO: LipJ for both? or only JJ?
@@ -2076,7 +2057,7 @@ def bundle_adjust(
         bp = J_pose.transpose() * fx0
         #JJ_mult = 1 + np.maximum(minimumL, np.minimum(L_in_cluster_ * 2, L)) # might have changed .. must be off sigh
         #blockEigenvalueJtJ = blockEigenvalue(JtJ, 9) # TODO: what if this is only needed for 0-eigen directions? return !=0 only if in small eigendir
-        blockEigenvalueJtJ = blockEigenvalueWhereNeeded(JtJ, 9, 1e-3) # ! 1e-2, 1e-4 1e-5 als works. problem 52, 1e-6 does not 173 performance bad if not 1e-6?
+        blockEigenvalueJtJ = blockEigenvalueWhereNeeded(JtJ, 9, threshWhereNeeded) # ! 1e-2, 1e-4 1e-5 als works. problem 52, 1e-6 does not 173 performance bad if not 1e-6?
         #stepSize = JJ_mult * JtJ.copy() + blockEigMult * blockEigenvalueJtJ
         stepSize = LipJ_ * JtJ.copy() + blockEigMult * blockEigenvalueJtJ # todo blockEigMult was maybe adjusted above, ok?
 
@@ -2672,15 +2653,16 @@ lastCost = np.sum(fx0**2) #1e20
 lastCostDRE = np.sum(fx0**2) #1e20
 bestCost = np.sum(fx0**2) #1e20
 bestIt = 0
+globalIt = 0
 basic_version = False #True # accelerated or basic
 sequential = True
 linearize_at_last_solution = True # linearize at uk or v. maybe best to check energy. at u or v. DRE:
 lib = ctypes.CDLL("./libprocess_clusters.so")
 init_lib()
+
 LipJ = 1 * np.ones(kClusters)
 blockEig_in_cluster = 1e-5 * np.ones(kClusters)
-memory_be = 10 # here can shrink, below this only grow.
-globalIt = 0
+memory_be = 8 # here can shrink, below this only grow.
 for ci in range(kClusters):
     print("input blockEig_in_cluster[ci] ", blockEig_in_cluster[ci])
 
@@ -2702,8 +2684,7 @@ pre_merges = 0
 # insert v -> only fk(v) remains. insert u:
 
 values, counts = np.unique(camera_indices, return_counts=True)
-minCount = np.min(counts)
-print(". minimum camera observations in total ", minCount, " cams with < 5 landmarks ", np.sum(counts < 5))
+print(". minimum camera observations in total ", np.min(counts), " cams with < 5 landmarks ", np.sum(counts < 5))
 
 # what if clustering must avoid degenrate clusters?
 # e.g. 173 with 6 clusters is much better than with 5! but 5 with! good distribution is better than 6.
@@ -2729,8 +2710,7 @@ print(". minimum camera observations in total ", minCount, " cams with < 5 landm
 
 for ci in range(kClusters):
     values, counts = np.unique(camera_indices_in_cluster[ci], return_counts=True)
-    minCount = np.min(counts)
-    print(ci, ". minimum camera observations in cluster ", minCount, " cams with < 5 landmarks ", np.sum(counts < 5))
+    print(ci, ". minimum camera observations in cluster ", np.min(counts), " cams with < 5 landmarks ", np.sum(counts < 5))
 
 L_in_cluster = []
 for _ in range(kClusters):
@@ -2771,8 +2751,8 @@ if basic_version:
             blockEig_in_cluster
         ) = prox_f(
             camera_indices_in_cluster, point_indices_in_cluster, points_2d_in_cluster,
-            poses_in_cluster, landmarks, poses_s_in_cluster, L_in_cluster, Ul_in_cluster, blockEig_in_cluster,
-            kClusters, LipJ, innerIts=innerIts, sequential=True,
+            poses_in_cluster, landmarks, poses_s_in_cluster, L_in_cluster, Ul_in_cluster,
+            blockEig_in_cluster, kClusters, LipJ, innerIts=innerIts, sequential=True,
             )
         end = time.time()
 
@@ -2899,7 +2879,7 @@ else:
     for globalIt in range(its): ##########################################################################################
         # get line search direction and update bfgs data
         # operate with np concatenate to get large vector and reshape search_direction here?
-        RNA_or_bfgs = True # RNA is best here ?! ok. else nesterov
+        RNA_or_bfgs = False #True # RNA is best here ?! ok. else nesterov
         if RNA_or_bfgs:
             use_bfgs = False # maybe full u,v?
             bfgs_r = np.zeros(kClusters * 9 * n_cameras)
@@ -3197,12 +3177,16 @@ else:
                     # so more needs to be reset than I do.
 
                     # super basic?
+                    # VERSION v 
                     poses_in_cluster = [poses_v.copy() for _ in poses_in_cluster]
                     for ci in range(kClusters):
                         poses_in_cluster[ci][:,6] += 1e-6 # 1e-6 is enough to make it different.
                         poses_s_in_cluster[ci] = poses_v.copy()
+                    ############
+                    # VERSION U is doing nothing actually. This is differetn if taking actula steps as below.
                     # poses_s_in_cluster = [elem.copy() for elem in poses_s_in_cluster_pre]
                     # poses_in_cluster_test = [elem.copy() for elem in poses_in_cluster]
+                    ############
                     oneRound = False
                     # TODO: LipJ or tempBlockEigen.
                     #LipJ *= np.sqrt(2)
