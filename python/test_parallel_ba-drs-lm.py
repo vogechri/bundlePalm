@@ -590,7 +590,12 @@ def torchSingleResiduumScaled(camera_params_, point_params_, p2d, scaling, scali
     residual = torch.cat([resX[:,], resY[:,]], dim=1)
     return residual
 
-def torchSingleResiduumXScaled(camera_params, point_params, p2d, scaling, scalingP) :
+def torchSingleResiduumXScaled(camera_params, point_params, p2d, scaling, scalingP, scalingFull) :
+    camera_params = \
+        camera_params[:,0, None] * scalingFull[:,:,0] + camera_params[:,1, None] * scalingFull[:,:,1] + camera_params[:,2, None] * scalingFull[:,:,2] + \
+        camera_params[:,3, None] * scalingFull[:,:,3] + camera_params[:,4, None] * scalingFull[:,:,4] + camera_params[:,5, None] * scalingFull[:,:,5] + \
+        camera_params[:,6, None] * scalingFull[:,:,6] + camera_params[:,7, None] * scalingFull[:,:,7] + camera_params[:,8, None] * scalingFull[:,:,8]
+
     angle_axis = camera_params[:,:3] * scaling[:,:3]
     point_params = point_params * scalingP
     points_cam = AngleAxisRotatePoint(angle_axis, point_params)
@@ -607,7 +612,12 @@ def torchSingleResiduumXScaled(camera_params, point_params, p2d, scaling, scalin
     resX = (points_reprojX-p2d[:,0])
     return resX
 
-def torchSingleResiduumYScaled(camera_params, point_params, p2d, scaling, scalingP) :
+def torchSingleResiduumYScaled(camera_params, point_params, p2d, scaling, scalingP, scalingFull) :
+    camera_params = \
+        camera_params[:,0, None] * scalingFull[:,:,0] + camera_params[:,1, None] * scalingFull[:,:,1] + camera_params[:,2, None] * scalingFull[:,:,2] + \
+        camera_params[:,3, None] * scalingFull[:,:,3] + camera_params[:,4, None] * scalingFull[:,:,4] + camera_params[:,5, None] * scalingFull[:,:,5] + \
+        camera_params[:,6, None] * scalingFull[:,:,6] + camera_params[:,7, None] * scalingFull[:,:,7] + camera_params[:,8, None] * scalingFull[:,:,8]
+
     angle_axis = camera_params[:,:3] * scaling[:,:3]
     point_params = point_params * scalingP
     points_cam = AngleAxisRotatePoint(angle_axis, point_params)
@@ -659,6 +669,13 @@ def ComputeDerivativeMatrixInit(x0_c_, x0_l_, points_2d, camera_indices, point_i
 
     return (J_pose, J_land, fx0)
 
+# return a sparse identity matrix skipping elements not present in ordered_selection.
+def SelectionMatrix(ordered_selection, num_elems, space=9 ):
+    data = np.ones(ordered_selection.shape[0]*space)
+    indices = ordered_selection * space + np.tile(np.arange(space), ordered_selection.shape[0])
+    indptr = np.arange(0, ordered_selection.shape[0]*space+1, space)
+    return csr_matrix((data, indices, indptr), shape=(ordered_selection.shape[0]*space, num_elems*space))
+
 def ComputeDerivativeMatricesNew(x0_t_cam, x0_t_land, camera_indices_, point_indices_, torch_points_2d, unique_poses_in_c_, unique_landmarks_in_c_
 ):
     verbose = False
@@ -678,10 +695,31 @@ def ComputeDerivativeMatricesNew(x0_t_cam, x0_t_land, camera_indices_, point_ind
     landScale = from_numpy(landScale[point_indices_[:]]) # here direct, or not?
     landScale.requires_grad_(False)
 
-    funx0_st1 = lambda X0, X1, X2: torchSingleResiduumXScaled(X0.view(-1,9), X1.view(-1,3), X2.view(-1,2), camScale, landScale)
-    funy0_st1 = lambda X0, X1, X2: torchSingleResiduumYScaled(X0.view(-1,9), X1.view(-1,3), X2.view(-1,2), camScale, landScale)
+    # TODO might need to be done INSIDE the function to make gradient work as tensors?
+    # implement as tensor?
+    x0_t_all_cams = np.zeros((int(Unorm_all.shape[1] / 9), 9))
+    x0_t_all_cams[unique_poses_in_c_,:] = x0_t_cam
+    x0_t_all_cams = (Unorm_all * x0_t_all_cams.flatten()).reshape(-1,9)
+    #pcg_x0_t_cam = x0_t_all_cams[unique_poses_in_c_,:]
+    #pcg_x0_t_cam = from_numpy(pcg_x0_t_cam)
+    #selection_matrix = SelectionMatrix(unique_poses_in_c_, Unorm_all.shape[1] / 9, space=9 )
+    #Unorm_all * selection_matrix * x0_t_cam.flatten()
+    camScaleFull = Unorm_all.data.reshape(-1,9,9)
+    #print(camScaleFull.shape)
+    camScaleFull = camScaleFull[unique_poses_in_c_]
+    #print(camScaleFull.shape)
+    camScaleFull = from_numpy(camScaleFull[camera_indices_[:]])
+    #print(camScaleFull.shape)
+    camScaleFull.requires_grad_(False)
+    #pcg_x0_t_cam = x0_t_cam
 
+    funx0_st1 = lambda X0, X1, X2: torchSingleResiduumXScaled(X0.view(-1,9), X1.view(-1,3), X2.view(-1,2), camScale, landScale, camScaleFull)
+    funy0_st1 = lambda X0, X1, X2: torchSingleResiduumYScaled(X0.view(-1,9), X1.view(-1,3), X2.view(-1,2), camScale, landScale, camScaleFull)
+
+    # original:
     torch_cams = x0_t_cam[camera_indices_[:],:] #x0_t[:n_cameras*9].reshape(n_cameras,9)[camera_indices[:],:]
+    # new
+    #torch_cams = pcg_x0_t_cam[camera_indices_[:],:] #x0_t[:n_cameras*9].reshape(n_cameras,9)[camera_indices[:],:]
     torch_lands = x0_t_land[point_indices_[:],:] #x0_t[n_cameras*9:].reshape(n_points,3)[point_indices[:],:]
     torch_lands.requires_grad_()
     torch_cams.requires_grad_()
@@ -1512,12 +1550,20 @@ def primal_cost(
     landScale = from_numpy(landScale[unique_points_in_c_])
     landScale.requires_grad_(False)
 
+    x0_t_all_cams = np.zeros((int(Unorm_all.shape[1] / 9), 9))
+    x0_t_all_cams[cameras_indices_in_c_,:] = x0_t_cam.numpy().reshape(-1,9)
+    x0_t_all_cams = (Unorm_all * x0_t_all_cams.flatten()).reshape(-1,9)
+    pcg_x0_t_cam = x0_t_all_cams[cameras_indices_in_c_,:]
+    pcg_x0_t_cam = from_numpy(pcg_x0_t_cam)
+    #print("pcg_x0_t_cam ", pcg_x0_t_cam.shape, " x0_t_cam ", x0_t_cam.shape)
+
     funx0_st1 = lambda X0, X1, X2: \
         torchSingleResiduumScaled(X0.view(-1, 9), X1.view(-1, 3), X2.view(-1, 2), \
                                   camScale[camera_indices_[:]], landScale[point_indices_[:]])
 
     fx1 = funx0_st1(
-        x0_t_cam[camera_indices_[:]],
+        pcg_x0_t_cam[camera_indices_[:]],
+        #x0_t_cam[camera_indices_[:]],
         x0_t_land[point_indices_[:]],
         torch_points_2d)
     costEnd = np.sum(fx1.numpy() ** 2)
@@ -1845,7 +1891,7 @@ def bundle_adjust(
             #print("Mat.shape " , Mat.shape)
             #JltJlDiag_all = L * JltJlDiag
             # not sure:
-            # JltJlDiag_all.indices += J_pose.shape[1] # add 9 * n_cams 
+            # JltJlDiag_all.indices += J_pose.shape[1] # add 9 * n_cams
             # so .. ? hstack diag of 0 and Jl
             JltJlDiag_all = sparse_hstack((0 * J_pose, J_land))
             JltJlDiag_all = L * JltJlDiag_all.transpose() * JltJlDiag_all
@@ -1884,7 +1930,16 @@ def bundle_adjust(
         x0_p_ = x0_p_ + delta_p
         x0_l_ = x0_l_ + delta_l
 
-        x0_ = np.hstack((x0_p_, x0_l_))
+        # new
+        #print(" x0_p_ ", x0_p_)
+        x0_t_all_cams = np.zeros((int(Unorm_all.shape[1] / 9), 9))
+        x0_t_all_cams[unique_poses_in_c_,:] = x0_p_.reshape(-1,9)
+        x0_t_all_cams = (Unorm_all * x0_t_all_cams.flatten()).reshape(-1,9)
+        pcg_x0_p_ = x0_t_all_cams[unique_poses_in_c_,:].flatten()
+        #print(" pcg_x0_p_ ", pcg_x0_p_)
+
+        #x0_ = np.hstack((x0_p_, x0_l_))
+        x0_ = np.hstack((pcg_x0_p_, x0_l_)) # new
         x0_t_ = from_numpy(x0_)
         x0_t_cam = x0_t_[: n_cameras_ * 9].reshape(n_cameras_, 9)
         x0_t_land = x0_t_[n_cameras_ * 9 :].reshape(n_points_, 3)
@@ -2422,7 +2477,7 @@ def GetPreconditioners(cameras_, points_3d_, points_2d_, camera_indices_, point_
     J_pose, J_land, fx0_ = ComputeDerivativeMatrixInit(cameras_, points_3d_, points_2d_, camera_indices_, point_indices_)
 
     JtJ = J_pose.transpose() * J_pose
-    W = J_pose.transpose() * J_land
+    # W = J_pose.transpose() * J_land
     orig = True
     if orig:
         temp_ = np.squeeze(np.asarray(0.0001 * ( (np.abs(JtJ)/1000).sum(axis=0) )))
@@ -2450,6 +2505,27 @@ def GetPreconditioners(cameras_, points_3d_, points_2d_, camera_indices_, point_
     # TODO: eval thresh here. lower higher, use 173 maybe w. all lms. Also: redo every 10 iterations?
     # temp_ = np.ones(temp_.shape) # e.g. 173: worse. Likely all w landmarks far away?
     Unorm_ = diag_sparse(temp_.flatten())
+
+    # new
+    #Unorm_all_ = blockInverse(JtJ + blockEigenvalueWhereNeeded(JtJ, 9, 1e-6), 9)
+    #Unorm_all_ = (2 * JtJ + 1e-4 * blockEigenvalueWhereNeeded(JtJ, 9, 1e-6)) * 1e-7 # ok
+    
+    #Unorm_all_ = (2 * JtJ + 1e-4 * blockEigenvalueWhereNeeded(JtJ, 9, 1e-4)) * 1e-6 # experimental
+    Unorm_all_ = (2 * JtJ + 1e-4 * blockEigenvalueWhereNeeded(JtJ, 9, 1e-4)) * 1e-10 # experimental
+
+    #Unorm_all_ = diag_sparse(temp_.flatten()) + 1e-16 * JtJ # debug hack
+    Unorm_ = diag_sparse(np.ones(temp_.shape).flatten())
+    #Unorm_all_ = diag_sparse(np.ones(temp_.shape).flatten()) # ok
+
+    if False:
+        temp_ = np.ones(temp_.shape).reshape(-1,9)
+        temp_[:,6] *= 0.1 # check in debug output
+        #temp_[:,0:3] *= 0.5
+        #temp_[:,8] *= 0.8 # check in debug output
+        Unorm_correction_ = diag_sparse(temp_.flatten())
+        # Unorm_all_ = Unorm_all_ * Unorm_correction_
+        Unorm_ = Unorm_correction_
+
     #print(Unorm.shape, " ", Unorm.data.shape)
     #Unorm = diag_sparse(np.squeeze(np.asarray(0.01 * np.sqrt( (np.abs(JtJ)/1000).sum(axis=0) ))))
     #Unorm = diag_sparse(np.ones(cameras.flatten().shape[0])) * 100 # ok.
@@ -2479,7 +2555,7 @@ def GetPreconditioners(cameras_, points_3d_, points_2d_, camera_indices_, point_
     #temp_ = np.repeat(temp_[:,np.newaxis], 3, axis=1)
     Vnorm_ = diag_sparse(temp_.flatten())
     Vnorm_ = diag_sparse(np.ones(points_3d.flatten().shape[0])) # 52: this is much better -- could be random
-    return Unorm_, Vnorm_, fx0_
+    return Unorm_, Vnorm_, fx0_, Unorm_all_
 
 def UpdatePreconditioners(cameras_, points_3d_, points_2d_, camera_indices_, point_indices_):
     torch_cams = from_numpy(cameras_.reshape(-1,9))
@@ -2526,8 +2602,14 @@ def UpdatePreconditioners(cameras_, points_3d_, points_2d_, camera_indices_, poi
     # print("np.sum(fx0**2) ", np.sum(fx0**2))
     # print("cameras ", cameras )
 
+    Unorm_all_ = (2 * JtJ + 1e-4 * blockEigenvalueWhereNeeded(JtJ, 9, 1e-4)) * 1e-10 # experimental
+    # Unorm_all_ = diag_sparse(temp_.flatten()) # debug
+    #Unorm_all_ = diag_sparse(temp_.flatten()) + 1e-16 * JtJ # debug hack
+    Unorm_ = diag_sparse(np.ones(temp_.shape).flatten())
+    #Unorm_all_ = diag_sparse(np.ones(temp_.shape).flatten()) + 1e-20 * JtJ
+
     #print("cameras ", cameras ) # looks ok ..
-    return Unorm_, fx0_
+    return Unorm_, fx0_, Unorm_all_
 
 ##############################################################################
 
@@ -2589,9 +2671,13 @@ print("min k2 distance ", np.min(cameras[:,8].flatten()), " ", np.max(cameras[:,
 # alternative: this defines a basis. then we return not 9x9 but 9 values wrt basis bounding the actual
 
 c02_mult = 1; c34_mult = 1; c5_mult = 1; c6_mult = 1; c7_mult = 1; c8_mult = 1
-Unorm, Vnorm, fx0 = GetPreconditioners(cameras, points_3d, points_2d, camera_indices, point_indices)
+Unorm, Vnorm, fx0, Unorm_all = GetPreconditioners(cameras, points_3d, points_2d, camera_indices, point_indices)
 cameras = (Unorm * cameras.flatten()).reshape(-1,9)
 points_3d = (Vnorm * points_3d.flatten()).reshape(-1,3)
+
+cameras = (Unorm_all * cameras.flatten()).reshape(-1,9)
+Unorm_all = blockInverse(Unorm_all, 9)
+#Unorm_all = diag_sparse(Unorm_all.diagonal().flatten()) # TODO debug
 
 # can i do this?
 if False:
@@ -3256,6 +3342,7 @@ else:
                         dre_bfgs = dre # while loop uses this
                     if True: # is True better maybe -> Does not do ANYTHING? 52/89, test smth else.
                         lastCostDRE_bfgs = dre_bfgs # does not happen? needed to not keep running in it. Yet demanding Lip < X to enter should work
+                        prev_dk = 0 * prev_dk # erase momentum
 
                 # revert whole iteration.
                 #it = it - 1
@@ -3344,13 +3431,20 @@ else:
                             for ci in range(kClusters):
                                 tempBlockEigen[ci][m] = maxM
 
-                    if False and globalIt % 10 == 9: # debatable, bigger analysis needed. Just random?
-                        Unorm_update, fx0 = UpdatePreconditioners(poses_v, landmarks, points_2d, camera_indices, point_indices)
+                    if True and globalIt % 2 == 1: # debatable, bigger analysis needed. Just random?
+                        Unorm_update, fx0, Unorm_all_update = \
+                            UpdatePreconditioners(poses_v, landmarks, points_2d, camera_indices, point_indices)
+
+                        # print("Unorm_update ", Unorm_update)
+                        print("Unorm_all_update ", Unorm_all_update)
+                        print("Unorm_all ", Unorm_all)
+                        Unorm_update = Unorm_all_update.copy() # lazy and ugly
+
                         poses_v = (Unorm_update * poses_v.flatten()).reshape(-1,9)
                         poses_s_in_cluster = [(Unorm_update * poses_s.flatten()).reshape(-1,9) for poses_s in poses_s_in_cluster]
                         poses_s_in_cluster_pre = [(Unorm_update * poses_s.flatten()).reshape(-1,9) for poses_s in poses_s_in_cluster_pre]
-                        poses_in_cluster = [(Unorm_update * poses_s.flatten()).reshape(-1,9) for poses_s in poses_in_cluster]
-                        Unorm = Unorm_update * Unorm
+                        poses_in_cluster = [(Unorm_update * poses_u.flatten()).reshape(-1,9) for poses_u in poses_in_cluster]
+                        #Unorm = Unorm_update * Unorm
 
                         # avoid total chaos, adjust RNA buffer along.
                         for pos in range(len(Gs)):
@@ -3358,6 +3452,22 @@ else:
                                 Gs[pos][ci * 9 * n_cameras: (ci+1) * 9 * n_cameras] = Unorm_update * Gs[pos][ci * 9 * n_cameras: (ci+1) * 9 * n_cameras]
                                 Fes[pos][ci * 9 * n_cameras: (ci+1) * 9 * n_cameras] = Unorm_update * Fes[pos][ci * 9 * n_cameras: (ci+1) * 9 * n_cameras]
                                 Fs[pos][ci * 9 * n_cameras: (ci+1) * 9 * n_cameras] = Unorm_update * Fs[pos][ci * 9 * n_cameras: (ci+1) * 9 * n_cameras]
+                        #(Unorm_update * Unorm_all)^-1 = Unorm_all^-1 Unorm_update^-1 
+                        Unorm_all = Unorm_all * blockInverse(Unorm_all_update, 9)
+                        #print("Unorm_all ", Unorm_all)
+                        Unorm_all = Unorm_all + 0 * Unorm_all
+                        print("Unorm_all ", Unorm_all)
+
+                        primal_cost_v_pcg = 0 # TODO out of loop if correct
+                        for ci in range(kClusters):
+                            primal_cost_v_pcg += primal_cost(
+                                poses_v, # v not u
+                                camera_indices_in_cluster[ci],
+                                point_indices_in_cluster[ci],
+                                points_2d_in_cluster[ci],
+                                landmarks)
+                        print("primal_cost_v_pcg ", primal_cost_v_pcg)
+
                         #poses_s_in_cluster_pre = [poses_s.copy() for poses_s in poses_in_cluster]
                         #poses_s_in_cluster = [poses_s.copy() for poses_s in poses_in_cluster]
                         #poses_s_in_cluster = [poses_v.copy() for poses_s in poses_s_in_cluster]
