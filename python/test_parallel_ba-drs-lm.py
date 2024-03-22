@@ -699,12 +699,18 @@ def ComputeDerivativeMatricesNew(x0_t_cam, x0_t_land, camera_indices_, point_ind
     # implement as tensor?
     x0_t_all_cams = np.zeros((int(Unorm_all.shape[1] / 9), 9))
     x0_t_all_cams[unique_poses_in_c_,:] = x0_t_cam
-    x0_t_all_cams = (Unorm_all * x0_t_all_cams.flatten()).reshape(-1,9)
+    x0_t_all_cams = (Unorm_all * x0_t_all_cams.flatten()).reshape(-1,9) # transpose
     #pcg_x0_t_cam = x0_t_all_cams[unique_poses_in_c_,:]
     #pcg_x0_t_cam = from_numpy(pcg_x0_t_cam)
     #selection_matrix = SelectionMatrix(unique_poses_in_c_, Unorm_all.shape[1] / 9, space=9 )
     #Unorm_all * selection_matrix * x0_t_cam.flatten()
-    camScaleFull = Unorm_all.data.reshape(-1,9,9)
+
+    # todo thi scould be an issue: before Unorm_all was symmetric
+    # (A*B)^t = B^T A^T = B A != A B so not sym.
+    # this is even more weird/insane
+    camScaleFull = Unorm_all.transpose().data.reshape(-1,9,9)
+    #camScaleFull = Unorm_all.data.reshape(-1,9,9) # no transpose
+
     #print(camScaleFull.shape)
     camScaleFull = camScaleFull[unique_poses_in_c_]
     #print(camScaleFull.shape)
@@ -712,6 +718,9 @@ def ComputeDerivativeMatricesNew(x0_t_cam, x0_t_land, camera_indices_, point_ind
     #print(camScaleFull.shape)
     camScaleFull.requires_grad_(False)
     #pcg_x0_t_cam = x0_t_cam
+
+    # print("x0_t_all_cams\n", x0_t_all_cams)
+    # print("camScaleFull\n", camScaleFull)
 
     funx0_st1 = lambda X0, X1, X2: torchSingleResiduumXScaled(X0.view(-1,9), X1.view(-1,3), X2.view(-1,2), camScale, landScale, camScaleFull)
     funy0_st1 = lambda X0, X1, X2: torchSingleResiduumYScaled(X0.view(-1,9), X1.view(-1,3), X2.view(-1,2), camScale, landScale, camScaleFull)
@@ -731,6 +740,7 @@ def ComputeDerivativeMatricesNew(x0_t_cam, x0_t_land, camera_indices_, point_ind
     lossX.backward()
 
     cam_grad_x = torch_cams.grad.detach().numpy().copy()
+    #print("cam_grad_x\n", cam_grad_x)
     #cam_grad_x.detach()
     land_grad_x = torch_lands.grad.detach().numpy().copy()
     #land_grad_x.detach()
@@ -812,6 +822,32 @@ def buildResiduumNew(resX, resY) :
 def check_symmetric(a, tol=1e-8):
     return np.all(np.abs(a-a.T) < tol)
 
+def blockUpdatePCG(M, A, bs):
+    Mi = M.copy()
+    if bs > 1:
+        bs2 = bs * bs
+        for i in range(int(M.data.shape[0] / bs2)):
+            mat  = A.data[bs2 * i : bs2 * i + bs2].copy().reshape(bs, bs)
+            matM = Mi.data[bs2 * i : bs2 * i + bs2].reshape(bs, bs)
+            if not check_symmetric(mat):
+                imat = inv_dense(np.fliplr(mat), hermitian=True) # inv or pinv?
+            else:
+                imat = inv_dense(mat, hermitian=True)
+            if not check_symmetric(matM):
+                matM = np.fliplr(matM)
+                Mi.data[bs2 * i : bs2 * i + bs2] = (np.fliplr(matM.dot(imat))).flatten()
+            else:
+                # print("m " ,matM)
+                # print("a ", mat)
+                # print("matM * imat ",matM * imat)
+                #print("matM * imat ", imat.dot(mat))
+                Mi.data[bs2 * i : bs2 * i + bs2] = (matM.dot(imat)).flatten()
+    else:
+        Mi = M.copy()
+        for i in range(int(M.data.shape[0])):
+            Mi.data[i : i + 1] = 1.0 / Mi.data[i : i + 1]
+    return Mi
+
 # bs : blocksize, eg 9 -> 9x9 or 3 -> 3x3 per block
 def blockInverse(M, bs):
     Mi = M.copy()
@@ -821,9 +857,9 @@ def blockInverse(M, bs):
             mat = Mi.data[bs2 * i : bs2 * i + bs2].reshape(bs, bs)
             if not check_symmetric(mat):
                 mat = np.fliplr(mat)
-                imat = np.fliplr(inv_dense(mat)) # inv or pinv?
+                imat = np.fliplr(inv_dense(mat, hermitian=True)) # inv or pinv?
             else:
-                imat = inv_dense(mat)
+                imat = inv_dense(mat, hermitian=True)
             Mi.data[bs2 * i : bs2 * i + bs2] = imat.flatten()
     else:
         Mi = M.copy()
@@ -1552,7 +1588,7 @@ def primal_cost(
 
     x0_t_all_cams = np.zeros((int(Unorm_all.shape[1] / 9), 9))
     x0_t_all_cams[cameras_indices_in_c_,:] = x0_t_cam.numpy().reshape(-1,9)
-    x0_t_all_cams = (Unorm_all * x0_t_all_cams.flatten()).reshape(-1,9)
+    x0_t_all_cams = (Unorm_all * x0_t_all_cams.flatten()).reshape(-1,9) # transpose!
     pcg_x0_t_cam = x0_t_all_cams[cameras_indices_in_c_,:]
     pcg_x0_t_cam = from_numpy(pcg_x0_t_cam)
     #print("pcg_x0_t_cam ", pcg_x0_t_cam.shape, " x0_t_cam ", x0_t_cam.shape)
@@ -1934,7 +1970,7 @@ def bundle_adjust(
         #print(" x0_p_ ", x0_p_)
         x0_t_all_cams = np.zeros((int(Unorm_all.shape[1] / 9), 9))
         x0_t_all_cams[unique_poses_in_c_,:] = x0_p_.reshape(-1,9)
-        x0_t_all_cams = (Unorm_all * x0_t_all_cams.flatten()).reshape(-1,9)
+        x0_t_all_cams = (Unorm_all * x0_t_all_cams.flatten()).reshape(-1,9) # transpose!
         pcg_x0_p_ = x0_t_all_cams[unique_poses_in_c_,:].flatten()
         #print(" pcg_x0_p_ ", pcg_x0_p_)
 
@@ -2509,9 +2545,9 @@ def GetPreconditioners(cameras_, points_3d_, points_2d_, camera_indices_, point_
     # new
     #Unorm_all_ = blockInverse(JtJ + blockEigenvalueWhereNeeded(JtJ, 9, 1e-6), 9)
     #Unorm_all_ = (2 * JtJ + 1e-4 * blockEigenvalueWhereNeeded(JtJ, 9, 1e-6)) * 1e-7 # ok
-    
-    #Unorm_all_ = (2 * JtJ + 1e-4 * blockEigenvalueWhereNeeded(JtJ, 9, 1e-4)) * 1e-6 # experimental
-    Unorm_all_ = (2 * JtJ + 1e-4 * blockEigenvalueWhereNeeded(JtJ, 9, 1e-4)) * 1e-10 # experimental
+
+    Unorm_all_ = (2 * JtJ + 1e-4 * blockEigenvalueWhereNeeded(JtJ, 9, 1e-4)) * 1e-6 # experimental
+    #Unorm_all_ = (2 * JtJ + 1e-4 * blockEigenvalueWhereNeeded(JtJ, 9, 1e-4)) * 1e-10 # experimental
 
     #Unorm_all_ = diag_sparse(temp_.flatten()) + 1e-16 * JtJ # debug hack
     Unorm_ = diag_sparse(np.ones(temp_.shape).flatten())
@@ -2556,6 +2592,21 @@ def GetPreconditioners(cameras_, points_3d_, points_2d_, camera_indices_, point_
     Vnorm_ = diag_sparse(temp_.flatten())
     Vnorm_ = diag_sparse(np.ones(points_3d.flatten().shape[0])) # 52: this is much better -- could be random
     return Unorm_, Vnorm_, fx0_, Unorm_all_
+
+def RedoPreconditioners(cameras_, points_3d_, points_2d_, camera_indices_, point_indices_, Unorm_allinv):
+    torch_cams = from_numpy((Unorm_allinv * cameras_.flatten()).reshape(-1,9))
+    torch_lands = from_numpy(points_3d_.reshape(-1,3))
+    torch_points_2d = from_numpy(points_2d_)
+    torch_points_2d.requires_grad_(False)
+
+    # this is now in original coordinates
+    J_pose, J_land, fx0_ = ComputeDerivativeMatricesNew (
+        torch_cams, torch_lands, camera_indices_, point_indices_,
+        torch_points_2d, range(torch_cams.shape[0]), range(torch_lands.shape[0]) )
+
+    JtJ = J_pose.transpose() * J_pose
+    Unorm_all_new = (2 * JtJ + 1e-4 * blockEigenvalueWhereNeeded(JtJ, 9, 1e-4)) * 1e-6 # experimental
+    return Unorm_allinv, fx0_, Unorm_all_new
 
 def UpdatePreconditioners(cameras_, points_3d_, points_2d_, camera_indices_, point_indices_):
     torch_cams = from_numpy(cameras_.reshape(-1,9))
@@ -2602,7 +2653,7 @@ def UpdatePreconditioners(cameras_, points_3d_, points_2d_, camera_indices_, poi
     # print("np.sum(fx0**2) ", np.sum(fx0**2))
     # print("cameras ", cameras )
 
-    Unorm_all_ = (2 * JtJ + 1e-4 * blockEigenvalueWhereNeeded(JtJ, 9, 1e-4)) * 1e-10 # experimental
+    Unorm_all_ = (2 * JtJ + 1e-4 * blockEigenvalueWhereNeeded(JtJ, 9, 1e-4)) * 1e-6 # experimental
     # Unorm_all_ = diag_sparse(temp_.flatten()) # debug
     #Unorm_all_ = diag_sparse(temp_.flatten()) + 1e-16 * JtJ # debug hack
     Unorm_ = diag_sparse(np.ones(temp_.shape).flatten())
@@ -3431,14 +3482,36 @@ else:
                             for ci in range(kClusters):
                                 tempBlockEigen[ci][m] = maxM
 
-                    if True and globalIt % 2 == 1: # debatable, bigger analysis needed. Just random?
+                    if True and globalIt % 10 == 9: # debatable, bigger analysis needed. Just random?
+                        Unorm_all_safe = Unorm_all.copy()
+                        Unorm_all = 1e-36 * Unorm_all + diag_sparse(np.ones(Unorm_all.shape[0]).flatten()) # to overwrite global var needs to be done in outer scope?
+
+                        Unorm_allinv_old, fx0, Unorm_all = \
+                            RedoPreconditioners(poses_v, landmarks, points_2d, camera_indices, point_indices, Unorm_all_safe)
+
+                        poses_v = (Unorm_all * (Unorm_allinv_old * poses_v.flatten())).reshape(-1,9)
+                        poses_s_in_cluster = [(Unorm_all * (Unorm_allinv_old * poses_s.flatten())).reshape(-1,9) for poses_s in poses_s_in_cluster]
+                        poses_s_in_cluster_pre = [(Unorm_all * (Unorm_allinv_old * poses_s.flatten())).reshape(-1,9) for poses_s in poses_s_in_cluster_pre]
+                        poses_in_cluster = [(Unorm_all * (Unorm_allinv_old * poses_u.flatten())).reshape(-1,9) for poses_u in poses_in_cluster]
+
+                        for pos in range(len(Gs)):
+                            for ci in range(kClusters):
+                                Gs[pos][ci * 9 * n_cameras: (ci+1) * 9 * n_cameras]  = Unorm_all * (Unorm_allinv_old *  Gs[pos][ci * 9 * n_cameras: (ci+1) * 9 * n_cameras])
+                                Fes[pos][ci * 9 * n_cameras: (ci+1) * 9 * n_cameras] = Unorm_all * (Unorm_allinv_old * Fes[pos][ci * 9 * n_cameras: (ci+1) * 9 * n_cameras])
+                                Fs[pos][ci * 9 * n_cameras: (ci+1) * 9 * n_cameras]  = Unorm_all * (Unorm_allinv_old *  Fs[pos][ci * 9 * n_cameras: (ci+1) * 9 * n_cameras])
+                        Unorm_all = blockInverse(Unorm_all, 9)
+
+                    if False and globalIt % 2 == 1: # debatable, bigger analysis needed. Just random?
                         Unorm_update, fx0, Unorm_all_update = \
                             UpdatePreconditioners(poses_v, landmarks, points_2d, camera_indices, point_indices)
 
                         # print("Unorm_update ", Unorm_update)
-                        print("Unorm_all_update ", Unorm_all_update)
-                        print("Unorm_all ", Unorm_all)
+                        #print("Unorm_all_update ", Unorm_all_update) # both are similar ? update should be much smaller?
+                        #print("Unorm_all ", Unorm_all)
                         Unorm_update = Unorm_all_update.copy() # lazy and ugly
+
+                        poses_v_1 = poses_v.copy()
+                        poses_v_2 = (Unorm_all * poses_v.flatten()).reshape(-1,9)
 
                         poses_v = (Unorm_update * poses_v.flatten()).reshape(-1,9)
                         poses_s_in_cluster = [(Unorm_update * poses_s.flatten()).reshape(-1,9) for poses_s in poses_s_in_cluster]
@@ -3453,10 +3526,40 @@ else:
                                 Fes[pos][ci * 9 * n_cameras: (ci+1) * 9 * n_cameras] = Unorm_update * Fes[pos][ci * 9 * n_cameras: (ci+1) * 9 * n_cameras]
                                 Fs[pos][ci * 9 * n_cameras: (ci+1) * 9 * n_cameras] = Unorm_update * Fs[pos][ci * 9 * n_cameras: (ci+1) * 9 * n_cameras]
                         #(Unorm_update * Unorm_all)^-1 = Unorm_all^-1 Unorm_update^-1 
+                        #Unorm_all = blockUpdatePCG(Unorm_all, Unorm_all_update, 9) # double transpose hidden!
+                        #Unorm_all = blockUpdatePCG(Unorm_all, Unorm_all_update, 9).transpose() # this feels wrong.
                         Unorm_all = Unorm_all * blockInverse(Unorm_all_update, 9)
+                        if False:
+                            Unorm_all_1 = Unorm_all * blockInverse(Unorm_all_update, 9)
+                            Unorm_all_2 = blockUpdatePCG(Unorm_all, Unorm_all_update, 9).transpose() # this feels wrong.
+
+                            poses_v_3 = (Unorm_all_2 * poses_v.flatten()).reshape(-1,9)
+                            poses_v_3b = (Unorm_all_1 * poses_v.flatten()).reshape(-1,9)
+                            poses_v_4 = (blockInverse(Unorm_all_update, 9) * poses_v.flatten()).reshape(-1,9)
+
+                            print("poses_v1 ", poses_v_1)
+                            print("poses_v4 ", poses_v_4) # 1 equals 4: ok
+                            print("poses_v ", poses_v)
+                            print("poses_v2 ", poses_v_2) # 2 equlas 3: no? Haeh?
+                            print("poses_v3 ", poses_v_3)
+                            print("poses_v3 ", poses_v_3b)
+                            print(Unorm_all_1)
+                            print(Unorm_all_2)
+                            exit()
+                        else:
+                            Unorm_all = Unorm_all + 0 * Unorm_all
+                            print("poses_v ", poses_v)
+                        # print(Unorm_all)
+                        # print(Unorm_all_update)
+                        # print(blockInverse(Unorm_all_update, 9))
+                        # is '0':
+                        #print(Unorm_all_update - blockUpdatePCG(Unorm_all_update, Unorm_all_update, 9).dot(Unorm_all_update))
+
+                        #exit()
+
                         #print("Unorm_all ", Unorm_all)
-                        Unorm_all = Unorm_all + 0 * Unorm_all
-                        print("Unorm_all ", Unorm_all)
+                        #Unorm_all = Unorm_all + 0 * Unorm_all
+                        #print("Unorm_all ", Unorm_all)
 
                         primal_cost_v_pcg = 0 # TODO out of loop if correct
                         for ci in range(kClusters):
