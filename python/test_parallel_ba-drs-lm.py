@@ -708,8 +708,8 @@ def ComputeDerivativeMatricesNew(x0_t_cam, x0_t_land, camera_indices_, point_ind
     # todo thi scould be an issue: before Unorm_all was symmetric
     # (A*B)^t = B^T A^T = B A != A B so not sym.
     # this is even more weird/insane
-    camScaleFull = Unorm_all.transpose().data.reshape(-1,9,9)
-    #camScaleFull = Unorm_all.data.reshape(-1,9,9) # no transpose
+    #camScaleFull = Unorm_all.transpose().data.reshape(-1,9,9)
+    camScaleFull = Unorm_all.data.reshape(-1,9,9) # no transpose
 
     #print(camScaleFull.shape)
     camScaleFull = camScaleFull[unique_poses_in_c_]
@@ -987,6 +987,29 @@ def blockEigenvalueFull(M, bs, x0_t_cam_):
             #print("evv ", evv[bs-1])
             print("evv ", evv)
             print(" cam " , x0_t_cam_[i,:])
+            mat = evv.dot(diag_sparse(evs) * evv.transpose())
+            if flip:
+                mat = np.fliplr(mat)
+            Ei.data[bs2 * i : bs2 * i + bs2] = mat.flatten()
+    else:
+        Ei = M.copy()
+    return Ei
+
+def blockEigenvalueSqrt(M, bs, t = 1e-16):
+    Ei = M.copy()
+    if bs > 1:
+        bs2 = bs * bs
+        for i in range(int(M.data.shape[0] / bs2)):
+            mat = Ei.data[bs2 * i : bs2 * i + bs2].reshape(bs, bs)
+            flip = False
+            if not check_symmetric(mat):
+                mat = np.fliplr(mat)
+                flip = True
+            evs, evv = eigh(mat)
+            evs = np.sqrt(np.fmax(evs, t))
+            # print("evs ", evs[bs-1] / evs)
+            # #print("evv ", evv[bs-1])
+            # print("evv ", evv)
             mat = evv.dot(diag_sparse(evs) * evv.transpose())
             if flip:
                 mat = np.fliplr(mat)
@@ -1760,7 +1783,7 @@ def bundle_adjust(
             #maxE, minE = minmaxEv(stepSize, 9)
             #print("minmax ev stepSz ", np.max(maxE), " ", np.max(minE), " ", np.min(maxE), " ",  np.min(minE), " spec ", np.max(maxE/minE) )
 
-            print( "Mean diagonal of pseudo Hessian ",  np.sum(np.abs(JtJ.diagonal()).reshape(-1,9) / (1000 * n_cameras_), 0), file=sys.stderr )
+            print( "Mean diagonal of pseudo Hessian ",  np.sum(np.abs(JtJ.diagonal()).reshape(-1,9) / (1 * n_cameras_), 0), file=sys.stderr )
             absDiagJtJ = np.abs(JtJ.diagonal()).reshape(-1,9)
             print( "Diag pseudo HessP (max/min/med)",  np.max(absDiagJtJ, axis=0), " ", np.min(absDiagJtJ, axis=0),  " ", np.median(absDiagJtJ, axis=0), file=sys.stderr )
 
@@ -2591,22 +2614,36 @@ def GetPreconditioners(cameras_, points_3d_, points_2d_, camera_indices_, point_
     #temp_ = np.repeat(temp_[:,np.newaxis], 3, axis=1)
     Vnorm_ = diag_sparse(temp_.flatten())
     Vnorm_ = diag_sparse(np.ones(points_3d.flatten().shape[0])) # 52: this is much better -- could be random
-    return Unorm_, Vnorm_, fx0_, Unorm_all_
+
+    # sqrt can do more? smaller is better for 52 or worse for 173. Smart solution?
+    Unorm_all_ = (2 * JtJ + 1e-6 * blockEigenvalueWhereNeeded(JtJ, 9, 1e-12)) # experimental
+    Unorm_all_sqrt = blockEigenvalueSqrt(Unorm_all_, 9)
+    return Unorm_, Vnorm_, fx0_, Unorm_all_sqrt
 
 def RedoPreconditioners(cameras_, points_3d_, points_2d_, camera_indices_, point_indices_, Unorm_allinv):
-    torch_cams = from_numpy((Unorm_allinv * cameras_.flatten()).reshape(-1,9))
-    torch_lands = from_numpy(points_3d_.reshape(-1,3))
-    torch_points_2d = from_numpy(points_2d_)
-    torch_points_2d.requires_grad_(False)
+    #torch_cams = from_numpy((Unorm_allinv * cameras_.flatten()).reshape(-1,9))
+    #torch_lands = from_numpy(points_3d_.reshape(-1,3))
+    #torch_points_2d = from_numpy(points_2d_)
+    #torch_points_2d.requires_grad_(False)
+    # # this is now in original coordinates
+    # J_pose, J_land, fx0_ = ComputeDerivativeMatricesNew (
+    #     torch_cams, torch_lands, camera_indices_, point_indices_,
+    #     torch_points_2d, range(torch_cams.shape[0]), range(torch_lands.shape[0]) )
 
-    # this is now in original coordinates
-    J_pose, J_land, fx0_ = ComputeDerivativeMatricesNew (
-        torch_cams, torch_lands, camera_indices_, point_indices_,
-        torch_points_2d, range(torch_cams.shape[0]), range(torch_lands.shape[0]) )
+    J_pose, J_land, fx0_ = ComputeDerivativeMatrixInit(Unorm_allinv * cameras_.flatten(), \
+        points_3d_, points_2d_, camera_indices_, point_indices_)
 
+    # basic idea. Hes = J^tJ operating on x. J^tJ*x.
+    # pcg with M:
+    # M^t J^t J M * [M^-1 * x]
+    # M^t J^t J M *       x^
+    # M = sqrt(J^t J) -> V^T sqrt(E) V, with J^tJ = V^T E V ->
+    # M^t J^t J M = V^T sqrt(E) V  [V^T E V]  V^T sqrt(E) V = Identity.
     JtJ = J_pose.transpose() * J_pose
-    Unorm_all_new = (2 * JtJ + 1e-4 * blockEigenvalueWhereNeeded(JtJ, 9, 1e-4)) * 1e-6 # experimental
-    return Unorm_allinv, fx0_, Unorm_all_new
+    #Unorm_all_new = (2 * JtJ + 1e-4 * blockEigenvalueWhereNeeded(JtJ, 9, 1e-4)) * 1e-6 # experimental
+    Unorm_all_new = (2 * JtJ + 1e-6 * blockEigenvalueWhereNeeded(JtJ, 9, 1e-12)) # cases exist w 1e-4 no enough (173).
+    Unorm_all_new_sqrt = blockEigenvalueSqrt(Unorm_all_new, 9)
+    return Unorm_allinv, fx0_, Unorm_all_new_sqrt
 
 def UpdatePreconditioners(cameras_, points_3d_, points_2d_, camera_indices_, point_indices_):
     torch_cams = from_numpy(cameras_.reshape(-1,9))
@@ -3483,11 +3520,12 @@ else:
                                 tempBlockEigen[ci][m] = maxM
 
                     if True and globalIt % 10 == 9: # debatable, bigger analysis needed. Just random?
-                        Unorm_all_safe = Unorm_all.copy()
-                        Unorm_all = 1e-36 * Unorm_all + diag_sparse(np.ones(Unorm_all.shape[0]).flatten()) # to overwrite global var needs to be done in outer scope?
+                        #Unorm_all_safe = Unorm_all.copy()
+                        #Unorm_all.data = 1e-20 * np.ones(Unorm_all.data.shape)
+                        #Unorm_all = Unorm_all + diag_sparse(np.ones(Unorm_all.shape[0]).flatten()) # to overwrite global var needs to be done in outer scope?
 
                         Unorm_allinv_old, fx0, Unorm_all = \
-                            RedoPreconditioners(poses_v, landmarks, points_2d, camera_indices, point_indices, Unorm_all_safe)
+                            RedoPreconditioners(poses_v, landmarks, points_2d, camera_indices, point_indices, Unorm_all)
 
                         poses_v = (Unorm_all * (Unorm_allinv_old * poses_v.flatten())).reshape(-1,9)
                         poses_s_in_cluster = [(Unorm_all * (Unorm_allinv_old * poses_s.flatten())).reshape(-1,9) for poses_s in poses_s_in_cluster]
