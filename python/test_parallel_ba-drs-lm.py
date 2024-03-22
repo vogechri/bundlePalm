@@ -1320,10 +1320,10 @@ def average_cameras_new(
             Up_all += U_pose
     Upi_all = blockInverse(Up_all, 9)
 
-    # rho_k/2 |u_k - v_k|^2 - rho_k <s_k - u_k, u_k - v_k> is actually 
+    # rho_k/2 |u_k - v_k|^2 - rho_k <s_k - u_k, u_k - v_k> is actually
     # rho_k/2 |u_k - v_k|^2 - <nabla_k, u_k - v_k>
-    # and solution 
-    # sum_k rho_k (u_k - v_k) + nabla_k = 0 -> 
+    # and solution
+    # sum_k rho_k (u_k - v_k) + nabla_k = 0 ->
     # v = sum_k (rho_k)^-1 * sum_k (rho_k u_k + nabla_k)
 
     # rho_k/2 |u_k - v_k|^2 - rho_k <s_k - u_k, u_k - v_k>
@@ -1437,7 +1437,7 @@ def cost_DRE(
         else:
             Ul_all += U_pose
 
-    # analyis 646 small and large mixed. 
+    # analyis 646 small and large mixed.
     #     EV.append(blockEigenvalueSet(U_pose, 9))
     # EV.append(blockEigenvalueSet(Ul_all, 9))
     # print("-----------")
@@ -1451,7 +1451,7 @@ def cost_DRE(
     #       Since I want to work with a new Vl already. Problem.
     # i want |u-s|_D |u-v|_D, also |v-2u-s|_D
     #cost_input  = 0.5 * (pose_v_.flatten().dot(Ul_all * pose_v_.flatten() - 2 * sum_Ds_2u) + sum_constant_term)
-    print("---- |u-s|^2_D ", round(sum_u_s), "|u-v|^2_D ", round(sum_u_v), "|2u-s-v|^2_D ", round(sum_2u_s_v), 
+    print("---- |u-s|^2_D ", round(sum_u_s), "|u-v|^2_D ", round(sum_u_v), "|2u-s-v|^2_D ", round(sum_2u_s_v),
           "|u-v|^2 ", round(sum_u_v_), " cost_dre ", cost_dre, file=sys.stderr)
     print("---- dre_per_part --- ", dre_per_part, file=sys.stderr)
     return cost_dre, dre_per_part
@@ -2661,7 +2661,7 @@ lib = ctypes.CDLL("./libprocess_clusters.so")
 init_lib()
 
 LipJ = 1 * np.ones(kClusters)
-blockEig_in_cluster = 1e-5 * np.ones(kClusters)
+blockEig_in_cluster = 1e-4 * np.ones(kClusters)
 memory_be = 8 # here can shrink, below this only grow.
 for ci in range(kClusters):
     print("input blockEig_in_cluster[ci] ", blockEig_in_cluster[ci])
@@ -3177,7 +3177,7 @@ else:
                     # so more needs to be reset than I do.
 
                     # super basic?
-                    # VERSION v 
+                    # VERSION v
                     poses_in_cluster = [poses_v.copy() for _ in poses_in_cluster]
                     for ci in range(kClusters):
                         poses_in_cluster[ci][:,6] += 1e-6 # 1e-6 is enough to make it different.
