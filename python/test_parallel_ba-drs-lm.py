@@ -3494,6 +3494,9 @@ else:
                         poses_s_in_cluster_pre = [(Unorm_all * (Unorm_allinv_old * poses_s.flatten())).reshape(-1,9) for poses_s in poses_s_in_cluster_pre]
                         poses_in_cluster = [(Unorm_all * (Unorm_allinv_old * poses_u.flatten())).reshape(-1,9) for poses_u in poses_in_cluster]
 
+                        for ci in range(kClusters):
+                            prev_dk[ci * 9 * n_cameras: (ci+1) * 9 * n_cameras]  = Unorm_all * (Unorm_allinv_old *  prev_dk[ci * 9 * n_cameras: (ci+1) * 9 * n_cameras])
+
                         for pos in range(len(Gs)):
                             for ci in range(kClusters):
                                 Gs[pos][ci * 9 * n_cameras: (ci+1) * 9 * n_cameras]  = Unorm_all * (Unorm_allinv_old *  Gs[pos][ci * 9 * n_cameras: (ci+1) * 9 * n_cameras])
