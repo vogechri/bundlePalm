@@ -783,9 +783,9 @@ def blockInverse(M, bs):
             mat = Mi.data[bs2 * i : bs2 * i + bs2].reshape(bs, bs)
             if not check_symmetric(mat):
                 mat = np.fliplr(mat)
-                imat = np.fliplr(inv_dense(mat)) # inv or pinv?
+                imat = np.fliplr(inv_dense(mat, hermitian=True)) # inv or pinv?
             else:
-                imat = inv_dense(mat)
+                imat = inv_dense(mat, hermitian=True)
             Mi.data[bs2 * i : bs2 * i + bs2] = imat.flatten()
     else:
         Mi = M.copy()
@@ -846,7 +846,7 @@ def minEigenvalues(M, bs, get_max_evs=False):
             Ei[i] = np.maximum(1e-16, evs[0])
     return Ei
 
-def blockEigenvalueWhereNeeded(M, bs, thresh = 1e-6):
+def blockEigenvalueWhereNeeded(M, bs, thresh = 1e-6, replace=False):
     Ei = np.zeros(M.shape[0])
     if bs > 1:
         bs2 = bs * bs
@@ -860,7 +860,10 @@ def blockEigenvalueWhereNeeded(M, bs, thresh = 1e-6):
             #    mat = np.fliplr(mat)
             #    evs = eigvalsh(mat)
             if evs[0] < thresh * evs[bs-1]: # all smaller horror.
-                Ei[bs*i:bs*i+bs] = evs[bs-1] # largest
+                if replace:
+                    Ei[bs*i:bs*i+bs] = evs[bs-1] * thresh
+                else:
+                    Ei[bs*i:bs*i+bs] = evs[bs-1] # largest
             else:
                 Ei[bs*i:bs*i+bs] = evs[0] # smallest
 
@@ -1758,12 +1761,17 @@ def bundle_adjust(
                 # default 1e-4. 1e-6 for 173: slightly worse| 1e-6 for 52: also worse now (maybe was the other way round).
                 #               1e-3 for 173: | 1e-3 for 52: ok 1e-3 or 1e-4? might be highly random based on clustering.
                 # 1e-3 appears a bit better.
-                blockEigenvalueJtJ = blockEigenvalueWhereNeeded(JtJ, 9, threshWhereNeeded) # ! 1e-2, 1e-4 1e-5 als works. problem 52, 1e-6 does not 173 performance bad if not 1e-6?
-                #blockEigenvalueJtJ = 1e-1 * blockEigenvalue(JtJ, 9) # ! try 173 & 52, fails at 1e-2, 10 clusters. 1e-1 ok for 173 & 52. (not dead)
+                if False:
+                    blockEigenvalueJtJ = blockEigenvalueWhereNeeded(JtJ, 9, threshWhereNeeded) # ! 1e-2, 1e-4 1e-5 als works. problem 52, 1e-6 does not 173 performance bad if not 1e-6?
+                    #blockEigenvalueJtJ = 1e-1 * blockEigenvalue(JtJ, 9) # ! try 173 & 52, fails at 1e-2, 10 clusters. 1e-1 ok for 173 & 52. (not dead)
 
-                # TODO: LipJ for both? or only JJ?
-                #stepSize = JJ_mult * JtJ.copy() + blockEigMult * blockEigenvalueJtJ
-                stepSize = LipJ_ * JtJ.copy() + blockEigMult * blockEigenvalueJtJ
+                    # TODO: LipJ for both? or only JJ?
+                    #stepSize = JJ_mult * JtJ.copy() + blockEigMult * blockEigenvalueJtJ
+                    stepSize = LipJ_ * JtJ.copy() + blockEigMult * blockEigenvalueJtJ
+                # new version again
+                blockEigenvalueJtJ = blockEigenvalueWhereNeeded(JtJ, 9, 1e-3 * threshWhereNeeded, replace=True) # Try new version
+                stepSize = LipJ_ * JtJ.copy() + blockEigenvalueJtJ
+
                 JtJDiag = JtJ.copy() + blockEigMultJtJ * blockEigenvalueJtJ
 
                 if False:
