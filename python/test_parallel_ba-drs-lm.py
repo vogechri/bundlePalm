@@ -3321,9 +3321,6 @@ else:
 
             else:
 
-                if RNA_or_bfgs == False and ls_it != line_search_iterations-1:
-                    failedNesterovAcceleration = 0 # success, reset counter
-
                 # if lastCostDRE_bfgs < dre_bfgs and ls_it == line_search_iterations-1:
                 #     #LipJ += 0.2 * np.ones(kClusters)
                 #     partid = np.argmax(dre_per_part)
@@ -3388,6 +3385,10 @@ else:
                     #print("poses_v ", poses_v)
                     if o3d_defined:
                         rerender(vis, camera_indices_in_cluster, point_indices_in_cluster, poses_in_cluster, landmarks, save_image=False)
+
+                    if RNA_or_bfgs == False and ls_it != line_search_iterations-1:
+                        print("Reset counter after ", failedNesterovAcceleration , " failed acceleration steps")
+                        failedNesterovAcceleration = 0 # success, reset counter
 
                     #print("A landmark_s_in_cluster", landmark_s_in_cluster)
                     break # next full iteration
