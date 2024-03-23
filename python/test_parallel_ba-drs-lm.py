@@ -2662,8 +2662,9 @@ lastCostDRE = np.sum(fx0**2) #1e20
 bestCost = np.sum(fx0**2) #1e20
 bestIt = 0
 globalIt = 0
+resetIt = 0 # resetting nesterov acceleration
 failedNesterovAcceleration = 0 # count after k consecutive misses, restart (RNA might not need this)
-maxFailedNesterovAcceleration = 5
+maxFailedNesterovAcceleration = 4
 basic_version = False #True # accelerated or basic
 sequential = True
 linearize_at_last_solution = True # linearize at uk or v. maybe best to check energy. at u or v. DRE:
@@ -3009,7 +3010,7 @@ else:
                 delta_s_old_ = delta_s_.copy()
 
                 # momentum simple, same for v? about same
-                beta_nesterov = (globalIt-1) / (globalIt+2) # 0.7
+                beta_nesterov = (globalIt-resetIt-1) / (globalIt-resetIt+2) # 0.7
                 #beta_nesterov = 0.7
                 dk = s_new - s_cur + beta_nesterov * prev_dk
                 #vk = s_new - s_cur + 0.7 * prev_vk
@@ -3157,11 +3158,12 @@ else:
             # Reset acceleration if fails 6 times in a row
             if RNA_or_bfgs == False and ls_it == line_search_iterations - 1:
                 failedNesterovAcceleration += 1
-                print( failedNesterovAcceleration, " consecutive acceleration fails.")
-                if failedNesterovAcceleration > maxFailedNesterovAcceleration:
+                #print( failedNesterovAcceleration, " consecutive acceleration fails.")
+                if failedNesterovAcceleration >= maxFailedNesterovAcceleration:
                     prev_dk = 0 * prev_dk
+                    resetIt = globalIt
                     failedNesterovAcceleration = 0
-                    print("Reset Nesterov acceleration ", maxFailedNesterovAcceleration, " consecutive fails.")
+                    print("Reset Nesterov acceleration after ", maxFailedNesterovAcceleration, " consecutive fails.")
 
             maxPctV = np.sqrt(maxPct)
             #if reject and (np.min(LipJ) < LipJMax) and (ls_it == line_search_iterations-1) and (maxPct * lastCostDRE_bfgs < dre_bfgs) and (primal_cost_v > maxPctV * primal_cost_v_before): # or primal_cost_v > maxPct * primal_cost_u):
@@ -3387,7 +3389,7 @@ else:
                         rerender(vis, camera_indices_in_cluster, point_indices_in_cluster, poses_in_cluster, landmarks, save_image=False)
 
                     if RNA_or_bfgs == False and ls_it != line_search_iterations-1:
-                        print("Reset counter after ", failedNesterovAcceleration , " failed acceleration steps")
+                        #print("Reset counter after ", failedNesterovAcceleration , " failed acceleration steps")
                         failedNesterovAcceleration = 0 # success, reset counter
 
                     #print("A landmark_s_in_cluster", landmark_s_in_cluster)
