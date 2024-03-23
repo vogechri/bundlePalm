@@ -1595,7 +1595,7 @@ def bundle_adjust(
         threshWhereNeeded = 1e-4 # this higher -> blockEigMult, blockEigMultLimit lower?
         blockEigMultJtJ = 1e-4 # 173: little effect 1e-6/4/8. just 173 or always not mattering much?
         blockEigMultLimit = 1e-5
-        blockEigLowerMultLimit = 1e-1 # 1e-2? # same as blockEigenMaxT
+        #globalBlockEigUpperLimit # set globally 1e-2?
         decent_lemma_divisor = 2 # 2/4: higher does indeed delay flow over, but result is worse.
         Derivative_at_end = False # maybe negative to have update v and updte u differ.
         # limit lower -> major effect from partitioning only?
@@ -1768,8 +1768,8 @@ def bundle_adjust(
                     # TODO: LipJ for both? or only JJ?
                     #stepSize = JJ_mult * JtJ.copy() + blockEigMult * blockEigenvalueJtJ
                     stepSize = LipJ_ * JtJ.copy() + blockEigMult * blockEigenvalueJtJ
-                # new version again
-                blockEigenvalueJtJ = blockEigenvalueWhereNeeded(JtJ, 9, 1e-3 * threshWhereNeeded, replace=True) # Try new version
+                # new version again, 427/356 fail.
+                blockEigenvalueJtJ = blockEigenvalueWhereNeeded(JtJ, 9, 1e-2 * threshWhereNeeded, replace=True) # Try new version
                 stepSize = LipJ_ * JtJ.copy() + blockEigenvalueJtJ
 
                 JtJDiag = JtJ.copy() + blockEigMultJtJ * blockEigenvalueJtJ
@@ -1961,7 +1961,7 @@ def bundle_adjust(
         if tr_check >= tr_eta_2 and LfkViolated:
             steSizeTouched = True
         # LfkViolated = False # todo remove? What happens? all tested ok so far. example 646 failed without.
-        if tr_check >= tr_eta_2 and LfkViolated and blockEigMult < blockEigLowerMultLimit: # violated -- should revert update.
+        if tr_check >= tr_eta_2 and LfkViolated and blockEigMult < globalBlockEigUpperLimit: # violated -- should revert update.
         #if tr_check >= tr_eta_2 and LfkViolated and not steSizeTouched or (steSizeTouched and costStart + penaltyStart < costEnd + penaltyL + penaltyP): # violated -- should revert update.
         #if LfkViolated and not steSizeTouched or (steSizeTouched and costStart + penaltyStart < costEnd + penaltyL): # violated -- should revert update.
             steSizeTouched = True
@@ -1974,7 +1974,7 @@ def bundle_adjust(
 
             # indeed reliable to get over.
             blockEigMult_old = blockEigMult
-            blockEigMult = np.minimum(blockEigLowerMultLimit, np.maximum(blockEigMultLimit, blockEigMultGain * blockEigMult))
+            blockEigMult = np.minimum(globalBlockEigUpperLimit, np.maximum(blockEigMultLimit, blockEigMultGain * blockEigMult))
             stepSize += (blockEigMult - blockEigMult_old) * blockEigenvalueJtJ
             #blockEigenvalueJtJ.data *= 2 # appears slow but safe
 
@@ -2004,7 +2004,7 @@ def bundle_adjust(
 
         # TODO: this basically disables lowering blockEigMult !?
         if (newVersion and LfkSafe and not steSizeTouched) and allowDecreaseBlockEig: # 394 escalates if True here. 
-            blockEigMult = np.minimum(blockEigLowerMultLimit, np.maximum(blockEigMultLimit, blockEigMult / 2))
+            blockEigMult = np.minimum(globalBlockEigUpperLimit, np.maximum(blockEigMultLimit, blockEigMult / 2))
 
         # version with penalty check for ADMM convergence / descent lemma. Problem: slower?
         if costStart + penaltyStart < costEnd + penaltyL  + penaltyP or LfkViolated:
@@ -2080,19 +2080,19 @@ def bundle_adjust(
 
     if use_be_memory:
         if globalIt < memory_be and globalIt >= len(tempBlockEigen[cluster_id]):
-            tempBlockEigen[cluster_id].append(np.minimum(blockEigLowerMultLimit, np.maximum(blockEigMultLimit, blockEigMult)))
+            tempBlockEigen[cluster_id].append(np.minimum(globalBlockEigUpperLimit, np.maximum(blockEigMultLimit, blockEigMult)))
             #print("Appending  cl:", cluster_id, " it: ", globalIt, " mem:", memory_be, " -> ", tempBlockEigen[cluster_id])
         else:
-            tempBlockEigen[cluster_id][globalIt % memory_be] = np.minimum(blockEigLowerMultLimit, np.maximum(blockEigMultLimit, blockEigMult))
+            tempBlockEigen[cluster_id][globalIt % memory_be] = np.minimum(globalBlockEigUpperLimit, np.maximum(blockEigMultLimit, blockEigMult))
 
     ###################
     # TODO this leads to blockEigMult not shrinking at all?!
     # if important we maybe should never lower it to begin with !? see line 2019
-    #    blockEigMult = np.minimum(blockEigLowerMultLimit, np.maximum(blockEigMultLimit, blockEigMult / 2))
+    #    blockEigMult = np.minimum(globalBlockEigUpperLimit, np.maximum(blockEigMultLimit, blockEigMult / 2))
     # if (newVersion and LfkSafe and not steSizeTouched):
-    #     blockEigMult = np.minimum(blockEigLowerMultLimit, np.maximum(blockEigMultLimit, 2*blockEigMult)) # TODOL if ok remove this.
+    #     blockEigMult = np.minimum(globalBlockEigUpperLimit, np.maximum(blockEigMultLimit, 2*blockEigMult)) # TODOL if ok remove this.
     # else:
-    #     blockEigMult = np.minimum(blockEigLowerMultLimit, np.maximum(blockEigMultLimit, blockEigMult))
+    #     blockEigMult = np.minimum(globalBlockEigUpperLimit, np.maximum(blockEigMultLimit, blockEigMult))
     ###################
 
     if newVersion:
@@ -2662,6 +2662,8 @@ lastCostDRE = np.sum(fx0**2) #1e20
 bestCost = np.sum(fx0**2) #1e20
 bestIt = 0
 globalIt = 0
+failedNesterovAcceleration = 0 # count after k consecutive misses, restart (RNA might not need this)
+maxFailedNesterovAcceleration = 5
 basic_version = False #True # accelerated or basic
 sequential = True
 linearize_at_last_solution = True # linearize at uk or v. maybe best to check energy. at u or v. DRE:
@@ -2669,6 +2671,7 @@ lib = ctypes.CDLL("./libprocess_clusters.so")
 init_lib()
 
 LipJ = 1 * np.ones(kClusters)
+globalBlockEigUpperLimit = 1e1
 blockEig_in_cluster = 1e-4 * np.ones(kClusters)
 memory_be = 8 # here can shrink, below this only grow.
 for ci in range(kClusters):
@@ -3123,8 +3126,7 @@ else:
                 bestCost30 = bestCost
 
             # TODO: inc tempBlockEigen[cluster_id] *=2 -- if possible u/v
-            blockEigenMaxT = 1e-1
-            beMin = blockEigenMaxT
+            beMin = globalBlockEigUpperLimit
             for ci in range(kClusters):
                 beMin = np.minimum(beMin, tempBlockEigen[ci][globalIt % memory_be])
 
@@ -3140,7 +3142,7 @@ else:
             # idea accept if primal v cost is very close.
             # can happen that best primal cost is about same as current and dre was set to this as correction. 
             # TODO if dre < primal_v also increase LipJ or so.
-            if (beMin < blockEigenMaxT) and (ls_it == line_search_iterations-1) and (maxPct * lastCostDRE_bfgs < dre_bfgs):
+            if (beMin < globalBlockEigUpperLimit) and (ls_it == line_search_iterations-1) and (maxPct * lastCostDRE_bfgs < dre_bfgs):
             #if (np.min(LipJ) < LipJMax) and (ls_it == line_search_iterations-1) and (maxPct * lastCostDRE_bfgs < dre_bfgs):
                 primal_cost_v_before = 0 # should be fixed also
                 for ci in range(kClusters):
@@ -3151,10 +3153,19 @@ else:
                         points_2d_in_cluster[ci],
                         landmarks)
             # do not if primal_v best and current are about the same.
-                    
+
+            # Reset acceleration if fails 6 times in a row
+            if RNA_or_bfgs == False and ls_it == line_search_iterations - 1:
+                failedNesterovAcceleration += 1
+                print( failedNesterovAcceleration, " consecutive acceleration fails.")
+                if failedNesterovAcceleration > maxFailedNesterovAcceleration:
+                    prev_dk = 0 * prev_dk
+                    failedNesterovAcceleration = 0
+                    print("Reset Nesterov acceleration ", maxFailedNesterovAcceleration, " consecutive fails.")
+
             maxPctV = np.sqrt(maxPct)
             #if reject and (np.min(LipJ) < LipJMax) and (ls_it == line_search_iterations-1) and (maxPct * lastCostDRE_bfgs < dre_bfgs) and (primal_cost_v > maxPctV * primal_cost_v_before): # or primal_cost_v > maxPct * primal_cost_u):
-            if reject and (beMin < blockEigenMaxT) and (ls_it == line_search_iterations-1) and (maxPct * lastCostDRE_bfgs < dre_bfgs) and (primal_cost_v > maxPctV * primal_cost_v_before): # or primal_cost_v > maxPct * primal_cost_u):
+            if reject and (beMin < globalBlockEigUpperLimit) and (ls_it == line_search_iterations-1) and (maxPct * lastCostDRE_bfgs < dre_bfgs) and (primal_cost_v > maxPctV * primal_cost_v_before): # or primal_cost_v > maxPct * primal_cost_u):
                 print("Why enter is priaml v that bad or what", primal_cost_v, " ", primal_cost_v_before, " ", maxPctV * primal_cost_v_before)
 
                 # revert ! Not clear how to do this.
@@ -3200,7 +3211,7 @@ else:
                     #LipJ *= np.sqrt(2)
                     for ci in range(kClusters):
                         tempBlockEigen[ci][globalIt % memory_be] = \
-                            np.minimum(tempBlockEigen[ci][globalIt % memory_be] * 2, blockEigenMaxT)
+                            np.minimum(tempBlockEigen[ci][globalIt % memory_be] * 2, globalBlockEigUpperLimit)
                     print("LipJ *= sqrt(2) = ", np.mean(LipJ))
 
                     # if 1 fails alawya will.
@@ -3310,6 +3321,9 @@ else:
 
             else:
 
+                if RNA_or_bfgs == False and ls_it != line_search_iterations-1:
+                    failedNesterovAcceleration = 0 # success, reset counter
+
                 # if lastCostDRE_bfgs < dre_bfgs and ls_it == line_search_iterations-1:
                 #     #LipJ += 0.2 * np.ones(kClusters)
                 #     partid = np.argmax(dre_per_part)
@@ -3317,9 +3331,9 @@ else:
 
                 # accept / reject, reject all but drs and see
                 # if ls_it == line_search_iterations-1 :
+
                 if dre_bfgs <= lastCostDRE_bfgs or 10000 * (dre_bfgs-lastCostDRE_bfgs) <= lastCostDRE_bfgs or ls_it == line_search_iterations-1 : # not correct yet, must be <= last - c/gamma |u-v|
                     # TODO: save and use best wrt. cost: new fct?
-                    #
                     steplength = 0 # currently printed
                     for ci in range(kClusters):
                         poses_s_in_cluster[ci] = poses_s_in_cluster_bfgs[ci].copy()
