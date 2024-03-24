@@ -1760,16 +1760,18 @@ def bundle_adjust(
                 # default 1e-4. 1e-6 for 173: slightly worse| 1e-6 for 52: also worse now (maybe was the other way round).
                 #               1e-3 for 173: | 1e-3 for 52: ok 1e-3 or 1e-4? might be highly random based on clustering.
                 # 1e-3 appears a bit better.
-                if False:
+                if True:
                     blockEigenvalueJtJ = blockEigenvalueWhereNeeded(JtJ, 9, threshWhereNeeded) # ! 1e-2, 1e-4 1e-5 als works. problem 52, 1e-6 does not 173 performance bad if not 1e-6?
                     #blockEigenvalueJtJ = 1e-1 * blockEigenvalue(JtJ, 9) # ! try 173 & 52, fails at 1e-2, 10 clusters. 1e-1 ok for 173 & 52. (not dead)
 
                     # TODO: LipJ for both? or only JJ?
                     #stepSize = JJ_mult * JtJ.copy() + blockEigMult * blockEigenvalueJtJ
                     stepSize = LipJ_ * JtJ.copy() + blockEigMult * blockEigenvalueJtJ
+                else:
                 # new version again, 427/356 fail.
-                blockEigenvalueJtJ = blockEigenvalueWhereNeeded(JtJ, 9, 1e-2 * threshWhereNeeded, replace=True) # Try new version
-                stepSize = LipJ_ * JtJ.copy() + blockEigenvalueJtJ # * blockEigMult * 1e3 # does not work
+                    blockEigenvalueJtJ = blockEigenvalueWhereNeeded(JtJ, 9, 1e-2 * threshWhereNeeded, replace=True) # Try new version
+                    stepSize = LipJ_ * JtJ.copy() + blockEigenvalueJtJ # like this without memory but good
+                    #stepSize = LipJ_ * JtJ.copy() + blockEigenvalueJtJ * blockEigMult * 1e4 # like this with memory but bad.
 
                 JtJDiag = JtJ.copy() + blockEigMultJtJ * blockEigenvalueJtJ
 
@@ -1974,7 +1976,7 @@ def bundle_adjust(
             # indeed reliable to get over.
             blockEigMult_old = blockEigMult
             blockEigMult = np.minimum(globalBlockEigUpperLimit, np.maximum(blockEigMultLimit, blockEigMultGain * blockEigMult))
-            stepSize += 1e4 * (blockEigMult - blockEigMult_old) * blockEigenvalueJtJ # 
+            stepSize += (blockEigMult - blockEigMult_old) * blockEigenvalueJtJ
             #blockEigenvalueJtJ.data *= 2 # appears slow but safe
 
             # try this
@@ -2671,7 +2673,7 @@ lib = ctypes.CDLL("./libprocess_clusters.so")
 init_lib()
 
 LipJ = 1 * np.ones(kClusters)
-globalBlockEigUpperLimit = 1e1
+globalBlockEigUpperLimit = 1e-1 # 1e-1, 1e1?
 blockEig_in_cluster = 1e-4 * np.ones(kClusters)
 memory_be = 8 # here can shrink, below this only grow.
 for ci in range(kClusters):
@@ -3142,6 +3144,9 @@ else:
             # normally use u,v. Forgot example why / where v is better.
             # likely 'things' go 'wild'. hmm.
 
+            # best_poses_v = poses_v.copy()
+            # best_landmarks = landmarks.copy()
+
             # idea accept if primal v cost is very close.
             # can happen that best primal cost is about same as current and dre was set to this as correction. 
             # TODO if dre < primal_v also increase LipJ or so.
@@ -3222,7 +3227,7 @@ else:
                             np.minimum(tempBlockEigen[ci][globalIt % memory_be] * 4, globalBlockEigUpperLimit)
                         tmp.append(tempBlockEigen[ci][globalIt % memory_be])
                     equalizeBlockEig = False
-                    resetNesterov = True
+                    resetNesterov = False
                     if equalizeBlockEig:
                         # all mem are forced equal in all clusters / maybe even better in time (so only grow or very long memory):
                         for m in range(len(tempBlockEigen[ci])):
