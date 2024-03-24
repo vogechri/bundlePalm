@@ -1760,7 +1760,7 @@ def bundle_adjust(
                 # default 1e-4. 1e-6 for 173: slightly worse| 1e-6 for 52: also worse now (maybe was the other way round).
                 #               1e-3 for 173: | 1e-3 for 52: ok 1e-3 or 1e-4? might be highly random based on clustering.
                 # 1e-3 appears a bit better.
-                if True:
+                if False:
                     blockEigenvalueJtJ = blockEigenvalueWhereNeeded(JtJ, 9, threshWhereNeeded) # ! 1e-2, 1e-4 1e-5 als works. problem 52, 1e-6 does not 173 performance bad if not 1e-6?
                     #blockEigenvalueJtJ = 1e-1 * blockEigenvalue(JtJ, 9) # ! try 173 & 52, fails at 1e-2, 10 clusters. 1e-1 ok for 173 & 52. (not dead)
 
@@ -1770,8 +1770,8 @@ def bundle_adjust(
                 else:
                 # new version again, 427/356 fail.
                     blockEigenvalueJtJ = blockEigenvalueWhereNeeded(JtJ, 9, 1e-2 * threshWhereNeeded, replace=True) # Try new version
-                    stepSize = LipJ_ * JtJ.copy() + blockEigenvalueJtJ # like this without memory but good
-                    #stepSize = LipJ_ * JtJ.copy() + blockEigenvalueJtJ * blockEigMult * 1e4 # like this with memory but bad.
+                    #stepSize = LipJ_ * JtJ.copy() + blockEigenvalueJtJ # like this without memory but good
+                    stepSize = LipJ_ * JtJ.copy() + blockEigenvalueJtJ * blockEigMult * 1e2 # like this with memory but bad.
 
                 JtJDiag = JtJ.copy() + blockEigMultJtJ * blockEigenvalueJtJ
 
@@ -1976,7 +1976,7 @@ def bundle_adjust(
             # indeed reliable to get over.
             blockEigMult_old = blockEigMult
             blockEigMult = np.minimum(globalBlockEigUpperLimit, np.maximum(blockEigMultLimit, blockEigMultGain * blockEigMult))
-            stepSize += (blockEigMult - blockEigMult_old) * blockEigenvalueJtJ
+            stepSize += 1e2 * (blockEigMult - blockEigMult_old) * blockEigenvalueJtJ
             #blockEigenvalueJtJ.data *= 2 # appears slow but safe
 
             # try this
@@ -2674,7 +2674,7 @@ init_lib()
 
 LipJ = 1 * np.ones(kClusters)
 globalBlockEigUpperLimit = 1e-1 # 1e-1, 1e1?
-blockEig_in_cluster = 1e-4 * np.ones(kClusters)
+blockEig_in_cluster = 1e-5 * np.ones(kClusters)
 memory_be = 8 # here can shrink, below this only grow.
 for ci in range(kClusters):
     print("input blockEig_in_cluster[ci] ", blockEig_in_cluster[ci])
