@@ -1610,12 +1610,11 @@ def bundle_adjust(
     allowDecreaseBlockEig = True
     use_be_memory = True
     if use_be_memory and len(tempBlockEigen[cluster_id]) > 1:
-        if len(tempBlockEigen[cluster_id]) > globalIt % memory_be:
+        if len(tempBlockEigen[cluster_id]) > globalIt % memory_be: # TODO: memory does not work yet. Huge jumps down, eg. from 10 to 1e-5
             tempBlockEigen[cluster_id][globalIt % memory_be] = 0 # remove current, either inner iteration or beyond memory
-        #tmp = np.array(tempBlockEigen[cluster_id])
-        #print("cluster_id ", cluster_id, " blockEigMult ", blockEigMult, " 1000 * tmp ", 1000 * tmp," maxbe ", np.max(tmp, axis=0), " globalIt % memory_be ", globalIt % memory_be)
-        #blockEigMult = np.maximum(blockEigMult, np.max(tmp, axis=0)) # else always larger / pointless same as base version
-        blockEigMult = np.max(tempBlockEigen[cluster_id], axis=0)
+        print(globalIt, " cluster_id ", cluster_id, " blockEigMult ", blockEigMult, " 1000 * tmp ", 1000 * np.array(tempBlockEigen[cluster_id]),\
+              " maxbe ", np.max(np.array(tempBlockEigen[cluster_id]), axis=0), " globalIt % memory_be ", globalIt % memory_be, file=sys.stderr)
+        blockEigMult = np.max(np.array(tempBlockEigen[cluster_id]), axis=0)
 
     it_ = 0
     funx0_st1 = lambda X0, X1, X2: \
@@ -1770,7 +1769,7 @@ def bundle_adjust(
                     stepSize = LipJ_ * JtJ.copy() + blockEigMult * blockEigenvalueJtJ
                 # new version again, 427/356 fail.
                 blockEigenvalueJtJ = blockEigenvalueWhereNeeded(JtJ, 9, 1e-2 * threshWhereNeeded, replace=True) # Try new version
-                stepSize = LipJ_ * JtJ.copy() + blockEigenvalueJtJ
+                stepSize = LipJ_ * JtJ.copy() + blockEigenvalueJtJ # * blockEigMult * 1e3 # does not work
 
                 JtJDiag = JtJ.copy() + blockEigMultJtJ * blockEigenvalueJtJ
 
@@ -1975,7 +1974,7 @@ def bundle_adjust(
             # indeed reliable to get over.
             blockEigMult_old = blockEigMult
             blockEigMult = np.minimum(globalBlockEigUpperLimit, np.maximum(blockEigMultLimit, blockEigMultGain * blockEigMult))
-            stepSize += (blockEigMult - blockEigMult_old) * blockEigenvalueJtJ
+            stepSize += 1e4 * (blockEigMult - blockEigMult_old) * blockEigenvalueJtJ # 
             #blockEigenvalueJtJ.data *= 2 # appears slow but safe
 
             # try this
@@ -2664,7 +2663,7 @@ bestIt = 0
 globalIt = 0
 resetIt = 0 # resetting nesterov acceleration
 failedNesterovAcceleration = 0 # count after k consecutive misses, restart (RNA might not need this)
-maxFailedNesterovAcceleration = 4
+maxFailedNesterovAcceleration = 3
 basic_version = False #True # accelerated or basic
 sequential = True
 linearize_at_last_solution = True # linearize at uk or v. maybe best to check energy. at u or v. DRE:
@@ -3119,6 +3118,9 @@ else:
             print( globalIt, "/", ls_it, " ======== DRE BFGS ====== ", round(dre_bfgs) , " ========= gain " , \
                 round(lastCostDRE_bfgs - dre_bfgs), "==== f(v)= ", round(primal_cost_v), " f(u)= ", round(primal_cost_u), " BE ", blockEig_in_cluster_bfgs)
             print( globalIt, "/", ls_it, " f(v) = ", primal_cost_v_all, " f(u) = ", primal_cost_u_all)
+            if primal_cost_v < bestCost:
+                best_poses_v = poses_v_bfgs.copy()
+                best_landmarks = landmarks_bfgs.copy()
             bestCost = np.minimum(primal_cost_v, bestCost)
             bestIt = globalIt
             if globalIt < 60:
@@ -3148,11 +3150,11 @@ else:
                 primal_cost_v_before = 0 # should be fixed also
                 for ci in range(kClusters):
                     primal_cost_v_before += primal_cost(
-                        poses_v, # v not u
+                        best_poses_v, # v not u
                         camera_indices_in_cluster[ci],
                         point_indices_in_cluster[ci],
                         points_2d_in_cluster[ci],
-                        landmarks)
+                        best_landmarks)
             # do not if primal_v best and current are about the same.
 
             # Reset acceleration if fails 6 times in a row
@@ -3163,12 +3165,12 @@ else:
                     prev_dk = 0 * prev_dk
                     resetIt = globalIt
                     failedNesterovAcceleration = 0
-                    print("Reset Nesterov acceleration after ", maxFailedNesterovAcceleration, " consecutive fails.")
+                    print("Reset Nesterov acceleration after ", maxFailedNesterovAcceleration, " consecutive failures.")
 
             maxPctV = np.sqrt(maxPct)
             #if reject and (np.min(LipJ) < LipJMax) and (ls_it == line_search_iterations-1) and (maxPct * lastCostDRE_bfgs < dre_bfgs) and (primal_cost_v > maxPctV * primal_cost_v_before): # or primal_cost_v > maxPct * primal_cost_u):
             if reject and (beMin < globalBlockEigUpperLimit) and (ls_it == line_search_iterations-1) and (maxPct * lastCostDRE_bfgs < dre_bfgs) and (primal_cost_v > maxPctV * primal_cost_v_before): # or primal_cost_v > maxPct * primal_cost_u):
-                print("Why enter is priaml v that bad or what", primal_cost_v, " ", primal_cost_v_before, " ", maxPctV * primal_cost_v_before)
+                print("Why enter is primal v that bad or what", primal_cost_v, " ", primal_cost_v_before, " ", maxPctV * primal_cost_v_before)
 
                 # revert ! Not clear how to do this.
                 # before, _ = cost_DRE(camera_indices_in_cluster, poses_in_cluster, poses_s_in_cluster,
@@ -3188,35 +3190,56 @@ else:
                             print("LipJ[" , ci, "] *= sqrt(2)") # 
 
                 else: # adjust all
-                    # if i use u, the cost is likely to grow instead, since i increase the penalty?
-                    # for ci in range(kClusters):
-                    #     poses_in_cluster[ci] = poses_v.copy() # 'best_v' instead != last_v? this alone is bfgs_r = u-v =0.
-                    #     poses_s_in_cluster[ci] = poses_v.copy() # this alone is killing RNA fnorm = 0.
 
                     # TODO: either LipJ does not work or other ? 
                     oneRound = True # loop has an issue that it is not only dependent on the input, but more. blockEig ?
                     # so more needs to be reset than I do.
 
-                    # super basic?
-                    # VERSION v
-                    poses_in_cluster = [poses_v.copy() for _ in poses_in_cluster]
-                    for ci in range(kClusters):
-                        poses_in_cluster[ci][:,6] += 1e-6 # 1e-6 is enough to make it different.
-                        poses_s_in_cluster[ci] = poses_v.copy()
+                    # TODO: landmarks differ form best pose.
+                    # VERSION v, could always restart at best so far, best_poses_v, or best in current view poses_v.
+                    poses_in_cluster = [best_poses_v.copy() for _ in poses_in_cluster]
+                    landmarks = best_landmarks.copy()
+                    for ci in range(kClusters): # TODO: this is not enough ?!
+                        if RNA_or_bfgs:
+                            poses_in_cluster[ci][:,5] += 1e-6 # 1e-6 is enough to make it different.
+                        poses_s_in_cluster[ci] = best_poses_v.copy()
+                        poses_s_in_cluster_pre[ci] = best_poses_v.copy() # s + u-v = s in this case.
                     ############
                     # VERSION U is doing nothing actually. This is differetn if taking actula steps as below.
                     # poses_s_in_cluster = [elem.copy() for elem in poses_s_in_cluster_pre]
                     # poses_in_cluster_test = [elem.copy() for elem in poses_in_cluster]
                     ############
+                    # TODO: 
+                    # 1. if revert and much worse than best never recovers.
+                    # 2. reset nest & revert -> 3x if 1st fails.
+                    # 
                     oneRound = False
                     # TODO: LipJ or tempBlockEigen.
                     #LipJ *= np.sqrt(2)
+                    tmp = []
                     for ci in range(kClusters):
                         tempBlockEigen[ci][globalIt % memory_be] = \
-                            np.minimum(tempBlockEigen[ci][globalIt % memory_be] * 2, globalBlockEigUpperLimit)
-                    print("LipJ *= sqrt(2) = ", np.mean(LipJ))
+                            np.minimum(tempBlockEigen[ci][globalIt % memory_be] * 4, globalBlockEigUpperLimit)
+                        tmp.append(tempBlockEigen[ci][globalIt % memory_be])
+                    equalizeBlockEig = False
+                    resetNesterov = True
+                    if equalizeBlockEig:
+                        # all mem are forced equal in all clusters / maybe even better in time (so only grow or very long memory):
+                        for m in range(len(tempBlockEigen[ci])):
+                            maxM = 0
+                            for ci in range(kClusters):
+                                maxM = np.maximum(tempBlockEigen[ci][m], maxM)
+                            for ci in range(kClusters):
+                                tempBlockEigen[ci][m] = maxM
+                                tmp[m] = maxM
+                    print(globalIt, " LipJ *= sqrt(2) = ", np.mean(LipJ), " BE ", tmp) # why is ths never used? iteration number overwritten?
+                    if resetNesterov:
+                        prev_dk = 0 * prev_dk
+                        resetIt = globalIt
+                        failedNesterovAcceleration = 0
+                        print("Reset Nesterov acceleration after ", maxFailedNesterovAcceleration, " consecutive failures.")
 
-                    # if 1 fails alawya will.
+                    # if 1 fails always will.
                     while oneRound and (np.min(LipJ) < LipJMax) and (maxPct * lastCostDRE_bfgs < dre_bfgs) and (primal_cost_v > maxPctV * primal_cost_v_before): # while since LipJ must be large enough.
                         oneRound = False
                         LipJ *= np.sqrt(2) # there could one 1 particularly bad one
@@ -3281,7 +3304,7 @@ else:
                 # revert whole iteration.
                 #it = it - 1
                 #its = its - 1
-                print(" ************** REVERTED iteration **************, DRE cost set to ", lastCostDRE_bfgs, " min LipJ", np.min(LipJ))
+                print(" ************** REVERTED iteration **************, DRE cost set to ", lastCostDRE_bfgs, " before ", primal_cost_v_before, " min LipJ", np.min(LipJ))
                 # must update costs as well. if LipJ increased, then costs are not valid. Recompute how?
                 # u and v and s known, but not step size change.
 
