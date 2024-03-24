@@ -1437,7 +1437,7 @@ def cost_DRE(
         else:
             Ul_all += U_pose
 
-    # analyis 646 small and large mixed. 
+    # analyis 646 small and large mixed.
     #     EV.append(blockEigenvalueSet(U_pose, 9))
     # EV.append(blockEigenvalueSet(Ul_all, 9))
     # print("-----------")
@@ -1451,7 +1451,7 @@ def cost_DRE(
     #       Since I want to work with a new Vl already. Problem.
     # i want |u-s|_D |u-v|_D, also |v-2u-s|_D
     #cost_input  = 0.5 * (pose_v_.flatten().dot(Ul_all * pose_v_.flatten() - 2 * sum_Ds_2u) + sum_constant_term)
-    print("---- |u-s|^2_D ", round(sum_u_s), "|u-v|^2_D ", round(sum_u_v), "|2u-s-v|^2_D ", round(sum_2u_s_v), 
+    print("---- |u-s|^2_D ", round(sum_u_s), "|u-v|^2_D ", round(sum_u_v), "|2u-s-v|^2_D ", round(sum_2u_s_v),
           "|u-v|^2 ", round(sum_u_v_), " cost_dre ", cost_dre, file=sys.stderr)
     print("---- dre_per_part --- ", dre_per_part, file=sys.stderr)
     return cost_dre, dre_per_part
@@ -2654,6 +2654,7 @@ lastCostDRE = np.sum(fx0**2) #1e20
 bestCost = np.sum(fx0**2) #1e20
 bestIt = 0
 globalIt = 0
+resetIt = 0
 failedNesterovAcceleration = 0 # count after k consecutive misses, restart (RNA might not need this)
 maxFailedNesterovAcceleration = 3
 basic_version = False #True # accelerated or basic
@@ -3001,7 +3002,7 @@ else:
                 delta_s_old_ = delta_s_.copy()
 
                 # momentum simple, same for v? about same
-                beta_nesterov = (globalIt-1) / (globalIt+2) # 0.7
+                beta_nesterov = (globalIt-resetIt-1) / (globalIt-resetIt+2) # 0.7
                 #beta_nesterov = 0.7
                 dk = s_new - s_cur + beta_nesterov * prev_dk
                 #vk = s_new - s_cur + 0.7 * prev_vk
@@ -3189,7 +3190,7 @@ else:
                     # so more needs to be reset than I do.
 
                     # super basic?
-                    # VERSION v 
+                    # VERSION v
                     poses_in_cluster = [poses_v.copy() for _ in poses_in_cluster]
                     for ci in range(kClusters):
                         poses_in_cluster[ci][:,6] += 1e-6 # 1e-6 is enough to make it different.
