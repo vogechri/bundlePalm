@@ -1717,7 +1717,7 @@ def bundle_adjust(
         #tmp = np.array(tempBlockEigen[cluster_id])
         #print("cluster_id ", cluster_id, " blockEigMult ", blockEigMult, " 1000 * tmp ", 1000 * tmp," maxbe ", np.max(tmp, axis=0), " globalIt % memory_be ", globalIt % memory_be)
         #blockEigMult = np.maximum(blockEigMult, np.max(tmp, axis=0)) # else always larger / pointless same as base version
-        blockEigMult = np.max(tempBlockEigen[cluster_id], axis=0)
+        blockEigMult = np.max(np.array(tempBlockEigen[cluster_id]), axis=0)
 
     it_ = 0
     funx0_st1 = lambda X0, X1, X2: \
@@ -2828,6 +2828,9 @@ lastCostDRE = np.sum(fx0**2) #1e20
 bestCost = np.sum(fx0**2) #1e20
 bestIt = 0
 globalIt = 0
+resetIt = 0 # resetting nesterov acceleration
+failedNesterovAcceleration = 0 # count after k consecutive misses, restart (RNA might not need this)
+maxFailedNesterovAcceleration = 3
 basic_version = False #True # accelerated or basic
 sequential = True
 linearize_at_last_solution = True # linearize at uk or v. maybe best to check energy. at u or v. DRE:
@@ -3053,7 +3056,7 @@ else:
     for globalIt in range(its): ##########################################################################################
         # get line search direction and update bfgs data
         # operate with np concatenate to get large vector and reshape search_direction here?
-        RNA_or_bfgs = False #True # RNA is best here ?! ok. else nesterov
+        RNA_or_bfgs = False # RNA is best here ?! ok. else nesterov
         if RNA_or_bfgs:
             use_bfgs = False # maybe full u,v?
             bfgs_r = np.zeros(kClusters * 9 * n_cameras)
@@ -3172,7 +3175,7 @@ else:
                 delta_s_old_ = delta_s_.copy()
 
                 # momentum simple, same for v? about same
-                beta_nesterov = (globalIt-1) / (globalIt+2) # 0.7
+                beta_nesterov = (globalIt-resetIt-1) / (globalIt-resetIt+2) # 0.7
                 #beta_nesterov = 0.7
                 dk = s_new - s_cur + beta_nesterov * prev_dk
                 #vk = s_new - s_cur + 0.7 * prev_vk
@@ -3192,7 +3195,7 @@ else:
 
 
         line_search_iterations = 3 # 3 appears ok
-        print(" ..... step length ", steplength, " bfgs step ", dk_stepLength, " ratio ", multiplier, file=sys.stderr )
+        print(" ..... step length ", steplength, " bfgs step ", dk_stepLength, " ratio ", dk_stepLength/steplength, " mult ", multiplier) #, file=sys.stderr )
         Vnorm_safe = Vnorm.copy()
         for ls_it in range(line_search_iterations):
             Vnorm = Vnorm_safe.copy()
@@ -3317,7 +3320,17 @@ else:
                         points_2d_in_cluster[ci],
                         landmarks)
             # do not if primal_v best and current are about the same.
-                    
+
+            # Reset acceleration if fails 6 times in a row
+            if RNA_or_bfgs == False and ls_it == line_search_iterations - 1:
+                failedNesterovAcceleration += 1
+                #print( failedNesterovAcceleration, " consecutive acceleration fails.")
+                if failedNesterovAcceleration >= maxFailedNesterovAcceleration:
+                    prev_dk = 0 * prev_dk
+                    resetIt = globalIt
+                    failedNesterovAcceleration = 0
+                    print("Reset Nesterov acceleration after ", maxFailedNesterovAcceleration, " consecutive failures.")
+
             maxPctV = np.sqrt(maxPct)
             #if reject and (np.min(LipJ) < LipJMax) and (ls_it == line_search_iterations-1) and (maxPct * lastCostDRE_bfgs < dre_bfgs) and (primal_cost_v > maxPctV * primal_cost_v_before): # or primal_cost_v > maxPct * primal_cost_u):
             if reject and (beMin < blockEigenMaxT) and (ls_it == line_search_iterations-1) and (maxPct * lastCostDRE_bfgs < dre_bfgs) and (primal_cost_v > maxPctV * primal_cost_v_before): # or primal_cost_v > maxPct * primal_cost_u):
@@ -3350,8 +3363,7 @@ else:
                     oneRound = True # loop has an issue that it is not only dependent on the input, but more. blockEig ?
                     # so more needs to be reset than I do.
 
-                    # super basic?
-                    # VERSION v 
+                    # VERSION v, landmarks and poses_s_in_cluster_pre
                     poses_in_cluster = [poses_v.copy() for _ in poses_in_cluster]
                     for ci in range(kClusters):
                         poses_in_cluster[ci][:,6] += 1e-6 # 1e-6 is enough to make it different.
@@ -3430,7 +3442,8 @@ else:
                         dre_bfgs = dre # while loop uses this
                     if True: # is True better maybe -> Does not do ANYTHING? 52/89, test smth else.
                         lastCostDRE_bfgs = dre_bfgs # does not happen? needed to not keep running in it. Yet demanding Lip < X to enter should work
-                        prev_dk = 0 * prev_dk # erase momentum
+                        if not RNA_or_bfgs:
+                            prev_dk = 0 * prev_dk # erase momentum
 
                 # revert whole iteration.
                 #it = it - 1
@@ -3532,8 +3545,15 @@ else:
                         poses_s_in_cluster_pre = [(Unorm_all * (Unorm_allinv_old * poses_s.flatten())).reshape(-1,9) for poses_s in poses_s_in_cluster_pre]
                         poses_in_cluster = [(Unorm_all * (Unorm_allinv_old * poses_u.flatten())).reshape(-1,9) for poses_u in poses_in_cluster]
 
-                        for ci in range(kClusters):
-                            prev_dk[ci * 9 * n_cameras: (ci+1) * 9 * n_cameras]  = Unorm_all * (Unorm_allinv_old *  prev_dk[ci * 9 * n_cameras: (ci+1) * 9 * n_cameras])
+                        if not RNA_or_bfgs:
+                            for ci in range(kClusters):
+                                prev_dk[ci * 9 * n_cameras: (ci+1) * 9 * n_cameras]  = Unorm_all * (Unorm_allinv_old *  prev_dk[ci * 9 * n_cameras: (ci+1) * 9 * n_cameras])
+
+                        for pos in range(len(bfgs_ps)):
+                            for ci in range(kClusters):
+                                bfgs_ps[pos][ci * 9 * n_cameras: (ci+1) * 9 * n_cameras]  = Unorm_all * (Unorm_allinv_old *  bfgs_ps[pos][ci * 9 * n_cameras: (ci+1) * 9 * n_cameras])
+                                bfgs_qs[pos][ci * 9 * n_cameras: (ci+1) * 9 * n_cameras]  = Unorm_all * (Unorm_allinv_old *  bfgs_qs[pos][ci * 9 * n_cameras: (ci+1) * 9 * n_cameras])
+                                bfgs_rhos[pos] = np.maximum(0., 1./ bfgs_qs[pos].dot(bfgs_ps[pos]))
 
                         for pos in range(len(Gs)):
                             for ci in range(kClusters):
@@ -3620,6 +3640,10 @@ else:
                     #print("poses_v ", poses_v)
                     if o3d_defined:
                         rerender(vis, camera_indices_in_cluster, point_indices_in_cluster, poses_in_cluster, landmarks, save_image=False)
+
+                    if not RNA_or_bfgs and ls_it != line_search_iterations-1:
+                        #print("Reset counter after ", failedNesterovAcceleration , " failed acceleration steps")
+                        failedNesterovAcceleration = 0 # success, reset counter
 
                     #print("A landmark_s_in_cluster", landmark_s_in_cluster)
                     break # next full iteration
