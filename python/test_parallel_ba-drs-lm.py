@@ -1595,6 +1595,7 @@ def bundle_adjust(
         threshWhereNeeded = 1e-4 # this higher -> blockEigMult, blockEigMultLimit lower?
         blockEigMultJtJ = 1e-4 # 173: little effect 1e-6/4/8. just 173 or always not mattering much?
         blockEigMultLimit = 1e-5
+        normalBlockEigenvalue = True
         #globalBlockEigUpperLimit # set globally 1e-2?
         decent_lemma_divisor = 2 # 2/4: higher does indeed delay flow over, but result is worse.
         Derivative_at_end = False # maybe negative to have update v and updte u differ.
@@ -1760,7 +1761,7 @@ def bundle_adjust(
                 # default 1e-4. 1e-6 for 173: slightly worse| 1e-6 for 52: also worse now (maybe was the other way round).
                 #               1e-3 for 173: | 1e-3 for 52: ok 1e-3 or 1e-4? might be highly random based on clustering.
                 # 1e-3 appears a bit better.
-                if False:
+                if normalBlockEigenvalue:
                     blockEigenvalueJtJ = blockEigenvalueWhereNeeded(JtJ, 9, threshWhereNeeded) # ! 1e-2, 1e-4 1e-5 als works. problem 52, 1e-6 does not 173 performance bad if not 1e-6?
                     #blockEigenvalueJtJ = 1e-1 * blockEigenvalue(JtJ, 9) # ! try 173 & 52, fails at 1e-2, 10 clusters. 1e-1 ok for 173 & 52. (not dead)
 
@@ -1976,7 +1977,10 @@ def bundle_adjust(
             # indeed reliable to get over.
             blockEigMult_old = blockEigMult
             blockEigMult = np.minimum(globalBlockEigUpperLimit, np.maximum(blockEigMultLimit, blockEigMultGain * blockEigMult))
-            stepSize += 1e2 * (blockEigMult - blockEigMult_old) * blockEigenvalueJtJ
+            if normalBlockEigenvalue:
+                stepSize += (blockEigMult - blockEigMult_old) * blockEigenvalueJtJ
+            else:
+                stepSize += 1e2 * (blockEigMult - blockEigMult_old) * blockEigenvalueJtJ
             #blockEigenvalueJtJ.data *= 2 # appears slow but safe
 
             # try this
@@ -2658,9 +2662,9 @@ x0_p = x0_p.reshape(n_cameras, 9)
 startL = 1
 innerIts = 1  # change to get an update, not 1 iteration
 cost = np.zeros(kClusters)
-lastCost = np.sum(fx0**2) #1e20
-lastCostDRE = np.sum(fx0**2) #1e20
-bestCost = np.sum(fx0**2) #1e20
+lastCost = np.sum(fx0**2)
+lastCostDRE = np.sum(fx0**2)
+bestCost = np.sum(fx0**2)
 bestIt = 0
 globalIt = 0
 resetIt = 0 # resetting nesterov acceleration
