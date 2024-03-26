@@ -699,7 +699,9 @@ def ComputeDerivativeMatricesNew(x0_t_cam, x0_t_land, camera_indices_, point_ind
     # implement as tensor?
     x0_t_all_cams = np.zeros((int(Unorm_all.shape[1] / 9), 9))
     x0_t_all_cams[unique_poses_in_c_,:] = x0_t_cam
+    #print("x0_t_all_cams\n", x0_t_all_cams)
     x0_t_all_cams = (Unorm_all * x0_t_all_cams.flatten()).reshape(-1,9) # transpose
+    #print("x0_t_all_cams\n", x0_t_all_cams)
     #pcg_x0_t_cam = x0_t_all_cams[unique_poses_in_c_,:]
     #pcg_x0_t_cam = from_numpy(pcg_x0_t_cam)
     #selection_matrix = SelectionMatrix(unique_poses_in_c_, Unorm_all.shape[1] / 9, space=9 )
@@ -719,7 +721,6 @@ def ComputeDerivativeMatricesNew(x0_t_cam, x0_t_land, camera_indices_, point_ind
     camScaleFull.requires_grad_(False)
     #pcg_x0_t_cam = x0_t_cam
 
-    # print("x0_t_all_cams\n", x0_t_all_cams)
     # print("camScaleFull\n", camScaleFull)
 
     funx0_st1 = lambda X0, X1, X2: torchSingleResiduumXScaled(X0.view(-1,9), X1.view(-1,3), X2.view(-1,2), camScale, landScale, camScaleFull)
@@ -819,8 +820,11 @@ def buildResiduumNew(resX, resY) :
     res = np.concatenate(data)
     return res
 
-def check_symmetric(a, tol=1e-8):
-    return np.all(np.abs(a-a.T) < tol)
+# TODO: just find more symmetric: np.fliplr(a) vs a.
+def check_symmetric(a, tol=1e-5):
+    # if not np.all(np.abs(a-a.T) < np.fmax(1, np.abs(a)) * tol):
+    #     print(np.abs(a-a.T) < np.fmax(1, np.abs(a)) * tol)
+    return np.all(np.abs(a-a.T) < np.fmax(1, np.abs(a)) * tol)
 
 def blockUpdatePCG(M, A, bs):
     Mi = M.copy()
@@ -856,16 +860,34 @@ def blockInverse(M, bs):
         for i in range(int(M.data.shape[0] / bs2)):
             mat = Mi.data[bs2 * i : bs2 * i + bs2].reshape(bs, bs)
             if not check_symmetric(mat):
+                #print(" not symmetric ", mat)
                 mat = np.fliplr(mat)
                 imat = np.fliplr(inv_dense(mat, hermitian=True)) # inv or pinv?
             else:
                 imat = inv_dense(mat, hermitian=True)
+                #print(" symmetric ", mat.dot(imat))
             Mi.data[bs2 * i : bs2 * i + bs2] = imat.flatten()
     else:
         Mi = M.copy()
         for i in range(int(M.data.shape[0])):
             Mi.data[i : i + 1] = 1.0 / Mi.data[i : i + 1]
     return Mi
+
+def blockMult(M, x, bs):
+    Mi = M.copy()
+    y = x.copy()
+    if bs > 1:
+        bs2 = bs * bs
+        for i in range(int(M.data.shape[0] / bs2)):
+            mat = Mi.data[bs2 * i : bs2 * i + bs2].reshape(bs, bs)
+            if not check_symmetric(mat):
+                mat = np.fliplr(mat)
+            #print (" m ", mat)
+            #print(mat.shape, " ", x[bs * i : bs * i + bs].shape, " ", y[bs * i : bs * i + bs].shape, " ", mat.dot(x[bs * i : bs * i + bs]).shape )
+            #print (" x ", x[bs * i : bs * i + bs], " ", x[bs * i : bs * i + bs].shape)
+            y[bs * i : bs * i + bs] = mat.dot(x[bs * i : bs * i + bs].flatten())
+            #print (" y ", y[bs * i : bs * i + bs], " ", y[bs * i : bs * i + bs].shape)
+    return y
 
 def blockEigenvalue(M, bs):
     Ei = np.zeros(M.shape[0])
@@ -920,7 +942,7 @@ def minEigenvalues(M, bs, get_max_evs=False):
             Ei[i] = np.maximum(1e-16, evs[0])
     return Ei
 
-def blockEigenvalueWhereNeeded(M, bs, thresh = 1e-6):
+def blockEigenvalueWhereNeeded(M, bs, thresh = 1e-6, replace=False):
     Ei = np.zeros(M.shape[0])
     if bs > 1:
         bs2 = bs * bs
@@ -934,7 +956,10 @@ def blockEigenvalueWhereNeeded(M, bs, thresh = 1e-6):
             #    mat = np.fliplr(mat)
             #    evs = eigvalsh(mat)
             if evs[0] < thresh * evs[bs-1]: # all smaller horror.
-                Ei[bs*i:bs*i+bs] = evs[bs-1] # largest
+                if replace:
+                    Ei[bs*i:bs*i+bs] = thresh * evs[bs-1] # largest
+                else:
+                    Ei[bs*i:bs*i+bs] = evs[bs-1] # largest
             else:
                 Ei[bs*i:bs*i+bs] = evs[0] # smallest
 
@@ -970,24 +995,26 @@ def minmaxEv(M, bs):
 
     return maxE, minE
 
-def blockEigenvalueFull(M, bs, x0_t_cam_):
+def blockEigenvalueFull(M, bs, t = 1e-8):#, x0_t_cam_):
     Ei = M.copy()
     if bs > 1:
         bs2 = bs * bs
         for i in range(int(M.data.shape[0] / bs2)):
-            #print(M.data.shape)
-            mat = M.data[bs2 * i : bs2 * i + bs2].reshape(bs, bs)
+            mat = Ei.data[bs2 * i : bs2 * i + bs2].reshape(bs, bs)
             flip = False
             if not check_symmetric(mat):
                 mat = np.fliplr(mat)
                 flip = True
             evs, evv = eigh(mat)
-            evs = np.fmax(evs, evs[bs-1] * 1e-6) # e.g. ?
-            print("evs ", evs[bs-1] / evs)
-            #print("evv ", evv[bs-1])
-            print("evv ", evv)
-            print(" cam " , x0_t_cam_[i,:])
+            #evs = np.fmax(evs, evs[bs-1] * t)
+            #print("evs ", evs)
+            evs = np.fmax(evs, np.maximum(1e-16, evs[bs-1] * t))
+            #print("evs ", evs[bs-1] / evs)
+            # print("evv ", evv)
+            # print(" cam " , x0_t_cam_[i,:])
+
             mat = evv.dot(diag_sparse(evs) * evv.transpose())
+            #mat = evv.transpose().dot(diag_sparse(evs) * evv)
             if flip:
                 mat = np.fliplr(mat)
             Ei.data[bs2 * i : bs2 * i + bs2] = mat.flatten()
@@ -1003,19 +1030,23 @@ def blockEigenvalueSqrt(M, bs, t = 1e-16):
             mat = Ei.data[bs2 * i : bs2 * i + bs2].reshape(bs, bs)
             flip = False
             if not check_symmetric(mat):
+                #print("blockEigenvalueSqrt in " , mat)
                 mat = np.fliplr(mat)
+                #print("blockEigenvalueSqrt flip " , mat)
                 flip = True
             evs, evv = eigh(mat)
             evs = np.sqrt(np.fmax(evs, t))
             # print("evs ", evs[bs-1] / evs)
             # #print("evv ", evv[bs-1])
             # print("evv ", evv)
-            mat = evv.dot(diag_sparse(evs) * evv.transpose())
+            mat = evv.dot(diag_sparse(evs).dot(evv.transpose()))
             if flip:
                 mat = np.fliplr(mat)
+                #print("blockEigenvalueSqrt out ", mat)
             Ei.data[bs2 * i : bs2 * i + bs2] = mat.flatten()
     else:
         Ei = M.copy()
+    #exit()
     return Ei
 
 def copy_selected_blocks(M, block_selection_, bs):
@@ -2599,6 +2630,7 @@ def GetPreconditioners(cameras_, points_3d_, points_2d_, camera_indices_, point_
     JltJl = J_land.transpose() * J_land
     Vnorm_ = diag_sparse(np.squeeze(np.asarray(1 * ( (np.abs(JltJl)/10).sum(axis=0) ))))
     temp_  = Vnorm_.data.reshape(-1,3)
+    #temp_ /= np.median(temp_, axis = 0)[np.newaxis,:]
     temp_ = np.sqrt(temp_)
     print("min/max Vnorm ", np.min(temp_), np.max(temp_))
     temp_ = np.fmax(temp_, 1e-10) # TODO. pick most singular example? 646 and 52? 1-10 was ok on 52 clust 1e-1, 1e-3 bad? check
@@ -2614,10 +2646,29 @@ def GetPreconditioners(cameras_, points_3d_, points_2d_, camera_indices_, point_
     #temp_ = np.repeat(temp_[:,np.newaxis], 3, axis=1)
     Vnorm_ = diag_sparse(temp_.flatten())
     Vnorm_ = diag_sparse(np.ones(points_3d.flatten().shape[0])) # 52: this is much better -- could be random
-
     # sqrt can do more? smaller is better for 52 or worse for 173. Smart solution?
-    Unorm_all_ = (2 * JtJ + 1e-6 * blockEigenvalueWhereNeeded(JtJ, 9, 1e-12)) # experimental
-    Unorm_all_sqrt = blockEigenvalueSqrt(Unorm_all_, 9)
+    #Unorm_all_ = (2 * JtJ + 1e-6 * blockEigenvalueWhereNeeded(JtJ, 9, 1e-12)) # experimental
+    Unorm_all_ = (2 * JtJ + 1e-2 * blockEigenvalueWhereNeeded(JtJ, 9, 1e-16)) # experimental
+    #Unorm_all_ = blockEigenvalueFull(JtJ, 9, 1e-10) #* 1e-6
+    #Unorm_all_ = (2 * JtJ + blockEigenvalueWhereNeeded(JtJ, 9, 1e-6, True)) # experimental
+    #Unorm_all_ = (2 * JtJ + 1e-7 * blockEigenvalueWhereNeeded(JtJ, 9, 1e0)) # experimental
+    print("np.mean(Unorm_all_.diagonal() ", np.mean(Unorm_all_.diagonal()))
+    print("Unorm_all_ ", Unorm_all_)
+
+    Unorm_all_sqrt = 1e-2 * blockEigenvalueSqrt(Unorm_all_, 9)
+
+    # Unorm_all_update_ = diag_sparse(np.ones(cameras.flatten().shape[0]))
+    # temp__ = Unorm_all_update_.data.reshape(-1,9)
+    # temp__[:,6] *= 0.1
+    # Unorm_all_update_ = diag_sparse(temp__.flatten())
+    #Unorm_all_sqrt = Unorm_all_update_ * Unorm_all_sqrt * Unorm_all_update_ + 0 * JtJ
+
+    Unorm_all_sqrt = Unorm_all_sqrt + 0 * JtJ
+
+    print("np.mean(Unorm_all_sqrt.diagonal() ", np.mean(Unorm_all_sqrt.diagonal()))
+    #Unorm_all_sqrt *= 1000./np.mean(Unorm_all_sqrt.diagonal()) # e.g. 427 this is needed, WTF?
+    print("Unorm_all_sqrt ", Unorm_all_sqrt)
+
     return Unorm_, Vnorm_, fx0_, Unorm_all_sqrt
 
 def RedoPreconditioners(cameras_, points_3d_, points_2d_, camera_indices_, point_indices_, Unorm_allinv):
@@ -2641,8 +2692,25 @@ def RedoPreconditioners(cameras_, points_3d_, points_2d_, camera_indices_, point
     # M^t J^t J M = V^T sqrt(E) V  [V^T E V]  V^T sqrt(E) V = Identity.
     JtJ = J_pose.transpose() * J_pose
     #Unorm_all_new = (2 * JtJ + 1e-4 * blockEigenvalueWhereNeeded(JtJ, 9, 1e-4)) * 1e-6 # experimental
-    Unorm_all_new = (2 * JtJ + 1e-6 * blockEigenvalueWhereNeeded(JtJ, 9, 1e-12)) # cases exist w 1e-4 no enough (173).
-    Unorm_all_new_sqrt = blockEigenvalueSqrt(Unorm_all_new, 9)
+    #Unorm_all_new = (2 * JtJ + 1e-6 * blockEigenvalueWhereNeeded(JtJ, 9, 1e-12)) # cases exist w 1e-4 no enough (173).
+    Unorm_all_new = blockEigenvalueFull(JtJ, 9, 1e-10) + 0 * JtJ # trick to ensure 'correct' order in matrix
+    #print(Unorm_all_new)
+    #print("np.mean(Unorm_all_new.diagonal() ", np.mean(Unorm_all_new.diagonal()))
+    #print("np.median(Unorm_all_new.diagonal() ", np.median(Unorm_all_new.diagonal()))
+    Unorm_all_old = blockInverse(Unorm_allinv, 9)
+    print("np.mean(Unorm_all_old.diagonal() ", np.mean(Unorm_all_old.diagonal()))
+    print(Unorm_all_old)
+    print(Unorm_all_old.data.shape)
+
+    print(Unorm_all_new.data.shape)
+    Unorm_all_new_sqrt = 1e-3 * blockEigenvalueSqrt(Unorm_all_new, 9)
+    print(Unorm_all_new_sqrt.data.shape)
+    #Unorm_all_new_sqrt *= 1000./np.mean(Unorm_all_new_sqrt.diagonal()) # e.g. 427 this is needed, WTF?
+    #Unorm_all_new_sqrt *= np.minimum(1, 1e2/np.median(Unorm_all_new_sqrt.diagonal())) # e.g. 427 this is needed, WTF?
+    #print("np.mean(Unorm_all_new_sqrt.diagonal() ", np.mean(Unorm_all_new_sqrt.diagonal()))
+    #print(Unorm_all_new_sqrt.data.shape)
+    print(Unorm_all_new_sqrt)
+
     return Unorm_allinv, fx0_, Unorm_all_new_sqrt
 
 def UpdatePreconditioners(cameras_, points_3d_, points_2d_, camera_indices_, point_indices_):
@@ -2760,11 +2828,23 @@ print("min k2 distance ", np.min(cameras[:,8].flatten()), " ", np.max(cameras[:,
 
 c02_mult = 1; c34_mult = 1; c5_mult = 1; c6_mult = 1; c7_mult = 1; c8_mult = 1
 Unorm, Vnorm, fx0, Unorm_all = GetPreconditioners(cameras, points_3d, points_2d, camera_indices, point_indices)
+
+np.set_printoptions(formatter={"float": "{: 0.2f}".format})
+
+cameras_in = cameras.copy()
+print("cameras input ", cameras_in)
 cameras = (Unorm * cameras.flatten()).reshape(-1,9)
 points_3d = (Vnorm * points_3d.flatten()).reshape(-1,3)
 
-cameras = (Unorm_all * cameras.flatten()).reshape(-1,9)
+#cameras = (Unorm_all * cameras.flatten()).reshape(-1,9)
+cameras = blockMult(Unorm_all, cameras.flatten(), 9).reshape(-1,9)
+print("cameras pcg ", cameras)
 Unorm_all = blockInverse(Unorm_all, 9)
+
+cameras_out = blockMult(Unorm_all, cameras.flatten(), 9).reshape(-1,9)
+#cameras_out = (Unorm_all * cameras.flatten()).reshape(-1,9)
+print("cameras_out ", cameras_out)
+#exit()
 #Unorm_all = diag_sparse(Unorm_all.diagonal().flatten()) # TODO debug
 
 # can i do this?
@@ -2790,8 +2870,6 @@ if False:
     cameras[:,6] = cameras[:,6] / c6_mult
     cameras[:,7] = cameras[:,7] / c7_mult
     cameras[:,8] = cameras[:,8] / c8_mult
-
-np.set_printoptions(formatter={"float": "{: 0.2f}".format})
 
 print("n_cameras: {}".format(n_cameras))
 print("n_points: {}".format(n_points))
@@ -3195,7 +3273,7 @@ else:
 
 
         line_search_iterations = 3 # 3 appears ok
-        print(" ..... step length ", steplength, " bfgs step ", dk_stepLength, " ratio ", dk_stepLength/steplength, " mult ", multiplier) #, file=sys.stderr )
+        print(" ..... step length ", steplength, " bfgs step ", dk_stepLength, " ratio ", dk_stepLength/steplength, " mult ", multiplier, file=sys.stderr )
         Vnorm_safe = Vnorm.copy()
         for ls_it in range(line_search_iterations):
             Vnorm = Vnorm_safe.copy()
@@ -3532,7 +3610,7 @@ else:
                             for ci in range(kClusters):
                                 tempBlockEigen[ci][m] = maxM
 
-                    if True and globalIt % 10 == 9: # debatable, bigger analysis needed. Just random?
+                    if False and globalIt % 10 == 9: # debatable, bigger analysis needed. Just random?
                         #Unorm_all_safe = Unorm_all.copy()
                         #Unorm_all.data = 1e-20 * np.ones(Unorm_all.data.shape)
                         #Unorm_all = Unorm_all + diag_sparse(np.ones(Unorm_all.shape[0]).flatten()) # to overwrite global var needs to be done in outer scope?
@@ -3549,11 +3627,11 @@ else:
                             for ci in range(kClusters):
                                 prev_dk[ci * 9 * n_cameras: (ci+1) * 9 * n_cameras]  = Unorm_all * (Unorm_allinv_old *  prev_dk[ci * 9 * n_cameras: (ci+1) * 9 * n_cameras])
 
-                        for pos in range(len(bfgs_ps)):
-                            for ci in range(kClusters):
-                                bfgs_ps[pos][ci * 9 * n_cameras: (ci+1) * 9 * n_cameras]  = Unorm_all * (Unorm_allinv_old *  bfgs_ps[pos][ci * 9 * n_cameras: (ci+1) * 9 * n_cameras])
-                                bfgs_qs[pos][ci * 9 * n_cameras: (ci+1) * 9 * n_cameras]  = Unorm_all * (Unorm_allinv_old *  bfgs_qs[pos][ci * 9 * n_cameras: (ci+1) * 9 * n_cameras])
-                                bfgs_rhos[pos] = np.maximum(0., 1./ bfgs_qs[pos].dot(bfgs_ps[pos]))
+                        # for pos in range(len(bfgs_ps)):
+                        #     for ci in range(kClusters):
+                        #         bfgs_ps[pos][ci * 9 * n_cameras: (ci+1) * 9 * n_cameras]  = Unorm_all * (Unorm_allinv_old *  bfgs_ps[pos][ci * 9 * n_cameras: (ci+1) * 9 * n_cameras])
+                        #         bfgs_qs[pos][ci * 9 * n_cameras: (ci+1) * 9 * n_cameras]  = Unorm_all * (Unorm_allinv_old *  bfgs_qs[pos][ci * 9 * n_cameras: (ci+1) * 9 * n_cameras])
+                        #         bfgs_rhos[pos] = np.maximum(0., 1./ bfgs_qs[pos].dot(bfgs_ps[pos]))
 
                         for pos in range(len(Gs)):
                             for ci in range(kClusters):
