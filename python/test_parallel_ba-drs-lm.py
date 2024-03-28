@@ -1609,7 +1609,7 @@ def bundle_adjust(
     if use_be_memory and len(tempBlockEigen[cluster_id]) > 1:
         if len(tempBlockEigen[cluster_id]) > globalIt % memory_be:
             tempBlockEigen[cluster_id][globalIt % memory_be] = 0 # remove current, either inner iteration or beyond memory
-        print(globalIt, " cluster_id ", cluster_id, " blockEigMult ", blockEigMult, " 1000 * tmp ", 1000 * np.array(tempBlockEigen[cluster_id]),\
+        print(globalIt, " cluster_id ", cluster_id, " 1000 * tmp ", 1000 * np.array(tempBlockEigen[cluster_id]),\
               " maxbe ", np.max(np.array(tempBlockEigen[cluster_id]), axis=0), " globalIt % memory_be ", globalIt % memory_be, file=sys.stderr)
         #blockEigMult = np.maximum(blockEigMult, np.max(tmp, axis=0)) # else always larger / pointless same as base version
         blockEigMult = np.max(np.array(tempBlockEigen[cluster_id]), axis=0) # correct but 52 much worse ?Z
@@ -1758,8 +1758,11 @@ def bundle_adjust(
                 # default 1e-4. 1e-6 for 173: slightly worse| 1e-6 for 52: also worse now (maybe was the other way round).
                 #               1e-3 for 173: | 1e-3 for 52: ok 1e-3 or 1e-4? might be highly random based on clustering.
                 # 1e-3 appears a bit better.
-                blockEigenvalueJtJ = blockEigenvalueWhereNeeded(JtJ, 9, threshWhereNeeded) # ! 1e-2, 1e-4 1e-5 als works. problem 52, 1e-6 does not 173 performance bad if not 1e-6?
+                #blockEigenvalueJtJ = blockEigenvalueWhereNeeded(JtJ, 9, threshWhereNeeded) # ! 1e-2, 1e-4 1e-5 als works. problem 52, 1e-6 does not 173 performance bad if not 1e-6?
                 #blockEigenvalueJtJ = 1e-1 * blockEigenvalue(JtJ, 9) # ! try 173 & 52, fails at 1e-2, 10 clusters. 1e-1 ok for 173 & 52. (not dead)
+
+                # TODO: check this out?
+                blockEigenvalueJtJ = 1e2 * threshWhereNeeded * blockEigenvalue(JtJ, 9) # 173 to set.
 
                 # TODO: LipJ for both? or only JJ?
                 #stepSize = JJ_mult * JtJ.copy() + blockEigMult * blockEigenvalueJtJ
@@ -2056,8 +2059,10 @@ def bundle_adjust(
         JtJ = J_pose.transpose() * J_pose
         bp = J_pose.transpose() * fx0
         #JJ_mult = 1 + np.maximum(minimumL, np.minimum(L_in_cluster_ * 2, L)) # might have changed .. must be off sigh
-        #blockEigenvalueJtJ = blockEigenvalue(JtJ, 9) # TODO: what if this is only needed for 0-eigen directions? return !=0 only if in small eigendir
+
+        #blockEigenvalueJtJ = threshWhereNeeded * blockEigenvalue(JtJ, 9) # TODO: what if this is only needed for 0-eigen directions? return !=0 only if in small eigendir
         blockEigenvalueJtJ = blockEigenvalueWhereNeeded(JtJ, 9, threshWhereNeeded) # ! 1e-2, 1e-4 1e-5 als works. problem 52, 1e-6 does not 173 performance bad if not 1e-6?
+
         #stepSize = JJ_mult * JtJ.copy() + blockEigMult * blockEigenvalueJtJ
         stepSize = LipJ_ * JtJ.copy() + blockEigMult * blockEigenvalueJtJ # todo blockEigMult was maybe adjusted above, ok?
 
@@ -2649,14 +2654,14 @@ x0_p = x0_p.reshape(n_cameras, 9)
 startL = 1
 innerIts = 1  # change to get an update, not 1 iteration
 cost = np.zeros(kClusters)
-lastCost = np.sum(fx0**2) #1e20
-lastCostDRE = np.sum(fx0**2) #1e20
-bestCost = np.sum(fx0**2) #1e20
+lastCost = np.sum(fx0**2)
+lastCostDRE = np.sum(fx0**2)
+bestCost = np.sum(fx0**2)
 bestIt = 0
 globalIt = 0
 resetIt = 0
 failedNesterovAcceleration = 0 # count after k consecutive misses, restart (RNA might not need this)
-maxFailedNesterovAcceleration = 3
+maxFailedNesterovAcceleration = 3 # 3 or 4
 basic_version = False #True # accelerated or basic
 sequential = True
 linearize_at_last_solution = True # linearize at uk or v. maybe best to check energy. at u or v. DRE:
@@ -2665,7 +2670,7 @@ init_lib()
 
 LipJ = 1 * np.ones(kClusters)
 globalBlockEigUpperLimit = 1e-1 # 1e-1, 1e1?
-blockEig_in_cluster = 1e-5 * np.ones(kClusters)
+blockEig_in_cluster = 1e-4 * np.ones(kClusters) # 1e-4 or 1e-5
 memory_be = 8 # here can shrink, below this only grow.
 for ci in range(kClusters):
     print("input blockEig_in_cluster[ci] ", blockEig_in_cluster[ci])
@@ -3021,7 +3026,7 @@ else:
             s_prev = s_cur.copy() # access to old s.
 
 
-        line_search_iterations = 3 # 3 appears ok
+        line_search_iterations = 2 # 3 appears ok
         print(" ..... step length ", steplength, " bfgs step ", dk_stepLength, " ratio ", multiplier, file=sys.stderr )
         Vnorm_safe = Vnorm.copy()
         for ls_it in range(line_search_iterations):
@@ -3193,7 +3198,8 @@ else:
                     # VERSION v
                     poses_in_cluster = [poses_v.copy() for _ in poses_in_cluster]
                     for ci in range(kClusters):
-                        poses_in_cluster[ci][:,6] += 1e-6 # 1e-6 is enough to make it different.
+                        if RNA_or_bfgs:
+                            poses_in_cluster[ci][:,5] += 1e-6 # 1e-6 is enough to make it different.
                         poses_s_in_cluster[ci] = poses_v.copy()
                     ############
                     # VERSION U is doing nothing actually. This is differetn if taking actula steps as below.
@@ -3324,7 +3330,6 @@ else:
                 # if ls_it == line_search_iterations-1 :
                 if dre_bfgs <= lastCostDRE_bfgs or 10000 * (dre_bfgs-lastCostDRE_bfgs) <= lastCostDRE_bfgs or ls_it == line_search_iterations-1 : # not correct yet, must be <= last - c/gamma |u-v|
                     # TODO: save and use best wrt. cost: new fct?
-                    #
                     steplength = 0 # currently printed
                     for ci in range(kClusters):
                         poses_s_in_cluster[ci] = poses_s_in_cluster_bfgs[ci].copy()
