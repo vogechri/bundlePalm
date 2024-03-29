@@ -1580,6 +1580,7 @@ def bundle_adjust(
     tr_eta_2 = 0.25
     blockEigMultGain = 4 # 4 better than 2 at least if allowDecreaseBlockEig, feels random and weird
     threshWhereNeeded = 1e-6
+    verbose_Jac = False
 
     newVersion = True
     # TODO: This parameter block is ok blockEigMultJtJ 1e-5, LipJ = 2, blockEigenvalueWhereNeeded 1e-2,
@@ -1640,14 +1641,11 @@ def bundle_adjust(
         if updateJacobian:  # not needed if rejected
             x0_t_cam  = x0_t_[: n_cameras_ * 9].reshape(n_cameras_, 9)
             x0_t_land = x0_t_[n_cameras_ * 9 :].reshape(n_points_, 3)
+            #start = time.time()
+
             J_pose, J_land, fx0 = ComputeDerivativeMatricesNew (
                 x0_t_cam, x0_t_land, camera_indices_, point_indices_, torch_points_2d, unique_poses_in_c_, unique_landmarks_in_c_ )
-
-            # fx1 = funx0_st1(
-            #     x0_t_cam[camera_indices_[:]],
-            #     x0_t_land[point_indices_[:]],
-            #     torch_points_2d)
-            # print("Cost test ", np.sum(fx1.numpy() ** 2))
+            #print("Jac time ", time.time() - start )
 
             # 2 * JtJ majorizes, note JtJ:=(UW|W^TV), so W part majorized by *2:
             # clearly: 2a^2+b^2 > (a+b)^2 = a^2 + b^2 + 2ab. Since (a-b)^2 = a^2 + b^2 - 2ab > 0, so a^2 + b^2 > 2ab.
@@ -1655,100 +1653,39 @@ def bundle_adjust(
             #(Jl | Jp) (l,p)^T = Jl l + Jp p and |(Jl | Jp) (l,p)^T|^2 = l^t Jl^t Jl l + p^t Jp^t Jp p + 2 p^t Jp^t Jl l.
             # So 2 JtJ  + 2 JltJl shuold majorize |J^t x|^2 for all x.
 
-            JtJ = J_pose.transpose() * J_pose
-            # print(JtJ.indices) # TODO: these are twisted around / backward indices per row.
-            # print(JtJ.indptr)
-            # exit()
-            # JtJDiag = diag_sparse(np.fmax(JtJ.diagonal(), 1e-4))
-
-            # this might be an issue for poses.
-            # R|T| f,d. especially d might have much different (smaller) eigenvalues.
-
-            #blockEigenvalueJtJ = blockEigenvalue(JtJ, 9) # TODO: what if this is only needed for 0-eigen directions? return !=0 only if in small eigendir
-            blockEigenvalueJtJ = blockEigenvalueWhereNeeded(JtJ, 9, threshWhereNeeded) # here ok? 173: 1e-6
-            stepSize = blockEigMult * blockEigenvalueJtJ + JJ_mult * JtJ.copy() # Todo '2 *' vs 1 by convex.
-
-            #blockEigenvalueJtJ = blockEigenvalueFull(JtJ, 9, x0_t_cam)
-            #stepSize = blockEigenvalueJtJ + JJ_mult * JtJ.copy() # Todo '2 *' vs 1 by convex.
-
-            # TODO: cam hessian scaled awfully. degenerate.
-            maxE, minE = minmaxEv(JtJ, 9)
-            JtJSpec = [round_int(np.max(maxE/minE)), np.min(maxE/minE), round_int(np.median(maxE/minE))]
-            print("minmax ev JtJ ", np.max(maxE), " ", np.max(minE), " ", np.min(maxE), " ",  np.min(minE), " spec ", JtJSpec, file=sys.stderr )
-            #maxE, minE = minmaxEv(stepSize, 9)
-            #print("minmax ev stepSz ", np.max(maxE), " ", np.max(minE), " ", np.min(maxE), " ",  np.min(minE), " spec ", np.max(maxE/minE) )
-
-            print( "Mean diagonal of pseudo Hessian ",  np.sum(np.abs(JtJ.diagonal()).reshape(-1,9) / (1000 * n_cameras_), 0), file=sys.stderr )
-            absDiagJtJ = np.abs(JtJ.diagonal()).reshape(-1,9)
-            print( "Diag pseudo HessP (max/min/med)",  np.max(absDiagJtJ, axis=0), " ", np.min(absDiagJtJ, axis=0),  " ", np.median(absDiagJtJ, axis=0), file=sys.stderr )
-
-            # TODO: here, also write min/max Eigenvec and spec to debug
-            # blockEigenvalueJtJ = blockEigenvalueFull(JtJ, 9) # print eval/vec structure
-            # stepSize = blockEigenvalueJtJ + JJ_mult * JtJ.copy() # Todo '2 *' vs 1 by convex.
-
-            # try this. maybe eigenvals very far apart?
-            #stepSize = JJ_mult * JtJ.copy() + minDiag * diag_sparse(np.fmax(JtJ.diagonal(), 1e-4))
-
-            # stepSize = 1. * (blockEigMult * blockEigenvalueJtJ + 1.4 * JtJ.copy()) # Todo '2 *' vs 1 by convex.
-            #stepSize = 1. * (1e-1 * diag_sparse(np.ones(JtJ.shape[0])) + 1.1 * JtJ.copy()) # not at all working
-            # both of these are faster (accelerated only? or anyways?)
-            # todo: maybe adjust factor on JtJ instead? or check extrapolation of s wrt. cost / penalty.
-            # faster for normal, non accelerated runs
-            #stepSize = diag_sparse(np.fmax(blockEigMult * JtJ.diagonal(), 1e-2)) + 1.1 * JtJ.copy() # stable 27.9 non-acc. with unstable but faster.
-            #stepSize = diag_sparse(np.fmax(blockEigMult * JtJ.diagonal(), 1e-1)) + 2.0 * JtJ.copy()# stable 28.1 non-acc. with unstable but faster.
-            # this is what dre test is for, no? maybe cannot compare if we alter RELATIVE weight of step size.
-
-            # if not issparse(Vl_in_c_) and it_ < 1:
-            #     stepSize = blockEigenvalueJltJl
-            # else: # increase where needed -- this here is WAY too slow?
-            #     stepSize.data = np.maximum(0.05 * stepSize.data, blockEigenvalueJltJl.data) # else diagSparse of it
-
-            # shoudl not depend on eigenvalue of block. the small ones should be increased, since we invert the matrix.
-            #stepSize = LipJ * JtJ.copy() + J_eps2 * diag_sparse(np.ones(JtJ.shape[0])) # ?
-            #stepSize = LipJ * JtJ.copy() + diag_sparse(np.fmax(JtJ.diagonal(), 1e-4))
-
             JltJl = J_land.transpose() * J_land
-            absDiagJltJl = np.abs(JltJl.diagonal()).reshape(-1,3)
-            print( "Diag pseudo HessL (max/min/med)",  np.max(absDiagJltJl, axis=0), " ", np.min(absDiagJltJl, axis=0),  " ", np.median(absDiagJltJl, axis=0), file=sys.stderr )
             # JltJlDiag = JltJl + J_eps * diag_sparse(np.ones(JltJl.shape[0]))
-            # maybe more appropriate?
-            #blockEigenvalueJltJl = blockEigenvalue(JltJl, 3)
-            blockEigenvalueJltJl = blockEigenvalueWhereNeeded(JltJl, 3) # nope not at all.
+            #blockEigenvalueJltJl = blockEigenvalueWhereNeeded(JltJl, 3) # nope not at all.
+            blockEigenvalueJltJl = 1e-3 * blockEigenvalue(JltJl, 3) # TODO: adjust this.
             JltJlDiag = JltJl + 1e-6 * blockEigenvalueJltJl # play around at 173 example. 1e-8: 58 / 0  ======== DRE BFGS ======  518626, 1e-6 518 MUCH earlier
             # could do only where needed? smallest ev is indeed small?
-            JtJDiag = stepSize.copy() # max 1, 1/L, line-search dre fails -> increase
 
-            maxE, minE = minmaxEv(JltJl, 3)
-            #print("minmax ev JltJl ", np.max(maxE), " ", np.max(minE), " ", np.min(maxE), " ",  np.min(minE), " spec ", np.max(maxE/minE) )
-            JltJlSpec = [round_int(np.max(maxE/minE)), np.min(maxE/minE), round_int(np.median(maxE/minE))]
-            maxE, minE = minmaxEv(JltJlDiag, 3)
-            JltJlDiagSpec = [round_int(np.max(maxE/minE)), np.min(maxE/minE), round_int(np.median(maxE/minE))]
-            print("minmax ev JltJlD ", np.max(maxE), " ", np.max(minE), " ", np.min(maxE), " ",  np.min(minE), " spec ", JltJlSpec, " -> ", JltJlDiagSpec, file=sys.stderr )
+            if verbose_Jac:
+                absDiagJltJl = np.abs(JltJl.diagonal()).reshape(-1,3)
+                print( "Diag pseudo HessL (max/min/med)",  np.max(absDiagJltJl, axis=0), " ", np.min(absDiagJltJl, axis=0),  " ", np.median(absDiagJltJl, axis=0), file=sys.stderr )
+                maxE, minE = minmaxEv(JltJl, 3)
+                #print("minmax ev JltJl ", np.max(maxE), " ", np.max(minE), " ", np.min(maxE), " ",  np.min(minE), " spec ", np.max(maxE/minE) )
+                JltJlSpec = [round_int(np.max(maxE/minE)), np.min(maxE/minE), round_int(np.median(maxE/minE))]
+                maxE, minE = minmaxEv(JltJlDiag, 3)
+                JltJlDiagSpec = [round_int(np.max(maxE/minE)), np.min(maxE/minE), round_int(np.median(maxE/minE))]
+                print("minmax ev JltJlD ", np.max(maxE), " ", np.max(minE), " ", np.min(maxE), " ",  np.min(minE), " spec ", JltJlSpec, " -> ", JltJlDiagSpec, file=sys.stderr )
 
-            #JtJDiag = diag_sparse(np.fmax(JtJ.diagonal(), 1e-4)) # diagonal is solid. slower than JtJ + something though
-            if newForUnique:
-                JtJDiag = copy_selected_blocks(JtJDiag, poses_only_in_cluster_, 3)
-                JtJDiag = JtJDiag + L * blockEigMult * blockEigenvalueJtJ
-
-            # maybe better: 3x3 matrix sqrt(|M|_1 |M|inf) as diag. Yet this removes effect of 'L' getting small = large steps.
-            # do i need to keep memory to ensure it remains >? or pre compute grad (and store)?
-            #print(" min/max JtJ.diag ", np.min(JtJ.diagonal()), " ", np.max(JtJ.diagonal()), " adjusted ", np.min(JtJDiag.diagonal()), " ", np.max(JtJDiag.diagonal()))
-            #print("JltJlDiag.shape ", JltJlDiag.shape, JltJlDiag.shape[0]/3)
-
-            JtJDiag = 1/L * JtJDiag # max 1, 1/L, line-search dre fails -> increase
-
+            prox_rhs = x0_p_ - s_p_
+            costStart = np.sum(fx0**2)
             W = J_pose.transpose() * J_land
             bp = J_pose.transpose() * fx0
             bl = J_land.transpose() * fx0
+            JtJ = J_pose.transpose() * J_pose
 
-            prox_rhs = x0_p_ - s_p_
-            if newForUnique: # alternative turn off completely, use 2u-s -> return (u-s)/2 to average u+k = uk + delta uk
-                landmarks_in_many_cluster_ = np.invert(landmarks_only_in_cluster_)
-                diag_present = diag_sparse( np.repeat((np.ones(n_points_) * landmarks_in_many_cluster_).reshape(-1,1), 3).flatten() )
-                prox_rhs = 1 * diag_present * prox_rhs
+            if verbose_Jac:
+                # TODO: cam hessian scaled awfully. degenerate.
+                maxE, minE = minmaxEv(JtJ, 9)
+                JtJSpec = [round_int(np.max(maxE/minE)), np.min(maxE/minE), round_int(np.median(maxE/minE))]
+                print("minmax ev JtJ ", np.max(maxE), " ", np.max(minE), " ", np.min(maxE), " ",  np.min(minE), " spec ", JtJSpec, file=sys.stderr )
 
-            costStart = np.sum(fx0**2)
-            penaltyStartConst = prox_rhs.dot(JtJDiag * prox_rhs)
+                print( "Mean diagonal of pseudo Hessian ",  np.sum(np.abs(JtJ.diagonal()).reshape(-1,9) / (1000 * n_cameras_), 0), file=sys.stderr )
+                absDiagJtJ = np.abs(JtJ.diagonal()).reshape(-1,9)
+                print( "Diag pseudo HessP (max/min/med)",  np.max(absDiagJtJ, axis=0), " ", np.min(absDiagJtJ, axis=0),  " ", np.median(absDiagJtJ, axis=0), file=sys.stderr )
 
             if newVersion:
                 # traditional ADMM: not good -- also return
@@ -1768,35 +1705,55 @@ def bundle_adjust(
                 #stepSize = JJ_mult * JtJ.copy() + blockEigMult * blockEigenvalueJtJ
                 stepSize = LipJ_ * JtJ.copy() + blockEigMult * blockEigenvalueJtJ
                 JtJDiag = JtJ.copy() + blockEigMultJtJ * blockEigenvalueJtJ
-
-                if False:
-                    #print(np.repeat(maxmin_ev[:,np.newaxis], 9, axis=1).flatten())
-                    # TODO: new version different per of course
-                    # maybe write max min ev. or use this one.
-                    mev = minEigenvalues(JtJ, 9, True) # in that sense take largest bev of recent its?
-                    #print("mev ", mev.shape)
-                    memory_ev = 3
-                    if len(tempEigen[cluster_id]) < memory_ev:
-                        tempEigen[cluster_id].append(mev)
-                    else:
-                        tempEigen[cluster_id][globalIt % memory_ev] = mev
-
-                    tmp = np.concatenate(tempEigen[cluster_id])
-                    #print("tmp", tmp.shape)
-                    tmp = tmp.reshape(mev.shape[0], -1)
-                    maxmin_ev = np.max(tmp, axis=1)
-                    #print("max ev last 10 ", len(tempEigen[cluster_id]), " ", tmp.shape, " " , np.max(tmp, axis=1))
-                    blockEigenvalueJtJ = diag_sparse(np.repeat(maxmin_ev[:,np.newaxis], 9, axis=1).flatten())
-                    stepSize = LipJ_ * JtJ.copy() + blockEigMult * blockEigenvalueJtJ
-                    JtJDiag = JtJ.copy() + blockEigMultJtJ * blockEigenvalueJtJ
-
-                #JtJDiag = 1e-4 * blockEigMult * blockEigenvalueJtJ # this could also work?
-                maxE, minE = minmaxEv(stepSize, 9)
-                StepSizeSpec = [round_int(np.max(maxE/minE)), np.min(maxE/minE), round_int(np.median(maxE/minE))]
-                print("minmax ev stepSz ", np.max(maxE), " ", np.max(minE), " ", np.min(maxE), " ",  np.min(minE), " spec ", StepSizeSpec, file=sys.stderr)
-                #maxE, minE = minmaxEv(JtJDiag, 9)
-                #print("minmax ev JtJDiag ", np.max(maxE), " ", np.max(minE), " ", np.min(maxE), " ",  np.min(minE), " spec ", np.max(maxE/minE))
                 penaltyStartConst = prox_rhs.dot(stepSize * prox_rhs)
+
+                if verbose_Jac:
+                    maxE, minE = minmaxEv(stepSize, 9)
+                    StepSizeSpec = [round_int(np.max(maxE/minE)), np.min(maxE/minE), round_int(np.median(maxE/minE))]
+                    print("minmax ev stepSz ", np.max(maxE), " ", np.max(minE), " ", np.min(maxE), " ",  np.min(minE), " spec ", StepSizeSpec, file=sys.stderr)
+                    #maxE, minE = minmaxEv(JtJDiag, 9)
+                    #print("minmax ev JtJDiag ", np.max(maxE), " ", np.max(minE), " ", np.min(maxE), " ",  np.min(minE), " spec ", np.max(maxE/minE))
+            else: # not newversion
+                #blockEigenvalueJtJ = blockEigenvalue(JtJ, 9) # TODO: what if this is only needed for 0-eigen directions? return !=0 only if in small eigendir
+                blockEigenvalueJtJ = blockEigenvalueWhereNeeded(JtJ, 9, threshWhereNeeded) # here ok? 173: 1e-6
+                stepSize = blockEigMult * blockEigenvalueJtJ + JJ_mult * JtJ.copy() # Todo '2 *' vs 1 by convex.
+
+                #blockEigenvalueJtJ = blockEigenvalueFull(JtJ, 9, x0_t_cam)
+                #stepSize = blockEigenvalueJtJ + JJ_mult * JtJ.copy() # Todo '2 *' vs 1 by convex.
+
+                JtJDiag = stepSize.copy() # max 1, 1/L, line-search dre fails -> increase
+                JtJDiag = 1/L * JtJDiag # max 1, 1/L, line-search dre fails -> increase
+                penaltyStartConst = prox_rhs.dot(JtJDiag * prox_rhs)
+
+                # TODO: here, also write min/max Eigenvec and spec to debug
+                # blockEigenvalueJtJ = blockEigenvalueFull(JtJ, 9) # print eval/vec structure
+                # stepSize = blockEigenvalueJtJ + JJ_mult * JtJ.copy() # Todo '2 *' vs 1 by convex.
+
+                # try this. maybe eigenvals very far apart?
+                #stepSize = JJ_mult * JtJ.copy() + minDiag * diag_sparse(np.fmax(JtJ.diagonal(), 1e-4))
+
+                # stepSize = 1. * (blockEigMult * blockEigenvalueJtJ + 1.4 * JtJ.copy()) # Todo '2 *' vs 1 by convex.
+                #stepSize = 1. * (1e-1 * diag_sparse(np.ones(JtJ.shape[0])) + 1.1 * JtJ.copy()) # not at all working
+                # both of these are faster (accelerated only? or anyways?)
+                # todo: maybe adjust factor on JtJ instead? or check extrapolation of s wrt. cost / penalty.
+                # faster for normal, non accelerated runs
+                #stepSize = diag_sparse(np.fmax(blockEigMult * JtJ.diagonal(), 1e-2)) + 1.1 * JtJ.copy() # stable 27.9 non-acc. with unstable but faster.
+                #stepSize = diag_sparse(np.fmax(blockEigMult * JtJ.diagonal(), 1e-1)) + 2.0 * JtJ.copy()# stable 28.1 non-acc. with unstable but faster.
+                # this is what dre test is for, no? maybe cannot compare if we alter RELATIVE weight of step size.
+
+                # if not issparse(Vl_in_c_) and it_ < 1:
+                #     stepSize = blockEigenvalueJltJl
+                # else: # increase where needed -- this here is WAY too slow?
+                #     stepSize.data = np.maximum(0.05 * stepSize.data, blockEigenvalueJltJl.data) # else diagSparse of it
+
+                # shoudl not depend on eigenvalue of block. the small ones should be increased, since we invert the matrix.
+                #stepSize = LipJ * JtJ.copy() + J_eps2 * diag_sparse(np.ones(JtJ.shape[0])) # ?
+                #stepSize = LipJ * JtJ.copy() + diag_sparse(np.fmax(JtJ.diagonal(), 1e-4))
+
+                #maxE, minE = minmaxEv(stepSize, 9)
+                #print("minmax ev stepSz ", np.max(maxE), " ", np.max(minE), " ", np.min(maxE), " ",  np.min(minE), " spec ", np.max(maxE/minE) )
+
+            #print("Full Jac time ", time.time() - start )
 
         # TODO: solve the whole! thing with cholesky and compare. maybe this is better.
         # Advantage DRS in parts: can be parallelized, no memory issues. Disadvantage: not as good as a whole -- maybe.
@@ -1825,50 +1782,6 @@ def bundle_adjust(
         delta_p, powerits_run = solveByGDNesterov(Ul, W, Vli, bS, powerits)
         delta_p = -delta_p
         delta_l = -Vli * ((W.transpose() * delta_p).flatten() + bl)
-        #delta_l  + Vli * bl = -Vli * ((W.transpose() * delta_p).flatten())
-
-        use_cholesky = False # incredibly slow.
-        if use_cholesky:
-            # matrix is
-            # [JtJ + L * JtJDiag + stepSize | W                     ] * [delta_p] = [bp_s]
-            # [W^T                          | JltJl + L * JltJlDiag ] * [delta_l] = [bl]
-            # how to set this up?
-            # 1. J^tJ and add diag parts
-            # J^tJ + L * JtJDiag + stepSize
-            # for L * JltJlDiag, add 9 * n_cams to indices
-            # delta = - inv_sparse(S) * bS
-            Jall = sparse_hstack((J_pose, J_land))
-            Mat = Jall.transpose() * Jall
-            #Mat += (L * JtJDiag + stepSize).resize(Mat.shape)
-            Matpart = L * JtJDiag + stepSize
-            #print("Mat.shape " , Mat.shape)
-            Matpart.resize(Mat.shape)
-            #print("Matpart.shape " , Matpart.shape)
-            Mat = Mat + Matpart
-            #print("Mat.shape " , Mat.shape)
-            #JltJlDiag_all = L * JltJlDiag
-            # not sure:
-            # JltJlDiag_all.indices += J_pose.shape[1] # add 9 * n_cams 
-            # so .. ? hstack diag of 0 and Jl
-            JltJlDiag_all = sparse_hstack((0 * J_pose, J_land))
-            JltJlDiag_all = L * JltJlDiag_all.transpose() * JltJlDiag_all
-            #print("JltJlDiag_all.shape " , JltJlDiag_all.shape)
-            #JltJlDiag_all.resize(Mat.shape)
-            Mat = Mat + JltJlDiag_all
-            ball = np.hstack((bp_s, bl))
-            #print("cholesky ")
-            #lu = splu(Mat)
-            #factor = cholesky(Mat)
-            #print("cholesky done")
-            #fac,low = cho_factor(Mat) # dense
-            #delta = cho_solve((fac,low), ball) # dense
-            #delta = -factor(ball)
-            #delta = -factor.solve_A(ball)
-            #delta = -lu.solve(ball)
-            delta = - spsolve(Mat, ball)
-            #delta = - inv_sparse(Mat) * ball
-            delta_p = delta[:n_cameras_ * 9]
-            delta_l = delta[n_cameras_ * 9:]
 
         penaltyL = L * (delta_l).dot(JltJlDiag * delta_l)
         penaltyP = L * (delta_p + prox_rhs).dot(JtJDiag * (delta_p + prox_rhs))
@@ -1998,7 +1911,7 @@ def bundle_adjust(
                 JtJDiag = 2 * JtJDiag # we return this maybe -- of course stupid to do in a release version
 
         # TODO: this basically disables lowering blockEigMult !?
-        if (newVersion and LfkSafe and not steSizeTouched) and allowDecreaseBlockEig: # 394 escalates if True here. 
+        if (newVersion and LfkSafe and not steSizeTouched) and allowDecreaseBlockEig: # 394 escalates if True here.
             blockEigMult = np.minimum(globalBlockEigUpperLimit, np.maximum(blockEigMultLimit, blockEigMult / 2))
 
         # version with penalty check for ADMM convergence / descent lemma. Problem: slower?
