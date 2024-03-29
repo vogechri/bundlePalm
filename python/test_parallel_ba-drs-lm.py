@@ -3116,6 +3116,9 @@ else:
             print( globalIt, "/", ls_it, " ======== DRE BFGS ====== ", round(dre_bfgs) , " ========= gain " , \
                 round(lastCostDRE_bfgs - dre_bfgs), "==== f(v)= ", round(primal_cost_v), " f(u)= ", round(primal_cost_u), " BE ", blockEig_in_cluster_bfgs)
             print( globalIt, "/", ls_it, " f(v) = ", primal_cost_v_all, " f(u) = ", primal_cost_u_all)
+            if primal_cost_v < bestCost:
+                best_poses_v = poses_v_bfgs.copy()
+                best_landmarks = landmarks_bfgs.copy()
             bestCost = np.minimum(primal_cost_v, bestCost)
             bestIt = globalIt
             if globalIt < 60:
@@ -3137,6 +3140,11 @@ else:
             # normally use u,v. Forgot example why / where v is better.
             # likely 'things' go 'wild'. hmm.
 
+            disable_best_pose = False
+            if disable_best_pose:
+                best_poses_v = poses_v.copy()
+                best_landmarks = landmarks.copy()
+
             # idea accept if primal v cost is very close.
             # can happen that best primal cost is about same as current and dre was set to this as correction. 
             # TODO if dre < primal_v also increase LipJ or so.
@@ -3145,11 +3153,11 @@ else:
                 primal_cost_v_before = 0 # should be fixed also
                 for ci in range(kClusters):
                     primal_cost_v_before += primal_cost(
-                        poses_v, # v not u
+                        best_poses_v, # v not u
                         camera_indices_in_cluster[ci],
                         point_indices_in_cluster[ci],
                         points_2d_in_cluster[ci],
-                        landmarks)
+                        best_landmarks)
             # do not if primal_v best and current are about the same.
 
             # Reset acceleration if fails 6 times in a row
@@ -3196,11 +3204,13 @@ else:
 
                     # super basic?
                     # VERSION v
-                    poses_in_cluster = [poses_v.copy() for _ in poses_in_cluster]
+                    poses_in_cluster = [best_poses_v.copy() for _ in poses_in_cluster]
                     for ci in range(kClusters):
                         if RNA_or_bfgs:
                             poses_in_cluster[ci][:,5] += 1e-6 # 1e-6 is enough to make it different.
-                        poses_s_in_cluster[ci] = poses_v.copy()
+                        poses_s_in_cluster_pre[ci] = best_poses_v.copy() # s + u-v = s in this case.
+                        poses_s_in_cluster[ci] = best_poses_v.copy()
+                    landmarks = best_landmarks.copy()
                     ############
                     # VERSION U is doing nothing actually. This is differetn if taking actula steps as below.
                     # poses_s_in_cluster = [elem.copy() for elem in poses_s_in_cluster_pre]
@@ -3209,10 +3219,14 @@ else:
                     oneRound = False
                     # TODO: LipJ or tempBlockEigen.
                     #LipJ *= np.sqrt(2)
+                    tmp = []
                     for ci in range(kClusters):
                         tempBlockEigen[ci][globalIt % memory_be] = \
                             np.minimum(tempBlockEigen[ci][globalIt % memory_be] * 2, globalBlockEigUpperLimit)
-                    print("LipJ *= sqrt(2) = ", np.mean(LipJ))
+                        tmp.append(tempBlockEigen[ci][globalIt % memory_be])
+                    print("LipJ *= sqrt(2) = ", np.mean(LipJ), " Be ", tmp)
+
+                    # TODO: equalize / reset nesterov(acceleration) here.
 
                     # if 1 fails alawya will.
                     while oneRound and (np.min(LipJ) < LipJMax) and (maxPct * lastCostDRE_bfgs < dre_bfgs) and (primal_cost_v > maxPctV * primal_cost_v_before): # while since LipJ must be large enough.
@@ -3279,7 +3293,8 @@ else:
                 # revert whole iteration.
                 #it = it - 1
                 #its = its - 1
-                print(" ************** REVERTED iteration **************, DRE cost set to ", lastCostDRE_bfgs, " min LipJ", np.min(LipJ))
+                print(" ************** REVERTED iteration **************, DRE cost set to ", lastCostDRE_bfgs, \
+                      " before ", primal_cost_v_before, " min LipJ", np.min(LipJ))
                 # must update costs as well. if LipJ increased, then costs are not valid. Recompute how?
                 # u and v and s known, but not step size change.
 
