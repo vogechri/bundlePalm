@@ -34,7 +34,7 @@
 {"base_url": "http://grail.cs.washington.edu/projects/bal/data/ladybug/", "file_name": "problem-49-7776-pre.txt.bz2", "iterations": 90, "bestCost": 26828, "bestIt": 89, "kClusters": 10, "bestCost60": 26888, "bestCost30": 27203}
 {"base_url": "http://grail.cs.washington.edu/projects/bal/data/dubrovnik/", "file_name": "problem-88-64298-pre.txt.bz2", "iterations": 90, "bestCost": 570903, "bestIt": 89, "kClusters": 10, "bestCost60": 572919, "bestCost30": 581449}
 {"base_url": "http://grail.cs.washington.edu/projects/bal/data/dubrovnik/", "file_name": "problem-142-93602-pre.txt.bz2", "iterations": 90, "bestCost": 559245, "bestIt": 89, "kClusters": 10, "bestCost60": 562850, "bestCost30": 620751}
-# restart at best, linesearch 2
+# restart at best, linesearch 2, 2624b6488a2b39e932a39652a5e7bf91636a3346
 {"base_url": "http://grail.cs.washington.edu/projects/bal/data/dubrovnik/", "file_name": "problem-135-90642-pre.txt.bz2", "iterations": 90, "bestCost": 703515, "bestIt": 89, "kClusters": 10, "bestCost60": 706582, "bestCost30": 713009}
 {"base_url": "http://grail.cs.washington.edu/projects/bal/data/dubrovnik/", "file_name": "problem-356-226730-pre.txt.bz2", "iterations": 90, "bestCost": 893137, "bestIt": 89, "kClusters": 10, "bestCost60": 908739, "bestCost30": 933390}
 {"base_url": "http://grail.cs.washington.edu/projects/bal/data/venice/", "file_name": "problem-52-64053-pre.txt.bz2", "iterations": 90, "bestCost": 533928, "bestIt": 89, "kClusters": 10, "bestCost60": 537299, "bestCost30": 554240}
