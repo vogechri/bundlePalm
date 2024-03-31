@@ -1705,6 +1705,13 @@ def bundle_adjust(
                 #stepSize = JJ_mult * JtJ.copy() + blockEigMult * blockEigenvalueJtJ
                 stepSize = LipJ_ * JtJ.copy() + blockEigMult * blockEigenvalueJtJ
                 JtJDiag = JtJ.copy() + blockEigMultJtJ * blockEigenvalueJtJ
+                #JtJDiag = blockEigMultJtJ * blockEigenvalueJtJ # this is likely almost same as above. Todo: check/find value.
+
+                # maxE, minE = minmaxEv(JtJ, 9)
+                # print("JtJ spectral ", (maxE/minE))
+                # maxE, minE = minmaxEv(stepSize, 9)
+                # print("stepSize spectral ", (maxE/minE))
+
                 penaltyStartConst = prox_rhs.dot(stepSize * prox_rhs)
 
                 if verbose_Jac:
