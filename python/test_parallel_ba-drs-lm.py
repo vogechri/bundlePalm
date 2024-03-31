@@ -707,7 +707,7 @@ def ComputeDerivativeMatricesNew(x0_t_cam, x0_t_land, camera_indices_, point_ind
     #selection_matrix = SelectionMatrix(unique_poses_in_c_, Unorm_all.shape[1] / 9, space=9 )
     #Unorm_all * selection_matrix * x0_t_cam.flatten()
 
-    # todo thi scould be an issue: before Unorm_all was symmetric
+    # todo this could be an issue: before Unorm_all was symmetric
     # (A*B)^t = B^T A^T = B A != A B so not sym.
     # this is even more weird/insane
     #camScaleFull = Unorm_all.transpose().data.reshape(-1,9,9)
@@ -722,6 +722,10 @@ def ComputeDerivativeMatricesNew(x0_t_cam, x0_t_land, camera_indices_, point_ind
     #pcg_x0_t_cam = x0_t_cam
 
     # print("camScaleFull\n", camScaleFull)
+
+    # TODO verify f(Ax) -> f(y), y=Ax. df/dx = df/dy * A.
+    # A maps x to y, y is the input parameterization.
+    # 
 
     funx0_st1 = lambda X0, X1, X2: torchSingleResiduumXScaled(X0.view(-1,9), X1.view(-1,3), X2.view(-1,2), camScale, landScale, camScaleFull)
     funy0_st1 = lambda X0, X1, X2: torchSingleResiduumYScaled(X0.view(-1,9), X1.view(-1,3), X2.view(-1,2), camScale, landScale, camScaleFull)
@@ -1813,6 +1817,7 @@ def bundle_adjust(
             print("minmax ev JtJ ", np.max(maxE), " ", np.max(minE), " ", np.min(maxE), " ",  np.min(minE), " spec ", JtJSpec, file=sys.stderr )
             #maxE, minE = minmaxEv(stepSize, 9)
             #print("minmax ev stepSz ", np.max(maxE), " ", np.max(minE), " ", np.min(maxE), " ",  np.min(minE), " spec ", np.max(maxE/minE) )
+            print("JTJ spectral ", (maxE/minE))
 
             print( "Mean diagonal of pseudo Hessian ",  np.sum(np.abs(JtJ.diagonal()).reshape(-1,9) / (1 * n_cameras_), 0), file=sys.stderr )
             absDiagJtJ = np.abs(JtJ.diagonal()).reshape(-1,9)
@@ -2565,7 +2570,8 @@ def perform_full_iteration(camera_indices_in_cluster_, point_indices_in_cluster_
 
 def GetPreconditioners(cameras_, points_3d_, points_2d_, camera_indices_, point_indices_):
     J_pose, J_land, fx0_ = ComputeDerivativeMatrixInit(cameras_, points_3d_, points_2d_, camera_indices_, point_indices_)
-
+    disable_basis_pcg = True
+    disable_new_pcg = False
     JtJ = J_pose.transpose() * J_pose
     # W = J_pose.transpose() * J_land
     orig = True
@@ -2604,7 +2610,8 @@ def GetPreconditioners(cameras_, points_3d_, points_2d_, camera_indices_, point_
     #Unorm_all_ = (2 * JtJ + 1e-4 * blockEigenvalueWhereNeeded(JtJ, 9, 1e-4)) * 1e-10 # experimental
 
     #Unorm_all_ = diag_sparse(temp_.flatten()) + 1e-16 * JtJ # debug hack
-    Unorm_ = diag_sparse(np.ones(temp_.shape).flatten())
+    if disable_basis_pcg:
+        Unorm_ = diag_sparse(np.ones(temp_.shape).flatten())
     #Unorm_all_ = diag_sparse(np.ones(temp_.shape).flatten()) # ok
 
     if False:
@@ -2647,9 +2654,10 @@ def GetPreconditioners(cameras_, points_3d_, points_2d_, camera_indices_, point_
     Vnorm_ = diag_sparse(temp_.flatten())
     Vnorm_ = diag_sparse(np.ones(points_3d.flatten().shape[0])) # 52: this is much better -- could be random
     # sqrt can do more? smaller is better for 52 or worse for 173. Smart solution?
-    #Unorm_all_ = (2 * JtJ + 1e-6 * blockEigenvalueWhereNeeded(JtJ, 9, 1e-12)) # experimental
-    Unorm_all_ = (2 * JtJ + 1e-2 * blockEigenvalueWhereNeeded(JtJ, 9, 1e-16)) # experimental
-    #Unorm_all_ = blockEigenvalueFull(JtJ, 9, 1e-10) #* 1e-6
+    #Unorm_all_ = (2 * JtJ + 1e-6 * blockEigenvalueWhereNeeded(JtJ, 9, 1e-12)) # experimental 3
+    #Unorm_all_ = (2 * JtJ + 1e-2 * blockEigenvalueWhereNeeded(JtJ, 9, 1e-16)) # experimental 1
+    Unorm_all_ = JtJ + 1e-18 * blockEigenvalue(JtJ, 9) # experimental 2
+    #Unorm_all_ = blockEigenvalueFull(JtJ, 9, 1e-14) #* 1e-6
     #Unorm_all_ = (2 * JtJ + blockEigenvalueWhereNeeded(JtJ, 9, 1e-6, True)) # experimental
     #Unorm_all_ = (2 * JtJ + 1e-7 * blockEigenvalueWhereNeeded(JtJ, 9, 1e0)) # experimental
     print("np.mean(Unorm_all_.diagonal() ", np.mean(Unorm_all_.diagonal()))
@@ -2668,6 +2676,9 @@ def GetPreconditioners(cameras_, points_3d_, points_2d_, camera_indices_, point_
     print("np.mean(Unorm_all_sqrt.diagonal() ", np.mean(Unorm_all_sqrt.diagonal()))
     #Unorm_all_sqrt *= 1000./np.mean(Unorm_all_sqrt.diagonal()) # e.g. 427 this is needed, WTF?
     print("Unorm_all_sqrt ", Unorm_all_sqrt)
+
+    if disable_new_pcg:
+        Unorm_all_sqrt = diag_sparse(np.ones(Unorm_all_sqrt.shape[0])) + 1e-20 * JtJ
 
     return Unorm_, Vnorm_, fx0_, Unorm_all_sqrt
 
