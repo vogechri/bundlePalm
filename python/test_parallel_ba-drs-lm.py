@@ -1026,7 +1026,7 @@ def blockEigenvalueFull(M, bs, t = 1e-8):#, x0_t_cam_):
         Ei = M.copy()
     return Ei
 
-def blockEigenvalueSqrt(M, bs, t = 1e-16):
+def blockEigenvalueSqrt(M, bs, t = 1e-14):
     Ei = M.copy()
     if bs > 1:
         bs2 = bs * bs
@@ -1039,7 +1039,7 @@ def blockEigenvalueSqrt(M, bs, t = 1e-16):
                 #print("blockEigenvalueSqrt flip " , mat)
                 flip = True
             evs, evv = eigh(mat)
-            evs = np.sqrt(np.fmax(evs, t))
+            evs = np.sqrt(np.fmin(np.fmax(evs, t), 1e13))
             # print("evs ", evs[bs-1] / evs)
             # #print("evv ", evv[bs-1])
             # print("evv ", evv)
@@ -1452,10 +1452,10 @@ def average_cameras_new(
             Up_all += U_pose
     Upi_all = blockInverse(Up_all, 9)
 
-    # rho_k/2 |u_k - v_k|^2 - rho_k <s_k - u_k, u_k - v_k> is actually 
+    # rho_k/2 |u_k - v_k|^2 - rho_k <s_k - u_k, u_k - v_k> is actually
     # rho_k/2 |u_k - v_k|^2 - <nabla_k, u_k - v_k>
-    # and solution 
-    # sum_k rho_k (u_k - v_k) + nabla_k = 0 -> 
+    # and solution
+    # sum_k rho_k (u_k - v_k) + nabla_k = 0 ->
     # v = sum_k (rho_k)^-1 * sum_k (rho_k u_k + nabla_k)
 
     # rho_k/2 |u_k - v_k|^2 - rho_k <s_k - u_k, u_k - v_k>
@@ -1569,7 +1569,7 @@ def cost_DRE(
         else:
             Ul_all += U_pose
 
-    # analyis 646 small and large mixed. 
+    # analyis 646 small and large mixed.
     #     EV.append(blockEigenvalueSet(U_pose, 9))
     # EV.append(blockEigenvalueSet(Ul_all, 9))
     # print("-----------")
@@ -1583,7 +1583,7 @@ def cost_DRE(
     #       Since I want to work with a new Vl already. Problem.
     # i want |u-s|_D |u-v|_D, also |v-2u-s|_D
     #cost_input  = 0.5 * (pose_v_.flatten().dot(Ul_all * pose_v_.flatten() - 2 * sum_Ds_2u) + sum_constant_term)
-    print("---- |u-s|^2_D ", round(sum_u_s), "|u-v|^2_D ", round(sum_u_v), "|2u-s-v|^2_D ", round(sum_2u_s_v), 
+    print("---- |u-s|^2_D ", round(sum_u_s), "|u-v|^2_D ", round(sum_u_v), "|2u-s-v|^2_D ", round(sum_2u_s_v),
           "|u-v|^2 ", round(sum_u_v_), " cost_dre ", cost_dre, file=sys.stderr)
     print("---- dre_per_part --- ", dre_per_part, file=sys.stderr)
     return cost_dre, dre_per_part
@@ -1732,7 +1732,6 @@ def bundle_adjust(
         threshWhereNeeded = 1e-4 # this higher -> blockEigMult, blockEigMultLimit lower?
         blockEigMultJtJ = 1e-4 # 173: little effect 1e-6/4/8. just 173 or always not mattering much?
         blockEigMultLimit = 1e-5
-        blockEigLowerMultLimit = 1e-1 # 1e-2? # same as blockEigenMaxT
         decent_lemma_divisor = 2 # 2/4: higher does indeed delay flow over, but result is worse.
         Derivative_at_end = False # maybe negative to have update v and updte u differ.
         # limit lower -> major effect from partitioning only?
@@ -1796,9 +1795,6 @@ def bundle_adjust(
             # So 2 JtJ  + 2 JltJl shuold majorize |J^t x|^2 for all x.
 
             JtJ = J_pose.transpose() * J_pose
-            # print(JtJ.indices) # TODO: these are twisted around / backward indices per row.
-            # print(JtJ.indptr)
-            # exit()
             # JtJDiag = diag_sparse(np.fmax(JtJ.diagonal(), 1e-4))
 
             # this might be an issue for poses.
@@ -1817,7 +1813,7 @@ def bundle_adjust(
             print("minmax ev JtJ ", np.max(maxE), " ", np.max(minE), " ", np.min(maxE), " ",  np.min(minE), " spec ", JtJSpec, file=sys.stderr )
             #maxE, minE = minmaxEv(stepSize, 9)
             #print("minmax ev stepSz ", np.max(maxE), " ", np.max(minE), " ", np.min(maxE), " ",  np.min(minE), " spec ", np.max(maxE/minE) )
-            print("JTJ spectral ", (maxE/minE))
+            #print("JTJ spectral ", (maxE/minE))
 
             print( "Mean diagonal of pseudo Hessian ",  np.sum(np.abs(JtJ.diagonal()).reshape(-1,9) / (1 * n_cameras_), 0), file=sys.stderr )
             absDiagJtJ = np.abs(JtJ.diagonal()).reshape(-1,9)
@@ -1853,9 +1849,12 @@ def bundle_adjust(
             print( "Diag pseudo HessL (max/min/med)",  np.max(absDiagJltJl, axis=0), " ", np.min(absDiagJltJl, axis=0),  " ", np.median(absDiagJltJl, axis=0), file=sys.stderr )
             # JltJlDiag = JltJl + J_eps * diag_sparse(np.ones(JltJl.shape[0]))
             # maybe more appropriate?
-            #blockEigenvalueJltJl = blockEigenvalue(JltJl, 3)
-            blockEigenvalueJltJl = blockEigenvalueWhereNeeded(JltJl, 3) # nope not at all.
+
+            #blockEigenvalueJltJl = 1e-0 * blockEigenvalue(JltJl, 3) # TODO: trial and error.
+            blockEigenvalueJltJl = 1e6 * blockEigenvalue(JltJl, 3) # TODO: trial and error. 1e3
+            #blockEigenvalueJltJl = blockEigenvalueWhereNeeded(JltJl, 3) # nope not at all.
             JltJlDiag = JltJl + 1e-6 * blockEigenvalueJltJl # play around at 173 example. 1e-8: 58 / 0  ======== DRE BFGS ======  518626, 1e-6 518 MUCH earlier
+
             # could do only where needed? smallest ev is indeed small?
             JtJDiag = stepSize.copy() # max 1, 1/L, line-search dre fails -> increase
 
@@ -1899,8 +1898,12 @@ def bundle_adjust(
                 # default 1e-4. 1e-6 for 173: slightly worse| 1e-6 for 52: also worse now (maybe was the other way round).
                 #               1e-3 for 173: | 1e-3 for 52: ok 1e-3 or 1e-4? might be highly random based on clustering.
                 # 1e-3 appears a bit better.
-                blockEigenvalueJtJ = blockEigenvalueWhereNeeded(JtJ, 9, threshWhereNeeded) # ! 1e-2, 1e-4 1e-5 als works. problem 52, 1e-6 does not 173 performance bad if not 1e-6?
+                #blockEigenvalueJtJ = blockEigenvalueWhereNeeded(JtJ, 9, threshWhereNeeded) # ! 1e-2, 1e-4 1e-5 als works. problem 52, 1e-6 does not 173 performance bad if not 1e-6?
                 #blockEigenvalueJtJ = 1e-1 * blockEigenvalue(JtJ, 9) # ! try 173 & 52, fails at 1e-2, 10 clusters. 1e-1 ok for 173 & 52. (not dead)
+
+                # blockEigenvalueJtJ = 1e2 * threshWhereNeeded * blockEigenvalue(JtJ, 9)
+                #blockEigenvalueJtJ = 1e6 * threshWhereNeeded * blockEigenvalue(JtJ, 9) # TODO
+                blockEigenvalueJtJ = 1e5 * threshWhereNeeded * blockEigenvalue(JtJ, 9) # TODO? lower for some, e.g. 931. higher for others
 
                 # TODO: LipJ for both? or only JJ?
                 #stepSize = JJ_mult * JtJ.copy() + blockEigMult * blockEigenvalueJtJ
@@ -1934,6 +1937,11 @@ def bundle_adjust(
                 print("minmax ev stepSz ", np.max(maxE), " ", np.max(minE), " ", np.min(maxE), " ",  np.min(minE), " spec ", StepSizeSpec, file=sys.stderr)
                 #maxE, minE = minmaxEv(JtJDiag, 9)
                 #print("minmax ev JtJDiag ", np.max(maxE), " ", np.max(minE), " ", np.min(maxE), " ",  np.min(minE), " spec ", np.max(maxE/minE))
+
+                # print("stepSize spectral ", (maxE/minE))
+                # maxE, minE = minmaxEv(JtJ, 9)
+                # print("JTJ spectral ", (maxE/minE))
+
                 penaltyStartConst = prox_rhs.dot(stepSize * prox_rhs)
 
         # TODO: solve the whole! thing with cholesky and compare. maybe this is better.
@@ -2091,7 +2099,7 @@ def bundle_adjust(
         LfkViolated = LfkDistance > 0
         LfkSafe = Lfklin < 0 # for any phi ok.
 
-        if tr_check < tr_eta_2: # and False: # TR should not help here. Maybe apply differently? TR checks if approx w. JtJ is ok within region.
+        if tr_check < tr_eta_2 and L < 8192: # and False: # TR should not help here. Maybe apply differently? TR checks if approx w. JtJ is ok within region.
             print(" //////  tr_check " , tr_check, " Lfk distance ", LfkDistance, " -nabla^Tdelta=" , -Lfklin, " /////", file=sys.stderr)
             L = L * 2
             if not newVersion:
@@ -2103,7 +2111,7 @@ def bundle_adjust(
         if tr_check >= tr_eta_2 and LfkViolated:
             steSizeTouched = True
         # LfkViolated = False # todo remove? What happens? all tested ok so far. example 646 failed without.
-        if tr_check >= tr_eta_2 and LfkViolated and blockEigMult < blockEigLowerMultLimit: # violated -- should revert update.
+        if tr_check >= tr_eta_2 and LfkViolated and blockEigMult < globalBlockEigUpperLimit: # violated -- should revert update.
         #if tr_check >= tr_eta_2 and LfkViolated and not steSizeTouched or (steSizeTouched and costStart + penaltyStart < costEnd + penaltyL + penaltyP): # violated -- should revert update.
         #if LfkViolated and not steSizeTouched or (steSizeTouched and costStart + penaltyStart < costEnd + penaltyL): # violated -- should revert update.
             steSizeTouched = True
@@ -2116,7 +2124,7 @@ def bundle_adjust(
 
             # indeed reliable to get over.
             blockEigMult_old = blockEigMult
-            blockEigMult = np.minimum(blockEigLowerMultLimit, np.maximum(blockEigMultLimit, blockEigMultGain * blockEigMult))
+            blockEigMult = np.minimum(globalBlockEigUpperLimit, np.maximum(blockEigMultLimit, blockEigMultGain * blockEigMult))
             stepSize += (blockEigMult - blockEigMult_old) * blockEigenvalueJtJ
             #blockEigenvalueJtJ.data *= 2 # appears slow but safe
 
@@ -2145,8 +2153,8 @@ def bundle_adjust(
                 JtJDiag = 2 * JtJDiag # we return this maybe -- of course stupid to do in a release version
 
         # TODO: this basically disables lowering blockEigMult !?
-        if (newVersion and LfkSafe and not steSizeTouched) and allowDecreaseBlockEig: # 394 escalates if True here. 
-            blockEigMult = np.minimum(blockEigLowerMultLimit, np.maximum(blockEigMultLimit, blockEigMult / 2))
+        if (newVersion and LfkSafe and not steSizeTouched) and allowDecreaseBlockEig: # 394 escalates if True here.
+            blockEigMult = np.minimum(globalBlockEigUpperLimit, np.maximum(blockEigMultLimit, blockEigMult / 2))
 
         # version with penalty check for ADMM convergence / descent lemma. Problem: slower?
         if costStart + penaltyStart < costEnd + penaltyL  + penaltyP or LfkViolated:
@@ -2222,19 +2230,19 @@ def bundle_adjust(
 
     if use_be_memory:
         if globalIt < memory_be and globalIt >= len(tempBlockEigen[cluster_id]):
-            tempBlockEigen[cluster_id].append(np.minimum(blockEigLowerMultLimit, np.maximum(blockEigMultLimit, blockEigMult)))
+            tempBlockEigen[cluster_id].append(np.minimum(globalBlockEigUpperLimit, np.maximum(blockEigMultLimit, blockEigMult)))
             #print("Appending  cl:", cluster_id, " it: ", globalIt, " mem:", memory_be, " -> ", tempBlockEigen[cluster_id])
         else:
-            tempBlockEigen[cluster_id][globalIt % memory_be] = np.minimum(blockEigLowerMultLimit, np.maximum(blockEigMultLimit, blockEigMult))
+            tempBlockEigen[cluster_id][globalIt % memory_be] = np.minimum(globalBlockEigUpperLimit, np.maximum(blockEigMultLimit, blockEigMult))
 
     ###################
     # TODO this leads to blockEigMult not shrinking at all?!
     # if important we maybe should never lower it to begin with !? see line 2019
-    #    blockEigMult = np.minimum(blockEigLowerMultLimit, np.maximum(blockEigMultLimit, blockEigMult / 2))
+    #    blockEigMult = np.minimum(globalBlockEigUpperLimit, np.maximum(blockEigMultLimit, blockEigMult / 2))
     # if (newVersion and LfkSafe and not steSizeTouched):
-    #     blockEigMult = np.minimum(blockEigLowerMultLimit, np.maximum(blockEigMultLimit, 2*blockEigMult)) # TODOL if ok remove this.
+    #     blockEigMult = np.minimum(globalBlockEigUpperLimit, np.maximum(blockEigMultLimit, 2*blockEigMult)) # TODOL if ok remove this.
     # else:
-    #     blockEigMult = np.minimum(blockEigLowerMultLimit, np.maximum(blockEigMultLimit, blockEigMult))
+    #     blockEigMult = np.minimum(globalBlockEigUpperLimit, np.maximum(blockEigMultLimit, blockEigMult))
     ###################
 
     if newVersion:
@@ -2563,7 +2571,7 @@ def perform_full_iteration(camera_indices_in_cluster_, point_indices_in_cluster_
             points_2d_in_cluster_[ci],
             landmarks_)
     dre_ = max( primal_cost_v_, dre_ ) # sandwich lemma, prevent maybe chaos
-    print("=== DRE = ", dre_, " ==== f(v)= ", round(primal_cost_v_), " f(u)= ", round(primal_cost_u_), "dre_per_part__ ", dre_per_part__)
+    print("=== DRE = ", round(dre_), " ==== f(v)= ", round(primal_cost_v_), " f(u)= ", round(primal_cost_u_), "dre_per_part__ ", dre_per_part__)
 
     return primalCost_u, dre_, L_in_cluster_, Ul_in_cluster_, poses_in_cluster_, poses_v_, landmarks_, \
         nabla_p_in_cluster_, blockEig_in_cluster__, poses_s_in_cluster_pre_, U_cluster_zeros_, steplength_
@@ -2656,26 +2664,48 @@ def GetPreconditioners(cameras_, points_3d_, points_2d_, camera_indices_, point_
     # sqrt can do more? smaller is better for 52 or worse for 173. Smart solution?
     #Unorm_all_ = (2 * JtJ + 1e-6 * blockEigenvalueWhereNeeded(JtJ, 9, 1e-12)) # experimental 3
     #Unorm_all_ = (2 * JtJ + 1e-2 * blockEigenvalueWhereNeeded(JtJ, 9, 1e-16)) # experimental 1
-    Unorm_all_ = JtJ + 1e-18 * blockEigenvalue(JtJ, 9) # experimental 2
-    #Unorm_all_ = blockEigenvalueFull(JtJ, 9, 1e-14) #* 1e-6
-    #Unorm_all_ = (2 * JtJ + blockEigenvalueWhereNeeded(JtJ, 9, 1e-6, True)) # experimental
-    #Unorm_all_ = (2 * JtJ + 1e-7 * blockEigenvalueWhereNeeded(JtJ, 9, 1e0)) # experimental
-    print("np.mean(Unorm_all_.diagonal() ", np.mean(Unorm_all_.diagonal()))
-    print("Unorm_all_ ", Unorm_all_)
+    Unorm_all_ = JtJ + 1e-12 * blockEigenvalue(JtJ, 9) # experimental 2, 1e-14? 1e12: 394 is bad, 1e-14 works not so good
+    # Unorm_all_ = blockEigenvalueFull(JtJ, 9, 1e-14) #* 1e-6
+    #Unorm_all_ = (2 * JtJ + 1e-2 * blockEigenvalueWhereNeeded(JtJ, 9, 1e-14)) # experimental 1, 89 does not work w. 1e-16
+    print("np.mean(Unorm_all_.diagonal() ", np.mean(Unorm_all_.diagonal()), " ", \
+          np.min(Unorm_all_.diagonal()), " " , np.max(Unorm_all_.diagonal()) )
+    #print("Unorm_all_ ", Unorm_all_)
 
     Unorm_all_sqrt = 1e-2 * blockEigenvalueSqrt(Unorm_all_, 9)
+    Unorm_all_sqrt /= np.median(Unorm_all_sqrt.diagonal())
+    print("old Unorm_all_sqrt.diagonal() ", np.median(Unorm_all_sqrt.diagonal()), " ", \
+          np.min(Unorm_all_sqrt.diagonal()), " " , np.max(Unorm_all_sqrt.diagonal()) )
 
+    # difference? not better (same?) some fail 646, eg.
+    # 931 needs 1e1 or even higher. others fail here?!
+    Unorm_all_sqrt = 1e1 * blockEigenvalueSqrt(JtJ + 1e-14 * blockEigenvalue(JtJ, 9), 9) #+ 1e-10 * blockEigenvalueSqrt(blockEigenvalue(JtJ, 9),9)
+    #Unorm_all_sqrt = 1e-1 * JtJ + 1e-12 * blockEigenvalue(JtJ, 9)
+    #Unorm_all_sqrt /= np.median(Unorm_all_sqrt.diagonal())
+    #old Unorm_all_sqrt.diagonal()  3.8239130059449353   8.284540707923528e-05   834297.9820354487
+    #new Unorm_all_sqrt.diagonal()  2.889637245850904   3.021424283029507e-05   725792.7588558348
+    # old Unorm_all_sqrt.diagonal()  3.8239130059449353   8.284540707923528e-05   834297.9820354487
+    # new Unorm_all_sqrt.diagonal()  45032.276915330374   0.4708605385933921       11310797072.14708
+    # new Unorm_all_sqrt.diagonal()  45032.276915330374   0.4708605385933921       1583952200.2844229 14
+    # new Unorm_all_sqrt.diagonal()  45032.276915330374   0.4708605385933921       1495526337.8129442 12
+    # new Unorm_all_sqrt.diagonal()  51954.978548655075   74.54135640746779    1485700741842245.0
+    # new Unorm_all_sqrt.diagonal()  45453.33155499508     7.612150922365605   14857017145772.191 10
+    # new Unorm_all_sqrt.diagonal()  45086.41746379333     0.5304696629229381     14866832925.962698 # 11
     # Unorm_all_update_ = diag_sparse(np.ones(cameras.flatten().shape[0]))
     # temp__ = Unorm_all_update_.data.reshape(-1,9)
     # temp__[:,6] *= 0.1
     # Unorm_all_update_ = diag_sparse(temp__.flatten())
     #Unorm_all_sqrt = Unorm_all_update_ * Unorm_all_sqrt * Unorm_all_update_ + 0 * JtJ
+    print("new Unorm_all_sqrt.diagonal() ", np.median(Unorm_all_sqrt.diagonal()), " ", \
+          np.min(Unorm_all_sqrt.diagonal()), " ", np.max(Unorm_all_sqrt.diagonal()) )
 
-    Unorm_all_sqrt = Unorm_all_sqrt + 0 * JtJ
+    print("np.mean(1e-12 * blockEigenvalue(JtJ, 9).diagonal() ", np.mean(1e-12 * blockEigenvalue(JtJ, 9).diagonal()), " ", \
+          np.min(1e-12 * blockEigenvalue(JtJ, 9).diagonal()), " ", np.max(1e-12 * blockEigenvalue(JtJ, 9).diagonal()) )
 
-    print("np.mean(Unorm_all_sqrt.diagonal() ", np.mean(Unorm_all_sqrt.diagonal()))
+    print("np.mean(1e1 * blockEigenvalueSqrt(JtJ, 9).diagonal() ", np.mean(1e1 * blockEigenvalueSqrt(JtJ, 9).diagonal()), " ", \
+          np.min(1e1 * blockEigenvalueSqrt(JtJ, 9).diagonal()), " ", np.max(1e1 * blockEigenvalueSqrt(JtJ, 9).diagonal()) )
+
     #Unorm_all_sqrt *= 1000./np.mean(Unorm_all_sqrt.diagonal()) # e.g. 427 this is needed, WTF?
-    print("Unorm_all_sqrt ", Unorm_all_sqrt)
+    #print("Unorm_all_sqrt ", Unorm_all_sqrt)
 
     if disable_new_pcg:
         Unorm_all_sqrt = diag_sparse(np.ones(Unorm_all_sqrt.shape[0])) + 1e-20 * JtJ
@@ -2710,17 +2740,21 @@ def RedoPreconditioners(cameras_, points_3d_, points_2d_, camera_indices_, point
     #print("np.median(Unorm_all_new.diagonal() ", np.median(Unorm_all_new.diagonal()))
     Unorm_all_old = blockInverse(Unorm_allinv, 9)
     print("np.mean(Unorm_all_old.diagonal() ", np.mean(Unorm_all_old.diagonal()))
-    print(Unorm_all_old)
-    print(Unorm_all_old.data.shape)
+    #print(Unorm_all_old)
+    #print(Unorm_all_old.data.shape)
 
-    print(Unorm_all_new.data.shape)
+    #print(Unorm_all_new.data.shape)
     Unorm_all_new_sqrt = 1e-3 * blockEigenvalueSqrt(Unorm_all_new, 9)
-    print(Unorm_all_new_sqrt.data.shape)
+    #print(Unorm_all_new_sqrt.data.shape)
     #Unorm_all_new_sqrt *= 1000./np.mean(Unorm_all_new_sqrt.diagonal()) # e.g. 427 this is needed, WTF?
     #Unorm_all_new_sqrt *= np.minimum(1, 1e2/np.median(Unorm_all_new_sqrt.diagonal())) # e.g. 427 this is needed, WTF?
     #print("np.mean(Unorm_all_new_sqrt.diagonal() ", np.mean(Unorm_all_new_sqrt.diagonal()))
     #print(Unorm_all_new_sqrt.data.shape)
-    print(Unorm_all_new_sqrt)
+
+    Unorm_all_new_sqrt = 1e1 * blockEigenvalueSqrt(JtJ, 9) + 1e-12 * blockEigenvalue(JtJ, 9)
+    Unorm_all_new_sqrt = 1e1 * blockEigenvalueSqrt(JtJ, 9)
+    Unorm_all_new_sqrt = Unorm_all_new_sqrt + 0 * Unorm_all_old
+    #print(Unorm_all_new_sqrt)
 
     return Unorm_allinv, fx0_, Unorm_all_new_sqrt
 
@@ -2843,18 +2877,18 @@ Unorm, Vnorm, fx0, Unorm_all = GetPreconditioners(cameras, points_3d, points_2d,
 np.set_printoptions(formatter={"float": "{: 0.2f}".format})
 
 cameras_in = cameras.copy()
-print("cameras input ", cameras_in)
+#print("cameras input ", cameras_in)
 cameras = (Unorm * cameras.flatten()).reshape(-1,9)
 points_3d = (Vnorm * points_3d.flatten()).reshape(-1,3)
 
 #cameras = (Unorm_all * cameras.flatten()).reshape(-1,9)
 cameras = blockMult(Unorm_all, cameras.flatten(), 9).reshape(-1,9)
-print("cameras pcg ", cameras)
+#print("cameras pcg ", cameras)
 Unorm_all = blockInverse(Unorm_all, 9)
 
 cameras_out = blockMult(Unorm_all, cameras.flatten(), 9).reshape(-1,9)
 #cameras_out = (Unorm_all * cameras.flatten()).reshape(-1,9)
-print("cameras_out ", cameras_out)
+#print("cameras_out ", cameras_out)
 #exit()
 #Unorm_all = diag_sparse(Unorm_all.diagonal().flatten()) # TODO debug
 
@@ -2912,9 +2946,9 @@ x0_p = x0_p.reshape(n_cameras, 9)
 startL = 1
 innerIts = 1  # change to get an update, not 1 iteration
 cost = np.zeros(kClusters)
-lastCost = np.sum(fx0**2) #1e20
-lastCostDRE = np.sum(fx0**2) #1e20
-bestCost = np.sum(fx0**2) #1e20
+lastCost = np.sum(fx0**2)
+lastCostDRE = np.sum(fx0**2)
+bestCost = np.sum(fx0**2)
 bestIt = 0
 globalIt = 0
 resetIt = 0 # resetting nesterov acceleration
@@ -2927,6 +2961,7 @@ lib = ctypes.CDLL("./libprocess_clusters.so")
 init_lib()
 
 LipJ = 1 * np.ones(kClusters)
+globalBlockEigUpperLimit = 1e-1 # 1e-1, 1e1? TODO pcg needs ?
 blockEig_in_cluster = 1e-5 * np.ones(kClusters)
 memory_be = 8 # here can shrink, below this only grow.
 for ci in range(kClusters):
@@ -3100,6 +3135,9 @@ else:
     Fs = []
     Fes = []
     rnaBufferSize = 6
+
+    best_poses_v = cameras.copy()
+    best_landmarks = landmarks.copy()
 
     (cost, dre, L_in_cluster, Ul_in_cluster, poses_in_cluster, poses_v, landmarks, \
      nabla_p_in_cluster, blockEig_in_cluster, poses_s_in_cluster_pre, U_cluster_zeros, steplength) = \
@@ -3283,7 +3321,7 @@ else:
             s_prev = s_cur.copy() # access to old s.
 
 
-        line_search_iterations = 3 # 3 appears ok
+        line_search_iterations = 2 # 3 appears ok
         print(" ..... step length ", steplength, " bfgs step ", dk_stepLength, " ratio ", dk_stepLength/steplength, " mult ", multiplier, file=sys.stderr )
         Vnorm_safe = Vnorm.copy()
         for ls_it in range(line_search_iterations):
@@ -3373,6 +3411,9 @@ else:
             print( globalIt, "/", ls_it, " ======== DRE BFGS ====== ", round(dre_bfgs) , " ========= gain " , \
                 round(lastCostDRE_bfgs - dre_bfgs), "==== f(v)= ", round(primal_cost_v), " f(u)= ", round(primal_cost_u), " BE ", blockEig_in_cluster_bfgs)
             print( globalIt, "/", ls_it, " f(v) = ", primal_cost_v_all, " f(u) = ", primal_cost_u_all)
+            if primal_cost_v < bestCost:
+                best_poses_v = poses_v_bfgs.copy()
+                best_landmarks = landmarks_bfgs.copy()
             bestCost = np.minimum(primal_cost_v, bestCost)
             bestIt = globalIt
             if globalIt < 60:
@@ -3381,8 +3422,7 @@ else:
                 bestCost30 = bestCost
 
             # TODO: inc tempBlockEigen[cluster_id] *=2 -- if possible u/v
-            blockEigenMaxT = 1e-1
-            beMin = blockEigenMaxT
+            beMin = globalBlockEigUpperLimit
             for ci in range(kClusters):
                 beMin = np.minimum(beMin, tempBlockEigen[ci][globalIt % memory_be])
 
@@ -3395,19 +3435,24 @@ else:
             # normally use u,v. Forgot example why / where v is better.
             # likely 'things' go 'wild'. hmm.
 
+            disable_best_pose = False
+            if disable_best_pose:
+                best_poses_v = poses_v.copy()
+                best_landmarks = landmarks.copy()
+
             # idea accept if primal v cost is very close.
             # can happen that best primal cost is about same as current and dre was set to this as correction. 
             # TODO if dre < primal_v also increase LipJ or so.
-            if (beMin < blockEigenMaxT) and (ls_it == line_search_iterations-1) and (maxPct * lastCostDRE_bfgs < dre_bfgs):
+            if (beMin < globalBlockEigUpperLimit) and (ls_it == line_search_iterations-1) and (maxPct * lastCostDRE_bfgs < dre_bfgs):
             #if (np.min(LipJ) < LipJMax) and (ls_it == line_search_iterations-1) and (maxPct * lastCostDRE_bfgs < dre_bfgs):
                 primal_cost_v_before = 0 # should be fixed also
                 for ci in range(kClusters):
                     primal_cost_v_before += primal_cost(
-                        poses_v, # v not u
+                        best_poses_v, # v not u
                         camera_indices_in_cluster[ci],
                         point_indices_in_cluster[ci],
                         points_2d_in_cluster[ci],
-                        landmarks)
+                        best_landmarks)
             # do not if primal_v best and current are about the same.
 
             # Reset acceleration if fails 6 times in a row
@@ -3422,7 +3467,7 @@ else:
 
             maxPctV = np.sqrt(maxPct)
             #if reject and (np.min(LipJ) < LipJMax) and (ls_it == line_search_iterations-1) and (maxPct * lastCostDRE_bfgs < dre_bfgs) and (primal_cost_v > maxPctV * primal_cost_v_before): # or primal_cost_v > maxPct * primal_cost_u):
-            if reject and (beMin < blockEigenMaxT) and (ls_it == line_search_iterations-1) and (maxPct * lastCostDRE_bfgs < dre_bfgs) and (primal_cost_v > maxPctV * primal_cost_v_before): # or primal_cost_v > maxPct * primal_cost_u):
+            if reject and (beMin < globalBlockEigUpperLimit) and (ls_it == line_search_iterations-1) and (maxPct * lastCostDRE_bfgs < dre_bfgs) and (primal_cost_v > maxPctV * primal_cost_v_before): # or primal_cost_v > maxPct * primal_cost_u):
                 print("Why enter is priaml v that bad or what", primal_cost_v, " ", primal_cost_v_before, " ", maxPctV * primal_cost_v_before)
 
                 # revert ! Not clear how to do this.
@@ -3453,10 +3498,13 @@ else:
                     # so more needs to be reset than I do.
 
                     # VERSION v, landmarks and poses_s_in_cluster_pre
-                    poses_in_cluster = [poses_v.copy() for _ in poses_in_cluster]
+                    poses_in_cluster = [best_poses_v.copy() for _ in poses_in_cluster]
                     for ci in range(kClusters):
-                        poses_in_cluster[ci][:,6] += 1e-6 # 1e-6 is enough to make it different.
-                        poses_s_in_cluster[ci] = poses_v.copy()
+                        if RNA_or_bfgs:
+                            poses_in_cluster[ci][:,5] += 1e-6 # 1e-6 is enough to make it different.
+                        poses_s_in_cluster_pre[ci] = best_poses_v.copy() # s + u-v = s in this case.
+                        poses_s_in_cluster[ci] = best_poses_v.copy()
+                    landmarks = best_landmarks.copy()
                     ############
                     # VERSION U is doing nothing actually. This is differetn if taking actula steps as below.
                     # poses_s_in_cluster = [elem.copy() for elem in poses_s_in_cluster_pre]
@@ -3467,7 +3515,7 @@ else:
                     #LipJ *= np.sqrt(2)
                     for ci in range(kClusters):
                         tempBlockEigen[ci][globalIt % memory_be] = \
-                            np.minimum(tempBlockEigen[ci][globalIt % memory_be] * 2, blockEigenMaxT)
+                            np.minimum(tempBlockEigen[ci][globalIt % memory_be] * 4, globalBlockEigUpperLimit)
                     print("LipJ *= sqrt(2) = ", np.mean(LipJ))
 
                     # if 1 fails alawya will.
@@ -3531,13 +3579,14 @@ else:
                         dre_bfgs = dre # while loop uses this
                     if True: # is True better maybe -> Does not do ANYTHING? 52/89, test smth else.
                         lastCostDRE_bfgs = dre_bfgs # does not happen? needed to not keep running in it. Yet demanding Lip < X to enter should work
-                        if not RNA_or_bfgs:
+                        if False and not RNA_or_bfgs: # always remove momentum if restart
                             prev_dk = 0 * prev_dk # erase momentum
 
                 # revert whole iteration.
                 #it = it - 1
                 #its = its - 1
-                print(" ************** REVERTED iteration **************, DRE cost set to ", lastCostDRE_bfgs, " min LipJ", np.min(LipJ))
+                print(" ************** REVERTED iteration **************, DRE cost set to ", lastCostDRE_bfgs, \
+                      " before ", primal_cost_v_before, " min LipJ", np.min(LipJ))
                 # must update costs as well. if LipJ increased, then costs are not valid. Recompute how?
                 # u and v and s known, but not step size change.
 
@@ -3588,7 +3637,6 @@ else:
                 # if ls_it == line_search_iterations-1 :
                 if dre_bfgs <= lastCostDRE_bfgs or 10000 * (dre_bfgs-lastCostDRE_bfgs) <= lastCostDRE_bfgs or ls_it == line_search_iterations-1 : # not correct yet, must be <= last - c/gamma |u-v|
                     # TODO: save and use best wrt. cost: new fct?
-                    #
                     steplength = 0 # currently printed
                     for ci in range(kClusters):
                         poses_s_in_cluster[ci] = poses_s_in_cluster_bfgs[ci].copy()
@@ -3621,7 +3669,8 @@ else:
                             for ci in range(kClusters):
                                 tempBlockEigen[ci][m] = maxM
 
-                    if False and globalIt % 10 == 9: # debatable, bigger analysis needed. Just random?
+                    redoPrecond = False
+                    if redoPrecond and globalIt % 10 == 9: # debatable, bigger analysis needed. Just random?
                         #Unorm_all_safe = Unorm_all.copy()
                         #Unorm_all.data = 1e-20 * np.ones(Unorm_all.data.shape)
                         #Unorm_all = Unorm_all + diag_sparse(np.ones(Unorm_all.shape[0]).flatten()) # to overwrite global var needs to be done in outer scope?
