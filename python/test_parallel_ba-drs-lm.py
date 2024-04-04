@@ -1039,7 +1039,7 @@ def blockEigenvalueSqrt(M, bs, t = 1e-14):
                 #print("blockEigenvalueSqrt flip " , mat)
                 flip = True
             evs, evv = eigh(mat)
-            evs = np.sqrt(np.fmin(np.fmax(evs, t), 1e13))
+            evs = np.sqrt(np.fmin(np.fmax(evs, t), 1e13)) #1e13
             # print("evs ", evs[bs-1] / evs)
             # #print("evv ", evv[bs-1])
             # print("evv ", evv)
