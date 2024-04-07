@@ -2702,8 +2702,9 @@ def GetPreconditioners(cameras_, points_3d_, points_2d_, camera_indices_, point_
     #Unorm_all_sqrt /= np.median(Unorm_all_sqrt.diagonal())
 
     temp_ = np.squeeze(np.asarray((np.abs(JtJ)).sum(axis=0) ))
-    #Unorm_all_sqrt = diag_sparse(np.sqrt(temp_).flatten()) + 1e-14 * blockEigenvalueSqrt(JtJ, 9)
-    Unorm_all_sqrt = 0.5 * diag_sparse(np.sqrt(temp_).flatten()) + 0.5 * blockEigenvalueSqrt(JtJ + 1e-14 * blockEigenvalue(JtJ, 9), 9)
+    #Unorm_all_sqrt = 1e-2 * diag_sparse(np.sqrt(temp_).flatten()) + 1e-14 * blockEigenvalueSqrt(JtJ, 9)
+    Unorm_all_sqrt = 1e-6 * diag_sparse(temp_.flatten()) + 1e-14 * blockEigenvalueSqrt(JtJ, 9)
+    #Unorm_all_sqrt = 0.5 * diag_sparse(np.sqrt(temp_).flatten()) + 0.5 * blockEigenvalueSqrt(JtJ + 1e-14 * blockEigenvalue(JtJ, 9), 9)
 
     #old Unorm_all_sqrt.diagonal()  3.8239130059449353   8.284540707923528e-05   834297.9820354487
     #new Unorm_all_sqrt.diagonal()  2.889637245850904   3.021424283029507e-05   725792.7588558348
