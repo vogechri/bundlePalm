@@ -1695,13 +1695,14 @@ def bundle_adjust(
     cluster_id,
     successfull_its_=1,
 ):
+    LipJ_ = 1.005 # less jumping never better. maybe best to inc this when failing ?! not really. some fail very early for no reason?
     newForUnique = False
     blockEigMult = 1e-5 # 1e-3 was used before, too high low precision.
     # 1e-8 fluctuates but faster 1e-6. increase JJ_mult?
     # problem dies at 173 example. 1e-5 ok more not.
     J_eps = 1e-4
-    minimumL = 1e-6
-    minDiag = 1e-5
+    minimumL = 1e-6 # 1e-6
+    #minDiag = 1e-5
     L = max(minimumL, L_in_cluster_)
     JJ_mult = 4 # TODO 4 / 2. 4 should suffice everywhere?
     updateJacobian = True
@@ -1855,12 +1856,23 @@ def bundle_adjust(
             #blockEigenvalueJltJl = blockEigenvalueWhereNeeded(JltJl, 3) # nope not at all.
             JltJlDiag = JltJl + 1e-6 * blockEigenvalueJltJl # play around at 173 example. 1e-8: 58 / 0  ======== DRE BFGS ======  518626, 1e-6 518 MUCH earlier
 
+            verboseSpec = False
+            if verboseSpec:
+                maxE, minE = minmaxEv(JltJl, 3)
+                print("JltJl     spectral ", (maxE/minE), " max / min ", maxE, " ", minE)
+                maxE, minE = minmaxEv(JltJlDiag, 3)
+                print("JltJlDiag spectral ", (maxE/minE)) # almost == 2, since blockEigenvalueJltJl
+                #print("blockEigenvalueJltJl ", blockEigenvalueJltJl)
+
             # could do only where needed? smallest ev is indeed small?
             JtJDiag = stepSize.copy() # max 1, 1/L, line-search dre fails -> increase
 
             maxE, minE = minmaxEv(JltJl, 3)
             #print("minmax ev JltJl ", np.max(maxE), " ", np.max(minE), " ", np.min(maxE), " ",  np.min(minE), " spec ", np.max(maxE/minE) )
             JltJlSpec = [round_int(np.max(maxE/minE)), np.min(maxE/minE), round_int(np.median(maxE/minE))]
+            if verboseSpec:
+                print("minmax ev JltJl  ", np.max(maxE), " ", np.max(minE), " ", np.min(maxE), " ",  np.min(minE), " ", np.median(maxE), " ", np.median(minE), " spec ", JltJlSpec, file=sys.stderr )
+
             maxE, minE = minmaxEv(JltJlDiag, 3)
             JltJlDiagSpec = [round_int(np.max(maxE/minE)), np.min(maxE/minE), round_int(np.median(maxE/minE))]
             print("minmax ev JltJlD ", np.max(maxE), " ", np.max(minE), " ", np.min(maxE), " ",  np.min(minE), " spec ", JltJlSpec, " -> ", JltJlDiagSpec, file=sys.stderr )
@@ -1938,9 +1950,10 @@ def bundle_adjust(
                 #maxE, minE = minmaxEv(JtJDiag, 9)
                 #print("minmax ev JtJDiag ", np.max(maxE), " ", np.max(minE), " ", np.min(maxE), " ",  np.min(minE), " spec ", np.max(maxE/minE))
 
-                # print("stepSize spectral ", (maxE/minE))
-                # maxE, minE = minmaxEv(JtJ, 9)
-                # print("JTJ spectral ", (maxE/minE))
+                if verboseSpec:
+                    print("stepSize spectral ", (maxE/minE))
+                    maxE, minE = minmaxEv(JtJ, 9)
+                    print("JTJ spectral ", (maxE/minE))
 
                 penaltyStartConst = prox_rhs.dot(stepSize * prox_rhs)
 
@@ -2215,8 +2228,10 @@ def bundle_adjust(
         bp = J_pose.transpose() * fx0
         #JJ_mult = 1 + np.maximum(minimumL, np.minimum(L_in_cluster_ * 2, L)) # might have changed .. must be off sigh
         #blockEigenvalueJtJ = blockEigenvalue(JtJ, 9) # TODO: what if this is only needed for 0-eigen directions? return !=0 only if in small eigendir
-        blockEigenvalueJtJ = blockEigenvalueWhereNeeded(JtJ, 9, threshWhereNeeded) # ! 1e-2, 1e-4 1e-5 als works. problem 52, 1e-6 does not 173 performance bad if not 1e-6?
         #stepSize = JJ_mult * JtJ.copy() + blockEigMult * blockEigenvalueJtJ
+
+        #blockEigenvalueJtJ = blockEigenvalueWhereNeeded(JtJ, 9, threshWhereNeeded)
+        blockEigenvalueJtJ = 1e5 * threshWhereNeeded * blockEigenvalue(JtJ, 9) # TODO? lower for some, e.g. 931. higher for others
         stepSize = LipJ_ * JtJ.copy() + blockEigMult * blockEigenvalueJtJ # todo blockEigMult was maybe adjusted above, ok?
 
         if not newVersion:
@@ -2648,7 +2663,7 @@ def GetPreconditioners(cameras_, points_3d_, points_2d_, camera_indices_, point_
     #temp_ /= np.median(temp_, axis = 0)[np.newaxis,:]
     temp_ = np.sqrt(temp_)
     print("min/max Vnorm ", np.min(temp_), np.max(temp_))
-    temp_ = np.fmax(temp_, 1e-10) # TODO. pick most singular example? 646 and 52? 1-10 was ok on 52 clust 1e-1, 1e-3 bad? check
+    temp_ = np.fmin(np.fmax(temp_, 1e-8), 1e8) # TODO. pick most singular example? 646 and 52? 1-10 was ok on 52 clust 1e-1, 1e-3 bad? check
     #temp = np.max(np.sqrt(temp), axis=1) # max or mean? sqrt
     # Diag pseudo HessL (max/min/med/mean) [ 13.04  13.93  11.30]   [ 0.59  3.49  0.38]   [ 7.13  7.08  3.95]   635351.3855933357
     # Diag pseudo HessL (max/min/med/mean) [ 3.15  1.89  1.89]   [ 0.00  0.00  0.00]   [ 0.02  0.01  0.01]   3575.420359064994
@@ -2659,8 +2674,12 @@ def GetPreconditioners(cameras_, points_3d_, points_2d_, camera_indices_, point_
     # min
     # Diag pseudo HessL (max/min/med/mean) [ 1383.44  1380.07  436.03]   [ 0.59  3.49  0.38]   [ 9.55  9.84  3.95]   1345250.7481203536
     #temp_ = np.repeat(temp_[:,np.newaxis], 3, axis=1)
-    Vnorm_ = diag_sparse(temp_.flatten())
+
+    Vnorm_ = diag_sparse(1e0 * temp_.flatten())
     Vnorm_ = diag_sparse(np.ones(points_3d.flatten().shape[0])) # 52: this is much better -- could be random
+    # Diag pseudo HessL (max/min/med) [ 4714908081545485312.00  9787621390603782144.00  5826396097922281472.00]   [ 3.43  19.01  10.47]   [ 143633.31  248961.93  156450.49]
+    # Diag pseudo HessL (max/min/med) [ 10.27  10.69  9.98]   [ 0.27  0.68  0.16]   [ 5.00  7.91  5.21]
+
     # sqrt can do more? smaller is better for 52 or worse for 173. Smart solution?
     #Unorm_all_ = (2 * JtJ + 1e-6 * blockEigenvalueWhereNeeded(JtJ, 9, 1e-12)) # experimental 3
     #Unorm_all_ = (2 * JtJ + 1e-2 * blockEigenvalueWhereNeeded(JtJ, 9, 1e-16)) # experimental 1
@@ -2681,6 +2700,11 @@ def GetPreconditioners(cameras_, points_3d_, points_2d_, camera_indices_, point_
     Unorm_all_sqrt = 1e1 * blockEigenvalueSqrt(JtJ + 1e-14 * blockEigenvalue(JtJ, 9), 9) #+ 1e-10 * blockEigenvalueSqrt(blockEigenvalue(JtJ, 9),9)
     #Unorm_all_sqrt = 1e-1 * JtJ + 1e-12 * blockEigenvalue(JtJ, 9)
     #Unorm_all_sqrt /= np.median(Unorm_all_sqrt.diagonal())
+
+    temp_ = np.squeeze(np.asarray((np.abs(JtJ)).sum(axis=0) ))
+    #Unorm_all_sqrt = diag_sparse(np.sqrt(temp_).flatten()) + 1e-14 * blockEigenvalueSqrt(JtJ, 9)
+    Unorm_all_sqrt = 0.5 * diag_sparse(np.sqrt(temp_).flatten()) + 0.5 * blockEigenvalueSqrt(JtJ + 1e-14 * blockEigenvalue(JtJ, 9), 9)
+
     #old Unorm_all_sqrt.diagonal()  3.8239130059449353   8.284540707923528e-05   834297.9820354487
     #new Unorm_all_sqrt.diagonal()  2.889637245850904   3.021424283029507e-05   725792.7588558348
     # old Unorm_all_sqrt.diagonal()  3.8239130059449353   8.284540707923528e-05   834297.9820354487
@@ -2943,7 +2967,7 @@ x0_p = x0_p.reshape(n_cameras, 9)
 # v := output, temporary
 
 # 1. take problem and split, sort indices by camera, define local global map and test it.
-startL = 1
+startL = 1 # init trust region L
 innerIts = 1  # change to get an update, not 1 iteration
 cost = np.zeros(kClusters)
 lastCost = np.sum(fx0**2)
@@ -2960,7 +2984,7 @@ linearize_at_last_solution = True # linearize at uk or v. maybe best to check en
 lib = ctypes.CDLL("./libprocess_clusters.so")
 init_lib()
 
-LipJ = 1 * np.ones(kClusters)
+LipJ = 1 * np.ones(kClusters) # mult for stepsize
 globalBlockEigUpperLimit = 1e-1 # 1e-1, 1e1? TODO pcg needs ?
 blockEig_in_cluster = 1e-5 * np.ones(kClusters)
 memory_be = 8 # here can shrink, below this only grow.
