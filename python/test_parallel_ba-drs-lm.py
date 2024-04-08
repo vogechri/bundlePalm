@@ -1053,6 +1053,26 @@ def blockEigenvalueSqrt(M, bs, t = 1e-14):
     #exit()
     return Ei
 
+def blockEigenvalueThresh(M, bs, t = 1e-10):
+    Ei = M.copy()
+    if bs > 1:
+        bs2 = bs * bs
+        for i in range(int(M.data.shape[0] / bs2)):
+            mat = Ei.data[bs2 * i : bs2 * i + bs2].reshape(bs, bs)
+            flip = False
+            if not check_symmetric(mat):
+                mat = np.fliplr(mat)
+                flip = True
+            evs, evv = eigh(mat)
+            evs = np.fmin(np.fmax(evs, t), 1e13)
+            mat = evv.dot(diag_sparse(evs).dot(evv.transpose()))
+            if flip:
+                mat = np.fliplr(mat)
+            Ei.data[bs2 * i : bs2 * i + bs2] = mat.flatten()
+    else:
+        Ei = M.copy()
+    return Ei
+
 def copy_selected_blocks(M, block_selection_, bs):
     Mi = M.copy()
     if bs > 1:
@@ -2597,7 +2617,7 @@ def GetPreconditioners(cameras_, points_3d_, points_2d_, camera_indices_, point_
     disable_new_pcg = False
     JtJ = J_pose.transpose() * J_pose
     # W = J_pose.transpose() * J_land
-    orig = True
+    orig = False
     if orig:
         temp_ = np.squeeze(np.asarray(0.0001 * ( (np.abs(JtJ)/1000).sum(axis=0) )))
         temp_  = temp_.reshape(-1,9)
@@ -2612,13 +2632,13 @@ def GetPreconditioners(cameras_, points_3d_, points_2d_, camera_indices_, point_
         print(" np.mean(temp_, axis = 0)[np.newaxis,:] " , np.mean(temp_, axis = 0)[np.newaxis,:])
 
         #temp_ = np.sqrt(temp_) # sqrt worse, **2 catastrophe
-
+        temp_ = 1e-2 * temp_
         #temp_ /= np.mean(temp_, axis = 1)[:,np.newaxis] # mean per variable 1.9M -> 2M
         #temp_ /= np.mean(temp_, axis = 0)[np.newaxis,:] # mean per component? #BAD
         print(" np.mean(temp_, axis = 0)[np.newaxis,:] " , np.mean(temp_, axis = 0)[np.newaxis,:])
-        temp_ /= np.sqrt(np.mean(temp_.flatten())) # and mean across compenents (likely needed due to close correlation)
+        #temp_ /= np.sqrt(np.mean(temp_.flatten())) # and mean across compenents (likely needed due to close correlation)
         #print(" np.mean(temp_, axis = 0)[np.newaxis,:] " , np.mean(temp_, axis = 0)[np.newaxis,:])
-        temp_[:,0:5] *= 0.4 # 1 654 521 M, 0.4 better at the end and same as above!
+        #temp_[:,0:5] *= 0.4 # 1 654 521 M, 0.4 better at the end and same as above!
     temp_ = np.fmax(temp_, 1e-14) # TODO. pick most singular example? 646? 173 maybe / any dubrovnik
 
     # TODO: eval thresh here. lower higher, use 173 maybe w. all lms. Also: redo every 10 iterations?
@@ -2703,8 +2723,15 @@ def GetPreconditioners(cameras_, points_3d_, points_2d_, camera_indices_, point_
 
     temp_ = np.squeeze(np.asarray((np.abs(JtJ)).sum(axis=0) ))
     #Unorm_all_sqrt = 1e-2 * diag_sparse(np.sqrt(temp_).flatten()) + 1e-14 * blockEigenvalueSqrt(JtJ, 9)
-    Unorm_all_sqrt = 1e-6 * diag_sparse(temp_.flatten()) + 1e-14 * blockEigenvalueSqrt(JtJ, 9)
+    # TODO go0d:?!
+    Unorm_all_sqrt = 1e-2 * diag_sparse(temp_.flatten()) + 1e-14 * blockEigenvalueSqrt(JtJ, 9)
     #Unorm_all_sqrt = 0.5 * diag_sparse(np.sqrt(temp_).flatten()) + 0.5 * blockEigenvalueSqrt(JtJ + 1e-14 * blockEigenvalue(JtJ, 9), 9)
+    # test
+    
+    #Unorm_all_sqrt = 1e-2 * (blockEigenvalueThresh(JtJ, 9) + 1e-10 * blockEigenvalue(JtJ, 9))
+    #Unorm_all_sqrt = 1e-2 * (JtJ + 1e-10 * blockEigenvalue(JtJ, 9))
+    #Unorm_all_sqrt = 1e-2 * (0.5 * diag_sparse(temp_.flatten()) + 0.5 * JtJ)
+    #Unorm_all_sqrt = 1e-2 * blockEigenvalueFull(JtJ, 9, 1e-10)
 
     #old Unorm_all_sqrt.diagonal()  3.8239130059449353   8.284540707923528e-05   834297.9820354487
     #new Unorm_all_sqrt.diagonal()  2.889637245850904   3.021424283029507e-05   725792.7588558348
