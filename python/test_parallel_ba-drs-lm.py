@@ -2613,8 +2613,8 @@ def perform_full_iteration(camera_indices_in_cluster_, point_indices_in_cluster_
 
 def GetPreconditioners(cameras_, points_3d_, points_2d_, camera_indices_, point_indices_):
     J_pose, J_land, fx0_ = ComputeDerivativeMatrixInit(cameras_, points_3d_, points_2d_, camera_indices_, point_indices_)
-    disable_basis_pcg = True
-    disable_new_pcg = False
+    disable_basis_pcg = False
+    disable_new_pcg = True
     JtJ = J_pose.transpose() * J_pose
     # W = J_pose.transpose() * J_land
     orig = False
@@ -2639,7 +2639,7 @@ def GetPreconditioners(cameras_, points_3d_, points_2d_, camera_indices_, point_
         #temp_ /= np.sqrt(np.mean(temp_.flatten())) # and mean across compenents (likely needed due to close correlation)
         #print(" np.mean(temp_, axis = 0)[np.newaxis,:] " , np.mean(temp_, axis = 0)[np.newaxis,:])
         #temp_[:,0:5] *= 0.4 # 1 654 521 M, 0.4 better at the end and same as above!
-    temp_ = np.fmax(temp_, 1e-14) # TODO. pick most singular example? 646? 173 maybe / any dubrovnik
+    temp_ = np.fmin(np.fmax(temp_, 1e-14), 1e16) # TODO. pick most singular example? 646! 173 maybe / any dubrovnik. fmin needed!
 
     # TODO: eval thresh here. lower higher, use 173 maybe w. all lms. Also: redo every 10 iterations?
     # temp_ = np.ones(temp_.shape) # e.g. 173: worse. Likely all w landmarks far away?
@@ -2724,7 +2724,9 @@ def GetPreconditioners(cameras_, points_3d_, points_2d_, camera_indices_, point_
     temp_ = np.squeeze(np.asarray((np.abs(JtJ)).sum(axis=0) ))
     #Unorm_all_sqrt = 1e-2 * diag_sparse(np.sqrt(temp_).flatten()) + 1e-14 * blockEigenvalueSqrt(JtJ, 9)
     # TODO go0d:?!
-    Unorm_all_sqrt = 1e-2 * diag_sparse(temp_.flatten()) + 1e-14 * blockEigenvalueSqrt(JtJ, 9)
+    # Unorm_all_sqrt = 1e-2 * diag_sparse(temp_.flatten()) + 1e-14 * blockEigenvalueSqrt(JtJ, 9) # used
+    # 1e-1 and 1e-2 are identical (1266, 257), 1e0 as well. 1e-3 worse!
+    Unorm_all_sqrt = 1e-2 * (diag_sparse(temp_.flatten()) + 1e-14 * blockEigenvalueSqrt(JtJ, 9))
     #Unorm_all_sqrt = 0.5 * diag_sparse(np.sqrt(temp_).flatten()) + 0.5 * blockEigenvalueSqrt(JtJ + 1e-14 * blockEigenvalue(JtJ, 9), 9)
     # test
     
