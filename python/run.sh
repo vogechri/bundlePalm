@@ -1,7 +1,7 @@
-# python test_parallel_ba-drs-lm.py http://grail.cs.washington.edu/projects/bal/data/dubrovnik/ problem-135-90642-pre.txt.bz2 90 10 2> lm135.txt
-# python test_parallel_ba-drs-lm.py http://grail.cs.washington.edu/projects/bal/data/dubrovnik/ problem-356-226730-pre.txt.bz2 90 10 2> lm356.txt
-# python test_parallel_ba-drs-lm.py http://grail.cs.washington.edu/projects/bal/data/venice/ problem-52-64053-pre.txt.bz2 90 10 2> lm52.txt
-# python test_parallel_ba-drs-lm.py http://grail.cs.washington.edu/projects/bal/data/venice/ problem-89-110973-pre.txt.bz2 90 10 2> lm89.txt
+python test_parallel_ba-drs-lm.py http://grail.cs.washington.edu/projects/bal/data/venice/ problem-52-64053-pre.txt.bz2 90 10 2> lm52.txt
+python test_parallel_ba-drs-lm.py http://grail.cs.washington.edu/projects/bal/data/venice/ problem-89-110973-pre.txt.bz2 90 10 2> lm89.txt
+python test_parallel_ba-drs-lm.py http://grail.cs.washington.edu/projects/bal/data/dubrovnik/ problem-135-90642-pre.txt.bz2 90 10 2> lm135.txt
+python test_parallel_ba-drs-lm.py http://grail.cs.washington.edu/projects/bal/data/dubrovnik/ problem-356-226730-pre.txt.bz2 90 10 2> lm356.txt
 #python test_parallel_ba-drs-lm.py http://grail.cs.washington.edu/projects/bal/data/final/ problem-93-61203-pre.txt.bz2 90 10 2> lm93.txt
 python test_parallel_ba-drs-lm.py http://grail.cs.washington.edu/projects/bal/data/dubrovnik/ problem-173-111908-pre.txt.bz2 90 10 2> lm173.txt
 python test_parallel_ba-drs-lm.py http://grail.cs.washington.edu/projects/bal/data/final/ problem-394-100368-pre.txt.bz2 90 10 2> lm394.txt

@@ -1555,13 +1555,13 @@ def bundle_adjust(
     cluster_id,
     successfull_its_=1,
 ):
-    newForUnique = False
+    LipJ_ = 1.005 # less jumping never better. maybe best to inc this when failing ?! not really. some fail very early for no reason?
     blockEigMult = 1e-5 # 1e-3 was used before, too high low precision.
     # 1e-8 fluctuates but faster 1e-6. increase JJ_mult?
     # problem dies at 173 example. 1e-5 ok more not.
-    J_eps = 1e-4
+    #J_eps = 1e-4
     minimumL = 1e-6
-    minDiag = 1e-5
+    #minDiag = 1e-5
     L = max(minimumL, L_in_cluster_)
     JJ_mult = 4 # TODO 4 / 2. 4 should suffice everywhere?
     updateJacobian = True
@@ -1580,7 +1580,7 @@ def bundle_adjust(
     tr_eta_2 = 0.25
     blockEigMultGain = 4 # 4 better than 2 at least if allowDecreaseBlockEig, feels random and weird
     threshWhereNeeded = 1e-6
-    verbose_Jac = False
+    verbose_Jac = True #False
 
     newVersion = True
     # TODO: This parameter block is ok blockEigMultJtJ 1e-5, LipJ = 2, blockEigenvalueWhereNeeded 1e-2,
@@ -1654,11 +1654,14 @@ def bundle_adjust(
             # So 2 JtJ  + 2 JltJl shuold majorize |J^t x|^2 for all x.
 
             JltJl = J_land.transpose() * J_land
-            # JltJlDiag = JltJl + J_eps * diag_sparse(np.ones(JltJl.shape[0]))
-            #blockEigenvalueJltJl = blockEigenvalueWhereNeeded(JltJl, 3) # nope not at all.
-            blockEigenvalueJltJl = 1e-3 * blockEigenvalue(JltJl, 3) # TODO: adjust this.
-            JltJlDiag = JltJl + 1e-6 * blockEigenvalueJltJl # play around at 173 example. 1e-8: 58 / 0  ======== DRE BFGS ======  518626, 1e-6 518 MUCH earlier
-            # could do only where needed? smallest ev is indeed small?
+            if False:
+                # JltJlDiag = JltJl + J_eps * diag_sparse(np.ones(JltJl.shape[0]))
+                #blockEigenvalueJltJl = blockEigenvalueWhereNeeded(JltJl, 3) # nope not at all.
+                blockEigenvalueJltJl = 1e-3 * blockEigenvalue(JltJl, 3)
+                JltJlDiag = JltJl + 1e-6 * blockEigenvalueJltJl
+            else:
+                # could do only where needed? smallest ev is indeed small?
+                JltJlDiag = JltJl + blockEigenvalue(JltJl, 3)
 
             if verbose_Jac:
                 absDiagJltJl = np.abs(JltJl.diagonal()).reshape(-1,3)
@@ -1698,14 +1701,19 @@ def bundle_adjust(
                 #blockEigenvalueJtJ = blockEigenvalueWhereNeeded(JtJ, 9, threshWhereNeeded) # ! 1e-2, 1e-4 1e-5 als works. problem 52, 1e-6 does not 173 performance bad if not 1e-6?
                 #blockEigenvalueJtJ = 1e-1 * blockEigenvalue(JtJ, 9) # ! try 173 & 52, fails at 1e-2, 10 clusters. 1e-1 ok for 173 & 52. (not dead)
 
-                # TODO: check this out?
-                blockEigenvalueJtJ = 1e2 * threshWhereNeeded * blockEigenvalue(JtJ, 9) # 173 to set.
+                if False:
+                    # TODO: check this out?
+                    blockEigenvalueJtJ = 1e2 * threshWhereNeeded * blockEigenvalue(JtJ, 9) # 173 to set.
 
-                # TODO: LipJ for both? or only JJ?
-                #stepSize = JJ_mult * JtJ.copy() + blockEigMult * blockEigenvalueJtJ
-                stepSize = LipJ_ * JtJ.copy() + blockEigMult * blockEigenvalueJtJ
-                JtJDiag = JtJ.copy() + blockEigMultJtJ * blockEigenvalueJtJ
-                #JtJDiag = blockEigMultJtJ * blockEigenvalueJtJ # this is likely almost same as above. Todo: check/find value.
+                    # TODO: LipJ for both? or only JJ?
+                    #stepSize = JJ_mult * JtJ.copy() + blockEigMult * blockEigenvalueJtJ
+                    stepSize = LipJ_ * JtJ.copy() + blockEigMult * blockEigenvalueJtJ
+                    JtJDiag = JtJ.copy() + blockEigMultJtJ * blockEigenvalueJtJ
+                    #JtJDiag = blockEigMultJtJ * blockEigenvalueJtJ # this is likely almost same as above. Todo: check/find value.
+                else:
+                    blockEigenvalueJtJ = 1e1 * blockEigenvalue(JtJ, 9)
+                    stepSize = LipJ_ * JtJ.copy() + blockEigMult * blockEigenvalueJtJ
+                    JtJDiag = JtJ.copy() + blockEigMultJtJ * blockEigenvalueJtJ
 
                 # maxE, minE = minmaxEv(JtJ, 9)
                 # print("JtJ spectral ", (maxE/minE))
@@ -2020,13 +2028,6 @@ def bundle_adjust(
     # this should be less communication, where do we get to? 518k vs 875k. With PCG does work now.
     # Rho = blockEigenvalueJtJ + 1e-16 * Rho # issue: needs to be same as drs penalty. else slow ?!
     # Rho = 2 * JtJ.copy() + 1e-12 * Ul # this here means we just use safe bet. Likely multiplier, '2' does not matter anyway. stable but slower. FUCK
-
-    # TODO change 2
-    # if newForUnique:
-    #     diag_present = 0.5 * diag_sparse( np.repeat((np.ones(n_points_) * landmarks_only_in_cluster_).reshape(-1,1), 3).flatten() )
-    #     # see above, compensate for averaging
-    #     xTest = x0_l_ - (diag_present*(x0_l_.flatten() - s_l_)).reshape(-1,3)
-    #     return costEnd, x0_p_, xTest, L, diag_present + Rho
 
     if False: # leads to numerical issues -> influences the results (can only be numerical?).
         Vnorm_ = diag_sparse(np.squeeze(np.asarray(np.sqrt( (np.abs(JltJl)/10).sum(axis=0) ))))
@@ -2355,15 +2356,17 @@ def GetPreconditioners(cameras_, points_3d_, points_2d_, camera_indices_, point_
         temp_[:,0:5] *= 0.4
     else:
         temp_ = 1e-2 * np.squeeze(np.asarray((np.abs(JtJ)).sum(axis=0) ))
-    temp_ = np.fmin(np.fmax(temp_, 1e-14), 1e-16) # TODO. pick most singular example? 646? 173 maybe / any dubrovnik
+        print("min/max Unorm ", np.min(temp_), np.max(temp_))
+        temp_  = temp_.reshape(-1,9)
+        #print(" np.mean(temp_, axis = 0)[np.newaxis,:] " , np.mean(temp_, axis = 0)[np.newaxis,:])
+    temp_ = np.fmin(np.fmax(temp_, 1e-14), 1e16) # TODO. pick most singular example? 646? 173 maybe / any dubrovnik
 
     # TODO: eval thresh here. lower higher, use 173 maybe w. all lms. Also: redo every 10 iterations?
     # temp_ = np.ones(temp_.shape) # e.g. 173: worse. Likely all w landmarks far away?
-    Unorm_ = diag_sparse(temp_.flatten())
+    Unorm_ = diag_sparse(temp_.copy().flatten())
     #print(Unorm.shape, " ", Unorm.data.shape)
     #Unorm = diag_sparse(np.squeeze(np.asarray(0.01 * np.sqrt( (np.abs(JtJ)/1000).sum(axis=0) ))))
     #Unorm = diag_sparse(np.ones(cameras.flatten().shape[0])) * 100 # ok.
-    #print(Unorm)
     # print("Unorm.data.reshape(-1,9)", Unorm.data.reshape(-1,9))
     # print("np.sum(fx0**2) ", np.sum(fx0**2))
     # print("cameras ", cameras )
@@ -2389,6 +2392,7 @@ def GetPreconditioners(cameras_, points_3d_, points_2d_, camera_indices_, point_
     #temp_ = np.repeat(temp_[:,np.newaxis], 3, axis=1)
     Vnorm_ = diag_sparse(temp_.flatten())
     Vnorm_ = diag_sparse(np.ones(points_3d.flatten().shape[0])) # 52: this is much better -- could be random
+
     return Unorm_, Vnorm_, fx0_
 
 def UpdatePreconditioners(cameras_, points_3d_, points_2d_, camera_indices_, point_indices_):
@@ -2488,6 +2492,8 @@ c02_mult = 1; c34_mult = 1; c5_mult = 1; c6_mult = 1; c7_mult = 1; c8_mult = 1
 Unorm, Vnorm, fx0 = GetPreconditioners(cameras, points_3d, points_2d, camera_indices, point_indices)
 cameras = (Unorm * cameras.flatten()).reshape(-1,9)
 points_3d = (Vnorm * points_3d.flatten()).reshape(-1,3)
+#print("cameras output ", cameras)
+#print(Unorm)
 
 # can i do this?
 if False:
@@ -2561,7 +2567,7 @@ init_lib()
 
 LipJ = 1 * np.ones(kClusters)
 globalBlockEigUpperLimit = 1e-1 # 1e-1, 1e1?
-blockEig_in_cluster = 1e-4 * np.ones(kClusters) # 1e-4 or 1e-5
+blockEig_in_cluster = 1e-5 * np.ones(kClusters) # 1e-4 or 1e-5
 memory_be = 8 # here can shrink, below this only grow.
 for ci in range(kClusters):
     print("input blockEig_in_cluster[ci] ", blockEig_in_cluster[ci])
