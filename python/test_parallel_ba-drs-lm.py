@@ -2348,29 +2348,14 @@ def GetPreconditioners(cameras_, points_3d_, points_2d_, camera_indices_, point_
 
     JtJ = J_pose.transpose() * J_pose
     W = J_pose.transpose() * J_land
-    orig = True
+    orig = False
     if orig:
         temp_ = np.squeeze(np.asarray(0.0001 * ( (np.abs(JtJ)/1000).sum(axis=0) )))
         temp_  = temp_.reshape(-1,9)
         temp_[:,0:5] *= 0.4
     else:
-        temp_ = np.squeeze(np.asarray((np.abs(JtJ)).sum(axis=0) ))
-        #temp_W= np.squeeze(np.asarray((np.abs(W)).sum(axis=1) ))
-        #print("W shapes", temp_.shape(), " ", temp_W.shape())
-        #temp_ = temp_ + temp_W
-        print("min/max Unorm ", np.min(temp_), np.max(temp_))
-        temp_  = temp_.reshape(-1,9)
-        print(" np.mean(temp_, axis = 0)[np.newaxis,:] " , np.mean(temp_, axis = 0)[np.newaxis,:])
-
-        #temp_ = np.sqrt(temp_) # sqrt worse, **2 catastrophe
-
-        #temp_ /= np.mean(temp_, axis = 1)[:,np.newaxis] # mean per variable 1.9M -> 2M
-        #temp_ /= np.mean(temp_, axis = 0)[np.newaxis,:] # mean per component? #BAD
-        print(" np.mean(temp_, axis = 0)[np.newaxis,:] " , np.mean(temp_, axis = 0)[np.newaxis,:])
-        temp_ /= np.sqrt(np.mean(temp_.flatten())) # and mean across compenents (likely needed due to close correlation)
-        #print(" np.mean(temp_, axis = 0)[np.newaxis,:] " , np.mean(temp_, axis = 0)[np.newaxis,:])
-        temp_[:,0:5] *= 0.4 # 1 654 521 M, 0.4 better at the end and same as above!
-    temp_ = np.fmax(temp_, 1e-14) # TODO. pick most singular example? 646? 173 maybe / any dubrovnik
+        temp_ = 1e-2 * np.squeeze(np.asarray((np.abs(JtJ)).sum(axis=0) ))
+    temp_ = np.fmin(np.fmax(temp_, 1e-14), 1e-16) # TODO. pick most singular example? 646? 173 maybe / any dubrovnik
 
     # TODO: eval thresh here. lower higher, use 173 maybe w. all lms. Also: redo every 10 iterations?
     # temp_ = np.ones(temp_.shape) # e.g. 173: worse. Likely all w landmarks far away?
@@ -2391,7 +2376,7 @@ def GetPreconditioners(cameras_, points_3d_, points_2d_, camera_indices_, point_
     temp_  = Vnorm_.data.reshape(-1,3)
     temp_ = np.sqrt(temp_)
     print("min/max Vnorm ", np.min(temp_), np.max(temp_))
-    temp_ = np.fmax(temp_, 1e-10) # TODO. pick most singular example? 646 and 52? 1-10 was ok on 52 clust 1e-1, 1e-3 bad? check
+    temp_ = np.fmin(np.fmax(temp_, 1e-10), 1e-10) # TODO. pick most singular example? 646 and 52? 1-10 was ok on 52 clust 1e-1, 1e-3 bad? check
     #temp = np.max(np.sqrt(temp), axis=1) # max or mean? sqrt
     # Diag pseudo HessL (max/min/med/mean) [ 13.04  13.93  11.30]   [ 0.59  3.49  0.38]   [ 7.13  7.08  3.95]   635351.3855933357
     # Diag pseudo HessL (max/min/med/mean) [ 3.15  1.89  1.89]   [ 0.00  0.00  0.00]   [ 0.02  0.01  0.01]   3575.420359064994
@@ -2424,23 +2409,9 @@ def UpdatePreconditioners(cameras_, points_3d_, points_2d_, camera_indices_, poi
     JtJ = J_pose.transpose() * J_pose
     temp_  = np.squeeze(np.asarray(np.abs(JtJ).sum(axis=0) ))
     print("UpdatePreconditioners min/max Unorm ", np.min(temp_), np.max(temp_))
-    temp_  = temp_.reshape(-1,9)
-    # temp_ /= np.mean(temp_, axis = 0)[np.newaxis,:] # mean per component?
-    #temp_ /= np.mean(temp_, axis = 1)[:,np.newaxis] # mean per camera
-    # #temp_ = np.sqrt(temp_/np.mean(temp_.flatten())) # better with .. !?
-    # temp_ = temp_/np.mean(temp_.flatten())
-    temp_ = np.sqrt(temp_) # ?
-    # temp_[:,0:5] *= 0.1
-
-    #temp_ /= np.sqrt(np.mean(temp_.flatten())) # does not do much maybe fix some bad numerics for some examples
-    #temp_[:,0:5] *= 0.4 #
-    temp_ = np.fmax(temp_, 1e-14) # TODO. pick most singular example? 646? 173 maybe / any dubrovnik
+    temp_ = np.fmin(np.fmax(1e-2 * temp_, 1e-14), 1e-16) # TODO. pick most singular example? 646? 173 maybe / any dubrovnik
     print("UpdatePreconditioners min/max Unorm ", np.min(temp_), np.max(temp_))
     print("UpdatePreconditioners fx0_ ", np.sum(fx0_**2))
-    # TODO: eval thresh here. lower higher, use 173 maybe w. all lms. Also: redo every 10 iterations?
-    # temp_ = np.ones(temp_.shape) # 173: worse
-
-    # Unorm_ = diag_sparse(temp_old * temp_.flatten())
     Unorm_ = diag_sparse(temp_.flatten())
 
     #print(Unorm.shape, " ", Unorm.data.shape)
