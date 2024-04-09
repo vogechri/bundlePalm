@@ -688,6 +688,9 @@ def ComputeDerivativeMatricesNew(x0_t_cam, x0_t_land, camera_indices_, point_ind
     torch_cams.retain_grad()
     torch_lands.retain_grad()
 
+    # print("camScale ", camScale)
+    # print("torch_cams ", torch_cams)
+
     resX = funx0_st1(torch_cams, torch_lands, torch_points_2d[:,:]).flatten()
     lossX = torch.sum(resX)
     lossX.backward()
@@ -2355,11 +2358,11 @@ def GetPreconditioners(cameras_, points_3d_, points_2d_, camera_indices_, point_
         temp_  = temp_.reshape(-1,9)
         temp_[:,0:5] *= 0.4
     else:
-        temp_ = 1e-2 * np.squeeze(np.asarray((np.abs(JtJ)).sum(axis=0) ))
+        temp_ = np.squeeze(np.asarray((np.abs(JtJ)).sum(axis=0) ))
         print("min/max Unorm ", np.min(temp_), np.max(temp_))
         temp_  = temp_.reshape(-1,9)
         #print(" np.mean(temp_, axis = 0)[np.newaxis,:] " , np.mean(temp_, axis = 0)[np.newaxis,:])
-    temp_ = np.fmin(np.fmax(temp_, 1e-14), 1e16) # TODO. pick most singular example? 646? 173 maybe / any dubrovnik
+    temp_ = 1e-2 * np.fmin(np.fmax(temp_, 1e-12), 1e18) # TODO. pick most singular example? 646? 173 maybe / any dubrovnik
 
     # TODO: eval thresh here. lower higher, use 173 maybe w. all lms. Also: redo every 10 iterations?
     # temp_ = np.ones(temp_.shape) # e.g. 173: worse. Likely all w landmarks far away?
@@ -2375,11 +2378,11 @@ def GetPreconditioners(cameras_, points_3d_, points_2d_, camera_indices_, point_
 
     # could also compute locally / all the time! 542: appears to 'go crazy' after 20 its.
     JltJl = J_land.transpose() * J_land
-    Vnorm_ = diag_sparse(np.squeeze(np.asarray(1 * ( (np.abs(JltJl)/10).sum(axis=0) ))))
+    Vnorm_ = diag_sparse(np.squeeze(np.asarray((np.abs(JltJl)).sum(axis=0) )))
     temp_  = Vnorm_.data.reshape(-1,3)
     temp_ = np.sqrt(temp_)
     print("min/max Vnorm ", np.min(temp_), np.max(temp_))
-    temp_ = np.fmin(np.fmax(temp_, 1e-10), 1e-10) # TODO. pick most singular example? 646 and 52? 1-10 was ok on 52 clust 1e-1, 1e-3 bad? check
+    temp_ = 1e-1 * np.fmin(np.fmax(temp_, 1e-10), 1e10) # TODO. pick most singular example? 646 and 52? 1-10 was ok on 52 clust 1e-1, 1e-3 bad? check
     #temp = np.max(np.sqrt(temp), axis=1) # max or mean? sqrt
     # Diag pseudo HessL (max/min/med/mean) [ 13.04  13.93  11.30]   [ 0.59  3.49  0.38]   [ 7.13  7.08  3.95]   635351.3855933357
     # Diag pseudo HessL (max/min/med/mean) [ 3.15  1.89  1.89]   [ 0.00  0.00  0.00]   [ 0.02  0.01  0.01]   3575.420359064994
@@ -2391,7 +2394,7 @@ def GetPreconditioners(cameras_, points_3d_, points_2d_, camera_indices_, point_
     # Diag pseudo HessL (max/min/med/mean) [ 1383.44  1380.07  436.03]   [ 0.59  3.49  0.38]   [ 9.55  9.84  3.95]   1345250.7481203536
     #temp_ = np.repeat(temp_[:,np.newaxis], 3, axis=1)
     Vnorm_ = diag_sparse(temp_.flatten())
-    Vnorm_ = diag_sparse(np.ones(points_3d.flatten().shape[0])) # 52: this is much better -- could be random
+    #Vnorm_ = diag_sparse(np.ones(points_3d.flatten().shape[0])) # 52: this is much better -- could be random
 
     return Unorm_, Vnorm_, fx0_
 
@@ -2494,6 +2497,9 @@ cameras = (Unorm * cameras.flatten()).reshape(-1,9)
 points_3d = (Vnorm * points_3d.flatten()).reshape(-1,3)
 #print("cameras output ", cameras)
 #print(Unorm)
+
+# print("cameras ", cameras)
+# print("Unorm ", Unorm)
 
 # can i do this?
 if False:
