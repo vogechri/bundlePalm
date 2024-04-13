@@ -99,6 +99,14 @@ def remove_large_points(points_3d, camera_indices, points_2d, point_indices):
         print(points_3d.shape)
     return points_3d, camera_indices, points_2d, point_indices
 
+def invert_focal_distance(camera_params_, camera_indices_, points_2d_):
+    flipIndices = camera_params_[:,6] < 0
+    flipCamIds = np.arange(camera_params_.shape[0])[flipIndices]
+    camera_params_[flipCamIds,6] *= -1
+    flip_point_ids = np.isin(camera_indices_, flipCamIds)
+    points_2d_[flip_point_ids] *= -1
+    return camera_params_, points_2d_
+
 def read_bal_data(file_name):
     with bz2.open(file_name, "rt") as file:
         n_cameras_, n_points_, n_observations = map(int, file.readline().split())
@@ -126,6 +134,10 @@ def read_bal_data(file_name):
     # currently must do for drs. turn off to fix issues? better debug
     (points_3d_, camera_indices_, points_2d_, point_indices_) = \
         remove_large_points(points_3d_, camera_indices_, points_2d_, point_indices_)
+
+    # invert points_2d_ and focal distance if needed
+    (camera_params, points_2d_) = \
+        invert_focal_distance(camera_params, camera_indices_, points_2d_)
 
     return camera_params, points_3d_, camera_indices_, point_indices_, points_2d_
 
@@ -548,7 +560,7 @@ def torchSingleResiduumX(camera_params, point_params, p2d) :
     k2 = camera_params[:, 8] * c8_mult
     r2 = points_projX*points_projX + points_projY*points_projY
     distortion = 1. + r2 * (k1 + k2 * r2)
-    points_reprojX = points_projX * distortion * f
+    points_reprojX = points_projX * distortion * f # if f is negative, points_reprojX is as well. -> negate p2d and f.
     resX = (points_reprojX-p2d[:,0])
     return resX
 
@@ -722,13 +734,13 @@ def ComputeDerivativeMatricesNew(x0_t_cam, x0_t_land, camera_indices_, point_ind
         start = time.time()
     J_land = buildMatrixNew(land_grad_x, land_grad_y, point_indices_, sz=3)
 
-    fx0 = buildResiduumNew(resX.detach(), resY.detach())
+    fx0_ = buildResiduumNew(resX.detach(), resY.detach())
 
     if verbose:
         print(" build Matrix & residuum took ", end-start, "s")
         end = time.time()
 
-    return (J_pose, J_land, fx0)
+    return (J_pose, J_land, fx0_)
 
 def buildMatrixNew(dx, dy, v_indices, sz=9) :
     data = []
@@ -2347,22 +2359,37 @@ def perform_full_iteration(camera_indices_in_cluster_, point_indices_in_cluster_
     return primalCost_u, dre_, L_in_cluster_, Ul_in_cluster_, poses_in_cluster_, poses_v_, landmarks_, \
         nabla_p_in_cluster_, blockEig_in_cluster__, poses_s_in_cluster_pre_, U_cluster_zeros_, steplength_
 
+def getScaling(min_, max_): # aim at max * min = 1. So max * x = 1/(min * x). x^2 = 1/(min * max)
+    # max * np.sqrt(1. / (min * max)) = np.sqrt(max^2 / (min * max)) = np.sqrt(max / min)
+    # 1/ (min * np.sqrt(1. / (min * max)) = np.sqrt(min * max / min^2) = np.sqrt(max / min).
+    return np.sqrt(1. / (min_ * max_) )
+
 def GetPreconditioners(cameras_, points_3d_, points_2d_, camera_indices_, point_indices_):
     J_pose, J_land, fx0_ = ComputeDerivativeMatrixInit(cameras_, points_3d_, points_2d_, camera_indices_, point_indices_)
 
     JtJ = J_pose.transpose() * J_pose
-    W = J_pose.transpose() * J_land
+    #W = J_pose.transpose() * J_land
     orig = False
     if orig:
         temp_ = np.squeeze(np.asarray(0.0001 * ( (np.abs(JtJ)/1000).sum(axis=0) )))
         temp_  = temp_.reshape(-1,9)
         temp_[:,0:5] *= 0.4
     else:
-        temp_ = np.squeeze(np.asarray((np.abs(JtJ)).sum(axis=0) ))
-        print("min/max Unorm ", np.min(temp_), np.max(temp_))
+        #temp_  = np.squeeze(np.asarray((np.abs(1e-2 * JtJ)).sum(axis=0) ))
+        temp_  = np.squeeze(np.asarray((np.abs(JtJ)).sum(axis=0) ))
+        print("min/max Unorm before ", np.min(temp_), np.max(temp_))
+        t = getScaling(np.min(temp_), np.max(temp_))
+        temp_  = np.squeeze(np.asarray((np.abs(t * JtJ)).sum(axis=0) ))
+        # temp_W = np.squeeze(np.asarray((np.abs(1e-6 * W)).sum(axis=1) ))
+        # temp_  = temp_ + temp_W
+        print("min/max Unorm after ", np.min(temp_), np.max(temp_), " t ", t, " min*max= ", np.min(temp_) * np.max(temp_))
         temp_  = temp_.reshape(-1,9)
         #print(" np.mean(temp_, axis = 0)[np.newaxis,:] " , np.mean(temp_, axis = 0)[np.newaxis,:])
-    temp_ = 1e-2 * np.fmin(np.fmax(temp_, 1e-12), 1e18) # TODO. pick most singular example? 646? 173 maybe / any dubrovnik
+    print("GetPreconditioners min/max Unorm ", np.min(temp_), np.max(temp_))
+    # e-14 to e16 at -2. -6 ->
+    temp_ = np.fmin(np.fmax(temp_, 1e-14), 1e14)
+    #temp_ = np.fmin(np.fmax(temp_, 1e-14), 1e16) # TODO. pick most singular example? 646? 173 maybe / any dubrovnik
+    print("GetPreconditioners min/max Unorm ", np.min(temp_), np.max(temp_))
 
     # TODO: eval thresh here. lower higher, use 173 maybe w. all lms. Also: redo every 10 iterations?
     # temp_ = np.ones(temp_.shape) # e.g. 173: worse. Likely all w landmarks far away?
@@ -2394,29 +2421,45 @@ def GetPreconditioners(cameras_, points_3d_, points_2d_, camera_indices_, point_
     # Diag pseudo HessL (max/min/med/mean) [ 1383.44  1380.07  436.03]   [ 0.59  3.49  0.38]   [ 9.55  9.84  3.95]   1345250.7481203536
     #temp_ = np.repeat(temp_[:,np.newaxis], 3, axis=1)
     Vnorm_ = diag_sparse(temp_.flatten())
-    #Vnorm_ = diag_sparse(np.ones(points_3d.flatten().shape[0])) # 52: this is much better -- could be random
+    Vnorm_ = diag_sparse(np.ones(points_3d.flatten().shape[0])) # 52: this is much better -- could be random
 
     return Unorm_, Vnorm_, fx0_
 
-def UpdatePreconditioners(cameras_, points_3d_, points_2d_, camera_indices_, point_indices_):
-    torch_cams = from_numpy(cameras_.reshape(-1,9))
-    # torch_cams.requires_grad_()
-    # torch_cams.retain_grad()
-    torch_lands = from_numpy(points_3d_.reshape(-1,3))
-    # torch_lands.requires_grad_()
-    # torch_lands.retain_grad()
-    torch_points_2d = from_numpy(points_2d_)
-    torch_points_2d.requires_grad_(False)
+def UpdatePreconditioners(cameras_, points_3d_, points_2d_, camera_indices_, point_indices_, Unorm_old):
 
-    J_pose, J_land, fx0_ = ComputeDerivativeMatricesNew (
-        torch_cams, torch_lands, camera_indices_, point_indices_,
-        torch_points_2d, range(torch_cams.shape[0]), range(torch_lands.shape[0]) )
+    Unorm_old_ = Unorm_old.copy()
+    Unorm_old_.data = 1. / Unorm_old.data
+    cameras_ = (Unorm_old_ * cameras_.flatten()).reshape(-1,9)
+
+    # torch_cams = from_numpy(cameras_.reshape(-1,9))
+    # # torch_cams.requires_grad_()
+    # # torch_cams.retain_grad()
+    # torch_lands = from_numpy(points_3d_.reshape(-1,3))
+    # # torch_lands.requires_grad_()
+    # # torch_lands.retain_grad()
+    # torch_points_2d = from_numpy(points_2d_)
+    # torch_points_2d.requires_grad_(False)
+
+    # J_pose, J_land, fx0_ = ComputeDerivativeMatricesNew (
+    #     torch_cams, torch_lands, camera_indices_, point_indices_,
+    #     torch_points_2d, range(torch_cams.shape[0]), range(torch_lands.shape[0]) )
+
+    J_pose, J_land, fx0_ = ComputeDerivativeMatrixInit(cameras_.flatten(), \
+        points_3d_, points_2d_, camera_indices_, point_indices_)
 
     #temp_old  = Unorm_.data.reshape(-1,9)
     JtJ = J_pose.transpose() * J_pose
     temp_  = np.squeeze(np.asarray(np.abs(JtJ).sum(axis=0) ))
-    print("UpdatePreconditioners min/max Unorm ", np.min(temp_), np.max(temp_))
-    temp_ = np.fmin(np.fmax(1e-2 * temp_, 1e-14), 1e-16) # TODO. pick most singular example? 646? 173 maybe / any dubrovnik
+    #temp_  = np.squeeze(np.asarray(np.abs(1e-2 * JtJ).sum(axis=0) ))# as update, not so smart
+    print("UpdatePreconditioners min/max Unorm before ", np.min(temp_), np.max(temp_), " min*max= ", np.min(temp_) * np.max(temp_))
+    t = getScaling(np.min(temp_), np.max(temp_))
+    temp_  = np.squeeze(np.asarray((np.abs(t * JtJ)).sum(axis=0) ))
+
+    # W = J_pose.transpose() * J_land
+    # temp_W = np.squeeze(np.asarray((np.abs(1e-6 * W)).sum(axis=1) ))
+    # temp_  = temp_ + temp_W
+    print("UpdatePreconditioners min/max Unorm after ", np.min(temp_), np.max(temp_), " t ", t, " min*max= ", np.min(temp_) * np.max(temp_))
+    temp_ = np.fmin(np.fmax(temp_, 1e-14), 1e14) # TODO. pick most singular example? 646? 173 maybe / any dubrovnik
     print("UpdatePreconditioners min/max Unorm ", np.min(temp_), np.max(temp_))
     print("UpdatePreconditioners fx0_ ", np.sum(fx0_**2))
     Unorm_ = diag_sparse(temp_.flatten())
@@ -2424,7 +2467,7 @@ def UpdatePreconditioners(cameras_, points_3d_, points_2d_, camera_indices_, poi
     #print(Unorm.shape, " ", Unorm.data.shape)
     #Unorm = diag_sparse(np.squeeze(np.asarray(0.01 * np.sqrt( (np.abs(JtJ)/1000).sum(axis=0) ))))
     #Unorm = diag_sparse(np.ones(cameras.flatten().shape[0])) * 100 # ok.
-    #print(Unorm)
+    #print(Unorm_)
     # print("Unorm.data.reshape(-1,9)", Unorm.data.reshape(-1,9))
     # print("np.sum(fx0**2) ", np.sum(fx0**2))
     # print("cameras ", cameras )
@@ -3280,24 +3323,29 @@ else:
                             for ci in range(kClusters):
                                 tempBlockEigen[ci][m] = maxM
 
-                    if False and globalIt % 10 == 9: # debatable, bigger analysis needed. Just random?
-                        Unorm_update, fx0 = UpdatePreconditioners(poses_v, landmarks, points_2d, camera_indices, point_indices)
-                        poses_v = (Unorm_update * poses_v.flatten()).reshape(-1,9)
-                        poses_s_in_cluster = [(Unorm_update * poses_s.flatten()).reshape(-1,9) for poses_s in poses_s_in_cluster]
-                        poses_s_in_cluster_pre = [(Unorm_update * poses_s.flatten()).reshape(-1,9) for poses_s in poses_s_in_cluster_pre]
-                        poses_in_cluster = [(Unorm_update * poses_s.flatten()).reshape(-1,9) for poses_s in poses_in_cluster]
-                        Unorm = Unorm_update * Unorm
+                    if True and globalIt % 10 == 9: # debatable, bigger analysis needed. Just random?
+                    #if True and globalIt % 3 == 2: # debatable, bigger analysis needed. Just random?
+                        Unorm_update, fx0 = UpdatePreconditioners(poses_v, landmarks, points_2d, camera_indices, point_indices, Unorm)
+
+                        # 1. update poses, etc.
+                        Unorm.data = 1. / Unorm.data
+                        poses_v = (Unorm_update * (Unorm * poses_v.flatten())).reshape(-1,9)
+                        poses_s_in_cluster = [(Unorm_update * (Unorm * poses_s.flatten())).reshape(-1,9) for poses_s in poses_s_in_cluster]
+                        poses_s_in_cluster_pre = [(Unorm_update * (Unorm * poses_s.flatten())).reshape(-1,9) for poses_s in poses_s_in_cluster_pre]
+                        poses_in_cluster = [(Unorm_update * (Unorm * poses_u.flatten())).reshape(-1,9) for poses_u in poses_in_cluster]
 
                         # avoid total chaos, adjust RNA buffer along.
-                        for pos in range(len(Gs)):
+                        if RNA_or_bfgs:
+                            for pos in range(len(Gs)):
+                                for ci in range(kClusters):
+                                    Gs[pos][ci * 9 * n_cameras: (ci+1) * 9 * n_cameras] = Unorm_update * (Unorm * Gs[pos][ci * 9 * n_cameras: (ci+1) * 9 * n_cameras])
+                                    Fes[pos][ci * 9 * n_cameras: (ci+1) * 9 * n_cameras] = Unorm_update * (Unorm * Fes[pos][ci * 9 * n_cameras: (ci+1) * 9 * n_cameras])
+                                    Fs[pos][ci * 9 * n_cameras: (ci+1) * 9 * n_cameras] = Unorm_update * (Unorm * Fs[pos][ci * 9 * n_cameras: (ci+1) * 9 * n_cameras])
+                        else:
                             for ci in range(kClusters):
-                                Gs[pos][ci * 9 * n_cameras: (ci+1) * 9 * n_cameras] = Unorm_update * Gs[pos][ci * 9 * n_cameras: (ci+1) * 9 * n_cameras]
-                                Fes[pos][ci * 9 * n_cameras: (ci+1) * 9 * n_cameras] = Unorm_update * Fes[pos][ci * 9 * n_cameras: (ci+1) * 9 * n_cameras]
-                                Fs[pos][ci * 9 * n_cameras: (ci+1) * 9 * n_cameras] = Unorm_update * Fs[pos][ci * 9 * n_cameras: (ci+1) * 9 * n_cameras]
-                        #poses_s_in_cluster_pre = [poses_s.copy() for poses_s in poses_in_cluster]
-                        #poses_s_in_cluster = [poses_s.copy() for poses_s in poses_in_cluster]
-                        #poses_s_in_cluster = [poses_v.copy() for poses_s in poses_s_in_cluster]
-                        #poses_s_in_cluster_pre = [poses_v.copy() for poses_s in poses_s_in_cluster_pre]
+                                prev_dk[ci * 9 * n_cameras: (ci+1) * 9 * n_cameras]  = Unorm_update * (Unorm *  prev_dk[ci * 9 * n_cameras: (ci+1) * 9 * n_cameras])
+
+                        Unorm = Unorm_update
 
                     #print("poses_v ", poses_v)
                     if o3d_defined:
