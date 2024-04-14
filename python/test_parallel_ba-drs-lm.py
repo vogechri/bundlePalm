@@ -786,8 +786,11 @@ def buildResiduumNew(resX, resY) :
     res = np.concatenate(data)
     return res
 
-def check_symmetric(a, tol=1e-8):
-    return np.all(np.abs(a-a.T) < tol)
+# def check_symmetric(a, tol=1e-8):
+#     return np.all(np.abs(a-a.T) < tol)
+
+def check_symmetric(a, tol=1e-5):
+    return np.all(np.abs(a-a.T) < np.fmax(1, np.abs(a)) * tol)
 
 # bs : blocksize, eg 9 -> 9x9 or 3 -> 3x3 per block
 def blockInverse(M, bs):
@@ -822,7 +825,15 @@ def blockEigenvalue(M, bs):
             #    mat = np.fliplr(mat)
             #    evs = eigvalsh(mat)
 
-            Ei[bs*i:bs*i+bs] = evs[bs-1] # largest
+            # TODO: Needed?
+            Ei[bs*i:bs*i+bs] = evs[bs-1] # largest, unless negative present (numerics)
+
+            #evsMax = np.max(np.abs(evs)) # this delivers worse results!
+            #Ei[bs*i:bs*i+bs] = evsMax
+
+            # if evsMax != evs[bs-1]: # prints a lot with 'my' scaling.
+            #     print(evs)
+
         Ei = diag_sparse(Ei)
     else:
         Ei = M.copy()
@@ -911,26 +922,34 @@ def minmaxEv(M, bs):
 
     return maxE, minE
 
-def blockEigenvalueFull(M, bs, x0_t_cam_):
+def blockEigenvalueFull(M, bs): #, x0_t_cam_):
     Ei = M.copy()
     if bs > 1:
         bs2 = bs * bs
         for i in range(int(M.data.shape[0] / bs2)):
             #print(M.data.shape)
-            mat = M.data[bs2 * i : bs2 * i + bs2].reshape(bs, bs)
+            mat = Ei.data[bs2 * i : bs2 * i + bs2].reshape(bs, bs)
             flip = False
             if not check_symmetric(mat):
                 mat = np.fliplr(mat)
                 flip = True
             evs, evv = eigh(mat)
-            evs = np.fmax(evs, evs[bs-1] * 1e-6) # e.g. ?
-            print("evs ", evs[bs-1] / evs)
-            #print("evv ", evv[bs-1])
-            print("evv ", evv)
-            print(" cam " , x0_t_cam_[i,:])
+            #evs = np.fmax(evs, np.abs(evs[bs-1]) * 1e-0) # e.g. ?
+            
+            evs = np.fmax(evs, evs[bs-1] * 1e-6) # normal
+            #evsMax = np.max(np.abs(eigvalsh(mat)))
+            #evs = np.fmax(evs, evsMax)
+
+            # if we add, we want sum to be > 0
+            #evs = np.fmax(evs, evs[bs-1] * 1e-6) # e.g. ?
+            # print("evs ", evs[bs-1] / evs)
+            # #print("evv ", evv[bs-1])
+            # print("evv ", evv)
+            # print(" cam " , x0_t_cam_[i,:])
             mat = evv.dot(diag_sparse(evs) * evv.transpose())
             if flip:
                 mat = np.fliplr(mat)
+                #print(mat)
             Ei.data[bs2 * i : bs2 * i + bs2] = mat.flatten()
     else:
         Ei = M.copy()
@@ -977,7 +996,7 @@ def solvePowerIts(Ul, W, Vli, bS, m_):
     return xk
 
 # test Loop over L0=x, L=y here. Likely best to do grid search to get an idea. model as exp(-poly(L,it))
-def solveByGDNesterov(Ul, W, Vli, bS, m):
+def solveByGDNesterov(Ul, W, Vli, bS, m_):
     Lip = 0.9 # 100 -> 1. # TODO: play, find out how to progress over time.
     lambda0 = (1.+np.sqrt(5.)) / 2. # l=0 g=1, 0, .. L0=1 g = 0,..
 
@@ -991,7 +1010,7 @@ def solveByGDNesterov(Ul, W, Vli, bS, m):
         costk = xk.dot(Ul * xk - W * (Vli * (W.transpose() * xk)) - 2 * bS)
         print("-1 gd cost ", costk)
 
-    for it__ in range(m):
+    for it__ in range(m_):
         lambda1 = (1 + np.sqrt(1 + 4 * lambda0**2)) / 2
         gamma = (1-lambda0) / lambda1
         lambda0 = lambda1
@@ -1726,9 +1745,20 @@ def bundle_adjust(
                     JtJDiag = JtJ.copy() + blockEigMultJtJ * blockEigenvalueJtJ
                     #JtJDiag = blockEigMultJtJ * blockEigenvalueJtJ # this is likely almost same as above. Todo: check/find value.
                 else:
+                    # could also be to scale 'back' until its ok.
                     blockEigenvalueJtJ = 1e1 * blockEigenvalue(JtJ, 9)
-                    stepSize = LipJ_ * JtJ.copy() + blockEigMult * blockEigenvalueJtJ
-                    JtJDiag = JtJ.copy() + blockEigMultJtJ * blockEigenvalueJtJ
+                    # temp_  = 1e1 * np.squeeze(np.asarray((np.abs(JtJ)).sum(axis=0) )) # do not use max EV everywhere, but upper bound!
+                    # print(np.minimum(blockEigenvalueJtJ.diagonal(), temp_))
+                    # print(blockEigenvalueJtJ.diagonal())
+                    # print(temp_)
+                    # blockEigenvalueJtJ = diag_sparse(np.minimum(blockEigenvalueJtJ.diagonal(), temp_))
+                    # or ..
+                    # blockEigenvalueJtJ = 1e1 * blockEigenvalueFull(JtJ, 9) # does not work -- why ?
+                    # ok this is better WITH scaling for 245! -> 1.79M
+                    # blockEigenvalueJtJ = 1e1 * diag_sparse(np.fmax(JtJ.diagonal(), 1e-6))
+
+                    stepSize = LipJ_ * JtJ.copy() + blockEigMult * blockEigenvalueJtJ # 0.1 * 10 = 1 -> spectral is at max 2.
+                    JtJDiag = JtJ.copy() + blockEigMultJtJ * blockEigenvalueJtJ # maybe needed for this not above.
 
                 # maxE, minE = minmaxEv(JtJ, 9)
                 # print("JtJ spectral ", (maxE/minE))
@@ -2364,32 +2394,64 @@ def getScaling(min_, max_): # aim at max * min = 1. So max * x = 1/(min * x). x^
     # 1/ (min * np.sqrt(1. / (min * max)) = np.sqrt(min * max / min^2) = np.sqrt(max / min).
     return np.sqrt(1. / (min_ * max_) )
 
+def GetPcgScalingDiag(JtJ, W):
+    temp_  = np.squeeze(np.asarray((np.abs(JtJ)).sum(axis=0) ))
+    # temp_W = np.squeeze(np.asarray((np.abs(W)).sum(axis=1) ))
+    # temp_  = temp_ + temp_W
+    print("min/max Unorm before ", np.min(temp_), np.max(temp_))
+    t = getScaling(np.min(temp_), np.max(temp_))
+    temp_  = np.squeeze(np.asarray((np.abs(t * JtJ)).sum(axis=0) ))
+    # temp_W = np.squeeze(np.asarray((np.abs(t * W)).sum(axis=1) ))
+    # temp_  = temp_ + temp_W
+    print("min/max Unorm after ", np.min(temp_), np.max(temp_), " t ", t, " min*max= ", np.min(temp_) * np.max(temp_))
+    temp_  = temp_.reshape(-1,9)
+    print("Preconditioners min/max Unorm ", np.min(temp_), np.max(temp_))
+    # e-14 to e16 at -2. -6 ->
+    minTresh = 1e-12 # 12 -> 14 for 245 and scale!
+    maxTresh = 1e12
+    temp_ = np.fmin(np.fmax(temp_, minTresh), maxTresh) #np.sqrt(np.minimum(np.maximum(t, minTresh), maxTresh))
+    #temp_ = np.fmin(np.fmax(temp_, 1e-14), 1e16) # TODO. pick most singular example? 646? 173 maybe / any dubrovnik
+    print("Preconditioners min/max Unorm after thresholding ", np.min(temp_), np.max(temp_))
+
+    scaleToHaveValuesAroundOneForHess = False
+    if scaleToHaveValuesAroundOneForHess:
+        #temp_ /= np.sqrt(t) #np.sqrt(np.minimum(np.maximum(t, minTresh), maxTresh))
+        #print("Preconditioners min/max Unorm after scaling 1", np.min(temp_), np.max(temp_))
+        absDiagJtJ = np.abs(JtJ.diagonal())
+        #print("absDiagJtJ ", absDiagJtJ.shape, " ", absDiagJtJ)
+        #print("temp_ ", temp_.shape, " ", temp_)
+        guess = diag_sparse(1./temp_.flatten()) * absDiagJtJ * diag_sparse(1./temp_.flatten())
+        print("Preconditioners min/max guess ", np.min(guess), np.max(guess))
+        #scale = np.maximum(1, 1./ np.sqrt(np.max(guess)))
+        #scale = np.maximum(1, 1./ np.sqrt(np.mean(guess)))
+        scale = 1. / np.maximum(1, 1./ np.sqrt(np.median(guess)))
+        #scale = np.maximum(1, 1./ np.sqrt(np.min(guess)))
+        scale = np.sqrt(np.median(guess)) # 245 with scale worse/stalls. 646 wo. max(1, *).
+        print(scale) # there has to be a stepsize issue?
+        temp_ = temp_ * scale # * 1e5 works but not as well ()
+        print("Preconditioners min/max Unorm after scaling 2", np.min(temp_), np.max(temp_))
+        guess = diag_sparse(1./temp_.flatten()) * absDiagJtJ * diag_sparse(1./temp_.flatten())
+        print("Preconditioners min/max guess ", np.min(guess), np.max(guess))
+        #exit()
+        # i could also thresh AGAIN? does not make sense!? more updating? adjust vnorm? stronger descent lemma correction / more?
+        #temp_ = np.fmin(np.fmax(temp_, minTresh), maxTresh) #np.sqrt(np.minimum(np.maximum(t, minTresh), maxTresh))
+        #print("Preconditioners min/max Unorm after thresholding ", np.min(temp_), np.max(temp_))
+
+    return temp_
+
 def GetPreconditioners(cameras_, points_3d_, points_2d_, camera_indices_, point_indices_):
     J_pose, J_land, fx0_ = ComputeDerivativeMatrixInit(cameras_, points_3d_, points_2d_, camera_indices_, point_indices_)
 
     JtJ = J_pose.transpose() * J_pose
-    #W = J_pose.transpose() * J_land
+    W = J_pose.transpose() * J_land
     orig = False
     if orig:
         temp_ = np.squeeze(np.asarray(0.0001 * ( (np.abs(JtJ)/1000).sum(axis=0) )))
         temp_  = temp_.reshape(-1,9)
         temp_[:,0:5] *= 0.4
+        temp_ = np.fmin(np.fmax(temp_, 1e-12), 1e12)
     else:
-        #temp_  = np.squeeze(np.asarray((np.abs(1e-2 * JtJ)).sum(axis=0) ))
-        temp_  = np.squeeze(np.asarray((np.abs(JtJ)).sum(axis=0) ))
-        print("min/max Unorm before ", np.min(temp_), np.max(temp_))
-        t = getScaling(np.min(temp_), np.max(temp_))
-        temp_  = np.squeeze(np.asarray((np.abs(t * JtJ)).sum(axis=0) ))
-        # temp_W = np.squeeze(np.asarray((np.abs(1e-6 * W)).sum(axis=1) ))
-        # temp_  = temp_ + temp_W
-        print("min/max Unorm after ", np.min(temp_), np.max(temp_), " t ", t, " min*max= ", np.min(temp_) * np.max(temp_))
-        temp_  = temp_.reshape(-1,9)
-        #print(" np.mean(temp_, axis = 0)[np.newaxis,:] " , np.mean(temp_, axis = 0)[np.newaxis,:])
-    print("GetPreconditioners min/max Unorm ", np.min(temp_), np.max(temp_))
-    # e-14 to e16 at -2. -6 ->
-    temp_ = np.fmin(np.fmax(temp_, 1e-14), 1e14)
-    #temp_ = np.fmin(np.fmax(temp_, 1e-14), 1e16) # TODO. pick most singular example? 646? 173 maybe / any dubrovnik
-    print("GetPreconditioners min/max Unorm ", np.min(temp_), np.max(temp_))
+        temp_ = GetPcgScalingDiag(JtJ, W)
 
     # TODO: eval thresh here. lower higher, use 173 maybe w. all lms. Also: redo every 10 iterations?
     # temp_ = np.ones(temp_.shape) # e.g. 173: worse. Likely all w landmarks far away?
@@ -2425,11 +2487,15 @@ def GetPreconditioners(cameras_, points_3d_, points_2d_, camera_indices_, point_
 
     return Unorm_, Vnorm_, fx0_
 
-def UpdatePreconditioners(cameras_, points_3d_, points_2d_, camera_indices_, point_indices_, Unorm_old):
+def UpdatePreconditioners(cameras_, points_3d_, points_2d_, camera_indices_, point_indices_, Unorm_old, Vnorm_old):
 
     Unorm_old_ = Unorm_old.copy()
     Unorm_old_.data = 1. / Unorm_old.data
     cameras_ = (Unorm_old_ * cameras_.flatten()).reshape(-1,9)
+
+    Vnorm_old_ = Vnorm_old.copy()
+    Vnorm_old_.data = 1. / Vnorm_old.data
+    points_3d_ = (Vnorm_old_ * points_3d_.flatten()).reshape(-1,3)
 
     # torch_cams = from_numpy(cameras_.reshape(-1,9))
     # # torch_cams.requires_grad_()
@@ -2449,19 +2515,8 @@ def UpdatePreconditioners(cameras_, points_3d_, points_2d_, camera_indices_, poi
 
     #temp_old  = Unorm_.data.reshape(-1,9)
     JtJ = J_pose.transpose() * J_pose
-    temp_  = np.squeeze(np.asarray(np.abs(JtJ).sum(axis=0) ))
-    #temp_  = np.squeeze(np.asarray(np.abs(1e-2 * JtJ).sum(axis=0) ))# as update, not so smart
-    print("UpdatePreconditioners min/max Unorm before ", np.min(temp_), np.max(temp_), " min*max= ", np.min(temp_) * np.max(temp_))
-    t = getScaling(np.min(temp_), np.max(temp_))
-    temp_  = np.squeeze(np.asarray((np.abs(t * JtJ)).sum(axis=0) ))
-
-    # W = J_pose.transpose() * J_land
-    # temp_W = np.squeeze(np.asarray((np.abs(1e-6 * W)).sum(axis=1) ))
-    # temp_  = temp_ + temp_W
-    print("UpdatePreconditioners min/max Unorm after ", np.min(temp_), np.max(temp_), " t ", t, " min*max= ", np.min(temp_) * np.max(temp_))
-    temp_ = np.fmin(np.fmax(temp_, 1e-14), 1e14) # TODO. pick most singular example? 646? 173 maybe / any dubrovnik
-    print("UpdatePreconditioners min/max Unorm ", np.min(temp_), np.max(temp_))
-    print("UpdatePreconditioners fx0_ ", np.sum(fx0_**2))
+    W = J_pose.transpose() * J_land
+    temp_ = GetPcgScalingDiag(JtJ, W)
     Unorm_ = diag_sparse(temp_.flatten())
 
     #print(Unorm.shape, " ", Unorm.data.shape)
@@ -3323,9 +3378,10 @@ else:
                             for ci in range(kClusters):
                                 tempBlockEigen[ci][m] = maxM
 
+                    #if globalIt == 10: # debatable, bigger analysis needed. Just random?
                     if True and globalIt % 10 == 9: # debatable, bigger analysis needed. Just random?
                     #if True and globalIt % 3 == 2: # debatable, bigger analysis needed. Just random?
-                        Unorm_update, fx0 = UpdatePreconditioners(poses_v, landmarks, points_2d, camera_indices, point_indices, Unorm)
+                        Unorm_update, fx0 = UpdatePreconditioners(poses_v, landmarks, points_2d, camera_indices, point_indices, Unorm, Vnorm)
 
                         # 1. update poses, etc.
                         Unorm.data = 1. / Unorm.data
