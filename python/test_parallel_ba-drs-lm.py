@@ -107,6 +107,32 @@ def invert_focal_distance(camera_params_, camera_indices_, points_2d_):
     points_2d_[flip_point_ids] *= -1
     return camera_params_, points_2d_
 
+def scale_adjust_focal_distance(camera_params_, camera_indices_, points_2d_, maxF = 2000):
+    flipIndices = camera_params_[:,6] > maxF
+    flipCamIds = np.arange(camera_params_.shape[0])[flipIndices]
+    scale_flipCamIds = maxF / camera_params_[flipCamIds, 6]
+    scale_focal_distance = np.ones(len(flipIndices))
+    scale_focal_distance[flipCamIds] = scale_flipCamIds
+    camera_params_[flipCamIds, 6] *= scale_flipCamIds
+    points_2d_[:,0] *= scale_focal_distance[camera_indices_]
+    points_2d_[:,1] *= scale_focal_distance[camera_indices_]
+    #flip_point_ids = np.isin(camera_indices_, flipCamIds)
+    #points_2d_[flip_point_ids] *= -1
+    return camera_params_, points_2d_
+
+def scale_adjust_small_focal_distance(camera_params_, camera_indices_, points_2d_, minF = 1):
+    flipIndices = camera_params_[:,6] < minF
+    flipCamIds = np.arange(camera_params_.shape[0])[flipIndices]
+    scale_flipCamIds = minF / camera_params_[flipCamIds, 6]
+    scale_focal_distance = np.ones(len(flipIndices))
+    scale_focal_distance[flipCamIds] = scale_flipCamIds
+    camera_params_[flipCamIds, 6] *= scale_flipCamIds
+    points_2d_[:,0] *= scale_focal_distance[camera_indices_]
+    points_2d_[:,1] *= scale_focal_distance[camera_indices_]
+    #flip_point_ids = np.isin(camera_indices_, flipCamIds)
+    #points_2d_[flip_point_ids] *= -1
+    return camera_params_, points_2d_
+
 def read_bal_data(file_name):
     with bz2.open(file_name, "rt") as file:
         n_cameras_, n_points_, n_observations = map(int, file.readline().split())
@@ -138,6 +164,13 @@ def read_bal_data(file_name):
     # invert points_2d_ and focal distance if needed
     (camera_params, points_2d_) = \
         invert_focal_distance(camera_params, camera_indices_, points_2d_)
+    # avoid super large focal distance values for numerical sanity.
+    if False: # changes the cost apparently.
+        (camera_params, points_2d_) = \
+            scale_adjust_focal_distance(camera_params, camera_indices_, points_2d_)
+        # avoid super small focal distance (if those exist?) values for numerical sanity.
+        (camera_params, points_2d_) = \
+            scale_adjust_small_focal_distance(camera_params, camera_indices_, points_2d_)
 
     return camera_params, points_3d_, camera_indices_, point_indices_, points_2d_
 
@@ -2364,6 +2397,52 @@ def getScaling(min_, max_): # aim at max * min = 1. So max * x = 1/(min * x). x^
     # 1/ (min * np.sqrt(1. / (min * max)) = np.sqrt(min * max / min^2) = np.sqrt(max / min).
     return np.sqrt(1. / (min_ * max_) )
 
+def GetPcgScalingDiag(JtJ):
+    temp_  = np.squeeze(np.asarray((np.abs(JtJ)).sum(axis=0) ))
+    # temp_W = np.squeeze(np.asarray((np.abs(W)).sum(axis=1) ))
+    # temp_  = temp_ + temp_W
+    print("min/max Unorm before ", np.min(temp_), np.max(temp_))
+    t = getScaling(np.min(temp_), np.max(temp_))
+    temp_  = np.squeeze(np.asarray((np.abs(t * JtJ)).sum(axis=0) ))
+    # temp_W = np.squeeze(np.asarray((np.abs(t * W)).sum(axis=1) ))
+    # temp_  = temp_ + temp_W
+    print("min/max Unorm after ", np.min(temp_), np.max(temp_), " t ", t, " min*max= ", np.min(temp_) * np.max(temp_))
+    temp_  = temp_.reshape(-1,9)
+    print("Preconditioners min/max Unorm ", np.min(temp_), np.max(temp_))
+    # e-14 to e16 at -2. -6 ->
+    minTresh = 1e-18 # 12 -> 14 for 245 and scale!
+    maxTresh = 1e18
+    temp_ = np.fmin(np.fmax(temp_, minTresh), maxTresh) #np.sqrt(np.minimum(np.maximum(t, minTresh), maxTresh))
+    #temp_ = np.fmin(np.fmax(temp_, 1e-14), 1e16) # TODO. pick most singular example? 646? 173 maybe / any dubrovnik
+    print("Preconditioners min/max Unorm after thresholding ", np.min(temp_), np.max(temp_))
+
+    scaleToHaveValuesAroundOneForHess = False #True
+    if scaleToHaveValuesAroundOneForHess:
+        #temp_ /= np.sqrt(t) #np.sqrt(np.minimum(np.maximum(t, minTresh), maxTresh))
+        #print("Preconditioners min/max Unorm after scaling 1", np.min(temp_), np.max(temp_))
+        absDiagJtJ = np.abs(JtJ.diagonal())
+        #print("absDiagJtJ ", absDiagJtJ.shape, " ", absDiagJtJ)
+        #print("temp_ ", temp_.shape, " ", temp_)
+        guess = diag_sparse(1./temp_.flatten()) * absDiagJtJ * diag_sparse(1./temp_.flatten())
+        print("Preconditioners min/max guess ", np.min(guess), np.max(guess))
+        #scale = 1. / np.maximum(1, 1./ np.sqrt(np.max(guess)))
+        #scale = 1. / np.maximum(1, 1./ np.sqrt(np.mean(guess)))
+        #scale = 1. / np.maximum(1, 1./ np.sqrt(np.median(guess)))
+        #scale = 1. / np.maximum(1, 1./ np.sqrt(np.min(guess)))
+        #scale = np.sqrt(np.median(guess)) # 245 with scale worse/stalls. 646 wo. max(1, *).
+        scale = np.sqrt(np.max(guess)) # 245 with scale worse/stalls. 646 wo. max(1, *).
+        print(scale) # there has to be a stepsize issue?
+        temp_ = temp_ * scale # * 1e5 works but not as well ()
+        print("Preconditioners min/max Unorm after scaling 2: ", np.min(temp_), np.max(temp_))
+        guess = diag_sparse(1./temp_.flatten()) * absDiagJtJ * diag_sparse(1./temp_.flatten())
+        print("Preconditioners min/max guess ", np.min(guess), np.max(guess))
+        #exit()
+        # i could also thresh AGAIN? does not make sense!? more updating? adjust vnorm? stronger descent lemma correction / more?
+        #temp_ = np.fmin(np.fmax(temp_, minTresh), maxTresh) #np.sqrt(np.minimum(np.maximum(t, minTresh), maxTresh))
+        #print("Preconditioners min/max Unorm after thresholding ", np.min(temp_), np.max(temp_))
+
+    return temp_
+
 def GetPreconditioners(cameras_, points_3d_, points_2d_, camera_indices_, point_indices_):
     J_pose, J_land, fx0_ = ComputeDerivativeMatrixInit(cameras_, points_3d_, points_2d_, camera_indices_, point_indices_)
 
@@ -2374,22 +2453,12 @@ def GetPreconditioners(cameras_, points_3d_, points_2d_, camera_indices_, point_
         temp_ = np.squeeze(np.asarray(0.0001 * ( (np.abs(JtJ)/1000).sum(axis=0) )))
         temp_  = temp_.reshape(-1,9)
         temp_[:,0:5] *= 0.4
+        temp_ = np.fmin(np.fmax(temp_, 1e-14), 1e14) # e-14 to e16 at 1e-2.
+        print("GetPreconditioners min/max Unorm ", np.min(temp_), np.max(temp_))
+        #temp_ = np.fmin(np.fmax(temp_, 1e-14), 1e16) # TODO. pick most singular example? 646? 173 maybe / any dubrovnik
+        print("GetPreconditioners min/max Unorm ", np.min(temp_), np.max(temp_))
     else:
-        #temp_  = np.squeeze(np.asarray((np.abs(1e-2 * JtJ)).sum(axis=0) ))
-        temp_  = np.squeeze(np.asarray((np.abs(JtJ)).sum(axis=0) ))
-        print("min/max Unorm before ", np.min(temp_), np.max(temp_))
-        t = getScaling(np.min(temp_), np.max(temp_))
-        temp_  = np.squeeze(np.asarray((np.abs(t * JtJ)).sum(axis=0) ))
-        # temp_W = np.squeeze(np.asarray((np.abs(1e-6 * W)).sum(axis=1) ))
-        # temp_  = temp_ + temp_W
-        print("min/max Unorm after ", np.min(temp_), np.max(temp_), " t ", t, " min*max= ", np.min(temp_) * np.max(temp_))
-        temp_  = temp_.reshape(-1,9)
-        #print(" np.mean(temp_, axis = 0)[np.newaxis,:] " , np.mean(temp_, axis = 0)[np.newaxis,:])
-    print("GetPreconditioners min/max Unorm ", np.min(temp_), np.max(temp_))
-    # e-14 to e16 at -2. -6 ->
-    temp_ = np.fmin(np.fmax(temp_, 1e-14), 1e14)
-    #temp_ = np.fmin(np.fmax(temp_, 1e-14), 1e16) # TODO. pick most singular example? 646? 173 maybe / any dubrovnik
-    print("GetPreconditioners min/max Unorm ", np.min(temp_), np.max(temp_))
+        temp_ = GetPcgScalingDiag(JtJ)
 
     # TODO: eval thresh here. lower higher, use 173 maybe w. all lms. Also: redo every 10 iterations?
     # temp_ = np.ones(temp_.shape) # e.g. 173: worse. Likely all w landmarks far away?
@@ -2411,25 +2480,20 @@ def GetPreconditioners(cameras_, points_3d_, points_2d_, camera_indices_, point_
     print("min/max Vnorm ", np.min(temp_), np.max(temp_))
     temp_ = 1e-1 * np.fmin(np.fmax(temp_, 1e-10), 1e10) # TODO. pick most singular example? 646 and 52? 1-10 was ok on 52 clust 1e-1, 1e-3 bad? check
     #temp = np.max(np.sqrt(temp), axis=1) # max or mean? sqrt
-    # Diag pseudo HessL (max/min/med/mean) [ 13.04  13.93  11.30]   [ 0.59  3.49  0.38]   [ 7.13  7.08  3.95]   635351.3855933357
-    # Diag pseudo HessL (max/min/med/mean) [ 3.15  1.89  1.89]   [ 0.00  0.00  0.00]   [ 0.02  0.01  0.01]   3575.420359064994
-    # max
-    # Diag pseudo HessL (max/min/med/mean) [ 13.04  13.28  11.30]   [ 0.03  2.59  0.01]   [ 7.05  6.89  3.21]   580241.0680950251
-    # mean
-    # [ 20.68  20.74  19.20]   [ 0.05  3.03  0.03]   [ 8.18  7.93  3.45]   715861.9186395196
-    # min
-    # Diag pseudo HessL (max/min/med/mean) [ 1383.44  1380.07  436.03]   [ 0.59  3.49  0.38]   [ 9.55  9.84  3.95]   1345250.7481203536
     #temp_ = np.repeat(temp_[:,np.newaxis], 3, axis=1)
     Vnorm_ = diag_sparse(temp_.flatten())
     Vnorm_ = diag_sparse(np.ones(points_3d.flatten().shape[0])) # 52: this is much better -- could be random
 
     return Unorm_, Vnorm_, fx0_
 
-def UpdatePreconditioners(cameras_, points_3d_, points_2d_, camera_indices_, point_indices_, Unorm_old):
-
+def UpdatePreconditioners(cameras_, points_3d_, points_2d_, camera_indices_, point_indices_, Unorm_old, Vnorm_old):
     Unorm_old_ = Unorm_old.copy()
     Unorm_old_.data = 1. / Unorm_old.data
     cameras_ = (Unorm_old_ * cameras_.flatten()).reshape(-1,9)
+
+    Vnorm_old_ = Vnorm_old.copy()
+    Vnorm_old_.data = 1. / Vnorm_old.data
+    points_3d_ = (Vnorm_old_ * points_3d_.flatten()).reshape(-1,3)
 
     # torch_cams = from_numpy(cameras_.reshape(-1,9))
     # # torch_cams.requires_grad_()
@@ -2449,30 +2513,13 @@ def UpdatePreconditioners(cameras_, points_3d_, points_2d_, camera_indices_, poi
 
     #temp_old  = Unorm_.data.reshape(-1,9)
     JtJ = J_pose.transpose() * J_pose
-    temp_  = np.squeeze(np.asarray(np.abs(JtJ).sum(axis=0) ))
-    #temp_  = np.squeeze(np.asarray(np.abs(1e-2 * JtJ).sum(axis=0) ))# as update, not so smart
-    print("UpdatePreconditioners min/max Unorm before ", np.min(temp_), np.max(temp_), " min*max= ", np.min(temp_) * np.max(temp_))
-    t = getScaling(np.min(temp_), np.max(temp_))
-    temp_  = np.squeeze(np.asarray((np.abs(t * JtJ)).sum(axis=0) ))
-
     # W = J_pose.transpose() * J_land
     # temp_W = np.squeeze(np.asarray((np.abs(1e-6 * W)).sum(axis=1) ))
     # temp_  = temp_ + temp_W
-    print("UpdatePreconditioners min/max Unorm after ", np.min(temp_), np.max(temp_), " t ", t, " min*max= ", np.min(temp_) * np.max(temp_))
-    temp_ = np.fmin(np.fmax(temp_, 1e-14), 1e14) # TODO. pick most singular example? 646? 173 maybe / any dubrovnik
-    print("UpdatePreconditioners min/max Unorm ", np.min(temp_), np.max(temp_))
-    print("UpdatePreconditioners fx0_ ", np.sum(fx0_**2))
+    temp_ = GetPcgScalingDiag(JtJ)
     Unorm_ = diag_sparse(temp_.flatten())
-
-    #print(Unorm.shape, " ", Unorm.data.shape)
-    #Unorm = diag_sparse(np.squeeze(np.asarray(0.01 * np.sqrt( (np.abs(JtJ)/1000).sum(axis=0) ))))
-    #Unorm = diag_sparse(np.ones(cameras.flatten().shape[0])) * 100 # ok.
-    #print(Unorm_)
-    # print("Unorm.data.reshape(-1,9)", Unorm.data.reshape(-1,9))
-    # print("np.sum(fx0**2) ", np.sum(fx0**2))
+    # print("np.sum(fx0_**2) ", np.sum(fx0_**2))
     # print("cameras ", cameras )
-
-    #print("cameras ", cameras ) # looks ok ..
     return Unorm_, fx0_
 
 ##############################################################################
@@ -2618,8 +2665,7 @@ LipJ = 1 * np.ones(kClusters)
 globalBlockEigUpperLimit = 1e-1 # 1e-1, 1e1?
 blockEig_in_cluster = 1e-5 * np.ones(kClusters) # 1e-4 or 1e-5
 memory_be = 8 # here can shrink, below this only grow.
-for ci in range(kClusters):
-    print("input blockEig_in_cluster[ci] ", blockEig_in_cluster[ci])
+print("input blockEig_in_cluster[ci] ", blockEig_in_cluster[0])
 
 tempEigen = [[] for i in range(kClusters)]
 tempBlockEigen = [[] for i in range(kClusters)] # last k multipliers for DL. take max
@@ -3325,7 +3371,7 @@ else:
 
                     if True and globalIt % 10 == 9: # debatable, bigger analysis needed. Just random?
                     #if True and globalIt % 3 == 2: # debatable, bigger analysis needed. Just random?
-                        Unorm_update, fx0 = UpdatePreconditioners(poses_v, landmarks, points_2d, camera_indices, point_indices, Unorm)
+                        Unorm_update, fx0 = UpdatePreconditioners(poses_v, landmarks, points_2d, camera_indices, point_indices, Unorm, Vnorm)
 
                         # 1. update poses, etc.
                         Unorm.data = 1. / Unorm.data
