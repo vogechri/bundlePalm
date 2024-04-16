@@ -175,7 +175,7 @@ def read_bal_data(file_name):
     return camera_params, points_3d_, camera_indices_, point_indices_, points_2d_
 
 def round_int(x):
-    if x in [float('inf'), float('-inf')]:
+    if x in [float('inf'), float('-inf'), float('nan')]:
         return x
     else:
         return int(round(x))
@@ -819,8 +819,21 @@ def buildResiduumNew(resX, resY) :
     res = np.concatenate(data)
     return res
 
-def check_symmetric(a, tol=1e-8):
-    return np.all(np.abs(a-a.T) < tol)
+# def check_symmetric(a, tol=1e-8):
+#     return np.all(np.abs(a-a.T) < tol)
+
+# TODO: just find more symmetric: np.fliplr(a) vs a.
+def check_symmetric(a, tol=1e-5):
+    # if not np.all(np.abs(a-a.T) < np.fmax(1, np.abs(a)) * tol):
+    #     print(np.abs(a-a.T) < np.fmax(1, np.abs(a)) * tol)
+    return np.all(np.abs(a-a.T) < np.fmax(1, np.abs(a)) * tol)
+
+# def check_symmetric(a, tol=1e-5):
+#     b = np.fliplr(a.copy())
+#     a_sym = np.sum(np.abs(a-a.T) < np.abs(b-b.T))
+#     b_sym = np.sum(np.abs(a-a.T) > np.abs(b-b.T))
+#     #print("a \n", a, " b \n", b, " \n", a_sym, " ", b_sym)
+#     return a_sym >= b_sym
 
 # bs : blocksize, eg 9 -> 9x9 or 3 -> 3x3 per block
 def blockInverse(M, bs):
@@ -831,7 +844,8 @@ def blockInverse(M, bs):
             mat = Mi.data[bs2 * i : bs2 * i + bs2].reshape(bs, bs)
             if not check_symmetric(mat):
                 mat = np.fliplr(mat)
-                imat = np.fliplr(inv_dense(mat, hermitian=True)) # inv or pinv?
+                imat = inv_dense(mat, hermitian=True)
+                imat = np.fliplr(imat) # inv or pinv?
             else:
                 imat = inv_dense(mat, hermitian=True)
             Mi.data[bs2 * i : bs2 * i + bs2] = imat.flatten()
@@ -846,12 +860,15 @@ def blockEigenvalue(M, bs):
     if bs > 1:
         bs2 = bs * bs
         for i in range(int(M.data.shape[0] / bs2)):
-            mat = M.data[bs2 * i : bs2 * i + bs2].reshape(bs, bs).copy()
+            mat = M.data[bs2 * i : bs2 * i + bs2].copy().reshape(bs, bs)
             if not check_symmetric(mat):
                 mat = np.fliplr(mat)
             # print(i, " ", mat)
             evs = eigvalsh(mat)
-            # if evs[0] <0:
+            # if bs==9:
+            #     print(i, " ", evs)
+
+            # if evs[0] <0: # possible that numerics have this < 0
             #    mat = np.fliplr(mat)
             #    evs = eigvalsh(mat)
 
@@ -861,6 +878,42 @@ def blockEigenvalue(M, bs):
         Ei = M.copy()
 
     return Ei
+
+def blockAddDiag(M, D, t, bs):
+    MD = M.copy()
+    flip = False
+    bs2 = bs * bs
+    for i in range(int(M.data.shape[0] / bs2)):
+        mat = M.data[bs2 * i : bs2 * i + bs2].copy().reshape(bs, bs)
+        if not check_symmetric(mat):
+            mat = np.fliplr(mat)
+            flip = True
+        for j in range(bs):
+            #print(t, " ", D.data.shape)
+            #print(mat.shape, " ", D.data[0,j+i*bs])
+            mat[j,j] += t * D.data[0,j+i*bs]
+        if flip:
+            mat = np.fliplr(mat)
+        MD.data[bs2 * i : bs2 * i + bs2] = mat.flatten()
+    return MD
+
+def blockAdd(M, D, bs):
+    MD = M.copy()
+    flip = False
+    bs2 = bs * bs
+    for i in range(int(M.data.shape[0] / bs2)):
+        mat = M.data[bs2 * i : bs2 * i + bs2].copy().reshape(bs, bs)
+        if not check_symmetric(mat):
+            mat = np.fliplr(mat)
+            flip = True
+        matD = D.data[bs2 * i : bs2 * i + bs2].copy().reshape(bs, bs)
+        if not check_symmetric(matD):
+            matD = np.fliplr(matD)
+        mat += matD
+        if flip:
+            mat = np.fliplr(mat)
+        MD.data[bs2 * i : bs2 * i + bs2] = mat.flatten()
+    return MD
 
 # analysis
 def blockEigenvalueSet(M, bs):
@@ -926,41 +979,56 @@ def blockEigenvalueWhereNeeded(M, bs, thresh = 1e-6):
 def minmaxEv(M, bs):
     maxE = np.zeros(int(M.shape[0]/bs))
     minE = np.zeros(int(M.shape[0]/bs))
+    enter = False
     if bs > 1:
         bs2 = bs * bs
         for i in range(int(M.data.shape[0] / bs2)):
-            mat = M.data[bs2 * i : bs2 * i + bs2].reshape(bs, bs).copy()
+            mat = M.data[bs2 * i : bs2 * i + bs2].copy().reshape(bs, bs)
             if not check_symmetric(mat):
                 mat = np.fliplr(mat)
             evs = eigvalsh(mat)
             maxE[i] = evs[bs-1]
             minE[i] = evs[0]
-            # if evs[0] <0:
-            #    #print("evs[0] ", evs[0], " " ,mat)
-            #    mat = np.fliplr(mat)
-            #    evs = eigvalsh(mat)
-            #    maxE[i] = evs[bs-1]
-            #    minE[i] = evs[0]
+            if evs[0] <0 and not enter:
+                enter = True
+                print("evs[0] ", evs[0], " \n" ,mat)
+                mat = np.fliplr(mat)
+                evs = eigvalsh(mat)
+                maxE[i] = evs[bs-1]
+                minE[i] = evs[0]
 
     return maxE, minE
 
-def blockEigenvalueFull(M, bs, x0_t_cam_):
+def isSymmetric(M, B, bs):
+    enter = False
+    if bs > 1:
+        bs2 = bs * bs
+        for i in range(int(M.data.shape[0] / bs2)):
+            mat = M.data[bs2 * i : bs2 * i + bs2].copy().reshape(bs, bs)
+            matB = B.data[bs2 * i : bs2 * i + bs2].copy().reshape(bs, bs)
+            if not check_symmetric(mat) and not check_symmetric(np.fliplr(mat)):
+                enter = True
+                print("mat non symmetric " ,mat, "\n", matB)
+
+    return not enter
+
+def blockEigenvalueFull(M, bs):#, x0_t_cam_):
     Ei = M.copy()
     if bs > 1:
         bs2 = bs * bs
         for i in range(int(M.data.shape[0] / bs2)):
             #print(M.data.shape)
-            mat = M.data[bs2 * i : bs2 * i + bs2].reshape(bs, bs)
+            mat = Ei.data[bs2 * i : bs2 * i + bs2].reshape(bs, bs)
             flip = False
             if not check_symmetric(mat):
                 mat = np.fliplr(mat)
                 flip = True
             evs, evv = eigh(mat)
-            evs = np.fmax(evs, evs[bs-1] * 1e-6) # e.g. ?
-            print("evs ", evs[bs-1] / evs)
+            evs = np.fmax(evs, evs[bs-1] * 1e-4) # e.g. ?
+            #print("evs ", evs[bs-1] / evs)
             #print("evv ", evv[bs-1])
-            print("evv ", evv)
-            print(" cam " , x0_t_cam_[i,:])
+            #print("evv ", evv)
+            #print(" cam " , x0_t_cam_[i,:])
             mat = evv.dot(diag_sparse(evs) * evv.transpose())
             if flip:
                 mat = np.fliplr(mat)
@@ -1727,6 +1795,14 @@ def bundle_adjust(
             bp = J_pose.transpose() * fx0
             bl = J_land.transpose() * fx0
             JtJ = J_pose.transpose() * J_pose
+            #JtJ = J_pose.transpose().dot(J_pose)
+            print(JtJ.data.shape)
+            JtJ = JtJ + diag_sparse(np.zeros(JtJ.diagonal().shape[0])) # force symmetry in data!
+            print(JtJ.data.shape)
+            #print("JtJ ", JtJ) # is this randomly dispalced?
+            # TODO: with this is works.
+            JtJ = blockEigenvalueFull(JtJ, 9) # TODO this i am trying to get runnning.
+            print(JtJ.data.shape)
 
             if verbose_Jac:
                 # TODO: cam hessian scaled awfully. degenerate.
@@ -1760,13 +1836,37 @@ def bundle_adjust(
                     #JtJDiag = blockEigMultJtJ * blockEigenvalueJtJ # this is likely almost same as above. Todo: check/find value.
                 else:
                     blockEigenvalueJtJ = 1e1 * blockEigenvalue(JtJ, 9)
-                    stepSize = LipJ_ * JtJ.copy() + blockEigMult * blockEigenvalueJtJ
-                    JtJDiag = JtJ.copy() + blockEigMultJtJ * blockEigenvalueJtJ
+                    print(JtJ.data.shape)
+                    #print("blockEigenvalueJtJ", blockEigenvalueJtJ)
+                    #print("min blockEigenvalueJtJ", np.min(blockEigenvalueJtJ.data))
+                    # blockEigenvalueJtJ = JtJ # test blockEigFull on JtJ
+                    #print(JtJ)
 
-                # maxE, minE = minmaxEv(JtJ, 9)
-                # print("JtJ spectral ", (maxE/minE))
-                # maxE, minE = minmaxEv(stepSize, 9)
-                # print("stepSize spectral ", (maxE/minE))
+                    stepSize = blockAddDiag(JtJ, blockEigenvalueJtJ, blockEigMult, 9)
+                    #stepSize = LipJ_ * JtJ.copy() + blockEigMult * blockEigenvalueJtJ
+                    print("JtJ.data.shape",  JtJ.data.shape) # ok
+                    print("stepSize.data.shape",  stepSize.data.shape) # ok
+                    #print(stepSize) # not symmetric any more?
+                    JtJDiag = blockAddDiag(JtJ, blockEigenvalueJtJ, blockEigMultJtJ, 9)
+                    #JtJDiag = JtJ.copy() + blockEigMultJtJ * blockEigenvalueJtJ
+                    print("JtJ.data.shape",  JtJ.data.shape) # ok
+                    print("JtJDiag.data.shape",  JtJDiag.data.shape) # ok
+
+                #print("Symmetric JTJ", isSymmetric(JtJ, 9)) # true
+                print("Symmetric stepSize", isSymmetric(stepSize, JtJ, 9))
+                print("stepSize.data.shape",  stepSize.data.shape) # not ok shape
+                print("JtJ.data.shape",  JtJ.data.shape) # ok
+                print(blockEigenvalueJtJ.data.shape)
+
+                maxE, minE = minmaxEv(JtJ, 9)
+                print("JtJ spectral ", (maxE/minE))
+                #print("JtJ minE ", (minE))
+                maxE, minE = minmaxEv(stepSize, 9)
+                print("stepSize spectral ", (maxE/minE))
+                #print("stepSize minE ", minE)
+                # temp__ = blockEigenvalueJtJ.data.copy()
+                # print(temp__.reshape(-1,9)[:,0])
+                # print(np.min(temp__.reshape(-1,9)[:,0]))
 
                 penaltyStartConst = prox_rhs.dot(stepSize * prox_rhs)
 
@@ -1774,6 +1874,8 @@ def bundle_adjust(
                     maxE, minE = minmaxEv(stepSize, 9)
                     StepSizeSpec = [round_int(np.max(maxE/minE)), np.min(maxE/minE), round_int(np.median(maxE/minE))]
                     print("minmax ev stepSz ", np.max(maxE), " ", np.max(minE), " ", np.min(maxE), " ",  np.min(minE), " spec ", StepSizeSpec, file=sys.stderr)
+                    #print(" all Spec stepSz ", maxE/minE) # this show diag vs diag sqrt -> diag is better as WITHIN block spec is 1k vs 100k for 'sqrt'.
+                    # 
                     #maxE, minE = minmaxEv(JtJDiag, 9)
                     #print("minmax ev JtJDiag ", np.max(maxE), " ", np.max(minE), " ", np.min(maxE), " ",  np.min(minE), " spec ", np.max(maxE/minE))
             else: # not newversion
@@ -1823,8 +1925,6 @@ def bundle_adjust(
 
         # start_ = time.time()
         Vl = JltJl + L * JltJlDiag
-        Ul = JtJ + L * JtJDiag
-        penaltyStart = L * penaltyStartConst
         # cost added is + L * (delta_v - s_l_ + x0_l_)^T  JltJlDiag * (delta_v - s_l_ + x0_l_)
         # + L * (delta_v)^T  JltJlDiag * (delta_v) + 2 L * (delta_v^T JltJlDiag * (x0_l_ - s_l_) + L * (s_l_ - x0_l_)^T  JltJlDiag * (s_l_ - x0_l_)
         # derivative
@@ -1832,8 +1932,13 @@ def bundle_adjust(
         # added cost is, 2 L * (delta_v^T JltJlDiag * (x0_l_ - s_l_) + L * (s_l_ - x0_l_)^T  JltJlDiag * (s_l_ - x0_l_)
 
         if newVersion:
-            Ul = JtJ + L * JtJDiag + stepSize
+            #Ul = JtJ + L * JtJDiag + stepSize # here loosing 0's?
+            Ul = blockAdd(JtJ, L * JtJDiag, 9)
+            Ul = blockAdd(Ul, stepSize, 9)
             penaltyStart = penaltyStartConst
+        else:
+            Ul = JtJ + L * JtJDiag
+            penaltyStart = L * penaltyStartConst
 
         Vli = blockInverse(Vl, 3)
         bp_s = bp + L * JtJDiag * prox_rhs # TODO: + or -. '+', see above
@@ -1841,6 +1946,12 @@ def bundle_adjust(
             bp_s = bp + stepSize * prox_rhs
         bS = (bp_s - W * Vli * bl).flatten()
 
+        # (2205, 2205)   (19843,) # WRONG AGAIN removes '0'? or something?
+        # (2205, 59241)   (2946753,)
+        # (59241, 59241)   (177723,)
+        print(Ul.shape, " ", Ul.data.shape)
+        print(W.shape, " ", W.data.shape)
+        print(Vli.shape, " ", Vli.data.shape)
         #delta_p = -solvePowerIts(Ul, W, Vli, bS, powerits)
         delta_p, powerits_run = solveByGDNesterov(Ul, W, Vli, bS, powerits)
         delta_p = -delta_p
@@ -1856,6 +1967,8 @@ def bundle_adjust(
 
         fx0_new = fx0 + (J_pose * delta_p + J_land * delta_l)
         costQuad = np.sum(fx0_new**2)
+        #print("delta_p ", delta_p) # super large
+        print(costQuad, " cost + penalty ", costQuad, " + ", penaltyL, " + ", penaltyP, " Pits ", powerits_run)
         print(it_, "it. cost 0     ", round(costStart)," cost + penalty ", round(costStart + penaltyStart), " === using L = ", L, file=sys.stderr)
         print(it_, "it. cost 0/new ", round(costQuad), " cost + penalty ", round(costQuad + penaltyL + penaltyP), " Pits ", powerits_run, file=sys.stderr)
 
@@ -2410,13 +2523,14 @@ def GetPcgScalingDiag(JtJ):
     temp_  = temp_.reshape(-1,9)
     print("Preconditioners min/max Unorm ", np.min(temp_), np.max(temp_))
     # e-14 to e16 at -2. -6 ->
-    minTresh = 1e-18 # 12 -> 14 for 245 and scale!
-    maxTresh = 1e18
+    minTresh = 1e-15 # 12 -> 14 for 245 and scale!
+    maxTresh = 1e15
+    #temp_ = np.sqrt(temp_) # test how much worse this is.
     temp_ = np.fmin(np.fmax(temp_, minTresh), maxTresh) #np.sqrt(np.minimum(np.maximum(t, minTresh), maxTresh))
     #temp_ = np.fmin(np.fmax(temp_, 1e-14), 1e16) # TODO. pick most singular example? 646? 173 maybe / any dubrovnik
     print("Preconditioners min/max Unorm after thresholding ", np.min(temp_), np.max(temp_))
 
-    scaleToHaveValuesAroundOneForHess = False #True
+    scaleToHaveValuesAroundOneForHess = True
     if scaleToHaveValuesAroundOneForHess:
         #temp_ /= np.sqrt(t) #np.sqrt(np.minimum(np.maximum(t, minTresh), maxTresh))
         #print("Preconditioners min/max Unorm after scaling 1", np.min(temp_), np.max(temp_))
@@ -2429,8 +2543,9 @@ def GetPcgScalingDiag(JtJ):
         #scale = 1. / np.maximum(1, 1./ np.sqrt(np.mean(guess)))
         #scale = 1. / np.maximum(1, 1./ np.sqrt(np.median(guess)))
         #scale = 1. / np.maximum(1, 1./ np.sqrt(np.min(guess)))
-        #scale = np.sqrt(np.median(guess)) # 245 with scale worse/stalls. 646 wo. max(1, *).
-        scale = np.sqrt(np.max(guess)) # 245 with scale worse/stalls. 646 wo. max(1, *).
+        scale = np.sqrt(np.median(guess)) # 245 with scale worse/stalls. 646 wo. max(1, *).
+        #scale = np.sqrt(np.min(guess)) # 245 with scale worse/stalls. 646 wo. max(1, *).
+        #scale = np.sqrt(np.max(guess)) # best with no sqrt ?!
         print(scale) # there has to be a stepsize issue?
         temp_ = temp_ * scale # * 1e5 works but not as well ()
         print("Preconditioners min/max Unorm after scaling 2: ", np.min(temp_), np.max(temp_))
