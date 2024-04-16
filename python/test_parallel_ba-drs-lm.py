@@ -1024,7 +1024,9 @@ def blockEigenvalueFull(M, bs):#, x0_t_cam_):
                 mat = np.fliplr(mat)
                 flip = True
             evs, evv = eigh(mat)
-            evs = np.fmax(evs, evs[bs-1] * 1e-5) # e.g. ?
+            # 245: 1e-5 30 / 0  ======== DRE BFGS ======  2496053
+            # 245: 1e-4 30 / 0  ======== DRE BFGS ======  1916230
+            evs = np.fmax(evs, evs[bs-1] * 1e-4) # tuned at 52: 1e-6: , 1e-4: , 1e-5: 476
             #print("evs ", evs[bs-1] / evs)
             #print("evv ", evv[bs-1])
             #print("evv ", evv)
@@ -1036,6 +1038,32 @@ def blockEigenvalueFull(M, bs):#, x0_t_cam_):
     else:
         Ei = M.copy()
     return Ei
+
+# p = 1.05 -> add 5 pct, etc.
+def blockEigenvalueFullAdd(M, bs, p=1.05):
+    Ei = M.copy()
+    if bs > 1:
+        bs2 = bs * bs
+        for i in range(int(M.data.shape[0] / bs2)):
+            #print(M.data.shape)
+            mat = Ei.data[bs2 * i : bs2 * i + bs2].reshape(bs, bs)
+            flip = False
+            if not check_symmetric(mat):
+                mat = np.fliplr(mat)
+                flip = True
+            evs, evv = eigh(mat)
+            evs = np.fmax(evs * p, evs[bs-1] * 1e-5)
+            #print("evs ", evs[bs-1] / evs)
+            #print("evv ", evv[bs-1])
+            #print("evv ", evv)
+            mat = evv.dot(diag_sparse(evs) * evv.transpose())
+            if flip:
+                mat = np.fliplr(mat)
+            Ei.data[bs2 * i : bs2 * i + bs2] = mat.flatten()
+    else:
+        Ei = M.copy()
+    return Ei
+
 
 def copy_selected_blocks(M, block_selection_, bs):
     Mi = M.copy()
@@ -1837,29 +1865,49 @@ def bundle_adjust(
                 else:
                     if False:
                         blockEigenvalueJtJ = 1e1 * blockEigenvalue(JtJ, 9)
-                        print(JtJ.data.shape)
                         #print("blockEigenvalueJtJ", blockEigenvalueJtJ)
                         #print("min blockEigenvalueJtJ", np.min(blockEigenvalueJtJ.data))
                         #print(JtJ)
 
                         stepSize = blockAddDiag(JtJ, blockEigenvalueJtJ, blockEigMult, 9)
                         #stepSize = LipJ_ * JtJ.copy() + blockEigMult * blockEigenvalueJtJ
-                        print("JtJ.data.shape",  JtJ.data.shape) # ok
-                        print("stepSize.data.shape",  stepSize.data.shape) # ok
+                        if JtJ.data.shape != stepSize.data.shape:
+                            print("JtJ.data.shape",  JtJ.data.shape) # ok
+                            print("stepSize.data.shape",  stepSize.data.shape) # ok
                         #print(stepSize) # not symmetric any more?
                         JtJDiag = blockAddDiag(JtJ, blockEigenvalueJtJ, blockEigMultJtJ, 9)
                         #JtJDiag = JtJ.copy() + blockEigMultJtJ * blockEigenvalueJtJ
-                        print("JtJ.data.shape",  JtJ.data.shape) # ok
-                        print("JtJDiag.data.shape",  JtJDiag.data.shape) # ok
-                    else:
-                        blockEigenvalueJtJ = (1/blockEigMult) * JtJ.copy()
-                        stepSize = blockAdd(JtJ, blockEigMult * blockEigenvalueJtJ, 9)
+                        if JtJ.data.shape != JtJDiag.data.shape:
+                            print("JtJ.data.shape",  JtJ.data.shape) # ok
+                            print("JtJDiag.data.shape",  JtJDiag.data.shape) # ok
+                    else: # fails for 245. ? JTJ and add something to all eigenvalues?
+                        # decomp + x% to eigenvals?
+                        # stepSize = blockEigenvalueFullAdd(JtJ, 9, 1e1*blockEigMult)
+                        # JtJDiag = blockEigenvalueFullAdd(JtJ, 9, 1e1*blockEigenvalueJtJ)
+
+                        # idea: descentlemma step is some multiple of JtJ and jtj is bounded by limiting eigenval.
+                        # limit is 1e5/1e4?
+                        blockEigenvalueJtJ = 1e5 * JtJ.copy()
+                        stepSize = blockEigMult * blockEigenvalueJtJ.copy()
+                        JtJDiag = JtJ.copy()
+                        #blockEigenvalueJtJ = 1e5 * JtJ.copy()
+                        #stepSize = blockAdd(JtJ, blockEigMult * blockEigenvalueJtJ, 9)
+                        #JtJDiag = blockAdd(JtJ, 1e-5 * blockEigenvalueJtJ, 9)
+
+                        #blockEigenvalueJtJ = 1e5 * JtJ.copy()
+                        #stepSize = blockAdd(JtJ, blockEigMult * blockEigenvalueJtJ, 9)
                         #stepSize = LipJ_ * JtJ.copy() + blockEigMult * blockEigenvalueJtJ
                         if JtJ.data.shape != stepSize.data.shape:
                             print("JtJ.data.shape",  JtJ.data.shape) # ok
                             print("stepSize.data.shape",  stepSize.data.shape) # ok
                         #print(stepSize) # not symmetric any more?
-                        JtJDiag = blockAdd(JtJ, blockEigMultJtJ * blockEigenvalueJtJ, 9)
+                        #JtJDiag = blockAdd(JtJ, 1e-1 * blockEigMult * blockEigenvalueJtJ, 9)
+
+                        # test this
+                        # blockEigenvalueJtJ = (1e-1/blockEigMult) * JtJ.copy()
+                        # stepSize = blockAdd(JtJ, blockEigMult * blockEigenvalueJtJ, 9)
+                        # JtJDiag = blockAdd(JtJ, 1e-1 * blockEigMult * blockEigenvalueJtJ, 9)
+
                         #JtJDiag = JtJ.copy() + blockEigMultJtJ * blockEigenvalueJtJ
                         if JtJ.data.shape != JtJDiag.data.shape:
                             print("JtJ.data.shape",  JtJ.data.shape) # ok
@@ -2074,7 +2122,7 @@ def bundle_adjust(
             blockEigMult_old = blockEigMult
             blockEigMult = np.minimum(globalBlockEigUpperLimit, np.maximum(blockEigMultLimit, blockEigMultGain * blockEigMult))
             stepSize += (blockEigMult - blockEigMult_old) * blockEigenvalueJtJ
-            print("|||| stepSize.data.shape ", stepSize.data.shape)
+            #print("|||| stepSize.data.shape ", stepSize.data.shape)
             #blockEigenvalueJtJ.data *= 2 # appears slow but safe
 
             # try this
@@ -2558,9 +2606,9 @@ def GetPcgScalingDiag(JtJ):
         #scale = 1. / np.maximum(1, 1./ np.sqrt(np.mean(guess)))
         #scale = 1. / np.maximum(1, 1./ np.sqrt(np.median(guess)))
         #scale = 1. / np.maximum(1, 1./ np.sqrt(np.min(guess)))
-        scale = np.sqrt(np.median(guess)) # 245 with scale worse/stalls. 646 wo. max(1, *).
+        #scale = np.sqrt(np.median(guess)) # 245 with scale worse/stalls. 646 wo. max(1, *).
         #scale = np.sqrt(np.min(guess)) # 245 with scale worse/stalls. 646 wo. max(1, *).
-        #scale = np.sqrt(np.max(guess)) # best with no sqrt ?!
+        scale = np.sqrt(np.max(guess)) # best with no sqrt ?!
         print(scale) # there has to be a stepsize issue?
         temp_ = temp_ * scale # * 1e5 works but not as well ()
         print("Preconditioners min/max Unorm after scaling 2: ", np.min(temp_), np.max(temp_))
