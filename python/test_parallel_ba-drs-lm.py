@@ -1024,7 +1024,7 @@ def blockEigenvalueFull(M, bs):#, x0_t_cam_):
                 mat = np.fliplr(mat)
                 flip = True
             evs, evv = eigh(mat)
-            evs = np.fmax(evs, evs[bs-1] * 1e-4) # e.g. ?
+            evs = np.fmax(evs, evs[bs-1] * 1e-5) # e.g. ?
             #print("evs ", evs[bs-1] / evs)
             #print("evv ", evv[bs-1])
             #print("evv ", evv)
@@ -1796,13 +1796,13 @@ def bundle_adjust(
             bl = J_land.transpose() * fx0
             JtJ = J_pose.transpose() * J_pose
             #JtJ = J_pose.transpose().dot(J_pose)
-            print(JtJ.data.shape)
+            #print(JtJ.data.shape)
             JtJ = JtJ + diag_sparse(np.zeros(JtJ.diagonal().shape[0])) # force symmetry in data!
-            print(JtJ.data.shape)
+            #print(JtJ.data.shape)
             #print("JtJ ", JtJ) # is this randomly dispalced?
             # TODO: with this is works.
             JtJ = blockEigenvalueFull(JtJ, 9) # TODO this i am trying to get runnning.
-            print(JtJ.data.shape)
+            #print(JtJ.data.shape)
 
             if verbose_Jac:
                 # TODO: cam hessian scaled awfully. degenerate.
@@ -1835,34 +1835,48 @@ def bundle_adjust(
                     JtJDiag = JtJ.copy() + blockEigMultJtJ * blockEigenvalueJtJ
                     #JtJDiag = blockEigMultJtJ * blockEigenvalueJtJ # this is likely almost same as above. Todo: check/find value.
                 else:
-                    blockEigenvalueJtJ = 1e1 * blockEigenvalue(JtJ, 9)
-                    print(JtJ.data.shape)
-                    #print("blockEigenvalueJtJ", blockEigenvalueJtJ)
-                    #print("min blockEigenvalueJtJ", np.min(blockEigenvalueJtJ.data))
-                    # blockEigenvalueJtJ = JtJ # test blockEigFull on JtJ
-                    #print(JtJ)
+                    if False:
+                        blockEigenvalueJtJ = 1e1 * blockEigenvalue(JtJ, 9)
+                        print(JtJ.data.shape)
+                        #print("blockEigenvalueJtJ", blockEigenvalueJtJ)
+                        #print("min blockEigenvalueJtJ", np.min(blockEigenvalueJtJ.data))
+                        #print(JtJ)
 
-                    stepSize = blockAddDiag(JtJ, blockEigenvalueJtJ, blockEigMult, 9)
-                    #stepSize = LipJ_ * JtJ.copy() + blockEigMult * blockEigenvalueJtJ
-                    print("JtJ.data.shape",  JtJ.data.shape) # ok
-                    print("stepSize.data.shape",  stepSize.data.shape) # ok
-                    #print(stepSize) # not symmetric any more?
-                    JtJDiag = blockAddDiag(JtJ, blockEigenvalueJtJ, blockEigMultJtJ, 9)
-                    #JtJDiag = JtJ.copy() + blockEigMultJtJ * blockEigenvalueJtJ
-                    print("JtJ.data.shape",  JtJ.data.shape) # ok
-                    print("JtJDiag.data.shape",  JtJDiag.data.shape) # ok
+                        stepSize = blockAddDiag(JtJ, blockEigenvalueJtJ, blockEigMult, 9)
+                        #stepSize = LipJ_ * JtJ.copy() + blockEigMult * blockEigenvalueJtJ
+                        print("JtJ.data.shape",  JtJ.data.shape) # ok
+                        print("stepSize.data.shape",  stepSize.data.shape) # ok
+                        #print(stepSize) # not symmetric any more?
+                        JtJDiag = blockAddDiag(JtJ, blockEigenvalueJtJ, blockEigMultJtJ, 9)
+                        #JtJDiag = JtJ.copy() + blockEigMultJtJ * blockEigenvalueJtJ
+                        print("JtJ.data.shape",  JtJ.data.shape) # ok
+                        print("JtJDiag.data.shape",  JtJDiag.data.shape) # ok
+                    else:
+                        blockEigenvalueJtJ = (1/blockEigMult) * JtJ.copy()
+                        stepSize = blockAdd(JtJ, blockEigMult * blockEigenvalueJtJ, 9)
+                        #stepSize = LipJ_ * JtJ.copy() + blockEigMult * blockEigenvalueJtJ
+                        if JtJ.data.shape != stepSize.data.shape:
+                            print("JtJ.data.shape",  JtJ.data.shape) # ok
+                            print("stepSize.data.shape",  stepSize.data.shape) # ok
+                        #print(stepSize) # not symmetric any more?
+                        JtJDiag = blockAdd(JtJ, blockEigMultJtJ * blockEigenvalueJtJ, 9)
+                        #JtJDiag = JtJ.copy() + blockEigMultJtJ * blockEigenvalueJtJ
+                        if JtJ.data.shape != JtJDiag.data.shape:
+                            print("JtJ.data.shape",  JtJ.data.shape) # ok
+                            print("JtJDiag.data.shape",  JtJDiag.data.shape) # ok
 
                 #print("Symmetric JTJ", isSymmetric(JtJ, 9)) # true
-                print("Symmetric stepSize", isSymmetric(stepSize, JtJ, 9))
-                print("stepSize.data.shape",  stepSize.data.shape) # not ok shape
-                print("JtJ.data.shape",  JtJ.data.shape) # ok
-                print(blockEigenvalueJtJ.data.shape)
+                if not isSymmetric(stepSize, JtJ, 9):
+                    print("Symmetric stepSize", isSymmetric(stepSize, JtJ, 9))
+                    print("stepSize.data.shape",  stepSize.data.shape) # not ok shape
+                    print("JtJ.data.shape",  JtJ.data.shape) # ok
+                    print(blockEigenvalueJtJ.data.shape)
 
                 maxE, minE = minmaxEv(JtJ, 9)
-                print("JtJ spectral ", (maxE/minE))
+                print("JtJ spectral ", (maxE/minE), file=sys.stderr)
                 #print("JtJ minE ", (minE))
                 maxE, minE = minmaxEv(stepSize, 9)
-                print("stepSize spectral ", (maxE/minE))
+                print("stepSize spectral ", (maxE/minE), file=sys.stderr)
                 #print("stepSize minE ", minE)
                 # temp__ = blockEigenvalueJtJ.data.copy()
                 # print(temp__.reshape(-1,9)[:,0])
@@ -1949,9 +1963,9 @@ def bundle_adjust(
         # (2205, 2205)   (19843,) # WRONG AGAIN removes '0'? or something?
         # (2205, 59241)   (2946753,)
         # (59241, 59241)   (177723,)
-        print(Ul.shape, " ", Ul.data.shape)
-        print(W.shape, " ", W.data.shape)
-        print(Vli.shape, " ", Vli.data.shape)
+        # print(Ul.shape, " ", Ul.data.shape)
+        # print(W.shape, " ", W.data.shape)
+        # print(Vli.shape, " ", Vli.data.shape)
         #delta_p = -solvePowerIts(Ul, W, Vli, bS, powerits)
         delta_p, powerits_run = solveByGDNesterov(Ul, W, Vli, bS, powerits)
         delta_p = -delta_p
@@ -1968,7 +1982,7 @@ def bundle_adjust(
         fx0_new = fx0 + (J_pose * delta_p + J_land * delta_l)
         costQuad = np.sum(fx0_new**2)
         #print("delta_p ", delta_p) # super large
-        print(costQuad, " cost + penalty ", costQuad, " + ", penaltyL, " + ", penaltyP, " Pits ", powerits_run)
+        #print(costQuad, " cost + penalty ", costQuad, " + ", penaltyL, " + ", penaltyP, " Pits ", powerits_run)
         print(it_, "it. cost 0     ", round(costStart)," cost + penalty ", round(costStart + penaltyStart), " === using L = ", L, file=sys.stderr)
         print(it_, "it. cost 0/new ", round(costQuad), " cost + penalty ", round(costQuad + penaltyL + penaltyP), " Pits ", powerits_run, file=sys.stderr)
 
@@ -2060,6 +2074,7 @@ def bundle_adjust(
             blockEigMult_old = blockEigMult
             blockEigMult = np.minimum(globalBlockEigUpperLimit, np.maximum(blockEigMultLimit, blockEigMultGain * blockEigMult))
             stepSize += (blockEigMult - blockEigMult_old) * blockEigenvalueJtJ
+            print("|||| stepSize.data.shape ", stepSize.data.shape)
             #blockEigenvalueJtJ.data *= 2 # appears slow but safe
 
             # try this
