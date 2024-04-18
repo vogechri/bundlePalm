@@ -3379,6 +3379,7 @@ else:
                         poses_s_in_cluster = [(Unorm_update * (Unorm * poses_s.flatten())).reshape(-1,9) for poses_s in poses_s_in_cluster]
                         poses_s_in_cluster_pre = [(Unorm_update * (Unorm * poses_s.flatten())).reshape(-1,9) for poses_s in poses_s_in_cluster_pre]
                         poses_in_cluster = [(Unorm_update * (Unorm * poses_u.flatten())).reshape(-1,9) for poses_u in poses_in_cluster]
+                        best_poses_v = (Unorm_update * (Unorm * best_poses_v.flatten())).reshape(-1,9)
 
                         # avoid total chaos, adjust RNA buffer along.
                         if RNA_or_bfgs:
