@@ -1040,6 +1040,31 @@ def blockEigenvalueFull(M, bs, t = 1e-4):#, x0_t_cam_):
         Ei = M.copy()
     return Ei
 
+def blockEigenvalueFullPositive(M, bs, t=0):
+    Ei = M.copy()
+    if bs > 1:
+        bs2 = bs * bs
+        for i in range(int(M.data.shape[0] / bs2)):
+            #print(M.data.shape)
+            mat = Ei.data[bs2 * i : bs2 * i + bs2].reshape(bs, bs)
+            flip = False
+            if not check_symmetric(mat):
+                mat = np.fliplr(mat)
+                flip = True
+            evs, evv = eigh(mat)
+            evs = np.fmax(evs, t) # * 5e-5)? # tuned at 52: 1e-6: , 1e-4: , 1e-5: 476
+            #print("evs ", evs[bs-1] / evs)
+            #print("evv ", evv[bs-1])
+            #print("evv ", evv)
+            #print(" cam " , x0_t_cam_[i,:])
+            mat = evv.dot(diag_sparse(evs) * evv.transpose())
+            if flip:
+                mat = np.fliplr(mat)
+            Ei.data[bs2 * i : bs2 * i + bs2] = mat.flatten()
+    else:
+        Ei = M.copy()
+    return Ei
+
 # p = 1.05 -> add 5 pct, etc.
 def blockEigenvalueFullAdd(M, bs, p=1.05):
     Ei = M.copy()
@@ -1724,7 +1749,7 @@ def bundle_adjust(
     tr_eta_1 = 0.8
     tr_eta_2 = 0.25
     blockEigMultGain = 1.5 # 4 # 4 better than 2 at least if allowDecreaseBlockEig, feels random and weird. Too large perf drops, too small jupming around.
-    stepSizeSetting = False # True original idea
+    stepSizeSetting = True #False # True original idea
     if not stepSizeSetting:
         blockEigMultGain = 4 #?
     blockEigMultLoss = np.sqrt(blockEigMultGain)
@@ -1834,6 +1859,7 @@ def bundle_adjust(
             #print(JtJ.data.shape)
             #print("JtJ ", JtJ) # is this randomly dispalced?
             # JtJ = blockEigenvalueFull(JtJ, 9, 1e-8) # TODO this i am trying to get runnning.
+            # JtJ = blockEigenvalueFullPositive(JtJ, 9, 0) # THIS has no effect here, will never have negative in UL VL ?!
             #print(JtJ.data.shape)
 
             if verbose_Jac:
@@ -1891,9 +1917,9 @@ def bundle_adjust(
 
                         # idea: descentlemma step is some multiple of JtJ and jtj is bounded by limiting eigenval.
                         # limit is 1e5/1e4?
-                        JtJDiag = blockEigenvalueFull(JtJ, 9)
+                        JtJDiag = blockEigenvalueFull(JtJ, 9, 1e1*blockEigMult) # ?any effect at all?
                         if stepSizeSetting: # was ok
-                            blockEigenvalueJtJ = LipJ_ * 1e5 * JtJDiag.copy()
+                            blockEigenvalueJtJ = LipJ_ * 1e5 * blockEigenvalueFull(JtJ, 9, 1e-4) # ?or what?
                             stepSize = blockEigMult * blockEigenvalueJtJ
                         else:
                             stepSize = LipJ_ * blockEigenvalueFull(JtJ, 9, blockEigMult)
@@ -2009,6 +2035,9 @@ def bundle_adjust(
         else:
             Ul = JtJ + L * JtJDiag
             penaltyStart = L * penaltyStartConst
+
+        Ul = blockEigenvalueFullPositive(Ul, 9, 0) #? when should this happen?
+        Vl = blockEigenvalueFullPositive(Vl, 3, 0) #? when should this happen?
 
         Vli = blockInverse(Vl, 3)
         bp_s = bp + L * JtJDiag * prox_rhs # TODO: + or -. '+', see above
@@ -2604,23 +2633,28 @@ def GetPcgScalingDiag(JtJ):
     #temp_ = np.fmin(np.fmax(temp_, 1e-14), 1e16) # TODO. pick most singular example? 646? 173 maybe / any dubrovnik
     print("Preconditioners min/max Unorm after thresholding ", np.min(temp_), np.max(temp_))
 
-    scaleToHaveValuesAroundOneForHess = False #True
+    # not true? 394, look at other examples.
+    absDiagJtJ = np.abs(JtJ.diagonal())
+    guess = diag_sparse(1./temp_.flatten()) * absDiagJtJ * diag_sparse(1./temp_.flatten())
+    print("Preconditioners min/max guess ", np.min(guess), np.max(guess))
+
+    scaleToHaveValuesAroundOneForHess = True
     if scaleToHaveValuesAroundOneForHess:
         #temp_ /= np.sqrt(t) #np.sqrt(np.minimum(np.maximum(t, minTresh), maxTresh))
         #print("Preconditioners min/max Unorm after scaling 1", np.min(temp_), np.max(temp_))
-        absDiagJtJ = np.abs(JtJ.diagonal())
+        #absDiagJtJ = np.abs(JtJ.diagonal())
         #print("absDiagJtJ ", absDiagJtJ.shape, " ", absDiagJtJ)
         #print("temp_ ", temp_.shape, " ", temp_)
-        guess = diag_sparse(1./temp_.flatten()) * absDiagJtJ * diag_sparse(1./temp_.flatten())
-        print("Preconditioners min/max guess ", np.min(guess), np.max(guess))
+        #guess = diag_sparse(1./temp_.flatten()) * absDiagJtJ * diag_sparse(1./temp_.flatten())
+        #print("Preconditioners min/max guess ", np.min(guess), np.max(guess))
         #scale = 1. / np.maximum(1, 1./ np.sqrt(np.max(guess)))
         #scale = 1. / np.maximum(1, 1./ np.sqrt(np.mean(guess)))
         #scale = 1. / np.maximum(1, 1./ np.sqrt(np.median(guess)))
         #scale = 1. / np.maximum(1, 1./ np.sqrt(np.min(guess)))
-        #scale = np.sqrt(np.median(guess)) # 245 with scale worse/stalls. 646 wo. max(1, *).
+        scale = np.sqrt(np.median(guess)) # 245 with scale worse/stalls. 646 wo. max(1, *).
         #scale = np.sqrt(np.min(guess)) # 245 with scale worse/stalls. 646 wo. max(1, *).
-        scale = np.sqrt(np.max(guess)) # best performance if we scale.
-        print(scale) # there has to be a stepsize issue?
+        #scale = np.sqrt(np.max(guess)) # best performance if we scale? or changes best blockEig Thresh?
+        # print(scale) # there has to be a stepsize issue?
         temp_ = temp_ * scale # * 1e5 works but not as well ()
         print("Preconditioners min/max Unorm after scaling 2: ", np.min(temp_), np.max(temp_))
         guess = diag_sparse(1./temp_.flatten()) * absDiagJtJ * diag_sparse(1./temp_.flatten())
@@ -2921,6 +2955,7 @@ for ci in range(kClusters):
         point_indices_in_cluster[ci],
         points_2d_in_cluster[ci],
         landmarks)
+primal_cost_v_before = primal_cost_v
 print("DEBUG scaled cost ", primal_cost_v)
 
 o3d_defined = False
@@ -3327,9 +3362,10 @@ else:
                 best_landmarks = landmarks.copy()
 
             # idea accept if primal v cost is very close.
-            # can happen that best primal cost is about same as current and dre was set to this as correction. 
+            # can happen that best primal cost is about same as current and dre was set to this as correction.
             # TODO if dre < primal_v also increase LipJ or so.
-            if (beMin < globalBlockEigUpperLimit) and (ls_it == line_search_iterations-1) and (maxPct * lastCostDRE_bfgs < dre_bfgs):
+            #if (beMin < globalBlockEigUpperLimit) and
+            if (ls_it == line_search_iterations-1) and (maxPct * lastCostDRE_bfgs < dre_bfgs):
             #if (np.min(LipJ) < LipJMax) and (ls_it == line_search_iterations-1) and (maxPct * lastCostDRE_bfgs < dre_bfgs):
                 primal_cost_v_before = 0 # should be fixed also
                 for ci in range(kClusters):
@@ -3516,7 +3552,9 @@ else:
                 # ********************** NEW AT IT   10  /  89  **********************
 
             else:
-
+                print("Regular Update ", beMin, " < ", globalBlockEigUpperLimit, " and ", maxPct, " * ", lastCostDRE_bfgs, " = ", maxPct * lastCostDRE_bfgs, " < ",\
+                      dre_bfgs, " and ", primal_cost_v, " > ", maxPctV * primal_cost_v_before, " = ", maxPctV, " * ", primal_cost_v_before, " ", reject, " and ",\
+                      (beMin < globalBlockEigUpperLimit), " and ", (ls_it == line_search_iterations-1)," and ", maxPct * lastCostDRE_bfgs < dre_bfgs, " and ", primal_cost_v > maxPctV * primal_cost_v_before)
                 # if lastCostDRE_bfgs < dre_bfgs and ls_it == line_search_iterations-1:
                 #     #LipJ += 0.2 * np.ones(kClusters)
                 #     partid = np.argmax(dre_per_part)
@@ -3568,6 +3606,7 @@ else:
                         poses_s_in_cluster = [(Unorm_update * (Unorm * poses_s.flatten())).reshape(-1,9) for poses_s in poses_s_in_cluster]
                         poses_s_in_cluster_pre = [(Unorm_update * (Unorm * poses_s.flatten())).reshape(-1,9) for poses_s in poses_s_in_cluster_pre]
                         poses_in_cluster = [(Unorm_update * (Unorm * poses_u.flatten())).reshape(-1,9) for poses_u in poses_in_cluster]
+                        best_poses_v = (Unorm_update * (Unorm * best_poses_v.flatten())).reshape(-1,9)
 
                         # avoid total chaos, adjust RNA buffer along.
                         if RNA_or_bfgs:
