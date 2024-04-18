@@ -1715,6 +1715,7 @@ def bundle_adjust(
     cluster_id,
     successfull_its_=1,
 ):
+    weird_investigate = False
     LipJ_ = 1.005 # less jumping never better. maybe best to inc this when failing ?! not really. some fail very early for no reason?
     newForUnique = False
     blockEigMult = 1e-5 # 1e-3 was used before, too high low precision.
@@ -1832,6 +1833,11 @@ def bundle_adjust(
             maxE, minE = minmaxEv(JtJ, 9)
             JtJSpec = [round_int(np.max(maxE/minE)), np.min(maxE/minE), round_int(np.median(maxE/minE))]
             print("minmax ev JtJ ", np.max(maxE), " ", np.max(minE), " ", np.min(maxE), " ",  np.min(minE), " spec ", JtJSpec, file=sys.stderr )
+            if weird_investigate:
+                print("stepSz maxE", maxE)
+                print("stepSz minE", minE)
+                print("stepSz spec ", np.round(maxE/minE))
+
             #maxE, minE = minmaxEv(stepSize, 9)
             #print("minmax ev stepSz ", np.max(maxE), " ", np.max(minE), " ", np.min(maxE), " ",  np.min(minE), " spec ", np.max(maxE/minE) )
             #print("JTJ spectral ", (maxE/minE))
@@ -1969,6 +1975,11 @@ def bundle_adjust(
                 print("minmax ev stepSz ", np.max(maxE), " ", np.max(minE), " ", np.min(maxE), " ",  np.min(minE), " spec ", StepSizeSpec, file=sys.stderr)
                 #maxE, minE = minmaxEv(JtJDiag, 9)
                 #print("minmax ev JtJDiag ", np.max(maxE), " ", np.max(minE), " ", np.min(maxE), " ",  np.min(minE), " spec ", np.max(maxE/minE))
+
+                if weird_investigate:
+                    print("stepSz maxE", maxE)
+                    print("stepSz minE", minE)
+                    print("stepSz spec ", np.round(maxE/minE))
 
                 if verboseSpec:
                     print("stepSize spectral ", (maxE/minE))
@@ -2613,8 +2624,8 @@ def perform_full_iteration(camera_indices_in_cluster_, point_indices_in_cluster_
 
 def GetPreconditioners(cameras_, points_3d_, points_2d_, camera_indices_, point_indices_):
     J_pose, J_land, fx0_ = ComputeDerivativeMatrixInit(cameras_, points_3d_, points_2d_, camera_indices_, point_indices_)
-    disable_basis_pcg = False
-    disable_new_pcg = True
+    disable_basis_pcg = True
+    disable_new_pcg = False
     JtJ = J_pose.transpose() * J_pose
     # W = J_pose.transpose() * J_land
     orig = False
@@ -3736,22 +3747,22 @@ else:
                         poses_s_in_cluster = [(Unorm_all * (Unorm_allinv_old * poses_s.flatten())).reshape(-1,9) for poses_s in poses_s_in_cluster]
                         poses_s_in_cluster_pre = [(Unorm_all * (Unorm_allinv_old * poses_s.flatten())).reshape(-1,9) for poses_s in poses_s_in_cluster_pre]
                         poses_in_cluster = [(Unorm_all * (Unorm_allinv_old * poses_u.flatten())).reshape(-1,9) for poses_u in poses_in_cluster]
+                        best_poses_v = (Unorm_all * (Unorm_allinv_old * best_poses_v.flatten())).reshape(-1,9)
 
                         if not RNA_or_bfgs:
                             for ci in range(kClusters):
                                 prev_dk[ci * 9 * n_cameras: (ci+1) * 9 * n_cameras]  = Unorm_all * (Unorm_allinv_old *  prev_dk[ci * 9 * n_cameras: (ci+1) * 9 * n_cameras])
-
-                        # for pos in range(len(bfgs_ps)):
-                        #     for ci in range(kClusters):
-                        #         bfgs_ps[pos][ci * 9 * n_cameras: (ci+1) * 9 * n_cameras]  = Unorm_all * (Unorm_allinv_old *  bfgs_ps[pos][ci * 9 * n_cameras: (ci+1) * 9 * n_cameras])
-                        #         bfgs_qs[pos][ci * 9 * n_cameras: (ci+1) * 9 * n_cameras]  = Unorm_all * (Unorm_allinv_old *  bfgs_qs[pos][ci * 9 * n_cameras: (ci+1) * 9 * n_cameras])
-                        #         bfgs_rhos[pos] = np.maximum(0., 1./ bfgs_qs[pos].dot(bfgs_ps[pos]))
-
-                        for pos in range(len(Gs)):
-                            for ci in range(kClusters):
-                                Gs[pos][ci * 9 * n_cameras: (ci+1) * 9 * n_cameras]  = Unorm_all * (Unorm_allinv_old *  Gs[pos][ci * 9 * n_cameras: (ci+1) * 9 * n_cameras])
-                                Fes[pos][ci * 9 * n_cameras: (ci+1) * 9 * n_cameras] = Unorm_all * (Unorm_allinv_old * Fes[pos][ci * 9 * n_cameras: (ci+1) * 9 * n_cameras])
-                                Fs[pos][ci * 9 * n_cameras: (ci+1) * 9 * n_cameras]  = Unorm_all * (Unorm_allinv_old *  Fs[pos][ci * 9 * n_cameras: (ci+1) * 9 * n_cameras])
+                        else:
+                            for pos in range(len(Gs)):
+                                for ci in range(kClusters):
+                                    Gs[pos][ci * 9 * n_cameras: (ci+1) * 9 * n_cameras]  = Unorm_all * (Unorm_allinv_old *  Gs[pos][ci * 9 * n_cameras: (ci+1) * 9 * n_cameras])
+                                    Fes[pos][ci * 9 * n_cameras: (ci+1) * 9 * n_cameras] = Unorm_all * (Unorm_allinv_old * Fes[pos][ci * 9 * n_cameras: (ci+1) * 9 * n_cameras])
+                                    Fs[pos][ci * 9 * n_cameras: (ci+1) * 9 * n_cameras]  = Unorm_all * (Unorm_allinv_old *  Fs[pos][ci * 9 * n_cameras: (ci+1) * 9 * n_cameras])
+                            # for pos in range(len(bfgs_ps)):
+                            #     for ci in range(kClusters):
+                            #         bfgs_ps[pos][ci * 9 * n_cameras: (ci+1) * 9 * n_cameras]  = Unorm_all * (Unorm_allinv_old *  bfgs_ps[pos][ci * 9 * n_cameras: (ci+1) * 9 * n_cameras])
+                            #         bfgs_qs[pos][ci * 9 * n_cameras: (ci+1) * 9 * n_cameras]  = Unorm_all * (Unorm_allinv_old *  bfgs_qs[pos][ci * 9 * n_cameras: (ci+1) * 9 * n_cameras])
+                            #         bfgs_rhos[pos] = np.maximum(0., 1./ bfgs_qs[pos].dot(bfgs_ps[pos]))
                         Unorm_all = blockInverse(Unorm_all, 9)
 
                     if False and globalIt % 2 == 1: # debatable, bigger analysis needed. Just random?
