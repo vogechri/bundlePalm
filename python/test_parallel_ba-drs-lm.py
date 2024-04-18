@@ -823,17 +823,17 @@ def buildResiduumNew(resX, resY) :
 #     return np.all(np.abs(a-a.T) < tol)
 
 # TODO: just find more symmetric: np.fliplr(a) vs a.
-def check_symmetric(a, tol=1e-5):
-    # if not np.all(np.abs(a-a.T) < np.fmax(1, np.abs(a)) * tol):
-    #     print(np.abs(a-a.T) < np.fmax(1, np.abs(a)) * tol)
-    return np.all(np.abs(a-a.T) < np.fmax(1, np.abs(a)) * tol)
-
 # def check_symmetric(a, tol=1e-5):
-#     b = np.fliplr(a.copy())
-#     a_sym = np.sum(np.abs(a-a.T) < np.abs(b-b.T))
-#     b_sym = np.sum(np.abs(a-a.T) > np.abs(b-b.T))
-#     #print("a \n", a, " b \n", b, " \n", a_sym, " ", b_sym)
-#     return a_sym >= b_sym
+#     # if not np.all(np.abs(a-a.T) < np.fmax(1, np.abs(a)) * tol):
+#     #     print(np.abs(a-a.T) < np.fmax(1, np.abs(a)) * tol)
+#     return np.all(np.abs(a-a.T) < np.fmax(1, np.abs(a)) * tol)
+
+def check_symmetric(a, tol=1e-5):
+    b = np.fliplr(a.copy())
+    a_sym = np.sum(np.abs(a-a.T) < np.abs(b-b.T))
+    b_sym = np.sum(np.abs(a-a.T) > np.abs(b-b.T))
+    #print("a \n", a, " b \n", b, " \n", a_sym, " ", b_sym)
+    return a_sym >= b_sym
 
 # bs : blocksize, eg 9 -> 9x9 or 3 -> 3x3 per block
 def blockInverse(M, bs):
@@ -989,13 +989,14 @@ def minmaxEv(M, bs):
             evs = eigvalsh(mat)
             maxE[i] = evs[bs-1]
             minE[i] = evs[0]
-            if evs[0] <0 and not enter:
-                enter = True
-                print("evs[0] ", evs[0], " \n" ,mat)
-                mat = np.fliplr(mat)
-                evs = eigvalsh(mat)
-                maxE[i] = evs[bs-1]
-                minE[i] = evs[0]
+            # if evs[0] <0 and not enter:
+            #     enter = True
+            #     print("evs[0] ", evs[0], " \n" ,mat)
+            #     mat = np.fliplr(mat)
+            #     evs = eigvalsh(mat)
+            #     print("lr evs[0] ", evs[0], " \n" ,mat)
+            #     maxE[i] = evs[bs-1]
+            #     minE[i] = evs[0]
 
     return maxE, minE
 
@@ -1012,7 +1013,7 @@ def isSymmetric(M, B, bs):
 
     return not enter
 
-def blockEigenvalueFull(M, bs):#, x0_t_cam_):
+def blockEigenvalueFull(M, bs, t = 1e-4):#, x0_t_cam_):
     Ei = M.copy()
     if bs > 1:
         bs2 = bs * bs
@@ -1025,8 +1026,8 @@ def blockEigenvalueFull(M, bs):#, x0_t_cam_):
                 flip = True
             evs, evv = eigh(mat)
             # 245: 1e-5 30 / 0  ======== DRE BFGS ======  2496053
-            # 245: 1e-4 30 / 0  ======== DRE BFGS ======  1916230
-            evs = np.fmax(evs, evs[bs-1] * 1e-4) # tuned at 52: 1e-6: , 1e-4: , 1e-5: 476
+            # 245: 1e-4 30 / 0  ======== DRE BFGS ======  1916230, fails for 52, 1266
+            evs = np.fmax(evs, evs[bs-1] * t) # * 5e-5)? # tuned at 52: 1e-6: , 1e-4: , 1e-5: 476
             #print("evs ", evs[bs-1] / evs)
             #print("evv ", evv[bs-1])
             #print("evv ", evv)
@@ -1722,7 +1723,11 @@ def bundle_adjust(
     powerits = 100 # kind of any value works here? > =5?
     tr_eta_1 = 0.8
     tr_eta_2 = 0.25
-    blockEigMultGain = 4 # 4 better than 2 at least if allowDecreaseBlockEig, feels random and weird
+    blockEigMultGain = 1.5 # 4 # 4 better than 2 at least if allowDecreaseBlockEig, feels random and weird. Too large perf drops, too small jupming around.
+    stepSizeSetting = False # True original idea
+    if not stepSizeSetting:
+        blockEigMultGain = 4 #?
+    blockEigMultLoss = np.sqrt(blockEigMultGain)
     threshWhereNeeded = 1e-6
     verbose_Jac = True #False
 
@@ -1828,8 +1833,7 @@ def bundle_adjust(
             JtJ = JtJ + diag_sparse(np.zeros(JtJ.diagonal().shape[0])) # force symmetry in data!
             #print(JtJ.data.shape)
             #print("JtJ ", JtJ) # is this randomly dispalced?
-            # TODO: with this is works.
-            JtJ = blockEigenvalueFull(JtJ, 9) # TODO this i am trying to get runnning.
+            # JtJ = blockEigenvalueFull(JtJ, 9, 1e-8) # TODO this i am trying to get runnning.
             #print(JtJ.data.shape)
 
             if verbose_Jac:
@@ -1887,9 +1891,13 @@ def bundle_adjust(
 
                         # idea: descentlemma step is some multiple of JtJ and jtj is bounded by limiting eigenval.
                         # limit is 1e5/1e4?
-                        blockEigenvalueJtJ = 1e5 * JtJ.copy()
-                        stepSize = blockEigMult * blockEigenvalueJtJ.copy()
-                        JtJDiag = JtJ.copy()
+                        JtJDiag = blockEigenvalueFull(JtJ, 9)
+                        if stepSizeSetting: # was ok
+                            blockEigenvalueJtJ = LipJ_ * 1e5 * JtJDiag.copy()
+                            stepSize = blockEigMult * blockEigenvalueJtJ
+                        else:
+                            stepSize = LipJ_ * blockEigenvalueFull(JtJ, 9, blockEigMult)
+
                         #blockEigenvalueJtJ = 1e5 * JtJ.copy()
                         #stepSize = blockAdd(JtJ, blockEigMult * blockEigenvalueJtJ, 9)
                         #JtJDiag = blockAdd(JtJ, 1e-5 * blockEigenvalueJtJ, 9)
@@ -2121,7 +2129,11 @@ def bundle_adjust(
             # indeed reliable to get over.
             blockEigMult_old = blockEigMult
             blockEigMult = np.minimum(globalBlockEigUpperLimit, np.maximum(blockEigMultLimit, blockEigMultGain * blockEigMult))
-            stepSize += (blockEigMult - blockEigMult_old) * blockEigenvalueJtJ
+            if stepSizeSetting:
+                stepSize += (blockEigMult - blockEigMult_old) * blockEigenvalueJtJ
+            else:
+                stepSize = LipJ_ * blockEigenvalueFull(JtJ, 9, blockEigMult)
+
             #print("|||| stepSize.data.shape ", stepSize.data.shape)
             #blockEigenvalueJtJ.data *= 2 # appears slow but safe
 
@@ -2151,10 +2163,10 @@ def bundle_adjust(
 
         # TODO: this basically disables lowering blockEigMult !?
         if (newVersion and LfkSafe and not steSizeTouched) and allowDecreaseBlockEig: # 394 escalates if True here.
-            blockEigMult = np.minimum(globalBlockEigUpperLimit, np.maximum(blockEigMultLimit, blockEigMult / 2))
+            blockEigMult = np.minimum(globalBlockEigUpperLimit, np.maximum(blockEigMultLimit, blockEigMult / blockEigMultLoss))
 
         # version with penalty check for ADMM convergence / descent lemma. Problem: slower?
-        if costStart + penaltyStart < costEnd + penaltyL  + penaltyP or LfkViolated:
+        if costStart + penaltyStart < costEnd + penaltyL + penaltyP or LfkViolated:
             # revert -- or linesearch
             x0_p_ = x0_p_ - delta_p
             x0_l_ = x0_l_ - delta_l
@@ -2584,16 +2596,15 @@ def GetPcgScalingDiag(JtJ):
     # temp_  = temp_ + temp_W
     print("min/max Unorm after ", np.min(temp_), np.max(temp_), " t ", t, " min*max= ", np.min(temp_) * np.max(temp_))
     temp_  = temp_.reshape(-1,9)
-    print("Preconditioners min/max Unorm ", np.min(temp_), np.max(temp_))
     # e-14 to e16 at -2. -6 ->
-    minTresh = 1e-15 # 12 -> 14 for 245 and scale!
-    maxTresh = 1e15
+    minTresh = 1e-14 # 12 -> 14 for 245 and scale!
+    maxTresh = 1e14
     #temp_ = np.sqrt(temp_) # test how much worse this is.
     temp_ = np.fmin(np.fmax(temp_, minTresh), maxTresh) #np.sqrt(np.minimum(np.maximum(t, minTresh), maxTresh))
     #temp_ = np.fmin(np.fmax(temp_, 1e-14), 1e16) # TODO. pick most singular example? 646? 173 maybe / any dubrovnik
     print("Preconditioners min/max Unorm after thresholding ", np.min(temp_), np.max(temp_))
 
-    scaleToHaveValuesAroundOneForHess = True
+    scaleToHaveValuesAroundOneForHess = False #True
     if scaleToHaveValuesAroundOneForHess:
         #temp_ /= np.sqrt(t) #np.sqrt(np.minimum(np.maximum(t, minTresh), maxTresh))
         #print("Preconditioners min/max Unorm after scaling 1", np.min(temp_), np.max(temp_))
@@ -2608,7 +2619,7 @@ def GetPcgScalingDiag(JtJ):
         #scale = 1. / np.maximum(1, 1./ np.sqrt(np.min(guess)))
         #scale = np.sqrt(np.median(guess)) # 245 with scale worse/stalls. 646 wo. max(1, *).
         #scale = np.sqrt(np.min(guess)) # 245 with scale worse/stalls. 646 wo. max(1, *).
-        scale = np.sqrt(np.max(guess)) # best with no sqrt ?!
+        scale = np.sqrt(np.max(guess)) # best performance if we scale.
         print(scale) # there has to be a stepsize issue?
         temp_ = temp_ * scale # * 1e5 works but not as well ()
         print("Preconditioners min/max Unorm after scaling 2: ", np.min(temp_), np.max(temp_))
