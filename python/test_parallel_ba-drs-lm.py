@@ -1917,7 +1917,8 @@ def bundle_adjust(
 
                         # idea: descentlemma step is some multiple of JtJ and jtj is bounded by limiting eigenval.
                         # limit is 1e5/1e4?
-                        JtJDiag = blockEigenvalueFull(JtJ, 9, 1e1*blockEigMult) # ?any effect at all?
+                        JtJDiag = blockEigenvalueFull(JtJ, 9, 1e-3) # ?any effect at all?
+                        #JtJDiag = blockEigenvalueFull(JtJ, 9, 1e-4) # ?any effect at all?
                         if stepSizeSetting: # was ok
                             blockEigenvalueJtJ = LipJ_ * 1e5 * blockEigenvalueFull(JtJ, 9, 1e-4) # ?or what?
                             stepSize = blockEigMult * blockEigenvalueJtJ
@@ -3552,9 +3553,10 @@ else:
                 # ********************** NEW AT IT   10  /  89  **********************
 
             else:
-                print("Regular Update ", beMin, " < ", globalBlockEigUpperLimit, " and ", maxPct, " * ", lastCostDRE_bfgs, " = ", maxPct * lastCostDRE_bfgs, " < ",\
-                      dre_bfgs, " and ", primal_cost_v, " > ", maxPctV * primal_cost_v_before, " = ", maxPctV, " * ", primal_cost_v_before, " ", reject, " and ",\
-                      (beMin < globalBlockEigUpperLimit), " and ", (ls_it == line_search_iterations-1)," and ", maxPct * lastCostDRE_bfgs < dre_bfgs, " and ", primal_cost_v > maxPctV * primal_cost_v_before)
+                # print("Regular Update ", beMin, " < ", globalBlockEigUpperLimit, " and ", maxPct, " * ", lastCostDRE_bfgs, " = ", maxPct * lastCostDRE_bfgs, " < ",\
+                #       dre_bfgs, " and ", primal_cost_v, " > ", maxPctV * primal_cost_v_before, " = ", maxPctV, " * ", primal_cost_v_before, " ", reject, " and ",\
+                #       (beMin < globalBlockEigUpperLimit), " and ", (ls_it == line_search_iterations-1)," and ", maxPct * lastCostDRE_bfgs < dre_bfgs, " and ", primal_cost_v > maxPctV * primal_cost_v_before)
+
                 # if lastCostDRE_bfgs < dre_bfgs and ls_it == line_search_iterations-1:
                 #     #LipJ += 0.2 * np.ones(kClusters)
                 #     partid = np.argmax(dre_per_part)
