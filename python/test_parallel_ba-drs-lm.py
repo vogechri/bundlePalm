@@ -178,6 +178,8 @@ def round_int(x):
     if x in [float('inf'), float('-inf'), float('nan')]:
         return x
     else:
+        if np.isnan(x):
+            return x
         return int(round(x))
 
 def float_to_rgb(f):
@@ -1749,9 +1751,9 @@ def bundle_adjust(
     tr_eta_1 = 0.8
     tr_eta_2 = 0.25
     blockEigMultGain = 1.5 # 4 # 4 better than 2 at least if allowDecreaseBlockEig, feels random and weird. Too large perf drops, too small jupming around.
-    stepSizeSetting = True #False # True original idea
+    stepSizeSetting = False # True original idea
     if not stepSizeSetting:
-        blockEigMultGain = 4 #?
+        blockEigMultGain = 2 #?
     blockEigMultLoss = np.sqrt(blockEigMultGain)
     threshWhereNeeded = 1e-6
     verbose_Jac = True #False
@@ -1776,8 +1778,8 @@ def bundle_adjust(
         # blockEigMult not import for 173 but 52 yes
         # adapt blockEigMult based on check? pass up and down hierarchy?
         # problem 1e-3/4/5 good for 173, not for 52. 52: better for 1e-6 bad for 1e-5 etc.
-        blockEigMult = blockEig_in_c_
-        print("blockEig_in_c_ ", blockEig_in_c_, file=sys.stderr)
+        # blockEigMult = blockEig_in_c_
+        # print("blockEig_in_c_ ", blockEig_in_c_, file=sys.stderr)
 
     allowDecreaseBlockEig = True
     use_be_memory = True
@@ -1818,7 +1820,7 @@ def bundle_adjust(
             #start = time.time()
 
             J_pose, J_land, fx0 = ComputeDerivativeMatricesNew (
-                x0_t_cam, x0_t_land, camera_indices_, point_indices_, torch_points_2d, unique_poses_in_c_, unique_landmarks_in_c_ )
+                x0_t_cam, x0_t_land, camera_indices_, point_indices_, torch_points_2d, unique_poses_in_c_, unique_landmarks_in_c_)
             #print("Jac time ", time.time() - start )
 
             # 2 * JtJ majorizes, note JtJ:=(UW|W^TV), so W part majorized by *2:
@@ -1836,6 +1838,8 @@ def bundle_adjust(
             else:
                 # could do only where needed? smallest ev is indeed small?
                 JltJlDiag = JltJl + blockEigenvalue(JltJl, 3)
+                # wo: 245 fails now. with: 52 fails miserably.
+                #JltJlDiag = blockEigenvalueFull(JltJl, 3, 1e-3) # -3: ok, -4:  better?
 
             if verbose_Jac:
                 absDiagJltJl = np.abs(JltJl.diagonal()).reshape(-1,3)
@@ -1854,12 +1858,12 @@ def bundle_adjust(
             bl = J_land.transpose() * fx0
             JtJ = J_pose.transpose() * J_pose
             #JtJ = J_pose.transpose().dot(J_pose)
-            #print(JtJ.data.shape)
             JtJ = JtJ + diag_sparse(np.zeros(JtJ.diagonal().shape[0])) # force symmetry in data!
             #print(JtJ.data.shape)
             #print("JtJ ", JtJ) # is this randomly dispalced?
-            # JtJ = blockEigenvalueFull(JtJ, 9, 1e-8) # TODO this i am trying to get runnning.
-            # JtJ = blockEigenvalueFullPositive(JtJ, 9, 0) # THIS has no effect here, will never have negative in UL VL ?!
+            # worse, despite:
+            #JtJ = blockEigenvalueFull(JtJ, 9, 1e-15) # 14, 15 works, 16 fails TODO this i am trying to get runnning. Still negative eigenvalues here.
+            #JtJ = blockEigenvalueFullPositive(JtJ, 9, 1e-32) # THIS has no effect here 1266, will never have negative in UL VL ?!
             #print(JtJ.data.shape)
 
             if verbose_Jac:
@@ -1917,8 +1921,8 @@ def bundle_adjust(
 
                         # idea: descentlemma step is some multiple of JtJ and jtj is bounded by limiting eigenval.
                         # limit is 1e5/1e4?
-                        JtJDiag = blockEigenvalueFull(JtJ, 9, 1e-3) # ?any effect at all?
-                        #JtJDiag = blockEigenvalueFull(JtJ, 9, 1e-4) # ?any effect at all?
+                        #JtJDiag = blockEigenvalueFull(JtJ, 9, 1e-3) # ?any effect at all?
+                        JtJDiag = blockEigenvalueFull(JtJ, 9, 1e-4) # ?any effect at all?
                         if stepSizeSetting: # was ok
                             blockEigenvalueJtJ = LipJ_ * 1e5 * blockEigenvalueFull(JtJ, 9, 1e-4) # ?or what?
                             stepSize = blockEigMult * blockEigenvalueJtJ
@@ -2090,6 +2094,11 @@ def bundle_adjust(
 
         tr_check = (costStart + penaltyStart - costEnd - penaltyP - penaltyL) / (costStart + penaltyStart - costQuad - penaltyP - penaltyL)
         #tr_check = (costStart - costEnd) / (costStart - costQuad) # does not help.
+
+        # does this make sense with DL? solution is clearly better! why increase here?
+        # 0 it. cost 0      59180  cost + penalty  71678  === using L =  0.04510168090928346
+        # 0 it. cost 0/new  63060  cost + penalty  69669  Pits  5
+        # 0 it. cost 1      63091       + penalty  69699
 
         # f(x) <= f(y) + <nabla(f(y) x-y> + Lf/2 |x-y|^2
         # we demand stepsize phi >= 2 Lf. Then even
@@ -2377,7 +2386,7 @@ def updateCluster(
         landmarks_in_c,
         poses_in_c,
         poses_s_in_c,
-        Vl_in_cluster_, # these are for those poses in cluster only. 
+        Vl_in_cluster_, # these are for those poses in cluster only.
         L_in_cluster_,
         LipJ,
         blockEig_in_c_,
@@ -2627,8 +2636,8 @@ def GetPcgScalingDiag(JtJ):
     print("min/max Unorm after ", np.min(temp_), np.max(temp_), " t ", t, " min*max= ", np.min(temp_) * np.max(temp_))
     temp_  = temp_.reshape(-1,9)
     # e-14 to e16 at -2. -6 ->
-    minTresh = 1e-14 # 12 -> 14 for 245 and scale!
-    maxTresh = 1e14
+    minTresh = 1e-15 # 12 -> 14 for 245 and scale!
+    maxTresh = 1e15
     #temp_ = np.sqrt(temp_) # test how much worse this is.
     temp_ = np.fmin(np.fmax(temp_, minTresh), maxTresh) #np.sqrt(np.minimum(np.maximum(t, minTresh), maxTresh))
     #temp_ = np.fmin(np.fmax(temp_, 1e-14), 1e16) # TODO. pick most singular example? 646? 173 maybe / any dubrovnik
@@ -2652,6 +2661,7 @@ def GetPcgScalingDiag(JtJ):
         #scale = 1. / np.maximum(1, 1./ np.sqrt(np.mean(guess)))
         #scale = 1. / np.maximum(1, 1./ np.sqrt(np.median(guess)))
         #scale = 1. / np.maximum(1, 1./ np.sqrt(np.min(guess)))
+        # 1266: 1e-2 * -> 'larger' negative smallest eigenvalues. Is this an issue? How to solve?
         scale = np.sqrt(np.median(guess)) # 245 with scale worse/stalls. 646 wo. max(1, *).
         #scale = np.sqrt(np.min(guess)) # 245 with scale worse/stalls. 646 wo. max(1, *).
         #scale = np.sqrt(np.max(guess)) # best performance if we scale? or changes best blockEig Thresh?
@@ -2888,7 +2898,7 @@ init_lib()
 LipJ = 1 * np.ones(kClusters)
 globalBlockEigUpperLimit = 1e-1 # 1e-1, 1e1?
 blockEig_in_cluster = 1e-5 * np.ones(kClusters) # 1e-4 or 1e-5
-memory_be = 8 # here can shrink, below this only grow.
+memory_be = 3 # 8 # here can shrink, below this only grow.
 print("input blockEig_in_cluster[ci] ", blockEig_in_cluster[0])
 
 tempEigen = [[] for i in range(kClusters)]
@@ -3391,7 +3401,7 @@ else:
             maxPctV = np.sqrt(maxPct)
             #if reject and (np.min(LipJ) < LipJMax) and (ls_it == line_search_iterations-1) and (maxPct * lastCostDRE_bfgs < dre_bfgs) and (primal_cost_v > maxPctV * primal_cost_v_before): # or primal_cost_v > maxPct * primal_cost_u):
             if reject and (beMin < globalBlockEigUpperLimit) and (ls_it == line_search_iterations-1) and (maxPct * lastCostDRE_bfgs < dre_bfgs) and (primal_cost_v > maxPctV * primal_cost_v_before): # or primal_cost_v > maxPct * primal_cost_u):
-                print("Why enter is priaml v that bad or what", primal_cost_v, " ", primal_cost_v_before, " ", maxPctV * primal_cost_v_before)
+                print("Why enter is primal v that bad or what", round_int(primal_cost_v), " ", round_int(primal_cost_v_before), " ", round_int(maxPctV * primal_cost_v_before))
 
                 # revert ! Not clear how to do this.
                 # before, _ = cost_DRE(camera_indices_in_cluster, poses_in_cluster, poses_s_in_cluster,
@@ -3436,13 +3446,15 @@ else:
                     ############
                     oneRound = False
                     # TODO: LipJ or tempBlockEigen.
-                    #LipJ *= np.sqrt(2)
-                    tmp = []
-                    for ci in range(kClusters):
-                        tempBlockEigen[ci][globalIt % memory_be] = \
-                            np.minimum(tempBlockEigen[ci][globalIt % memory_be] * 2, globalBlockEigUpperLimit)
-                        tmp.append(tempBlockEigen[ci][globalIt % memory_be])
-                    print("LipJ *= sqrt(2) = ", np.mean(LipJ), " Be ", tmp)
+                    increase_blockEig = False
+                    if increase_blockEig:
+                        #LipJ *= np.sqrt(2)
+                        tmp = []
+                        for ci in range(kClusters):
+                            tempBlockEigen[ci][globalIt % memory_be] = \
+                                np.minimum(tempBlockEigen[ci][globalIt % memory_be] * 2, globalBlockEigUpperLimit)
+                            tmp.append(tempBlockEigen[ci][globalIt % memory_be])
+                        print("LipJ *= sqrt(2) = ", np.mean(LipJ), " Be ", tmp)
 
                     # TODO: equalize / reset nesterov(acceleration) here.
 
