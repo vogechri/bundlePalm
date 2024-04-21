@@ -824,11 +824,18 @@ def buildResiduumNew(resX, resY) :
     res = np.concatenate(data)
     return res
 
-# TODO: just find more symmetric: np.fliplr(a) vs a.
 def check_symmetric(a, tol=1e-5):
-    # if not np.all(np.abs(a-a.T) < np.fmax(1, np.abs(a)) * tol):
-    #     print(np.abs(a-a.T) < np.fmax(1, np.abs(a)) * tol)
-    return np.all(np.abs(a-a.T) < np.fmax(1, np.abs(a)) * tol)
+    b = np.fliplr(a.copy())
+    a_sym = np.sum(np.abs(a-a.T) < np.abs(b-b.T))
+    b_sym = np.sum(np.abs(a-a.T) > np.abs(b-b.T))
+    #print("a \n", a, " b \n", b, " \n", a_sym, " ", b_sym)
+    return a_sym >= b_sym
+
+# # TODO: just find more symmetric: np.fliplr(a) vs a.
+# def check_symmetric(a, tol=1e-5):
+#     # if not np.all(np.abs(a-a.T) < np.fmax(1, np.abs(a)) * tol):
+#     #     print(np.abs(a-a.T) < np.fmax(1, np.abs(a)) * tol)
+#     return np.all(np.abs(a-a.T) < np.fmax(1, np.abs(a)) * tol)
 
 def blockUpdatePCG(M, A, bs):
     Mi = M.copy()
@@ -898,7 +905,7 @@ def blockEigenvalue(M, bs):
     if bs > 1:
         bs2 = bs * bs
         for i in range(int(M.data.shape[0] / bs2)):
-            mat = M.data[bs2 * i : bs2 * i + bs2].reshape(bs, bs).copy()
+            mat = M.data[bs2 * i : bs2 * i + bs2].copy().reshape(bs, bs)
             if not check_symmetric(mat):
                 mat = np.fliplr(mat)
             # print(i, " ", mat)
@@ -920,7 +927,7 @@ def blockEigenvalueSet(M, bs):
     if bs > 1:
         bs2 = bs * bs
         for i in range(int(M.data.shape[0] / bs2)):
-            mat = M.data[bs2 * i : bs2 * i + bs2].reshape(bs, bs).copy()
+            mat = M.data[bs2 * i : bs2 * i + bs2].copy().reshape(bs, bs)
             if not check_symmetric(mat):
                 mat = np.fliplr(mat)
             # print(i, " ", mat)
@@ -935,7 +942,7 @@ def minEigenvalues(M, bs, get_max_evs=False):
     bs2 = bs * bs
     Ei = np.zeros(int(M.data.shape[0] / bs2))
     for i in range(int(M.data.shape[0] / bs2)):
-        mat = M.data[bs2 * i : bs2 * i + bs2].reshape(bs, bs).copy()
+        mat = M.data[bs2 * i : bs2 * i + bs2].copy().reshape(bs, bs)
         if not check_symmetric(mat):
             mat = np.fliplr(mat)
         # print(i, " ", mat)
@@ -951,7 +958,7 @@ def blockEigenvalueWhereNeeded(M, bs, thresh = 1e-6, replace=False):
     if bs > 1:
         bs2 = bs * bs
         for i in range(int(M.data.shape[0] / bs2)):
-            mat = M.data[bs2 * i : bs2 * i + bs2].reshape(bs, bs).copy()
+            mat = M.data[bs2 * i : bs2 * i + bs2].copy().reshape(bs, bs)
             if not check_symmetric(mat):
                 mat = np.fliplr(mat)
             # print(i, " ", mat)
@@ -984,7 +991,7 @@ def minmaxEv(M, bs):
     if bs > 1:
         bs2 = bs * bs
         for i in range(int(M.data.shape[0] / bs2)):
-            mat = M.data[bs2 * i : bs2 * i + bs2].reshape(bs, bs).copy()
+            mat = M.data[bs2 * i : bs2 * i + bs2].copy().reshape(bs, bs)
             if not check_symmetric(mat):
                 mat = np.fliplr(mat)
             evs = eigvalsh(mat)
@@ -999,32 +1006,79 @@ def minmaxEv(M, bs):
 
     return maxE, minE
 
-def blockEigenvalueFull(M, bs, t = 1e-8):#, x0_t_cam_):
+def blockAddDiag(M, D, t, bs):
+    MD = M.copy()
+    flip = False
+    bs2 = bs * bs
+    for i in range(int(M.data.shape[0] / bs2)):
+        mat = M.data[bs2 * i : bs2 * i + bs2].copy().reshape(bs, bs)
+        if not check_symmetric(mat):
+            mat = np.fliplr(mat)
+            flip = True
+        for j in range(bs):
+            #print(t, " ", D.data.shape)
+            #print(mat.shape, " ", D.data[0,j+i*bs])
+            mat[j,j] += t * D.data[0,j+i*bs]
+        if flip:
+            mat = np.fliplr(mat)
+        MD.data[bs2 * i : bs2 * i + bs2] = mat.flatten()
+    return MD
+
+def blockAdd(M, D, bs):
+    MD = M.copy()
+    flip = False
+    bs2 = bs * bs
+    for i in range(int(M.data.shape[0] / bs2)):
+        mat = M.data[bs2 * i : bs2 * i + bs2].copy().reshape(bs, bs)
+        if not check_symmetric(mat):
+            mat = np.fliplr(mat)
+            flip = True
+        matD = D.data[bs2 * i : bs2 * i + bs2].copy().reshape(bs, bs)
+        if not check_symmetric(matD):
+            matD = np.fliplr(matD)
+        mat += matD
+        if flip:
+            mat = np.fliplr(mat)
+        MD.data[bs2 * i : bs2 * i + bs2] = mat.flatten()
+    return MD
+
+def blockEigenvalueFull(M, bs, t = 1e-4):#, x0_t_cam_):
     Ei = M.copy()
     if bs > 1:
         bs2 = bs * bs
         for i in range(int(M.data.shape[0] / bs2)):
+            #print(M.data.shape)
             mat = Ei.data[bs2 * i : bs2 * i + bs2].reshape(bs, bs)
             flip = False
             if not check_symmetric(mat):
                 mat = np.fliplr(mat)
                 flip = True
             evs, evv = eigh(mat)
-            #evs = np.fmax(evs, evs[bs-1] * t)
-            #print("evs ", evs)
-            evs = np.fmax(evs, np.maximum(1e-16, evs[bs-1] * t))
+            evs = np.fmax(evs, evs[bs-1] * t) # * 5e-5)? # tuned at 52: 1e-6: , 1e-4: , 1e-5: 476
             #print("evs ", evs[bs-1] / evs)
-            # print("evv ", evv)
-            # print(" cam " , x0_t_cam_[i,:])
-
+            #print("evv ", evv[bs-1])
+            #print("evv ", evv)
+            #print(" cam " , x0_t_cam_[i,:])
             mat = evv.dot(diag_sparse(evs) * evv.transpose())
-            #mat = evv.transpose().dot(diag_sparse(evs) * evv)
             if flip:
                 mat = np.fliplr(mat)
             Ei.data[bs2 * i : bs2 * i + bs2] = mat.flatten()
     else:
         Ei = M.copy()
     return Ei
+
+def isSymmetric(M, B, bs):
+    enter = False
+    if bs > 1:
+        bs2 = bs * bs
+        for i in range(int(M.data.shape[0] / bs2)):
+            mat = M.data[bs2 * i : bs2 * i + bs2].copy().reshape(bs, bs)
+            matB = B.data[bs2 * i : bs2 * i + bs2].copy().reshape(bs, bs)
+            if not check_symmetric(mat) and not check_symmetric(np.fliplr(mat)):
+                enter = True
+                print("mat non symmetric " ,mat, "\n", matB)
+
+    return not enter
 
 def blockEigenvalueSqrt(M, bs, t = 1e-14):
     Ei = M.copy()
@@ -1051,6 +1105,64 @@ def blockEigenvalueSqrt(M, bs, t = 1e-14):
     else:
         Ei = M.copy()
     #exit()
+    return Ei
+
+# 
+def blockEigenvalueSqrtNew(M, bs):
+    Ei = M.copy()
+    if bs > 1:
+        bs2 = bs * bs
+        for i in range(int(M.data.shape[0] / bs2)):
+            mat = Ei.data[bs2 * i : bs2 * i + bs2].reshape(bs, bs)
+            flip = False
+            if not check_symmetric(mat):
+                #print("blockEigenvalueSqrt in " , mat)
+                mat = np.fliplr(mat)
+                #print("blockEigenvalueSqrt flip " , mat)
+                flip = True
+            # centralize, thrshold & sqrt and back -- scale back!
+            # locally or global JtJ? not sure.
+            evs, evv = eigh(mat)
+            # TODO: this was 'better' than all others but 1266, 931 (ladybug, few lms in cam) escalate: v becomes bad, f(v) super bad.
+            #evs = 1e-1 * np.sqrt(np.fmax(evs, evs[bs-1] * 1e-14)) # 15: ok maybe as this is combined in matrix -> loss of small values.
+            #evs = np.sqrt(np.fmax(evs, 1e-16))
+            #evs = np.fmin(evs, evs[0] * 1e14)
+            evs = 1e-1 * np.power(np.fmax(evs, evs[bs-1] * 1e-9), 0.475) # 9 appears to be lowest wo. diff to e-14: ok maybe as this is combined in matrix -> loss of small values.
+            # idea minblock higher, use blockEigFull( instead. not ^0.5 but ^0.8 or 0.75?
+            #evs = 1e-1*np.power(np.fmax(evs, evs[bs-1] * 1e-8), 0.75)
+            # plot DIFFERENCE in maxEv, minEv between cameras for non-sqrt pcg.
+
+            # print("evs ", evs)
+            # print("evs ", evs[bs-1] / evs)
+            # #print("evv ", evv[bs-1])
+            # print("evv ", evv)
+            mat = evv.dot(diag_sparse(evs).dot(evv.transpose()))
+            if flip:
+                mat = np.fliplr(mat)
+                #print("blockEigenvalueSqrt out ", mat)
+            Ei.data[bs2 * i : bs2 * i + bs2] = mat.flatten()
+    else:
+        Ei = M.copy()
+    return Ei
+
+def blockEigenvalueFullPositive(M, bs, t=0):
+    Ei = M.copy()
+    if bs > 1:
+        bs2 = bs * bs
+        for i in range(int(M.data.shape[0] / bs2)):
+            mat = Ei.data[bs2 * i : bs2 * i + bs2].reshape(bs, bs)
+            flip = False
+            if not check_symmetric(mat):
+                mat = np.fliplr(mat)
+                flip = True
+            evs, evv = eigh(mat)
+            evs = np.fmax(evs, t) # * 5e-5)? # tuned at 52: 1e-6: , 1e-4: , 1e-5: 476
+            mat = evv.dot(diag_sparse(evs) * evv.transpose())
+            if flip:
+                mat = np.fliplr(mat)
+            Ei.data[bs2 * i : bs2 * i + bs2] = mat.flatten()
+    else:
+        Ei = M.copy()
     return Ei
 
 def blockEigenvalueThresh(M, bs, t = 1e-10):
@@ -1114,7 +1226,7 @@ def solvePowerIts(Ul, W, Vli, bS, m_):
     return xk
 
 # test Loop over L0=x, L=y here. Likely best to do grid search to get an idea. model as exp(-poly(L,it))
-def solveByGDNesterov(Ul, W, Vli, bS, m):
+def solveByGDNesterov(Ul, W, Vli, bS, m_):
     Lip = 0.9 # 100 -> 1. # TODO: play, find out how to progress over time.
     lambda0 = (1.+np.sqrt(5.)) / 2. # l=0 g=1, 0, .. L0=1 g = 0,..
 
@@ -1128,7 +1240,7 @@ def solveByGDNesterov(Ul, W, Vli, bS, m):
         costk = xk.dot(Ul * xk - W * (Vli * (W.transpose() * xk)) - 2 * bS)
         print("-1 gd cost ", costk)
 
-    for it__ in range(m):
+    for it__ in range(m_):
         lambda1 = (1 + np.sqrt(1 + 4 * lambda0**2)) / 2
         gamma = (1-lambda0) / lambda1
         lambda0 = lambda1
@@ -1753,7 +1865,7 @@ def bundle_adjust(
         # TODO: set to 1 and play with Limit. Set higher. is 1e-2 same 1e-1? is 1e-3 worse?
         threshWhereNeeded = 1e-4 # this higher -> blockEigMult, blockEigMultLimit lower?
         blockEigMultJtJ = 1e-4 # 173: little effect 1e-6/4/8. just 173 or always not mattering much?
-        blockEigMultLimit = 1e-5
+        blockEigMultLimit = 1e-5 # TODO 1e-5 is normal
         decent_lemma_divisor = 2 # 2/4: higher does indeed delay flow over, but result is worse.
         Derivative_at_end = False # maybe negative to have update v and updte u differ.
         # limit lower -> major effect from partitioning only?
@@ -1819,24 +1931,13 @@ def bundle_adjust(
             JtJ = J_pose.transpose() * J_pose
             # JtJDiag = diag_sparse(np.fmax(JtJ.diagonal(), 1e-4))
 
-            # this might be an issue for poses.
-            # R|T| f,d. especially d might have much different (smaller) eigenvalues.
-
-            #blockEigenvalueJtJ = blockEigenvalue(JtJ, 9) # TODO: what if this is only needed for 0-eigen directions? return !=0 only if in small eigendir
-            blockEigenvalueJtJ = blockEigenvalueWhereNeeded(JtJ, 9, threshWhereNeeded) # here ok? 173: 1e-6
-            stepSize = blockEigMult * blockEigenvalueJtJ + JJ_mult * JtJ.copy() # Todo '2 *' vs 1 by convex.
-
-            #blockEigenvalueJtJ = blockEigenvalueFull(JtJ, 9, x0_t_cam)
-            #stepSize = blockEigenvalueJtJ + JJ_mult * JtJ.copy() # Todo '2 *' vs 1 by convex.
-
-            # TODO: cam hessian scaled awfully. degenerate.
             maxE, minE = minmaxEv(JtJ, 9)
             JtJSpec = [round_int(np.max(maxE/minE)), np.min(maxE/minE), round_int(np.median(maxE/minE))]
             print("minmax ev JtJ ", np.max(maxE), " ", np.max(minE), " ", np.min(maxE), " ",  np.min(minE), " spec ", JtJSpec, file=sys.stderr )
             if weird_investigate:
-                print("stepSz maxE", maxE)
-                print("stepSz minE", minE)
-                print("stepSz spec ", np.round(maxE/minE))
+                #print("JtJ maxE", maxE, file=sys.stderr)
+                #print("JtJ minE", minE, file=sys.stderr)
+                print("JtJ spec ", np.round(maxE/minE), file=sys.stderr)
 
             #maxE, minE = minmaxEv(stepSize, 9)
             #print("minmax ev stepSz ", np.max(maxE), " ", np.max(minE), " ", np.min(maxE), " ",  np.min(minE), " spec ", np.max(maxE/minE) )
@@ -1846,41 +1947,12 @@ def bundle_adjust(
             absDiagJtJ = np.abs(JtJ.diagonal()).reshape(-1,9)
             print( "Diag pseudo HessP (max/min/med)",  np.max(absDiagJtJ, axis=0), " ", np.min(absDiagJtJ, axis=0),  " ", np.median(absDiagJtJ, axis=0), file=sys.stderr )
 
-            # TODO: here, also write min/max Eigenvec and spec to debug
-            # blockEigenvalueJtJ = blockEigenvalueFull(JtJ, 9) # print eval/vec structure
-            # stepSize = blockEigenvalueJtJ + JJ_mult * JtJ.copy() # Todo '2 *' vs 1 by convex.
-
-            # try this. maybe eigenvals very far apart?
-            #stepSize = JJ_mult * JtJ.copy() + minDiag * diag_sparse(np.fmax(JtJ.diagonal(), 1e-4))
-
-            # stepSize = 1. * (blockEigMult * blockEigenvalueJtJ + 1.4 * JtJ.copy()) # Todo '2 *' vs 1 by convex.
-            #stepSize = 1. * (1e-1 * diag_sparse(np.ones(JtJ.shape[0])) + 1.1 * JtJ.copy()) # not at all working
-            # both of these are faster (accelerated only? or anyways?)
-            # todo: maybe adjust factor on JtJ instead? or check extrapolation of s wrt. cost / penalty.
-            # faster for normal, non accelerated runs
-            #stepSize = diag_sparse(np.fmax(blockEigMult * JtJ.diagonal(), 1e-2)) + 1.1 * JtJ.copy() # stable 27.9 non-acc. with unstable but faster.
-            #stepSize = diag_sparse(np.fmax(blockEigMult * JtJ.diagonal(), 1e-1)) + 2.0 * JtJ.copy()# stable 28.1 non-acc. with unstable but faster.
-            # this is what dre test is for, no? maybe cannot compare if we alter RELATIVE weight of step size.
-
-            # if not issparse(Vl_in_c_) and it_ < 1:
-            #     stepSize = blockEigenvalueJltJl
-            # else: # increase where needed -- this here is WAY too slow?
-            #     stepSize.data = np.maximum(0.05 * stepSize.data, blockEigenvalueJltJl.data) # else diagSparse of it
-
-            # shoudl not depend on eigenvalue of block. the small ones should be increased, since we invert the matrix.
-            #stepSize = LipJ * JtJ.copy() + J_eps2 * diag_sparse(np.ones(JtJ.shape[0])) # ?
-            #stepSize = LipJ * JtJ.copy() + diag_sparse(np.fmax(JtJ.diagonal(), 1e-4))
-
             JltJl = J_land.transpose() * J_land
             absDiagJltJl = np.abs(JltJl.diagonal()).reshape(-1,3)
             print( "Diag pseudo HessL (max/min/med)",  np.max(absDiagJltJl, axis=0), " ", np.min(absDiagJltJl, axis=0),  " ", np.median(absDiagJltJl, axis=0), file=sys.stderr )
-            # JltJlDiag = JltJl + J_eps * diag_sparse(np.ones(JltJl.shape[0]))
-            # maybe more appropriate?
 
-            #blockEigenvalueJltJl = 1e-0 * blockEigenvalue(JltJl, 3) # TODO: trial and error.
-            blockEigenvalueJltJl = 1e6 * blockEigenvalue(JltJl, 3) # TODO: trial and error. 1e3
-            #blockEigenvalueJltJl = blockEigenvalueWhereNeeded(JltJl, 3) # nope not at all.
-            JltJlDiag = JltJl + 1e-6 * blockEigenvalueJltJl # play around at 173 example. 1e-8: 58 / 0  ======== DRE BFGS ======  518626, 1e-6 518 MUCH earlier
+            #blockEigenvalueJltJl = blockEigenvalueWhereNeeded(JltJl, 3)
+            JltJlDiag = JltJl + blockEigenvalue(JltJl, 3)
 
             verboseSpec = False
             if verboseSpec:
@@ -1889,9 +1961,6 @@ def bundle_adjust(
                 maxE, minE = minmaxEv(JltJlDiag, 3)
                 print("JltJlDiag spectral ", (maxE/minE)) # almost == 2, since blockEigenvalueJltJl
                 #print("blockEigenvalueJltJl ", blockEigenvalueJltJl)
-
-            # could do only where needed? smallest ev is indeed small?
-            JtJDiag = stepSize.copy() # max 1, 1/L, line-search dre fails -> increase
 
             maxE, minE = minmaxEv(JltJl, 3)
             #print("minmax ev JltJl ", np.max(maxE), " ", np.max(minE), " ", np.min(maxE), " ",  np.min(minE), " spec ", np.max(maxE/minE) )
@@ -1903,30 +1972,17 @@ def bundle_adjust(
             JltJlDiagSpec = [round_int(np.max(maxE/minE)), np.min(maxE/minE), round_int(np.median(maxE/minE))]
             print("minmax ev JltJlD ", np.max(maxE), " ", np.max(minE), " ", np.min(maxE), " ",  np.min(minE), " spec ", JltJlSpec, " -> ", JltJlDiagSpec, file=sys.stderr )
 
-            #JtJDiag = diag_sparse(np.fmax(JtJ.diagonal(), 1e-4)) # diagonal is solid. slower than JtJ + something though
-            if newForUnique:
-                JtJDiag = copy_selected_blocks(JtJDiag, poses_only_in_cluster_, 3)
-                JtJDiag = JtJDiag + L * blockEigMult * blockEigenvalueJtJ
-
             # maybe better: 3x3 matrix sqrt(|M|_1 |M|inf) as diag. Yet this removes effect of 'L' getting small = large steps.
             # do i need to keep memory to ensure it remains >? or pre compute grad (and store)?
             #print(" min/max JtJ.diag ", np.min(JtJ.diagonal()), " ", np.max(JtJ.diagonal()), " adjusted ", np.min(JtJDiag.diagonal()), " ", np.max(JtJDiag.diagonal()))
             #print("JltJlDiag.shape ", JltJlDiag.shape, JltJlDiag.shape[0]/3)
-
-            JtJDiag = 1/L * JtJDiag # max 1, 1/L, line-search dre fails -> increase
 
             W = J_pose.transpose() * J_land
             bp = J_pose.transpose() * fx0
             bl = J_land.transpose() * fx0
 
             prox_rhs = x0_p_ - s_p_
-            if newForUnique: # alternative turn off completely, use 2u-s -> return (u-s)/2 to average u+k = uk + delta uk
-                landmarks_in_many_cluster_ = np.invert(landmarks_only_in_cluster_)
-                diag_present = diag_sparse( np.repeat((np.ones(n_points_) * landmarks_in_many_cluster_).reshape(-1,1), 3).flatten() )
-                prox_rhs = 1 * diag_present * prox_rhs
-
             costStart = np.sum(fx0**2)
-            penaltyStartConst = prox_rhs.dot(JtJDiag * prox_rhs)
 
             if newVersion:
                 # traditional ADMM: not good -- also return
@@ -1941,7 +1997,7 @@ def bundle_adjust(
 
                 # blockEigenvalueJtJ = 1e2 * threshWhereNeeded * blockEigenvalue(JtJ, 9)
                 #blockEigenvalueJtJ = 1e6 * threshWhereNeeded * blockEigenvalue(JtJ, 9) # TODO
-                blockEigenvalueJtJ = 1e5 * threshWhereNeeded * blockEigenvalue(JtJ, 9) # TODO? lower for some, e.g. 931. higher for others
+                blockEigenvalueJtJ = 1e1 * blockEigenvalue(JtJ, 9) # TODO? lower for some, e.g. 931. higher for others
 
                 # TODO: LipJ for both? or only JJ?
                 #stepSize = JJ_mult * JtJ.copy() + blockEigMult * blockEigenvalueJtJ
@@ -1977,9 +2033,15 @@ def bundle_adjust(
                 #print("minmax ev JtJDiag ", np.max(maxE), " ", np.max(minE), " ", np.min(maxE), " ",  np.min(minE), " spec ", np.max(maxE/minE))
 
                 if weird_investigate:
-                    print("stepSz maxE", maxE)
-                    print("stepSz minE", minE)
-                    print("stepSz spec ", np.round(maxE/minE))
+                    #print("stepSz maxE", maxE, file=sys.stderr)
+                    #print("stepSz minE", minE, file=sys.stderr)
+                    print("stepSz spec ", np.round(maxE/minE), file=sys.stderr)
+
+                if not isSymmetric(stepSize, JtJ, 9):
+                    print("Symmetric stepSize", isSymmetric(stepSize, JtJ, 9))
+                    print("stepSize.data.shape",  stepSize.data.shape) # not ok shape
+                    print("JtJ.data.shape",  JtJ.data.shape) # ok
+                    print(blockEigenvalueJtJ.data.shape)
 
                 if verboseSpec:
                     print("stepSize spectral ", (maxE/minE))
@@ -2004,6 +2066,9 @@ def bundle_adjust(
         if newVersion:
             Ul = JtJ + L * JtJDiag + stepSize
             penaltyStart = penaltyStartConst
+
+        Ul = blockEigenvalueFullPositive(Ul, 9, 0) #? when should this happen? Never?
+        Vl = blockEigenvalueFullPositive(Vl, 3, 0) #? when should this happen? Never?
 
         Vli = blockInverse(Vl, 3)
         bp_s = bp + L * JtJDiag * prox_rhs # TODO: + or -. '+', see above
@@ -2622,11 +2687,80 @@ def perform_full_iteration(camera_indices_in_cluster_, point_indices_in_cluster_
     return primalCost_u, dre_, L_in_cluster_, Ul_in_cluster_, poses_in_cluster_, poses_v_, landmarks_, \
         nabla_p_in_cluster_, blockEig_in_cluster__, poses_s_in_cluster_pre_, U_cluster_zeros_, steplength_
 
+def getScaling(min_, max_): # aim at max * min = 1. So max * x = 1/(min * x). x^2 = 1/(min * max)
+    # max * np.sqrt(1. / (min * max)) = np.sqrt(max^2 / (min * max)) = np.sqrt(max / min)
+    # 1/ (min * np.sqrt(1. / (min * max)) = np.sqrt(min * max / min^2) = np.sqrt(max / min).
+    return np.sqrt(1. / (min_ * max_) )
+
+def GetPcgScalingDiag(JtJ):
+    temp_  = np.squeeze(np.asarray((np.abs(JtJ)).sum(axis=0) ))
+    # temp_W = np.squeeze(np.asarray((np.abs(W)).sum(axis=1) ))
+    # temp_  = temp_ + temp_W
+    print("min/max Unorm before ", np.min(temp_), np.max(temp_))
+    t = getScaling(np.min(temp_), np.max(temp_))
+    temp_  = np.squeeze(np.asarray((np.abs(t * JtJ)).sum(axis=0) ))
+    # temp_W = np.squeeze(np.asarray((np.abs(t * W)).sum(axis=1) ))
+    # temp_  = temp_ + temp_W
+    print("min/max Unorm after ", np.min(temp_), np.max(temp_), " t ", t, " min*max= ", np.min(temp_) * np.max(temp_))
+    #temp_  = temp_.reshape(-1,9)
+    # e-14 to e16 at -2. -6 ->
+    minTresh = 1e-15 # 12 -> 14 for 245 and scale!
+    maxTresh = 1e15
+    #temp_ = np.sqrt(temp_) # test how much worse this is.
+    temp_ = np.fmin(np.fmax(temp_, minTresh), maxTresh) #np.sqrt(np.minimum(np.maximum(t, minTresh), maxTresh))
+    #temp_ = np.fmin(np.fmax(temp_, 1e-14), 1e16) # TODO. pick most singular example? 646? 173 maybe / any dubrovnik
+    print("Preconditioners min/max Unorm after thresholding ", np.min(temp_), np.max(temp_))
+
+    # not true? 394, look at other examples.
+    absDiagJtJ = np.abs(JtJ.diagonal())
+    guess = diag_sparse(1./temp_.flatten()) * absDiagJtJ * diag_sparse(1./temp_.flatten())
+    print("Preconditioners min/max guess ", np.min(guess), np.max(guess))
+
+    scaleToHaveValuesAroundOneForHess = True
+    if scaleToHaveValuesAroundOneForHess:
+        #temp_ /= np.sqrt(t) #np.sqrt(np.minimum(np.maximum(t, minTresh), maxTresh))
+        #print("Preconditioners min/max Unorm after scaling 1", np.min(temp_), np.max(temp_))
+        #absDiagJtJ = np.abs(JtJ.diagonal())
+        #print("absDiagJtJ ", absDiagJtJ.shape, " ", absDiagJtJ)
+        #print("temp_ ", temp_.shape, " ", temp_)
+        #guess = diag_sparse(1./temp_.flatten()) * absDiagJtJ * diag_sparse(1./temp_.flatten())
+        #print("Preconditioners min/max guess ", np.min(guess), np.max(guess))
+        #scale = 1. / np.maximum(1, 1./ np.sqrt(np.max(guess)))
+        #scale = 1. / np.maximum(1, 1./ np.sqrt(np.mean(guess)))
+        #scale = 1. / np.maximum(1, 1./ np.sqrt(np.median(guess)))
+        #scale = 1. / np.maximum(1, 1./ np.sqrt(np.min(guess)))
+        # 1266: 1e-2 * -> 'larger' negative smallest eigenvalues. Is this an issue? How to solve?
+        scale = np.sqrt(np.median(guess)) # 245 with scale worse/stalls. 646 wo. max(1, *).
+        #scale = np.sqrt(np.min(guess)) # 245 with scale worse/stalls. 646 wo. max(1, *).
+        #scale = np.sqrt(np.max(guess)) # best performance if we scale? or changes best blockEig Thresh?
+        # print(scale) # there has to be a stepsize issue?
+        # print(scale) # there has to be a stepsize issue?
+        temp_ = temp_ * scale # * 1e5 works but not as well ()
+        print("Preconditioners min/max Unorm after scaling 2: ", np.min(temp_), np.max(temp_))
+        guess = diag_sparse(1./temp_.flatten()) * absDiagJtJ * diag_sparse(1./temp_.flatten())
+        print("Preconditioners min/max guess ", np.min(guess), np.max(guess))
+        #exit()
+        # i could also thresh AGAIN? does not make sense!? more updating? adjust vnorm? stronger descent lemma correction / more?
+        #temp_ = np.fmin(np.fmax(temp_, minTresh), maxTresh) #np.sqrt(np.minimum(np.maximum(t, minTresh), maxTresh))
+        #print("Preconditioners min/max Unorm after thresholding ", np.min(temp_), np.max(temp_))
+
+    return temp_
+
 def GetPreconditioners(cameras_, points_3d_, points_2d_, camera_indices_, point_indices_):
     J_pose, J_land, fx0_ = ComputeDerivativeMatrixInit(cameras_, points_3d_, points_2d_, camera_indices_, point_indices_)
     disable_basis_pcg = True
     disable_new_pcg = False
     JtJ = J_pose.transpose() * J_pose
+    JtJ = JtJ + diag_sparse(np.zeros(JtJ.shape[0]))
+    print("Get Pcg, cost: ", np.sum(fx0_**2))
+
+    # temp_  = np.squeeze(np.asarray((np.abs(JtJ)).sum(axis=0) ))
+    # print("min/max Unorm before ", np.min(temp_), np.max(temp_))
+    # t = getScaling(np.min(temp_), np.max(temp_))
+    # JtJ = JtJ * t
+    # temp_  = np.squeeze(np.asarray((np.abs(JtJ)).sum(axis=0) ))
+    # print("min/max Unorm after ", np.min(temp_), np.max(temp_))
+
     # W = J_pose.transpose() * J_land
     orig = False
     if orig:
@@ -2689,8 +2823,12 @@ def GetPreconditioners(cameras_, points_3d_, points_2d_, camera_indices_, point_
 
     # could also compute locally / all the time! 542: appears to 'go crazy' after 20 its.
     JltJl = J_land.transpose() * J_land
-    Vnorm_ = diag_sparse(np.squeeze(np.asarray(1 * ( (np.abs(JltJl)/10).sum(axis=0) ))))
+    Vnorm_ = diag_sparse(np.squeeze(np.asarray((np.abs(JltJl)).sum(axis=0) )))
     temp_  = Vnorm_.data.reshape(-1,3)
+
+    # t = getScaling(np.min(temp_), np.max(temp_))
+    # temp_ *= t
+
     #temp_ /= np.median(temp_, axis = 0)[np.newaxis,:]
     temp_ = np.sqrt(temp_)
     print("min/max Vnorm ", np.min(temp_), np.max(temp_))
@@ -2707,7 +2845,8 @@ def GetPreconditioners(cameras_, points_3d_, points_2d_, camera_indices_, point_
     #temp_ = np.repeat(temp_[:,np.newaxis], 3, axis=1)
 
     Vnorm_ = diag_sparse(1e0 * temp_.flatten())
-    Vnorm_ = diag_sparse(np.ones(points_3d.flatten().shape[0])) # 52: this is much better -- could be random
+    #Vnorm_ = diag_sparse(np.ones(points_3d.flatten().shape[0])) # 52: this is much better -- could be random
+
     # Diag pseudo HessL (max/min/med) [ 4714908081545485312.00  9787621390603782144.00  5826396097922281472.00]   [ 3.43  19.01  10.47]   [ 143633.31  248961.93  156450.49]
     # Diag pseudo HessL (max/min/med) [ 10.27  10.69  9.98]   [ 0.27  0.68  0.16]   [ 5.00  7.91  5.21]
 
@@ -2732,14 +2871,18 @@ def GetPreconditioners(cameras_, points_3d_, points_2d_, camera_indices_, point_
     #Unorm_all_sqrt = 1e-1 * JtJ + 1e-12 * blockEigenvalue(JtJ, 9)
     #Unorm_all_sqrt /= np.median(Unorm_all_sqrt.diagonal())
 
-    temp_ = np.squeeze(np.asarray((np.abs(JtJ)).sum(axis=0) ))
-    #Unorm_all_sqrt = 1e-2 * diag_sparse(np.sqrt(temp_).flatten()) + 1e-14 * blockEigenvalueSqrt(JtJ, 9)
-    # TODO go0d:?!
-    # Unorm_all_sqrt = 1e-2 * diag_sparse(temp_.flatten()) + 1e-14 * blockEigenvalueSqrt(JtJ, 9) # used
-    # 1e-1 and 1e-2 are identical (1266, 257), 1e0 as well. 1e-3 worse!
-    Unorm_all_sqrt = 1e-2 * (diag_sparse(temp_.flatten()) + 1e-14 * blockEigenvalueSqrt(JtJ, 9))
-    #Unorm_all_sqrt = 0.5 * diag_sparse(np.sqrt(temp_).flatten()) + 0.5 * blockEigenvalueSqrt(JtJ + 1e-14 * blockEigenvalue(JtJ, 9), 9)
-    # test
+    Unorm_all_sqrt = blockEigenvalueSqrtNew(JtJ, 9)
+    #Unorm_all_sqrt = blockEigenvalueSqrtNew(JtJ + 1e-14 * blockEigenvalue(JtJ, 9), 9)
+
+    if False: # before, likely doing well.
+        temp_ = np.squeeze(np.asarray((np.abs(JtJ)).sum(axis=0) ))
+        #Unorm_all_sqrt = 1e-2 * diag_sparse(np.sqrt(temp_).flatten()) + 1e-14 * blockEigenvalueSqrt(JtJ, 9)
+        # TODO go0d:?!
+        # Unorm_all_sqrt = 1e-2 * diag_sparse(temp_.flatten()) + 1e-14 * blockEigenvalueSqrt(JtJ, 9) # used
+        # 1e-1 and 1e-2 are identical (1266, 257), 1e0 as well. 1e-3 worse!
+        Unorm_all_sqrt = 1e-2 * (diag_sparse(temp_.flatten()) + 1e-14 * blockEigenvalueSqrt(JtJ, 9))
+        #Unorm_all_sqrt = 0.5 * diag_sparse(np.sqrt(temp_).flatten()) + 0.5 * blockEigenvalueSqrt(JtJ + 1e-14 * blockEigenvalue(JtJ, 9), 9)
+        # test
     
     #Unorm_all_sqrt = 1e-2 * (blockEigenvalueThresh(JtJ, 9) + 1e-10 * blockEigenvalue(JtJ, 9))
     #Unorm_all_sqrt = 1e-2 * (JtJ + 1e-10 * blockEigenvalue(JtJ, 9))
@@ -2775,9 +2918,11 @@ def GetPreconditioners(cameras_, points_3d_, points_2d_, camera_indices_, point_
     if disable_new_pcg:
         Unorm_all_sqrt = diag_sparse(np.ones(Unorm_all_sqrt.shape[0])) + 1e-20 * JtJ
 
+    Unorm_all_sqrt = Unorm_all_sqrt + diag_sparse(np.zeros(Unorm_all_sqrt.shape[0]))
+
     return Unorm_, Vnorm_, fx0_, Unorm_all_sqrt
 
-def RedoPreconditioners(cameras_, points_3d_, points_2d_, camera_indices_, point_indices_, Unorm_allinv):
+def RedoPreconditioners(cameras_, points_3d_, points_2d_, camera_indices_, point_indices_, Unorm_allinv, Vnorm_old):
     #torch_cams = from_numpy((Unorm_allinv * cameras_.flatten()).reshape(-1,9))
     #torch_lands = from_numpy(points_3d_.reshape(-1,3))
     #torch_points_2d = from_numpy(points_2d_)
@@ -2787,8 +2932,12 @@ def RedoPreconditioners(cameras_, points_3d_, points_2d_, camera_indices_, point
     #     torch_cams, torch_lands, camera_indices_, point_indices_,
     #     torch_points_2d, range(torch_cams.shape[0]), range(torch_lands.shape[0]) )
 
+    Vnorm_old_ = Vnorm_old.copy()
+    Vnorm_old_.data = 1. / Vnorm_old.data
+
     J_pose, J_land, fx0_ = ComputeDerivativeMatrixInit(Unorm_allinv * cameras_.flatten(), \
-        points_3d_, points_2d_, camera_indices_, point_indices_)
+        (Vnorm_old_ * points_3d_.flatten()).reshape(-1,3), points_2d_, camera_indices_, point_indices_)
+    print("Redo Pcg, cost: ", np.sum(fx0_**2))
 
     # basic idea. Hes = J^tJ operating on x. J^tJ*x.
     # pcg with M:
@@ -2797,9 +2946,10 @@ def RedoPreconditioners(cameras_, points_3d_, points_2d_, camera_indices_, point
     # M = sqrt(J^t J) -> V^T sqrt(E) V, with J^tJ = V^T E V ->
     # M^t J^t J M = V^T sqrt(E) V  [V^T E V]  V^T sqrt(E) V = Identity.
     JtJ = J_pose.transpose() * J_pose
+    JtJ = JtJ + diag_sparse(np.zeros(JtJ.shape[0]))
     #Unorm_all_new = (2 * JtJ + 1e-4 * blockEigenvalueWhereNeeded(JtJ, 9, 1e-4)) * 1e-6 # experimental
     #Unorm_all_new = (2 * JtJ + 1e-6 * blockEigenvalueWhereNeeded(JtJ, 9, 1e-12)) # cases exist w 1e-4 no enough (173).
-    Unorm_all_new = blockEigenvalueFull(JtJ, 9, 1e-10) + 0 * JtJ # trick to ensure 'correct' order in matrix
+    #Unorm_all_new = blockEigenvalueFull(JtJ, 9, 1e-10) + 0 * JtJ # trick to ensure 'correct' order in matrix
     #print(Unorm_all_new)
     #print("np.mean(Unorm_all_new.diagonal() ", np.mean(Unorm_all_new.diagonal()))
     #print("np.median(Unorm_all_new.diagonal() ", np.median(Unorm_all_new.diagonal()))
@@ -2808,17 +2958,23 @@ def RedoPreconditioners(cameras_, points_3d_, points_2d_, camera_indices_, point
     #print(Unorm_all_old)
     #print(Unorm_all_old.data.shape)
 
-    #print(Unorm_all_new.data.shape)
-    Unorm_all_new_sqrt = 1e-3 * blockEigenvalueSqrt(Unorm_all_new, 9)
-    #print(Unorm_all_new_sqrt.data.shape)
-    #Unorm_all_new_sqrt *= 1000./np.mean(Unorm_all_new_sqrt.diagonal()) # e.g. 427 this is needed, WTF?
-    #Unorm_all_new_sqrt *= np.minimum(1, 1e2/np.median(Unorm_all_new_sqrt.diagonal())) # e.g. 427 this is needed, WTF?
-    #print("np.mean(Unorm_all_new_sqrt.diagonal() ", np.mean(Unorm_all_new_sqrt.diagonal()))
-    #print(Unorm_all_new_sqrt.data.shape)
+    if False:
+        #print(Unorm_all_new.data.shape)
+        Unorm_all_new_sqrt = 1e-3 * blockEigenvalueSqrt(Unorm_all_new, 9)
+        #print(Unorm_all_new_sqrt.data.shape)
+        #Unorm_all_new_sqrt *= 1000./np.mean(Unorm_all_new_sqrt.diagonal()) # e.g. 427 this is needed, WTF?
+        #Unorm_all_new_sqrt *= np.minimum(1, 1e2/np.median(Unorm_all_new_sqrt.diagonal())) # e.g. 427 this is needed, WTF?
+        #print("np.mean(Unorm_all_new_sqrt.diagonal() ", np.mean(Unorm_all_new_sqrt.diagonal()))
+        #print(Unorm_all_new_sqrt.data.shape)
 
-    Unorm_all_new_sqrt = 1e1 * blockEigenvalueSqrt(JtJ, 9) + 1e-12 * blockEigenvalue(JtJ, 9)
-    Unorm_all_new_sqrt = 1e1 * blockEigenvalueSqrt(JtJ, 9)
-    Unorm_all_new_sqrt = Unorm_all_new_sqrt + 0 * Unorm_all_old
+        Unorm_all_new_sqrt = 1e1 * blockEigenvalueSqrt(JtJ, 9) + 1e-12 * blockEigenvalue(JtJ, 9)
+        Unorm_all_new_sqrt = 1e1 * blockEigenvalueSqrt(JtJ, 9)
+
+    #Unorm_all_new_sqrt = blockEigenvalueSqrtNew(JtJ + 1e-14 * blockEigenvalue(JtJ, 9), 9)
+    #Unorm_all_new_sqrt = 1e1 * blockEigenvalueSqrt(JtJ + 1e-14 * blockEigenvalue(JtJ, 9), 9)
+    Unorm_all_new_sqrt = blockEigenvalueSqrtNew(JtJ, 9)
+    #Unorm_all_new_sqrt = Unorm_all_new_sqrt + 0 * Unorm_all_old
+    Unorm_all_new_sqrt = Unorm_all_new_sqrt + diag_sparse(np.zeros(Unorm_all_new_sqrt.shape[0]))
     #print(Unorm_all_new_sqrt)
 
     return Unorm_allinv, fx0_, Unorm_all_new_sqrt
@@ -3734,14 +3890,14 @@ else:
                             for ci in range(kClusters):
                                 tempBlockEigen[ci][m] = maxM
 
-                    redoPrecond = False
+                    redoPrecond = True
                     if redoPrecond and globalIt % 10 == 9: # debatable, bigger analysis needed. Just random?
                         #Unorm_all_safe = Unorm_all.copy()
                         #Unorm_all.data = 1e-20 * np.ones(Unorm_all.data.shape)
                         #Unorm_all = Unorm_all + diag_sparse(np.ones(Unorm_all.shape[0]).flatten()) # to overwrite global var needs to be done in outer scope?
 
                         Unorm_allinv_old, fx0, Unorm_all = \
-                            RedoPreconditioners(poses_v, landmarks, points_2d, camera_indices, point_indices, Unorm_all)
+                            RedoPreconditioners(poses_v, landmarks, points_2d, camera_indices, point_indices, Unorm_all, Vnorm)
 
                         poses_v = (Unorm_all * (Unorm_allinv_old * poses_v.flatten())).reshape(-1,9)
                         poses_s_in_cluster = [(Unorm_all * (Unorm_allinv_old * poses_s.flatten())).reshape(-1,9) for poses_s in poses_s_in_cluster]
@@ -3751,7 +3907,7 @@ else:
 
                         if not RNA_or_bfgs:
                             for ci in range(kClusters):
-                                prev_dk[ci * 9 * n_cameras: (ci+1) * 9 * n_cameras]  = Unorm_all * (Unorm_allinv_old *  prev_dk[ci * 9 * n_cameras: (ci+1) * 9 * n_cameras])
+                                prev_dk[ci * 9 * n_cameras: (ci+1) * 9 * n_cameras]  = Unorm_all * (Unorm_allinv_old * prev_dk[ci * 9 * n_cameras: (ci+1) * 9 * n_cameras])
                         else:
                             for pos in range(len(Gs)):
                                 for ci in range(kClusters):
