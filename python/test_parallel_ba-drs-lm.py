@@ -1,5 +1,5 @@
 from __future__ import print_function
-from termios import CINTR
+#from termios import CINTR
 import urllib
 import bz2
 import os
@@ -21,7 +21,7 @@ import torch
 import math
 import ctypes
 from torch.autograd.functional import jacobian
-from torch import tensor, from_numpy
+from torch import from_numpy #, tensor
 #import open3d as o3d
 
 # look at website. This is the smallest problem. guess: pytoch cpu is pure python?
@@ -591,10 +591,10 @@ def torchSingleResiduumScaled(camera_params_, point_params_, p2d, scaling, scali
     return residual
 
 def torchSingleResiduumXScaled(camera_params, point_params, p2d, scaling, scalingP, scalingFull) :
-    camera_params = \
-        camera_params[:,0, None] * scalingFull[:,:,0] + camera_params[:,1, None] * scalingFull[:,:,1] + camera_params[:,2, None] * scalingFull[:,:,2] + \
-        camera_params[:,3, None] * scalingFull[:,:,3] + camera_params[:,4, None] * scalingFull[:,:,4] + camera_params[:,5, None] * scalingFull[:,:,5] + \
-        camera_params[:,6, None] * scalingFull[:,:,6] + camera_params[:,7, None] * scalingFull[:,:,7] + camera_params[:,8, None] * scalingFull[:,:,8]
+    # camera_params = \
+    #     camera_params[:,0, None] * scalingFull[:,:,0] + camera_params[:,1, None] * scalingFull[:,:,1] + camera_params[:,2, None] * scalingFull[:,:,2] + \
+    #     camera_params[:,3, None] * scalingFull[:,:,3] + camera_params[:,4, None] * scalingFull[:,:,4] + camera_params[:,5, None] * scalingFull[:,:,5] + \
+    #     camera_params[:,6, None] * scalingFull[:,:,6] + camera_params[:,7, None] * scalingFull[:,:,7] + camera_params[:,8, None] * scalingFull[:,:,8]
 
     angle_axis = camera_params[:,:3] * scaling[:,:3]
     point_params = point_params * scalingP
@@ -613,10 +613,10 @@ def torchSingleResiduumXScaled(camera_params, point_params, p2d, scaling, scalin
     return resX
 
 def torchSingleResiduumYScaled(camera_params, point_params, p2d, scaling, scalingP, scalingFull) :
-    camera_params = \
-        camera_params[:,0, None] * scalingFull[:,:,0] + camera_params[:,1, None] * scalingFull[:,:,1] + camera_params[:,2, None] * scalingFull[:,:,2] + \
-        camera_params[:,3, None] * scalingFull[:,:,3] + camera_params[:,4, None] * scalingFull[:,:,4] + camera_params[:,5, None] * scalingFull[:,:,5] + \
-        camera_params[:,6, None] * scalingFull[:,:,6] + camera_params[:,7, None] * scalingFull[:,:,7] + camera_params[:,8, None] * scalingFull[:,:,8]
+    # camera_params = \
+    #     camera_params[:,0, None] * scalingFull[:,:,0] + camera_params[:,1, None] * scalingFull[:,:,1] + camera_params[:,2, None] * scalingFull[:,:,2] + \
+    #     camera_params[:,3, None] * scalingFull[:,:,3] + camera_params[:,4, None] * scalingFull[:,:,4] + camera_params[:,5, None] * scalingFull[:,:,5] + \
+    #     camera_params[:,6, None] * scalingFull[:,:,6] + camera_params[:,7, None] * scalingFull[:,:,7] + camera_params[:,8, None] * scalingFull[:,:,8]
 
     angle_axis = camera_params[:,:3] * scaling[:,:3]
     point_params = point_params * scalingP
@@ -697,10 +697,11 @@ def ComputeDerivativeMatricesNew(x0_t_cam, x0_t_land, camera_indices_, point_ind
 
     # TODO might need to be done INSIDE the function to make gradient work as tensors?
     # implement as tensor?
-    x0_t_all_cams = np.zeros((int(Unorm_all.shape[1] / 9), 9))
-    x0_t_all_cams[unique_poses_in_c_,:] = x0_t_cam
+    #x0_t_all_cams = np.zeros((int(Unorm_all.shape[1] / 9), 9))
+    #x0_t_all_cams[unique_poses_in_c_,:] = x0_t_cam
     #print("x0_t_all_cams\n", x0_t_all_cams)
-    x0_t_all_cams = (Unorm_all * x0_t_all_cams.flatten()).reshape(-1,9) # transpose
+    #x0_t_all_cams = (Unorm_all * x0_t_all_cams.flatten()).reshape(-1,9) # transpose
+
     #print("x0_t_all_cams\n", x0_t_all_cams)
     #pcg_x0_t_cam = x0_t_all_cams[unique_poses_in_c_,:]
     #pcg_x0_t_cam = from_numpy(pcg_x0_t_cam)
@@ -711,8 +712,11 @@ def ComputeDerivativeMatricesNew(x0_t_cam, x0_t_land, camera_indices_, point_ind
     # (A*B)^t = B^T A^T = B A != A B so not sym.
     # this is even more weird/insane
     #camScaleFull = Unorm_all.transpose().data.reshape(-1,9,9)
-    camScaleFull = Unorm_all.data.reshape(-1,9,9) # no transpose
 
+    if not Unorm_all_is_identity: # TODO new pcg
+        camScaleFull = Unorm_all.data.reshape(-1,9,9) # no transpose
+    else:
+        camScaleFull = Unorm_all.data.reshape(-1,9) # TODO hack
     #print(camScaleFull.shape)
     camScaleFull = camScaleFull[unique_poses_in_c_]
     #print(camScaleFull.shape)
@@ -721,7 +725,8 @@ def ComputeDerivativeMatricesNew(x0_t_cam, x0_t_land, camera_indices_, point_ind
     camScaleFull.requires_grad_(False)
     #pcg_x0_t_cam = x0_t_cam
 
-    # print("camScaleFull\n", camScaleFull)
+    if verbose:
+        print("camScaleFull\n", camScaleFull)
 
     # TODO verify f(Ax) -> f(y), y=Ax. df/dx = df/dy * A.
     # A maps x to y, y is the input parameterization.
@@ -739,6 +744,10 @@ def ComputeDerivativeMatricesNew(x0_t_cam, x0_t_land, camera_indices_, point_ind
     torch_cams.requires_grad_()
     torch_cams.retain_grad()
     torch_lands.retain_grad()
+
+    if verbose:
+        print("camScale ", camScale)
+        print("torch_cams\n", torch_cams)
 
     resX = funx0_st1(torch_cams, torch_lands, torch_points_2d[:,:]).flatten()
     lossX = torch.sum(resX)
@@ -772,13 +781,16 @@ def ComputeDerivativeMatricesNew(x0_t_cam, x0_t_land, camera_indices_, point_ind
         start = time.time()
     J_land = buildMatrixNew(land_grad_x, land_grad_y, point_indices_, sz=3)
 
-    fx0 = buildResiduumNew(resX.detach(), resY.detach())
+    fx0_ = buildResiduumNew(resX.detach(), resY.detach())
 
     if verbose:
         print(" build Matrix & residuum took ", end-start, "s")
         end = time.time()
 
-    return (J_pose, J_land, fx0)
+    if verbose:
+        print("J_pose ", J_pose)
+
+    return (J_pose, J_land, fx0_)
 
 def buildMatrixNew(dx, dy, v_indices, sz=9) :
     data = []
@@ -1720,7 +1732,7 @@ def bundle_adjust(
     blockEigMult = 1e-5 # 1e-3 was used before, too high low precision.
     # 1e-8 fluctuates but faster 1e-6. increase JJ_mult?
     # problem dies at 173 example. 1e-5 ok more not.
-    J_eps = 1e-4
+    #J_eps = 1e-4
     minimumL = 1e-6 # 1e-6
     #minDiag = 1e-5
     L = max(minimumL, L_in_cluster_)
@@ -1876,7 +1888,7 @@ def bundle_adjust(
             #blockEigenvalueJltJl = blockEigenvalueWhereNeeded(JltJl, 3) # nope not at all.
             JltJlDiag = JltJl + 1e-6 * blockEigenvalueJltJl # play around at 173 example. 1e-8: 58 / 0  ======== DRE BFGS ======  518626, 1e-6 518 MUCH earlier
 
-            verboseSpec = False
+            verboseSpec = False #True
             if verboseSpec:
                 maxE, minE = minmaxEv(JltJl, 3)
                 print("JltJl     spectral ", (maxE/minE), " max / min ", maxE, " ", minE)
@@ -2623,7 +2635,7 @@ def GetPreconditioners(cameras_, points_3d_, points_2d_, camera_indices_, point_
         temp_  = temp_.reshape(-1,9)
         temp_[:,0:5] *= 0.4
     else:
-        temp_ = np.squeeze(np.asarray((np.abs(JtJ)).sum(axis=0) ))
+        temp_ = np.squeeze(np.asarray((np.abs(JtJ * 1e-2)).sum(axis=0) ))
         #temp_W= np.squeeze(np.asarray((np.abs(W)).sum(axis=1) ))
         #print("W shapes", temp_.shape(), " ", temp_W.shape())
         #temp_ = temp_ + temp_W
@@ -2632,7 +2644,7 @@ def GetPreconditioners(cameras_, points_3d_, points_2d_, camera_indices_, point_
         print(" np.mean(temp_, axis = 0)[np.newaxis,:] " , np.mean(temp_, axis = 0)[np.newaxis,:])
 
         #temp_ = np.sqrt(temp_) # sqrt worse, **2 catastrophe
-        temp_ = 1e-2 * temp_
+        #temp_ = 1e-2 * temp_
         #temp_ /= np.mean(temp_, axis = 1)[:,np.newaxis] # mean per variable 1.9M -> 2M
         #temp_ /= np.mean(temp_, axis = 0)[np.newaxis,:] # mean per component? #BAD
         print(" np.mean(temp_, axis = 0)[np.newaxis,:] " , np.mean(temp_, axis = 0)[np.newaxis,:])
@@ -2640,6 +2652,8 @@ def GetPreconditioners(cameras_, points_3d_, points_2d_, camera_indices_, point_
         #print(" np.mean(temp_, axis = 0)[np.newaxis,:] " , np.mean(temp_, axis = 0)[np.newaxis,:])
         #temp_[:,0:5] *= 0.4 # 1 654 521 M, 0.4 better at the end and same as above!
     temp_ = np.fmin(np.fmax(temp_, 1e-14), 1e16) # TODO. pick most singular example? 646! 173 maybe / any dubrovnik. fmin needed!
+    # it appears that  646 and 1266 have very SMALL values here?! or very large? such that pcg with 1e20 + identity matters!
+    # run pcg with 1e-20 and 1e-30 to compare.
 
     # TODO: eval thresh here. lower higher, use 173 maybe w. all lms. Also: redo every 10 iterations?
     # temp_ = np.ones(temp_.shape) # e.g. 173: worse. Likely all w landmarks far away?
@@ -2763,6 +2777,9 @@ def GetPreconditioners(cameras_, points_3d_, points_2d_, camera_indices_, point_
 
     if disable_new_pcg:
         Unorm_all_sqrt = diag_sparse(np.ones(Unorm_all_sqrt.shape[0])) + 1e-20 * JtJ
+        Unorm_all_is_identity = True
+        if Unorm_all_is_identity:
+            Unorm_all_sqrt = diag_sparse(np.ones(Unorm_all_sqrt.shape[0])) # TODO new pcg
 
     return Unorm_, Vnorm_, fx0_, Unorm_all_sqrt
 
@@ -2935,12 +2952,14 @@ cameras_in = cameras.copy()
 cameras = (Unorm * cameras.flatten()).reshape(-1,9)
 points_3d = (Vnorm * points_3d.flatten()).reshape(-1,3)
 
-#cameras = (Unorm_all * cameras.flatten()).reshape(-1,9)
-cameras = blockMult(Unorm_all, cameras.flatten(), 9).reshape(-1,9)
 #print("cameras pcg ", cameras)
-Unorm_all = blockInverse(Unorm_all, 9)
+Unorm_all_is_identity = True # TODO new pcg
+if not Unorm_all_is_identity:
+    #cameras = blockMult(Unorm_all, cameras.flatten(), 9).reshape(-1,9)
+    cameras = (Unorm_all * cameras.flatten()).reshape(-1,9)
+    Unorm_all = blockInverse(Unorm_all, 9)
 
-cameras_out = blockMult(Unorm_all, cameras.flatten(), 9).reshape(-1,9)
+#cameras_out = blockMult(Unorm_all, cameras.flatten(), 9).reshape(-1,9)
 #cameras_out = (Unorm_all * cameras.flatten()).reshape(-1,9)
 #print("cameras_out ", cameras_out)
 #exit()
