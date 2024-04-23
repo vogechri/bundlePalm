@@ -1750,13 +1750,9 @@ def bundle_adjust(
     powerits = 100 # kind of any value works here? > =5?
     tr_eta_1 = 0.8
     tr_eta_2 = 0.25
-    blockEigMultGain = 1.5 # 4 # 4 better than 2 at least if allowDecreaseBlockEig, feels random and weird. Too large perf drops, too small jupming around.
-    stepSizeSetting = False # True original idea
-    if not stepSizeSetting:
-        blockEigMultGain = 2 #?
-    blockEigMultLoss = np.sqrt(blockEigMultGain)
+
     threshWhereNeeded = 1e-6
-    verbose_Jac = True #False
+    verbose_Jac = False
 
     newVersion = True
     # TODO: This parameter block is ok blockEigMultJtJ 1e-5, LipJ = 2, blockEigenvalueWhereNeeded 1e-2,
@@ -1790,6 +1786,17 @@ def bundle_adjust(
               " maxbe ", np.max(np.array(tempBlockEigen[cluster_id]), axis=0), " globalIt % memory_be ", globalIt % memory_be, file=sys.stderr)
         #blockEigMult = np.maximum(blockEigMult, np.max(tmp, axis=0)) # else always larger / pointless same as base version
         blockEigMult = np.max(np.array(tempBlockEigen[cluster_id]), axis=0) # correct but 52 much worse ?Z
+
+    blockEigMultGain = 1.5 # 4 # 4 better than 2 at least if allowDecreaseBlockEig, feels random and weird. Too large perf drops, too small jupming around.
+    stepSizeSetting = True #False # True original idea
+    eigenValueLimit = 1e-4
+    if not stepSizeSetting:
+        blockEigMultGain = 2 #?
+    else:
+        blockEigMultGain = 1.334 # 8 steps to get x6: z^8 = 6, z = exp(log(6)/8) = 1.252
+        globalBlockEigUpperLimit = 10 * blockEigMultLimit # not 6.? : theoretical limit.
+
+    blockEigMultLoss = np.sqrt(blockEigMultGain)
 
     it_ = 0
     funx0_st1 = lambda X0, X1, X2: \
@@ -1837,9 +1844,11 @@ def bundle_adjust(
                 JltJlDiag = JltJl + 1e-6 * blockEigenvalueJltJl
             else:
                 # could do only where needed? smallest ev is indeed small?
-                JltJlDiag = JltJl + blockEigenvalue(JltJl, 3)
+                #JltJlDiag = JltJl + blockEigenvalue(JltJl, 3)
+                JltJlDiag = JltJl + blockEigenvalue(JltJl, 3) # * LipJ_?
                 # wo: 245 fails now. with: 52 fails miserably.
                 #JltJlDiag = blockEigenvalueFull(JltJl, 3, 1e-3) # -3: ok, -4:  better?
+                #JltJlDiag = blockEigenvalueFull(JltJl, 3, 1e-1) # test 52!
 
             if verbose_Jac:
                 absDiagJltJl = np.abs(JltJl.diagonal()).reshape(-1,3)
@@ -1922,10 +1931,14 @@ def bundle_adjust(
                         # idea: descentlemma step is some multiple of JtJ and jtj is bounded by limiting eigenval.
                         # limit is 1e5/1e4?
                         #JtJDiag = blockEigenvalueFull(JtJ, 9, 1e-3) # ?any effect at all?
-                        JtJDiag = blockEigenvalueFull(JtJ, 9, 1e-4) # ?any effect at all?
+                        JtJDiag = blockEigenvalueFull(JtJ, 9, 1e-4) # ? * LipJ_ # ?any effect at all?
                         if stepSizeSetting: # was ok
-                            blockEigenvalueJtJ = LipJ_ * 1e5 * blockEigenvalueFull(JtJ, 9, 1e-4) # ?or what?
-                            stepSize = blockEigMult * blockEigenvalueJtJ
+                            blockEigenvalueJtJ = LipJ_ * (1./blockEigMultLimit) * blockEigenvalueFull(JtJ, 9, eigenValueLimit) # ?or what?
+                            stepSize = blockEigMult * blockEigenvalueJtJ # likely too much.
+                            # stepSize += (blockEigMultGain-1) * blockEigenvalueJtJ
+                            # should be max at ~6. maybe just limit to 6x and 8 steps -> 6 times more and gain is
+                            # z: z^8 = 6, z = exp(log(6)/8) = 1.252
+                            # new limit = 6 * low.
                         else:
                             stepSize = LipJ_ * blockEigenvalueFull(JtJ, 9, blockEigMult)
 
@@ -1959,16 +1972,6 @@ def bundle_adjust(
                     print("JtJ.data.shape",  JtJ.data.shape) # ok
                     print(blockEigenvalueJtJ.data.shape)
 
-                maxE, minE = minmaxEv(JtJ, 9)
-                print("JtJ spectral ", (maxE/minE), file=sys.stderr)
-                #print("JtJ minE ", (minE))
-                maxE, minE = minmaxEv(stepSize, 9)
-                print("stepSize spectral ", (maxE/minE), file=sys.stderr)
-                #print("stepSize minE ", minE)
-                # temp__ = blockEigenvalueJtJ.data.copy()
-                # print(temp__.reshape(-1,9)[:,0])
-                # print(np.min(temp__.reshape(-1,9)[:,0]))
-
                 penaltyStartConst = prox_rhs.dot(stepSize * prox_rhs)
 
                 if verbose_Jac:
@@ -1976,7 +1979,13 @@ def bundle_adjust(
                     StepSizeSpec = [round_int(np.max(maxE/minE)), np.min(maxE/minE), round_int(np.median(maxE/minE))]
                     print("minmax ev stepSz ", np.max(maxE), " ", np.max(minE), " ", np.min(maxE), " ",  np.min(minE), " spec ", StepSizeSpec, file=sys.stderr)
                     #print(" all Spec stepSz ", maxE/minE) # this show diag vs diag sqrt -> diag is better as WITHIN block spec is 1k vs 100k for 'sqrt'.
-                    # 
+                    
+                    # compare both.
+                    print("stepSize spectral ", (maxE/minE), file=sys.stderr)
+                    maxE, minE = minmaxEv(JtJ, 9)
+                    print("JtJ spectral ", (maxE/minE), file=sys.stderr)
+                    #print("JtJ minE ", (minE))
+
                     #maxE, minE = minmaxEv(JtJDiag, 9)
                     #print("minmax ev JtJDiag ", np.max(maxE), " ", np.max(minE), " ", np.min(maxE), " ",  np.min(minE), " spec ", np.max(maxE/minE))
             else: # not newversion
@@ -2137,8 +2146,15 @@ def bundle_adjust(
             # TODO: - looks ok but maybe worse. try. also different divisors and 646?
             Lfklin = bp.dot(delta_p) + bl.dot(delta_l + Vli * bl) # '+' or '-'? in +/- bl.dot
             LfkQuad = delta_p.dot(stepSize * delta_p) / decent_lemma_divisor
+        # if we store delta_p as direction. we can command:
+        # Lfkconst - Lfklin - LfkQuad < 0 <-> Lfkconst - Lfklin < LfkQuad <-> (Lfkconst - Lfklin) * dld / |d|^2 < d/|d|^t S d/|d|
+        # or 1 < d'^T S d'. unklar bahnadlung wie S# = S + d/|d| d/|d|^T * max[ 0, ((Lfkconst - Lfklin) * dld / |d|^2 - d/|d|^t S d/|d| ) ]
+        # dann d/|d|^t S# d/|d| = d/|d|^t S d/|d| - d/|d|^t S d/|d| + ((Lfkconst - Lfklin) * dld / |d|^2 fulfills DL
+        # soll man das alles nicht per camera machen?
+        # cams area shared BUT lms are per part.
+        
 
-        LfkDistance  = Lfkconst - Lfklin - LfkQuad
+        LfkDistance  = Lfkconst - Lfklin - LfkQuad # 
         LfkViolated = LfkDistance > 0
         LfkSafe = Lfklin < 0 # for any phi ok.
 
@@ -2634,7 +2650,7 @@ def GetPcgScalingDiag(JtJ):
     # temp_W = np.squeeze(np.asarray((np.abs(t * W)).sum(axis=1) ))
     # temp_  = temp_ + temp_W
     print("min/max Unorm after ", np.min(temp_), np.max(temp_), " t ", t, " min*max= ", np.min(temp_) * np.max(temp_))
-    temp_  = temp_.reshape(-1,9)
+    #temp_  = temp_.reshape(-1,9)
     # e-14 to e16 at -2. -6 ->
     minTresh = 1e-15 # 12 -> 14 for 245 and scale!
     maxTresh = 1e15
@@ -2708,15 +2724,23 @@ def GetPreconditioners(cameras_, points_3d_, points_2d_, camera_indices_, point_
 
     # could also compute locally / all the time! 542: appears to 'go crazy' after 20 its.
     JltJl = J_land.transpose() * J_land
-    Vnorm_ = diag_sparse(np.squeeze(np.asarray((np.abs(JltJl)).sum(axis=0) )))
-    temp_  = Vnorm_.data.reshape(-1,3)
-    temp_ = np.sqrt(temp_)
-    print("min/max Vnorm ", np.min(temp_), np.max(temp_))
-    temp_ = 1e-1 * np.fmin(np.fmax(temp_, 1e-10), 1e10) # TODO. pick most singular example? 646 and 52? 1-10 was ok on 52 clust 1e-1, 1e-3 bad? check
-    #temp = np.max(np.sqrt(temp), axis=1) # max or mean? sqrt
-    #temp_ = np.repeat(temp_[:,np.newaxis], 3, axis=1)
+    if False:
+        temp_  = np.squeeze(np.asarray((np.abs(JltJl)).sum(axis=0)))
+        temp_  = temp_.reshape(-1,3)
+        #temp_ = np.sqrt(temp_)
+        print("min/max Vnorm ", np.min(temp_), np.max(temp_))
+        temp_ = 1e-1 * np.fmin(np.fmax(temp_, 1e-10), 1e10) 
+        # TODO. pick most singular example? 646 and 52? 1-10 was ok on 52 clust 1e-1, 1e-3 bad? check
+        #temp = np.max(np.sqrt(temp), axis=1) # max or mean? sqrt
+        #temp_ = np.repeat(temp_[:,np.newaxis], 3, axis=1)
+    else:
+        temp_ = GetPcgScalingDiag(JltJl)
+        temp_ = np.sqrt(temp_)
+
     Vnorm_ = diag_sparse(temp_.flatten())
-    Vnorm_ = diag_sparse(np.ones(points_3d.flatten().shape[0])) # 52: this is much better -- could be random
+    #Vnorm_ = diag_sparse(np.ones(points_3d.flatten().shape[0])) # 52: this is much better -- could be random
+
+
 
     return Unorm_, Vnorm_, fx0_
 
@@ -2897,8 +2921,11 @@ init_lib()
 
 LipJ = 1 * np.ones(kClusters)
 globalBlockEigUpperLimit = 1e-1 # 1e-1, 1e1?
+# TODO: the brilliant thing about adding max eigenvalue is that 1. prevent volatile crap (near 0 & flips) and 
+# also use this as factor 6 multiplier (theoretical limit).
+globalBlockEigUpperLimit = 1e-3 # TODO check 394, | 135, 356 1k better?
 blockEig_in_cluster = 1e-5 * np.ones(kClusters) # 1e-4 or 1e-5
-memory_be = 3 # 8 # here can shrink, below this only grow.
+memory_be = 4 #3 # 8 # here can shrink, below this only grow.
 print("input blockEig_in_cluster[ci] ", blockEig_in_cluster[0])
 
 tempEigen = [[] for i in range(kClusters)]
