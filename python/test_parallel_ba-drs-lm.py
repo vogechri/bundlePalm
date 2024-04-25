@@ -1,27 +1,27 @@
 from __future__ import print_function
-from termios import CINTR
+#from termios import CINTR
 import urllib
 import bz2
 import os
 import time
 import numpy as np
 from joblib import Parallel, delayed
-from scipy.sparse import csr_array, csr_matrix, issparse
+from scipy.sparse import csr_array, csr_matrix #, issparse
 from scipy.sparse import diags as diag_sparse
-from scipy.sparse import hstack as sparse_hstack
+#from scipy.sparse import hstack as sparse_hstack
 #from scipy.sparse.linalg import splu # slow as FUCK
-from scipy.sparse.linalg import spsolve # slow as FUCK
+#from scipy.sparse.linalg import spsolve # slow as FUCK
 #from scipy.linalg import cholesky, cho_solve, cho_factor
 #from sksparse.cholmod import cholesky # install suitesparse and ... and ..
-from scipy.sparse.linalg import inv as inv_sparse # Slowest ever.
+#from scipy.sparse.linalg import inv as inv_sparse # Slowest ever.
 from numpy.linalg import pinv as inv_dense
 from numpy.linalg import eigvalsh, eigh
 # idea reimplement projection with torch to get a jacobian -> numpy then
 import torch
 import math
 import ctypes
-from torch.autograd.functional import jacobian
-from torch import tensor, from_numpy
+#from torch.autograd.functional import jacobian
+from torch import from_numpy # tensor
 #import open3d as o3d
 
 # look at website. This is the smallest problem. guess: pytoch cpu is pure python?
@@ -1788,13 +1788,17 @@ def bundle_adjust(
         blockEigMult = np.max(np.array(tempBlockEigen[cluster_id]), axis=0) # correct but 52 much worse ?Z
 
     blockEigMultGain = 1.5 # 4 # 4 better than 2 at least if allowDecreaseBlockEig, feels random and weird. Too large perf drops, too small jupming around.
-    stepSizeSetting = True #False # True original idea
+    stepSizeSetting = False #True #original idea
+    oldVersion = True # ignore stepSizeSetting
     eigenValueLimit = 1e-4
     if not stepSizeSetting:
-        blockEigMultGain = 2 #?
+        blockEigMultGain = 2
     else:
         blockEigMultGain = 1.334 # 8 steps to get x6: z^8 = 6, z = exp(log(6)/8) = 1.252
-        globalBlockEigUpperLimit = 10 * blockEigMultLimit # not 6.? : theoretical limit.
+        # python makes var local since used in else, but does not know it, disable if stepSizeSetting=False
+        #globalBlockEigUpperLimit = 10 * blockEigMultLimit # not 6.? : theoretical limit.
+    if oldVersion:
+        blockEigMultGain = 3
 
     blockEigMultLoss = np.sqrt(blockEigMultGain)
 
@@ -1906,7 +1910,7 @@ def bundle_adjust(
                     JtJDiag = JtJ.copy() + blockEigMultJtJ * blockEigenvalueJtJ
                     #JtJDiag = blockEigMultJtJ * blockEigenvalueJtJ # this is likely almost same as above. Todo: check/find value.
                 else:
-                    if False:
+                    if oldVersion:
                         blockEigenvalueJtJ = 1e1 * blockEigenvalue(JtJ, 9)
                         #print("blockEigenvalueJtJ", blockEigenvalueJtJ)
                         #print("min blockEigenvalueJtJ", np.min(blockEigenvalueJtJ.data))
@@ -1940,7 +1944,7 @@ def bundle_adjust(
                             # z: z^8 = 6, z = exp(log(6)/8) = 1.252
                             # new limit = 6 * low.
                         else:
-                            stepSize = LipJ_ * blockEigenvalueFull(JtJ, 9, blockEigMult)
+                            stepSize = LipJ_ * blockEigenvalueFull(JtJ, 9, blockEigMult) # note that values should be 1e-3 for JtJDiag and 1-4 here? or 5e-x at least.
 
                         #blockEigenvalueJtJ = 1e5 * JtJ.copy()
                         #stepSize = blockAdd(JtJ, blockEigMult * blockEigenvalueJtJ, 9)
@@ -2152,7 +2156,6 @@ def bundle_adjust(
         # dann d/|d|^t S# d/|d| = d/|d|^t S d/|d| - d/|d|^t S d/|d| + ((Lfkconst - Lfklin) * dld / |d|^2 fulfills DL
         # soll man das alles nicht per camera machen?
         # cams area shared BUT lms are per part.
-        
 
         LfkDistance  = Lfkconst - Lfklin - LfkQuad # 
         LfkViolated = LfkDistance > 0
@@ -2181,13 +2184,18 @@ def bundle_adjust(
             #stepSize = stepSize * 2
             # other idea, initially we only add 1/2^k eg 0.125, times the needed value and inc if necessary, maybe do not add anything if not needed.
 
-            # indeed reliable to get over.
-            blockEigMult_old = blockEigMult
-            blockEigMult = np.minimum(globalBlockEigUpperLimit, np.maximum(blockEigMultLimit, blockEigMultGain * blockEigMult))
-            if stepSizeSetting:
+            if oldVersion:
+                blockEigMult_old = blockEigMult
+                blockEigMult = np.minimum(globalBlockEigUpperLimit, np.maximum(blockEigMultLimit, blockEigMultGain * blockEigMult))
                 stepSize += (blockEigMult - blockEigMult_old) * blockEigenvalueJtJ
             else:
-                stepSize = LipJ_ * blockEigenvalueFull(JtJ, 9, blockEigMult)
+                # indeed reliable to get over.
+                blockEigMult_old = blockEigMult
+                blockEigMult = np.minimum(globalBlockEigUpperLimit, np.maximum(blockEigMultLimit, blockEigMultGain * blockEigMult))
+                if stepSizeSetting:
+                    stepSize += (blockEigMult - blockEigMult_old) * blockEigenvalueJtJ
+                else:
+                    stepSize = LipJ_ * blockEigenvalueFull(JtJ, 9, blockEigMult)
 
             #print("|||| stepSize.data.shape ", stepSize.data.shape)
             #blockEigenvalueJtJ.data *= 2 # appears slow but safe
@@ -2739,8 +2747,6 @@ def GetPreconditioners(cameras_, points_3d_, points_2d_, camera_indices_, point_
 
     Vnorm_ = diag_sparse(temp_.flatten())
     #Vnorm_ = diag_sparse(np.ones(points_3d.flatten().shape[0])) # 52: this is much better -- could be random
-
-
 
     return Unorm_, Vnorm_, fx0_
 
