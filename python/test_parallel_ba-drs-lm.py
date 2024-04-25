@@ -1709,7 +1709,7 @@ def bundle_adjust(
                 JltJlDiag = JltJl + 1e-6 * blockEigenvalueJltJl
             else:
                 # could do only where needed? smallest ev is indeed small?
-                JltJlDiag = JltJl + blockEigenvalue(JltJl, 3)
+                JltJlDiag = JltJl + blockEigenvalue(JltJl, 3) # with normalization better? lower here, higher on JtJ ? or larger even?
 
             if verbose_Jac:
                 absDiagJltJl = np.abs(JltJl.diagonal()).reshape(-1,3)
@@ -1759,9 +1759,10 @@ def bundle_adjust(
                     JtJDiag = JtJ.copy() + blockEigMultJtJ * blockEigenvalueJtJ
                     #JtJDiag = blockEigMultJtJ * blockEigenvalueJtJ # this is likely almost same as above. Todo: check/find value.
                 else:
+                    # paper: why is this needed? since nearby hess are different especially for small eigen values -> add max ev.
                     blockEigenvalueJtJ = 1e1 * blockEigenvalue(JtJ, 9)
                     stepSize = LipJ_ * JtJ.copy() + blockEigMult * blockEigenvalueJtJ
-                    JtJDiag = JtJ.copy() + blockEigMultJtJ * blockEigenvalueJtJ
+                    JtJDiag = JtJ.copy() + blockEigMultJtJ * blockEigenvalueJtJ # new 1e-2 * same as for  JltJlDiag
 
                 # maxE, minE = minmaxEv(JtJ, 9)
                 # print("JtJ spectral ", (maxE/minE))
@@ -2397,6 +2398,7 @@ def getScaling(min_, max_): # aim at max * min = 1. So max * x = 1/(min * x). x^
     # 1/ (min * np.sqrt(1. / (min * max)) = np.sqrt(min * max / min^2) = np.sqrt(max / min).
     return np.sqrt(1. / (min_ * max_) )
 
+# next a local version of this? keep relative weight?
 def GetPcgScalingDiag(JtJ):
     temp_  = np.squeeze(np.asarray((np.abs(JtJ)).sum(axis=0) ))
     # temp_W = np.squeeze(np.asarray((np.abs(W)).sum(axis=1) ))
@@ -2407,7 +2409,7 @@ def GetPcgScalingDiag(JtJ):
     # temp_W = np.squeeze(np.asarray((np.abs(t * W)).sum(axis=1) ))
     # temp_  = temp_ + temp_W
     print("min/max Unorm after ", np.min(temp_), np.max(temp_), " t ", t, " min*max= ", np.min(temp_) * np.max(temp_))
-    temp_  = temp_.reshape(-1,9)
+    #temp_  = temp_.reshape(-1,9)
     print("Preconditioners min/max Unorm ", np.min(temp_), np.max(temp_))
     # e-14 to e16 at -2. -6 ->
     minTresh = 1e-18 # 12 -> 14 for 245 and scale!
@@ -2416,7 +2418,7 @@ def GetPcgScalingDiag(JtJ):
     #temp_ = np.fmin(np.fmax(temp_, 1e-14), 1e16) # TODO. pick most singular example? 646? 173 maybe / any dubrovnik
     print("Preconditioners min/max Unorm after thresholding ", np.min(temp_), np.max(temp_))
 
-    scaleToHaveValuesAroundOneForHess = False #True
+    scaleToHaveValuesAroundOneForHess = True
     if scaleToHaveValuesAroundOneForHess:
         #temp_ /= np.sqrt(t) #np.sqrt(np.minimum(np.maximum(t, minTresh), maxTresh))
         #print("Preconditioners min/max Unorm after scaling 1", np.min(temp_), np.max(temp_))
@@ -2429,8 +2431,8 @@ def GetPcgScalingDiag(JtJ):
         #scale = 1. / np.maximum(1, 1./ np.sqrt(np.mean(guess)))
         #scale = 1. / np.maximum(1, 1./ np.sqrt(np.median(guess)))
         #scale = 1. / np.maximum(1, 1./ np.sqrt(np.min(guess)))
-        #scale = np.sqrt(np.median(guess)) # 245 with scale worse/stalls. 646 wo. max(1, *).
-        scale = np.sqrt(np.max(guess)) # 245 with scale worse/stalls. 646 wo. max(1, *).
+        scale = 1e-1 * np.sqrt(np.median(guess)) # 245 with scale worse/stalls. 646 wo. max(1, *).
+        #scale = np.sqrt(np.max(guess)) # 245 with scale worse/stalls. 646 wo. max(1, *).
         print(scale) # there has to be a stepsize issue?
         temp_ = temp_ * scale # * 1e5 works but not as well ()
         print("Preconditioners min/max Unorm after scaling 2: ", np.min(temp_), np.max(temp_))
@@ -2462,6 +2464,7 @@ def GetPreconditioners(cameras_, points_3d_, points_2d_, camera_indices_, point_
 
     # TODO: eval thresh here. lower higher, use 173 maybe w. all lms. Also: redo every 10 iterations?
     # temp_ = np.ones(temp_.shape) # e.g. 173: worse. Likely all w landmarks far away?
+    #temp_ = np.sqrt(temp_) # does not matter?
     Unorm_ = diag_sparse(temp_.copy().flatten())
     #print(Unorm.shape, " ", Unorm.data.shape)
     #Unorm = diag_sparse(np.squeeze(np.asarray(0.01 * np.sqrt( (np.abs(JtJ)/1000).sum(axis=0) ))))
@@ -2476,13 +2479,19 @@ def GetPreconditioners(cameras_, points_3d_, points_2d_, camera_indices_, point_
     JltJl = J_land.transpose() * J_land
     Vnorm_ = diag_sparse(np.squeeze(np.asarray((np.abs(JltJl)).sum(axis=0) )))
     temp_  = Vnorm_.data.reshape(-1,3)
-    temp_ = np.sqrt(temp_)
+
+    temp_ = np.sqrt(temp_) # does not matter?
+
     print("min/max Vnorm ", np.min(temp_), np.max(temp_))
     temp_ = 1e-1 * np.fmin(np.fmax(temp_, 1e-10), 1e10) # TODO. pick most singular example? 646 and 52? 1-10 was ok on 52 clust 1e-1, 1e-3 bad? check
     #temp = np.max(np.sqrt(temp), axis=1) # max or mean? sqrt
     #temp_ = np.repeat(temp_[:,np.newaxis], 3, axis=1)
     Vnorm_ = diag_sparse(temp_.flatten())
-    Vnorm_ = diag_sparse(np.ones(points_3d.flatten().shape[0])) # 52: this is much better -- could be random
+    #Vnorm_ = diag_sparse(np.ones(points_3d.flatten().shape[0])) # 52: this is much better -- could be random
+
+    temp_ = GetPcgScalingDiag(JltJl)
+    temp_ = np.sqrt(temp_) # does not matter?
+    Vnorm_ = diag_sparse(temp_.flatten())
 
     return Unorm_, Vnorm_, fx0_
 
@@ -2663,6 +2672,7 @@ init_lib()
 
 LipJ = 1 * np.ones(kClusters)
 globalBlockEigUpperLimit = 1e-1 # 1e-1, 1e1?
+globalBlockEigUpperLimit = 1e-3 # 1e-1, 1e1?
 blockEig_in_cluster = 1e-5 * np.ones(kClusters) # 1e-4 or 1e-5
 memory_be = 8 # here can shrink, below this only grow.
 print("input blockEig_in_cluster[ci] ", blockEig_in_cluster[0])
