@@ -2672,9 +2672,9 @@ init_lib()
 
 LipJ = 1 * np.ones(kClusters)
 globalBlockEigUpperLimit = 1e-1 # 1e-1, 1e1?
-globalBlockEigUpperLimit = 1e-3 # 1e-1, 1e1?
+globalBlockEigUpperLimit = 1e-3
 blockEig_in_cluster = 1e-5 * np.ones(kClusters) # 1e-4 or 1e-5
-memory_be = 8 # here can shrink, below this only grow.
+memory_be = 4 # here can shrink, below this only grow.
 print("input blockEig_in_cluster[ci] ", blockEig_in_cluster[0])
 
 tempEigen = [[] for i in range(kClusters)]
