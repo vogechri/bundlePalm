@@ -2981,7 +2981,6 @@ pre_merges = 0
 values, counts = np.unique(camera_indices, return_counts=True)
 print(". minimum camera observations in total ", np.min(counts), " cams with < 5 landmarks ", np.sum(counts < 5))
 
-# could be even better?
 # what if clustering must avoid degenrate clusters?
 # e.g. 173 with 6 clusters is much better than with 5! but 5 with! good distribution is better than 6.
 # max_c min_i,j in c #(cam_i, lm_j).

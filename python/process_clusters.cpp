@@ -26,6 +26,7 @@
 //#define _rngseed_ 666 // be2 552k
 #define _rngseed_ 4567 // be2 547k
 //#define _rngseed_ 9753
+// This 1e-1 leads to distributing residuals evenly. lower values appear to deliver worse parttitions, higher values do not deliver even parts.
 #define _order_div_mult_  1e-1
 
 // Speedup, very little worse, else retries rejected merges.
@@ -1298,7 +1299,7 @@ void recluster_cameras(
 
     // a. find cluster with cam with < K obs in cluster
     // b. go over .. see above
-    maxLmPerCam = 15;
+    maxLmPerCam = 15;// 20 does not appear better, same.
     relevantCameras.clear();
     relevantCameras.resize(maxLmPerCam); // cam obs in part -> part and camId
     movable = 0;
