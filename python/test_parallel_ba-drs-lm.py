@@ -133,6 +133,23 @@ def scale_adjust_small_focal_distance(camera_params_, camera_indices_, points_2d
     #points_2d_[flip_point_ids] *= -1
     return camera_params_, points_2d_
 
+# normlization: 1. median of lms. 2. mad = median of deviation to 1) 3. scale = desired_scale / mad
+# -> move and scale lms lm = scale * (lm - median).
+# move and scale cmaeras: center = scale * (center - median):
+# c = -R^T*t. c'=s*(c-m). t= -R*c'.
+def normalize_data(points_3d_, cameras_, desired_scale = 1e5):
+    med = np.median(points_3d_.reshape(-1,3), axis = 0)
+    mad = np.sum(np.abs(points_3d_.reshape(-1,3) - med))
+    points_3d_ = desired_scale / mad * (points_3d_ - med)
+    #points_3d_ = points_3d_ - med
+    c = -AngleAxisRotatePoint(-from_numpy(cameras_[:,0:3]), from_numpy(cameras_[:,3:6])).numpy()
+    cnew = desired_scale / mad * (c - med)
+    #cnew = c - med
+    tnew = -AngleAxisRotatePoint(from_numpy(cameras_[:,0:3]), from_numpy(cnew)).numpy()
+    cameras_.reshape(-1,9)[:,3:6] = tnew
+    print("Normlization. medium point: ", med, " old scale: ", mad, ", * ", desired_scale / mad)
+    return points_3d_, cameras_
+
 def read_bal_data(file_name):
     with bz2.open(file_name, "rt") as file:
         n_cameras_, n_points_, n_observations = map(int, file.readline().split())
@@ -158,8 +175,13 @@ def read_bal_data(file_name):
         points_3d_ = points_3d_.reshape((n_points_, -1))
 
     # currently must do for drs. turn off to fix issues? better debug
-    (points_3d_, camera_indices_, points_2d_, point_indices_) = \
-        remove_large_points(points_3d_, camera_indices_, points_2d_, point_indices_)
+    # (points_3d_, camera_indices_, points_2d_, point_indices_) = \
+    #     remove_large_points(points_3d_, camera_indices_, points_2d_, point_indices_)
+
+    # only test examples with far points.
+    # remove_ids = np.arange(points_3d_.shape[0])[np.sum(points_3d_**2, 1) > 1e6]
+    # if remove_ids.shape[0] >0: #<=0:
+    #     exit()
 
     # invert points_2d_ and focal distance if needed
     (camera_params, points_2d_) = \
@@ -171,6 +193,8 @@ def read_bal_data(file_name):
         # avoid super small focal distance (if those exist?) values for numerical sanity.
         (camera_params, points_2d_) = \
             scale_adjust_small_focal_distance(camera_params, camera_indices_, points_2d_)
+
+    #points_3d_, camera_params = normalize_data(points_3d_, camera_params)
 
     return camera_params, points_3d_, camera_indices_, point_indices_, points_2d_
 
@@ -1764,7 +1788,7 @@ def bundle_adjust(
         # TODO: set to 1 and play with Limit. Set higher. is 1e-2 same 1e-1? is 1e-3 worse?
         threshWhereNeeded = 1e-4 # this higher -> blockEigMult, blockEigMultLimit lower?
         blockEigMultJtJ = 1e-4 # 173: little effect 1e-6/4/8. just 173 or always not mattering much?
-        blockEigMultLimit = 1e-5
+        blockEigMultLimit = 1e-5 # 1e-4 for stepSizeSetting = False
         #globalBlockEigUpperLimit = 1e-1 # 1e-2? # same as globalBlockEigUpperLimit
         decent_lemma_divisor = 2 # 2/4: higher does indeed delay flow over, but result is worse.
         Derivative_at_end = False # maybe negative to have update v and updte u differ.
@@ -1789,9 +1813,12 @@ def bundle_adjust(
 
     blockEigMultGain = 1.5 # 4 # 4 better than 2 at least if allowDecreaseBlockEig, feels random and weird. Too large perf drops, too small jupming around.
     stepSizeSetting = False #True #original idea
-    oldVersion = True # ignore stepSizeSetting
+    oldVersion = False #True # ignore stepSizeSetting
     eigenValueLimit = 1e-4
     if not stepSizeSetting:
+        if not oldVersion:
+            blockEigMultJtJ = 1e-3
+            blockEigMultLimit = 1e-4 # also start with 1e-4!
         blockEigMultGain = 2
     else:
         blockEigMultGain = 1.334 # 8 steps to get x6: z^8 = 6, z = exp(log(6)/8) = 1.252
@@ -1934,8 +1961,7 @@ def bundle_adjust(
 
                         # idea: descentlemma step is some multiple of JtJ and jtj is bounded by limiting eigenval.
                         # limit is 1e5/1e4?
-                        #JtJDiag = blockEigenvalueFull(JtJ, 9, 1e-3) # ?any effect at all?
-                        JtJDiag = blockEigenvalueFull(JtJ, 9, 1e-4) # ? * LipJ_ # ?any effect at all?
+                        JtJDiag = blockEigenvalueFull(JtJ, 9, blockEigMultJtJ) # stepSizeSetting true: 1e-4; false: 1e-3.
                         if stepSizeSetting: # was ok
                             blockEigenvalueJtJ = LipJ_ * (1./blockEigMultLimit) * blockEigenvalueFull(JtJ, 9, eigenValueLimit) # ?or what?
                             stepSize = blockEigMult * blockEigenvalueJtJ # likely too much.
@@ -2737,7 +2763,7 @@ def GetPreconditioners(cameras_, points_3d_, points_2d_, camera_indices_, point_
         temp_  = temp_.reshape(-1,3)
         #temp_ = np.sqrt(temp_)
         print("min/max Vnorm ", np.min(temp_), np.max(temp_))
-        temp_ = 1e-1 * np.fmin(np.fmax(temp_, 1e-10), 1e10) 
+        temp_ = 1e-1 * np.fmin(np.fmax(temp_, 1e-10), 1e10)
         # TODO. pick most singular example? 646 and 52? 1-10 was ok on 52 clust 1e-1, 1e-3 bad? check
         #temp = np.max(np.sqrt(temp), axis=1) # max or mean? sqrt
         #temp_ = np.repeat(temp_[:,np.newaxis], 3, axis=1)
@@ -2918,7 +2944,8 @@ bestIt = 0
 globalIt = 0
 resetIt = 0
 failedNesterovAcceleration = 0 # count after k consecutive misses, restart (RNA might not need this)
-maxFailedNesterovAcceleration = 3 # 3 or 4
+maxFailedNesterovAcceleration = 4 # 3 or 4
+alwaysResetIts = 200 # does not help
 basic_version = False #True # accelerated or basic
 sequential = True
 linearize_at_last_solution = True # linearize at uk or v. maybe best to check energy. at u or v. DRE:
@@ -2927,11 +2954,11 @@ init_lib()
 
 LipJ = 1 * np.ones(kClusters)
 globalBlockEigUpperLimit = 1e-1 # 1e-1, 1e1?
-# TODO: the brilliant thing about adding max eigenvalue is that 1. prevent volatile crap (near 0 & flips) and 
+# TODO: the brilliant thing about adding max eigenvalue is that 1. prevent volatile crap (near 0 & flips) and
 # also use this as factor 6 multiplier (theoretical limit).
 globalBlockEigUpperLimit = 1e-3 # TODO check 394, | 135, 356 1k better?
-blockEig_in_cluster = 1e-5 * np.ones(kClusters) # 1e-4 or 1e-5
-memory_be = 4 #3 # 8 # here can shrink, below this only grow.
+blockEig_in_cluster = 1e-4 * np.ones(kClusters) #1e-5 * np.ones(kClusters) # 1e-4 or 1e-5
+memory_be = 4 #3 # 8 # here can shrink, below this only grow. 245: 2: bad.
 print("input blockEig_in_cluster[ci] ", blockEig_in_cluster[0])
 
 tempEigen = [[] for i in range(kClusters)]
@@ -2954,6 +2981,7 @@ pre_merges = 0
 values, counts = np.unique(camera_indices, return_counts=True)
 print(". minimum camera observations in total ", np.min(counts), " cams with < 5 landmarks ", np.sum(counts < 5))
 
+# could be even better?
 # what if clustering must avoid degenrate clusters?
 # e.g. 173 with 6 clusters is much better than with 5! but 5 with! good distribution is better than 6.
 # max_c min_i,j in c #(cam_i, lm_j).
@@ -2986,7 +3014,6 @@ for _ in range(kClusters):
 
 print(L_in_cluster)
 Ul_in_cluster = [0 for x in range(kClusters)] # dummy fill list
-#poses = cameras.copy()
 poses_s_in_cluster = [cameras.copy() for _ in range(kClusters)]
 poses_in_cluster = [cameras.copy() for _ in range(kClusters)]
 landmarks = points_3d.copy()
@@ -3024,8 +3051,6 @@ if basic_version:
             blockEig_in_cluster, kClusters, LipJ, innerIts=innerIts, sequential=True,
             )
         end = time.time()
-
-        #print("++++++++++++++++++ globalSingleLandmarksB_in_c[0].shape ", globalSingleLandmarksB_in_c[0].shape)
 
         currentCost = np.sum(cost)
         print(globalIt, " ", round(currentCost), " gain ", round(lastCost - currentCost), ". ============= sum fk update takes ", end - start," s",)
@@ -3430,6 +3455,12 @@ else:
                     resetIt = globalIt
                     failedNesterovAcceleration = 0
                     print("Reset Nesterov acceleration after ", maxFailedNesterovAcceleration, " consecutive failures.")
+            # reset acceleration after alwaysResetIts iteartions without reset
+            if RNA_or_bfgs == False and (globalIt - resetIt) % alwaysResetIts == alwaysResetIts-1:
+                prev_dk = 0 * prev_dk
+                resetIt = globalIt
+                failedNesterovAcceleration = 0
+                print("Reset Nesterov acceleration after ", globalIt - resetIt, " iterations with acceleration.")
 
             maxPctV = np.sqrt(maxPct)
             #if reject and (np.min(LipJ) < LipJMax) and (ls_it == line_search_iterations-1) and (maxPct * lastCostDRE_bfgs < dre_bfgs) and (primal_cost_v > maxPctV * primal_cost_v_before): # or primal_cost_v > maxPct * primal_cost_u):
