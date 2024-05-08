@@ -431,9 +431,15 @@ def blockInverse(M, bs):
     Mi = M.copy()
     if bs > 1:
         bs2 = bs * bs
+
+        symmetric = True
+        mat = M.data[0 : bs2].reshape(bs, bs)
+        if not check_symmetric(mat):
+            symmetric = False
+
         for i_ in range(int(M.data.shape[0] / bs2)):
             mat = Mi.data[bs2 * i_ : bs2 * i_ + bs2].reshape(bs, bs)
-            if not check_symmetric(mat):
+            if not symmetric:
                 mat = np.fliplr(mat)
                 imat = inv_dense(mat, hermitian=True)
                 imat = np.fliplr(imat) # inv or pinv?
@@ -450,9 +456,15 @@ def blockEigenvalue(M, bs):
     Ei = np.zeros(M.shape[0])
     if bs > 1:
         bs2 = bs * bs
+
+        symmetric = True
+        mat = M.data[0 : bs2].reshape(bs, bs)
+        if not check_symmetric(mat):
+            symmetric = False
+
         for i_ in range(int(M.data.shape[0] / bs2)):
             mat = M.data[bs2 * i_ : bs2 * i_ + bs2].copy().reshape(bs, bs)
-            if not check_symmetric(mat):
+            if not symmetric:
                 mat = np.fliplr(mat)
             evs = eigvalsh(mat)
             Ei[bs * i_ : bs * i_ + bs] = evs[bs - 1] # largest
@@ -465,14 +477,20 @@ def blockEigenvalueFull(M, bs, t = 1e-4):
     Ei = M.copy()
     if bs > 1:
         bs2 = bs * bs
+
+        symmetric = True
+        mat = M.data[0 : bs2].reshape(bs, bs)
+        if not check_symmetric(mat):
+            symmetric = False
+
         for i in range(int(M.data.shape[0] / bs2)):
             mat = Ei.data[bs2 * i : bs2 * i + bs2].reshape(bs, bs)
             flip = False
-            if not check_symmetric(mat):
+            if not symmetric:
                 mat = np.fliplr(mat)
                 flip = True
             evs, evv = eigh(mat)
-            evs = np.fmax(evs, evs[bs-1] * t) # * 5e-5)? # tuned at 52: 1e-6: , 1e-4: , 1e-5: 476
+            evs = np.fmax(evs, evs[bs-1] * t)
             mat = evv.dot(diag_sparse(evs) * evv.transpose())
             if flip:
                 mat = np.fliplr(mat)

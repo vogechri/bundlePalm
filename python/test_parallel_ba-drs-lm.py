@@ -856,19 +856,28 @@ def buildResiduumNew(resX, resY) :
 
 def check_symmetric(a, tol=1e-5):
     b = np.fliplr(a.copy())
-    a_sym = np.sum(np.abs(a-a.T) < np.abs(b-b.T))
-    b_sym = np.sum(np.abs(a-a.T) > np.abs(b-b.T))
+    symScoreA = np.abs(a-a.T)
+    symScoreB = np.abs(b-b.T)
+    a_sym = np.sum(symScoreA < symScoreB)
+    b_sym = np.sum(symScoreA > symScoreB)
     #print("a \n", a, " b \n", b, " \n", a_sym, " ", b_sym)
     return a_sym >= b_sym
 
 # bs : blocksize, eg 9 -> 9x9 or 3 -> 3x3 per block
 def blockInverse(M, bs):
     Mi = M.copy()
+
     if bs > 1:
         bs2 = bs * bs
+
+        symmetric = True
+        mat = Mi.data[0 : bs2].reshape(bs, bs)
+        if not check_symmetric(mat):
+            symmetric = False
+
         for i in range(int(M.data.shape[0] / bs2)):
             mat = Mi.data[bs2 * i : bs2 * i + bs2].reshape(bs, bs)
-            if not check_symmetric(mat):
+            if not symmetric:
                 mat = np.fliplr(mat)
                 imat = inv_dense(mat, hermitian=True)
                 imat = np.fliplr(imat) # inv or pinv?
@@ -885,9 +894,15 @@ def blockEigenvalue(M, bs):
     Ei = np.zeros(M.shape[0])
     if bs > 1:
         bs2 = bs * bs
+
+        symmetric = True
+        mat = M.data[0 : bs2].reshape(bs, bs)
+        if not check_symmetric(mat):
+            symmetric = False
+
         for i in range(int(M.data.shape[0] / bs2)):
             mat = M.data[bs2 * i : bs2 * i + bs2].copy().reshape(bs, bs)
-            if not check_symmetric(mat):
+            if not symmetric:
                 mat = np.fliplr(mat)
             # print(i, " ", mat)
             evs = eigvalsh(mat)
@@ -1008,9 +1023,15 @@ def minmaxEv(M, bs):
     enter = False
     if bs > 1:
         bs2 = bs * bs
+
+        symmetric = True
+        mat = M.data[0 : bs2].reshape(bs, bs)
+        if not check_symmetric(mat):
+            symmetric = False
+
         for i in range(int(M.data.shape[0] / bs2)):
             mat = M.data[bs2 * i : bs2 * i + bs2].copy().reshape(bs, bs)
-            if not check_symmetric(mat):
+            if not symmetric:
                 mat = np.fliplr(mat)
             evs = eigvalsh(mat)
             maxE[i] = evs[bs-1]
@@ -1043,16 +1064,20 @@ def blockEigenvalueFull(M, bs, t = 1e-4):#, x0_t_cam_):
     Ei = M.copy()
     if bs > 1:
         bs2 = bs * bs
+
+        symmetric = True
+        mat = M.data[0 : bs2].reshape(bs, bs)
+        if not check_symmetric(mat):
+            symmetric = False
+
         for i in range(int(M.data.shape[0] / bs2)):
             #print(M.data.shape)
             mat = Ei.data[bs2 * i : bs2 * i + bs2].reshape(bs, bs)
             flip = False
-            if not check_symmetric(mat):
+            if not symmetric:
                 mat = np.fliplr(mat)
                 flip = True
             evs, evv = eigh(mat)
-            # 245: 1e-5 30 / 0  ======== DRE BFGS ======  2496053
-            # 245: 1e-4 30 / 0  ======== DRE BFGS ======  1916230, fails for 52, 1266
             evs = np.fmax(evs, evs[bs-1] * t) # * 5e-5)? # tuned at 52: 1e-6: , 1e-4: , 1e-5: 476
             #print("evs ", evs[bs-1] / evs)
             #print("evv ", evv[bs-1])
@@ -1070,11 +1095,17 @@ def blockEigenvalueFullPositive(M, bs, t=0):
     Ei = M.copy()
     if bs > 1:
         bs2 = bs * bs
+
+        symmetric = True
+        mat = M.data[0 : bs2].reshape(bs, bs)
+        if not check_symmetric(mat):
+            symmetric = False
+
         for i in range(int(M.data.shape[0] / bs2)):
             #print(M.data.shape)
             mat = Ei.data[bs2 * i : bs2 * i + bs2].reshape(bs, bs)
             flip = False
-            if not check_symmetric(mat):
+            if not symmetric:
                 mat = np.fliplr(mat)
                 flip = True
             evs, evv = eigh(mat)
@@ -2080,8 +2111,9 @@ def bundle_adjust(
             Ul = JtJ + L * JtJDiag
             penaltyStart = L * penaltyStartConst
 
-        Ul = blockEigenvalueFullPositive(Ul, 9, 0) #? when should this happen?
-        Vl = blockEigenvalueFullPositive(Vl, 3, 0) #? when should this happen?
+        if False:
+            Ul = blockEigenvalueFullPositive(Ul, 9, 0) #? when should this happen?
+            Vl = blockEigenvalueFullPositive(Vl, 3, 0) #? when should this happen?
 
         Vli = blockInverse(Vl, 3)
         bp_s = bp + L * JtJDiag * prox_rhs # TODO: + or -. '+', see above
@@ -2089,9 +2121,6 @@ def bundle_adjust(
             bp_s = bp + stepSize * prox_rhs
         bS = (bp_s - W * Vli * bl).flatten()
 
-        # (2205, 2205)   (19843,) # WRONG AGAIN removes '0'? or something?
-        # (2205, 59241)   (2946753,)
-        # (59241, 59241)   (177723,)
         # print(Ul.shape, " ", Ul.data.shape)
         # print(W.shape, " ", W.data.shape)
         # print(Vli.shape, " ", Vli.data.shape)
@@ -2183,9 +2212,10 @@ def bundle_adjust(
         # soll man das alles nicht per camera machen?
         # cams area shared BUT lms are per part.
 
-        LfkDistance  = Lfkconst - Lfklin - LfkQuad # 
+        LfkDistance  = Lfkconst - Lfklin - LfkQuad
         LfkViolated = LfkDistance > 0
-        LfkSafe = Lfklin < 0 # for any phi ok.
+        LfkSafe = Lfklin < 0 # for any phi ok. TODO or const - lin <0 ?
+        #LfkSafe = Lfkconst - Lfklin < 0 # TODO: test
 
         if tr_check < tr_eta_2: # and False: # TR should not help here. Maybe apply differently? TR checks if approx w. JtJ is ok within region.
             print(" //////  tr_check " , tr_check, " Lfk distance ", LfkDistance, " -nabla^Tdelta=" , -Lfklin, " /////", file=sys.stderr)
