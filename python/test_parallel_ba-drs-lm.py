@@ -1,26 +1,26 @@
 from __future__ import print_function
-from termios import CINTR
+#from termios import CINTR
 import urllib
 import bz2
 import os
 import time
 import numpy as np
 from joblib import Parallel, delayed
-from scipy.sparse import csr_array, csr_matrix, issparse
+from scipy.sparse import csr_array, csr_matrix, coo_matrix #, issparse
 from scipy.sparse import diags as diag_sparse
-from scipy.sparse import hstack as sparse_hstack
-#from scipy.sparse.linalg import splu # slow as FUCK
-from scipy.sparse.linalg import spsolve # slow as FUCK
-#from scipy.linalg import cholesky, cho_solve, cho_factor
-#from sksparse.cholmod import cholesky # install suitesparse and ... and ..
-from scipy.sparse.linalg import inv as inv_sparse # Slowest ever.
+#from scipy.sparse import hstack as sparse_hstack
+##from scipy.sparse.linalg import splu # slow as FUCK
+#from scipy.sparse.linalg import spsolve # slow as FUCK
+##from scipy.linalg import cholesky, cho_solve, cho_factor
+##from sksparse.cholmod import cholesky # install suitesparse and ... and ..
+#from scipy.sparse.linalg import inv as inv_sparse # Slowest ever.
 from numpy.linalg import pinv as inv_dense
 from numpy.linalg import eigvalsh, eigh
 # idea reimplement projection with torch to get a jacobian -> numpy then
 import torch
 import math
 import ctypes
-from torch.autograd.functional import jacobian
+#from torch.autograd.functional import jacobian
 from torch import tensor, from_numpy
 #import open3d as o3d
 
@@ -862,6 +862,12 @@ def blockEigenvalue(M, bs):
 
     return Ei
 
+def diagMatMult(s, bs):
+    if bs > 1:
+        #print(1e5 * np.repeat(s.transpose(), bs, axis=0).flatten())
+        Ei = diag_sparse(np.repeat(s.transpose(), bs, axis=0).flatten())
+    return Ei
+
 # analysis
 def blockEigenvalueSet(M, bs):
     Ei = np.zeros((bs, int(M.data.shape[0] / bs)))
@@ -1571,6 +1577,41 @@ def primal_cost(
     costEnd = np.sum(fx1.numpy() ** 2)
     return costEnd
 
+# use indices per cam, sum up. Also bl has indices
+def perCamDescentLemma(fx0_, fx1_, delta_p, Vli, W, bp, bl, stepSize, decent_lemma_divisor, camera_indices_):
+    costStart = (fx0_**2).reshape(-1,2)
+    costEnd = (fx1_.numpy() ** 2).reshape(-1,2)
+    ## print(costStart.shape) # 2 * cam indices, 'fx, fy'
+    ## print(bp.shape, " ", delta_p.shape, " ", bl.shape, " ", delta_l.shape, " ", camera_indices_.shape, " ", point_indices_.shape, " ", (W * Vli * bl).shape)
+    # Note delta_l + Vli * bl = -Vli * ((W.transpose() * delta_p).flatten()
+    # <bl, delta_l + Vli * bl> = <bl, -Vli * ((W.transpose() * delta_p).flatten()>
+    # Lfklin = np.sum(bp.reshape(-1,9) * delta_p.reshape(-1,9), axis=1) + np.sum(bl.reshape(-1,3) * (delta_l + Vli * bl).reshape(-1,3), axis=1)
+    # so
+    Lfklin = np.sum(bp.reshape(-1,9) * delta_p.reshape(-1,9), axis=1) - np.sum(delta_p.reshape(-1,9) * (W * Vli.transpose() * bl).reshape(-1,9), axis=1)
+    LfkQuad = np.sum(delta_p.reshape(-1,9) * (stepSize * delta_p).reshape(-1,9), axis=1) / decent_lemma_divisor
+    cost_per_res = np.sum((costEnd - costStart).reshape(-1,2), axis=1)
+    cost_per_cam = np.zeros(Lfklin.shape[0])
+    numcams = int(delta_p.shape[0] / 9)
+    numres = camera_indices_.shape[0]
+    A = coo_matrix((np.ones(numres),(camera_indices_, np.arange(numres))),shape=(numcams, numres))
+    cost_per_cam = A * cost_per_res
+    LfkDistance  = cost_per_cam - Lfklin - LfkQuad
+
+    # print("LfkDistance = Lfkconst - Lfklin - LfkQuad ", np.sum(LfkDistance), " = ", np.sum(cost_per_cam), " - ", np.sum(Lfklin)," - ", np.sum(LfkQuad))
+    # print("Lfklin ", np.sum(np.sum(bp.reshape(-1,9) * delta_p.reshape(-1,9), axis=1)), " - ", np.sum(np.sum(delta_p.reshape(-1,9) * (W * Vli.transpose() * bl).reshape(-1,9), axis=1)), " = -", np.sum(bl.reshape(-1,3) * (delta_l + Vli * bl).reshape(-1,3)))
+
+    LfkViolated = LfkDistance > 0
+    # print(LfkDistance, " ", np.sum(LfkDistance))
+
+    # TODO: 1. if sum is > only adjust those >
+    # 2.
+    #LfkSafe = Lfklin < 0 # for any phi ok.
+    return LfkViolated #check: LfkViolated.any()
+
+    # Lfklin = bp.dot(delta_p) + bl.dot(delta_l + Vli * bl) # '+' or '-'? in +/- bl.dot
+    # LfkQuad = delta_p.dot(stepSize * delta_p) / decent_lemma_divisor
+    # Lfkconst = costEnd - costStart
+
 # there are cams with < 5 -- even 1 landmark only.
 # must invert 9x9 in ok manner. those also constrain the cam vectors to lie at s.
 # what if we constrain it to lie in BS place? k1,k2,f>0 e.g.
@@ -1628,7 +1669,9 @@ def bundle_adjust(
     tr_eta_2 = 0.25
     blockEigMultGain = 4 # 4 better than 2 at least if allowDecreaseBlockEig, feels random and weird
     threshWhereNeeded = 1e-6
-    verbose_Jac = True #False
+    verbose_Jac = False #True #False
+
+    stepPerCam = True # False
 
     newVersion = True
     # TODO: This parameter block is ok blockEigMultJtJ 1e-5, LipJ = 2, blockEigenvalueWhereNeeded 1e-2,
@@ -1654,7 +1697,7 @@ def bundle_adjust(
         print("blockEig_in_c_ ", blockEig_in_c_, file=sys.stderr)
 
     allowDecreaseBlockEig = True
-    use_be_memory = True
+    use_be_memory = False #True
     if use_be_memory and len(tempBlockEigen[cluster_id]) > 1:
         if len(tempBlockEigen[cluster_id]) > globalIt % memory_be:
             tempBlockEigen[cluster_id][globalIt % memory_be] = 0 # remove current, either inner iteration or beyond memory
@@ -1760,8 +1803,11 @@ def bundle_adjust(
                     #JtJDiag = blockEigMultJtJ * blockEigenvalueJtJ # this is likely almost same as above. Todo: check/find value.
                 else:
                     blockEigenvalueJtJ = 1e1 * blockEigenvalue(JtJ, 9)
-                    stepSize = LipJ_ * JtJ.copy() + blockEigMult * blockEigenvalueJtJ
                     JtJDiag = JtJ.copy() + blockEigMultJtJ * blockEigenvalueJtJ
+                    if not stepPerCam:
+                        stepSize = LipJ_ * JtJ.copy() + blockEigMult * blockEigenvalueJtJ
+                    else:
+                        stepSize = LipJ_ * JtJ.copy() + diagMatMult(global_blockEig_in_cluster_per_cam[cluster_id], 9) * blockEigenvalueJtJ
 
                 # maxE, minE = minmaxEv(JtJ, 9)
                 # print("JtJ spectral ", (maxE/minE))
@@ -1916,9 +1962,35 @@ def bundle_adjust(
             Lfklin = bp.dot(delta_p) + bl.dot(delta_l + Vli * bl) # '+' or '-'? in +/- bl.dot
             LfkQuad = delta_p.dot(stepSize * delta_p) / decent_lemma_divisor
 
+            # print("Same? ", delta_l + Vli * bl, " = ", -Vli * ((W.transpose() * delta_p).flatten()))
+            # print("Same? ", np.sum( np.abs( delta_l + Vli * bl + Vli * ((W.transpose() * delta_p).flatten()))))
+            # print(Lfklin, " Lfklin =", bp.dot(delta_p), " - ", bl.dot(delta_l + Vli * bl))
+
         LfkDistance  = Lfkconst - Lfklin - LfkQuad
         LfkViolated = LfkDistance > 0
         LfkSafe = Lfklin < 0 # for any phi ok.
+
+        # print("LfkDistance = Lfkconst - Lfklin - LfkQuad ", LfkDistance, " = ", Lfkconst, " - ", Lfklin," - ", LfkQuad)
+
+        # TODO new
+        if stepPerCam:
+            LfkViolatedAll = perCamDescentLemma(fx0, fx1, delta_p, Vli, W, bp, bl, stepSize, decent_lemma_divisor, camera_indices_)
+            LfkViolatedAny = np.logical_and(LfkViolatedAll, global_blockEig_in_cluster_per_cam[cluster_id] < globalBlockEigUpperLimit).any()
+            LfkViolated = LfkViolatedAny and LfkViolated
+            # LfkViolated = LfkViolatedAny # this shows it does not work.
+            print("LfkViolated: ", LfkViolated, " LfkViolatedAll: ", LfkViolatedAll.any(), " sum: ", np.sum(LfkViolatedAll), file=sys.stderr)
+            # print("LfkViolated ", LfkViolated, " LfkDistance ",LfkDistance)
+            # print("global_blockEig_in_cluster_per_cam ", global_blockEig_in_cluster_per_cam[cluster_id])
+            # LfkViolated -> LfkViolated.any():
+            #print(" new gbe ", global_blockEig_in_cluster_per_cam[cluster_id].shape, " ", LfkViolatedAll.shape)
+            #print(LfkViolatedAll * blockEigMultGain * global_blockEig_in_cluster_per_cam[cluster_id])
+
+
+        # blockEigMult_old = global_blockEig_in_cluster_per_cam[cluster_id]
+        # global_blockEig_in_cluster_per_cam[cluster_id] = \
+        #     np.fmin(globalBlockEigUpperLimit, np.fmax(blockEigMultLimit, blockEigMult_old + LfkViolatedAll * (blockEigMultGain-1) * blockEigMult_old))
+        # stepSize += diagMatMult(global_blockEig_in_cluster_per_cam[cluster_id] - blockEigMult_old, 9) * blockEigenvalueJtJ
+        # print(1e5 * global_blockEig_in_cluster_per_cam[cluster_id])
 
         if tr_check < tr_eta_2: # and False: # TR should not help here. Maybe apply differently? TR checks if approx w. JtJ is ok within region.
             print(" //////  tr_check " , tr_check, " Lfk distance ", LfkDistance, " -nabla^Tdelta=" , -Lfklin, " /////", file=sys.stderr)
@@ -1943,11 +2015,18 @@ def bundle_adjust(
             #stepSize = stepSize * 2
             # other idea, initially we only add 1/2^k eg 0.125, times the needed value and inc if necessary, maybe do not add anything if not needed.
 
-            # indeed reliable to get over.
-            blockEigMult_old = blockEigMult
-            blockEigMult = np.minimum(globalBlockEigUpperLimit, np.maximum(blockEigMultLimit, blockEigMultGain * blockEigMult))
-            stepSize += (blockEigMult - blockEigMult_old) * blockEigenvalueJtJ
-            #blockEigenvalueJtJ.data *= 2 # appears slow but safe
+            if not stepPerCam:
+                # indeed reliable to get over.
+                blockEigMult_old = blockEigMult
+                blockEigMult = np.minimum(globalBlockEigUpperLimit, np.maximum(blockEigMultLimit, blockEigMultGain * blockEigMult))
+                stepSize += (blockEigMult - blockEigMult_old) * blockEigenvalueJtJ
+                #blockEigenvalueJtJ.data *= 2 # appears slow but safe
+            else:
+                blockEigMult_old = global_blockEig_in_cluster_per_cam[cluster_id]
+                global_blockEig_in_cluster_per_cam[cluster_id] = \
+                    np.fmin(globalBlockEigUpperLimit, np.fmax(blockEigMultLimit, blockEigMult_old + LfkViolatedAll * (blockEigMultGain-1) * blockEigMult_old))
+                stepSize += diagMatMult(global_blockEig_in_cluster_per_cam[cluster_id] - blockEigMult_old, 9) * blockEigenvalueJtJ
+                #print(1e5 * global_blockEig_in_cluster_per_cam[cluster_id])
 
             # try this
             #minDiag *= 2
@@ -1976,6 +2055,12 @@ def bundle_adjust(
         # TODO: this basically disables lowering blockEigMult !?
         if (newVersion and LfkSafe and not steSizeTouched) and allowDecreaseBlockEig: # 394 escalates if True here.
             blockEigMult = np.minimum(globalBlockEigUpperLimit, np.maximum(blockEigMultLimit, blockEigMult / 2))
+
+            # decrease those not violated only.
+            if stepPerCam:
+                global_blockEig_in_cluster_per_cam[cluster_id] = \
+                    np.fmin(globalBlockEigUpperLimit, np.fmax(blockEigMultLimit, \
+                                                            global_blockEig_in_cluster_per_cam[cluster_id] - (1-LfkViolatedAll) * global_blockEig_in_cluster_per_cam[cluster_id] / 2))
 
         # version with penalty check for ADMM convergence / descent lemma. Problem: slower?
         if costStart + penaltyStart < costEnd + penaltyL  + penaltyP or LfkViolated:
@@ -2057,6 +2142,11 @@ def bundle_adjust(
             #print("Appending  cl:", cluster_id, " it: ", globalIt, " mem:", memory_be, " -> ", tempBlockEigen[cluster_id])
         else:
             tempBlockEigen[cluster_id][globalIt % memory_be] = np.minimum(globalBlockEigUpperLimit, np.maximum(blockEigMultLimit, blockEigMult))
+    else:
+        if globalIt < memory_be and globalIt >= len(tempBlockEigen[cluster_id]):
+            tempBlockEigen[cluster_id].append(np.max(global_blockEig_in_cluster_per_cam[cluster_id]))
+        else:
+            tempBlockEigen[cluster_id][globalIt % memory_be] = np.max(global_blockEig_in_cluster_per_cam[cluster_id])
 
     ###################
     # TODO this leads to blockEigMult not shrinking at all?!
@@ -2397,7 +2487,7 @@ def getScaling(min_, max_): # aim at max * min = 1. So max * x = 1/(min * x). x^
     # 1/ (min * np.sqrt(1. / (min * max)) = np.sqrt(min * max / min^2) = np.sqrt(max / min).
     return np.sqrt(1. / (min_ * max_) )
 
-def GetPcgScalingDiag(JtJ):
+def GetPcgScalingDiag(JtJ, do_scaling=True):
     temp_  = np.squeeze(np.asarray((np.abs(JtJ)).sum(axis=0) ))
     # temp_W = np.squeeze(np.asarray((np.abs(W)).sum(axis=1) ))
     # temp_  = temp_ + temp_W
@@ -2407,16 +2497,15 @@ def GetPcgScalingDiag(JtJ):
     # temp_W = np.squeeze(np.asarray((np.abs(t * W)).sum(axis=1) ))
     # temp_  = temp_ + temp_W
     print("min/max Unorm after ", np.min(temp_), np.max(temp_), " t ", t, " min*max= ", np.min(temp_) * np.max(temp_))
-    temp_  = temp_.reshape(-1,9)
     print("Preconditioners min/max Unorm ", np.min(temp_), np.max(temp_))
     # e-14 to e16 at -2. -6 ->
-    minTresh = 1e-18 # 12 -> 14 for 245 and scale!
-    maxTresh = 1e18
+    minTresh = 1e-15 # 12 -> 14 for 245 and scale!
+    maxTresh = 1e15
     temp_ = np.fmin(np.fmax(temp_, minTresh), maxTresh) #np.sqrt(np.minimum(np.maximum(t, minTresh), maxTresh))
     #temp_ = np.fmin(np.fmax(temp_, 1e-14), 1e16) # TODO. pick most singular example? 646? 173 maybe / any dubrovnik
     print("Preconditioners min/max Unorm after thresholding ", np.min(temp_), np.max(temp_))
 
-    scaleToHaveValuesAroundOneForHess = False #True
+    scaleToHaveValuesAroundOneForHess = do_scaling #True
     if scaleToHaveValuesAroundOneForHess:
         #temp_ /= np.sqrt(t) #np.sqrt(np.minimum(np.maximum(t, minTresh), maxTresh))
         #print("Preconditioners min/max Unorm after scaling 1", np.min(temp_), np.max(temp_))
@@ -2440,7 +2529,6 @@ def GetPcgScalingDiag(JtJ):
         # i could also thresh AGAIN? does not make sense!? more updating? adjust vnorm? stronger descent lemma correction / more?
         #temp_ = np.fmin(np.fmax(temp_, minTresh), maxTresh) #np.sqrt(np.minimum(np.maximum(t, minTresh), maxTresh))
         #print("Preconditioners min/max Unorm after thresholding ", np.min(temp_), np.max(temp_))
-
     return temp_
 
 def GetPreconditioners(cameras_, points_3d_, points_2d_, camera_indices_, point_indices_):
@@ -2463,26 +2551,23 @@ def GetPreconditioners(cameras_, points_3d_, points_2d_, camera_indices_, point_
     # TODO: eval thresh here. lower higher, use 173 maybe w. all lms. Also: redo every 10 iterations?
     # temp_ = np.ones(temp_.shape) # e.g. 173: worse. Likely all w landmarks far away?
     Unorm_ = diag_sparse(temp_.copy().flatten())
-    #print(Unorm.shape, " ", Unorm.data.shape)
-    #Unorm = diag_sparse(np.squeeze(np.asarray(0.01 * np.sqrt( (np.abs(JtJ)/1000).sum(axis=0) ))))
-    #Unorm = diag_sparse(np.ones(cameras.flatten().shape[0])) * 100 # ok.
-    # print("Unorm.data.reshape(-1,9)", Unorm.data.reshape(-1,9))
     # print("np.sum(fx0**2) ", np.sum(fx0**2))
-    # print("cameras ", cameras )
-
-    #print("cameras ", cameras ) # looks ok ..
-
     # could also compute locally / all the time! 542: appears to 'go crazy' after 20 its.
     JltJl = J_land.transpose() * J_land
-    Vnorm_ = diag_sparse(np.squeeze(np.asarray((np.abs(JltJl)).sum(axis=0) )))
-    temp_  = Vnorm_.data.reshape(-1,3)
+    if False:
+        Vnorm_ = diag_sparse(np.squeeze(np.asarray((np.abs(JltJl)).sum(axis=0) )))
+        temp_  = Vnorm_.data.reshape(-1,3)
+        temp_ = np.sqrt(temp_)
+        print("min/max Vnorm ", np.min(temp_), np.max(temp_))
+        temp_ = 1e-1 * np.fmin(np.fmax(temp_, 1e-10), 1e10) # TODO. pick most singular example? 646 and 52? 1-10 was ok on 52 clust 1e-1, 1e-3 bad? check
+        #temp = np.max(np.sqrt(temp), axis=1) # max or mean? sqrt
+        #temp_ = np.repeat(temp_[:,np.newaxis], 3, axis=1)
+
+    temp_ = GetPcgScalingDiag(JltJl)
     temp_ = np.sqrt(temp_)
-    print("min/max Vnorm ", np.min(temp_), np.max(temp_))
-    temp_ = 1e-1 * np.fmin(np.fmax(temp_, 1e-10), 1e10) # TODO. pick most singular example? 646 and 52? 1-10 was ok on 52 clust 1e-1, 1e-3 bad? check
-    #temp = np.max(np.sqrt(temp), axis=1) # max or mean? sqrt
-    #temp_ = np.repeat(temp_[:,np.newaxis], 3, axis=1)
+
     Vnorm_ = diag_sparse(temp_.flatten())
-    Vnorm_ = diag_sparse(np.ones(points_3d.flatten().shape[0])) # 52: this is much better -- could be random
+    #Vnorm_ = diag_sparse(np.ones(points_3d.flatten().shape[0])) # 52: this is much better -- could be random
 
     return Unorm_, Vnorm_, fx0_
 
@@ -2687,12 +2772,6 @@ pre_merges = 0
 values, counts = np.unique(camera_indices, return_counts=True)
 print(". minimum camera observations in total ", np.min(counts), " cams with < 5 landmarks ", np.sum(counts < 5))
 
-# what if clustering must avoid degenrate clusters?
-# e.g. 173 with 6 clusters is much better than with 5! but 5 with! good distribution is better than 6.
-# max_c min_i,j in c #(cam_i, lm_j).
-# could pick max c s.t. at least 10 are present.
-# alternative cams occur in least # clusters.
-
 # (
 #     camera_indices_in_cluster,
 #     point_indices_in_cluster,
@@ -2709,6 +2788,7 @@ print(". minimum camera observations in total ", np.min(counts), " cams with < 5
 ) = cluster_deg_by_landmark(
     camera_indices, points_2d, point_indices, kClusters)
 
+global_blockEig_in_cluster_per_cam = [1e-5 * np.ones(len(np.unique(camera_indices_in_cluster[i]))) for i in range(kClusters)]
 for ci in range(kClusters):
     values, counts = np.unique(camera_indices_in_cluster[ci], return_counts=True)
     print(ci, ". minimum camera observations in cluster ", np.min(counts), " cams with < 5 landmarks ", np.sum(counts < 5))
@@ -2719,7 +2799,6 @@ for _ in range(kClusters):
 
 print(L_in_cluster)
 Ul_in_cluster = [0 for x in range(kClusters)] # dummy fill list
-#poses = cameras.copy()
 poses_s_in_cluster = [cameras.copy() for _ in range(kClusters)]
 poses_in_cluster = [cameras.copy() for _ in range(kClusters)]
 landmarks = points_3d.copy()
