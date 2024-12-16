@@ -1164,7 +1164,7 @@ def copy_selected_blocks(M, block_selection_, bs):
 
 def stop_criterion(delta, delta_i, i):
     # lower (1e-4) can be worse? maybe just the parts / how parts are.
-    eps = 1e-3 #1e-2 used in paper, tune. might allow smaller as faster?
+    eps = 1e-3 #1e-3 / 1e-2 used in paper, tune. might allow smaller as faster?
     return (i+1) * delta_i / delta < eps
 
 def solvePowerIts(Ul, W, Vli, bS, m_):
@@ -1191,7 +1191,7 @@ def solvePowerIts(Ul, W, Vli, bS, m_):
 # test Loop over L0=x, L=y here. Likely best to do grid search to get an idea. model as exp(-poly(L,it))
 def solveByGDNesterov(Ul, W, Vli, bS, m):
     Lip = 0.9 # 100 -> 1. # TODO: play, find out how to progress over time.
-    lambda0 = (1.+np.sqrt(5.)) / 2. # l=0 g=1, 0, .. L0=1 g = 0,..
+    lambda0 = (1. + np.sqrt(5.)) / 2. # l=0 g=1, 0, .. L0=1 g = 0,..
 
     Uli = blockInverse(Ul, 9)
     ubs = - Uli * bS

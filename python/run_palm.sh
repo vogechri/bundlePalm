@@ -26,4 +26,16 @@ python -u test_parallel_ba-PalmNew.py http://grail.cs.washington.edu/projects/ba
 python test_parallel_ba-PalmNew.py http://grail.cs.washington.edu/projects/bal/data/venice/ problem-1490-935273-pre.txt.bz2 90 10 2> lm1490_palm.txt
 
 python test_parallel_ba-PalmNew.py http://grail.cs.washington.edu/projects/bal/data/trafalgar/ problem-257-65132-pre.txt.bz2 90 10 2> lm257_palm.txt
-# python test_parallel_ba-PalmNew.py http://grail.cs.washington.edu/projects/bal/data/final/ problem-93-61203-pre.txt.bz2 90 10 2> lm93_palm.txt
+# # python test_parallel_ba-PalmNew.py http://grail.cs.washington.edu/projects/bal/data/final/ problem-93-61203-pre.txt.bz2 90 10 2> lm93_palm.txt
+
+python test_parallel_ba-PalmNew.py http://grail.cs.washington.edu/projects/bal/data/dubrovnik/ problem-287-182023-pre.txt.bz2 90 10 2> lm287_palm.txt
+python test_parallel_ba-PalmNew.py http://grail.cs.washington.edu/projects/bal/data/ladybug/ problem-783-84444-pre.txt.bz2 90 10 2> lm783_palm.txt
+python test_parallel_ba-PalmNew.py http://grail.cs.washington.edu/projects/bal/data/ladybug/ problem-1064-113655-pre.txt.bz2 90 10 2> lm1064_palm.txt
+python test_parallel_ba-PalmNew.py http://grail.cs.washington.edu/projects/bal/data/venice/ problem-744-543562-pre.txt.bz2 90 10 2> lm744_palm.txt
+python test_parallel_ba-PalmNew.py http://grail.cs.washington.edu/projects/bal/data/venice/ problem-951-708276-pre.txt.bz2 90 10 2> lm951_palm.txt
+python test_parallel_ba-PalmNew.py http://grail.cs.washington.edu/projects/bal/data/final/ problem-871-527480-pre.txt.bz2 90 10 2> lm871_palm.txt
+python test_parallel_ba-PalmNew.py http://grail.cs.washington.edu/projects/bal/data/dubrovnik/ problem-308-195089-pre.txt.bz2 90 10 2> lm308_palm.txt
+python test_parallel_ba-PalmNew.py http://grail.cs.washington.edu/projects/bal/data/ladybug/ problem-1723-156502-pre.txt.bz2 90 10 2> lm1723_palm.txt
+python test_parallel_ba-PalmNew.py http://grail.cs.washington.edu/projects/bal/data/venice/ problem-1778-993923-pre.txt.bz2 90 10 2> lm1778_palm.txt
+python test_parallel_ba-PalmNew.py http://grail.cs.washington.edu/projects/bal/data/final/ problem-3068-310854-pre.txt.bz2 90 10 2> lm3068_palm.txt
+python test_parallel_ba-PalmNew.py http://grail.cs.washington.edu/projects/bal/data/final/ problem-13682-4456117-pre.txt.bz2 90 10 2> lm13682_palm.txt

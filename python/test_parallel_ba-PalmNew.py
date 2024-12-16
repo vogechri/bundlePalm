@@ -536,9 +536,9 @@ def solvePowerIts(Ul, W, Vli, bS, m_):
             print(it__, " gd cost ", costk)
 
         if stop_criterion(np.linalg.norm(xk, 2), np.linalg.norm(g, 2), it__):
-           return xk
+           return xk, it__
 
-    return xk
+    return xk, it__
 
 # test Loop over L0=x, L=y here. Likely best to do grid search to get an idea. model as exp(-poly(L,it))
 def solveByGDNesterov(Ul, W, Vli, bS, m_):
@@ -573,6 +573,47 @@ def solveByGDNesterov(Ul, W, Vli, bS, m_):
          print(it__, " gd cost ", costk)
 
        if stop_criterion(np.linalg.norm(xk, 2), np.linalg.norm(1/Lip * g, 2), it__):
+           return xk, it__
+    return xk, it__
+
+def solveByGDPolak(Ul, W, Vli, bS, m):
+    L = 0.7 # 100 -> 1. 
+    mu = 0.4
+    L = 0.9
+    mu = 0.75
+
+    deltaInf = (np.sqrt(L) - np.sqrt(mu)) / (np.sqrt(L) + np.sqrt(mu))
+    delta1 = 4 * deltaInf / (L-mu)
+    delta2 = (1 - 2 * deltaInf * (L+mu)/(L-mu))
+    gamma = 2 / (L+mu)
+
+    Uli = blockInverse(Ul, 9)
+    ubs = - Uli * bS
+    xk0 = - ubs * 0
+    xk = - ubs * gamma
+
+    verbose = False
+    if verbose:
+        costk = xk.dot(Ul * xk - W * (Vli * (W.transpose() * xk)) - 2 * bS)
+        print("-1 gd cost ", costk)
+    
+    for it__ in range(m):
+
+       #( I - Uli * W * Vli * W.transpose()) 
+       g = xk - Uli*(W*(Vli*(W.transpose() * xk))) + ubs
+       #zk = xk - delta1 * g + delta2 * (xk0 - xk) # xk-1 - delta1 nabla f + delta2 (xk-2 -xk-1)
+       xk_i = delta1 * g + delta2 * (xk0 - xk)
+       zk = xk - xk_i # xk-1 - delta1 nabla f + delta2 (xk-2 -xk-1)
+       xk0 = xk
+       xk = zk
+
+       if verbose:
+         # test: 
+         # eq is Ul [I - Uli * W * Vli * W.transpose()] x = b
+         costk = xk.dot(Ul * xk - W * (Vli * (W.transpose() * xk)) - 2 * bS)
+         print(it__, " gd cost ", costk)
+
+       if stop_criterion(np.linalg.norm(xk, 2), np.linalg.norm(xk_i, 2), it__):
            return xk, it__
     return xk, it__
 
@@ -810,7 +851,7 @@ def cluster_by_camera_gpt(
         # 1. find incomplete lms -> not all res in single cluster. 
         # 2. lm -> res missing by id (only incomplete)
         # 3. distribute equally, pick cluster w least res. pick lm with least res to add, add (bunch)
-
+        kClusters = kClusters_
     else:
         res_indices_in_cluster_, kClusters, old_vtxsToPart = cluster_covis_lib(kClusters_, pre_merges, camera_indices_, point_indices_, old_vtxsToPart)
         kClusters_ = kClusters
@@ -1134,7 +1175,7 @@ def local_bundle_adjust(
                 ones_at_uncovered_indices[covered_indices_3d] = 0
                 blockEigenvalueJltJl = blockEigenvalue(JltJl, 3) #+ diag_sparse(ones_at_uncovered_indices)
                 
-                # todo 0.5 appars to be ok still & faster. lower leads to hickups and slow down
+                # todo 0.5 appears to be ok still & faster. lower leads to hickups and slow down
                 stepSize = 1. * (1e-3 * blockEigenvalueJltJl + JltJl.copy()) # this already suffices
                 #stepSize = 1. * (1e-0 * diag_sparse(np.ones(n_points_*3)) + 1.0 * JltJl.copy()) # not so good
                 JltJlDiag = stepSize.copy() # max 1, 1/L, line-search dre fails -> increase
@@ -1187,8 +1228,9 @@ def local_bundle_adjust(
         Vli = blockInverse(Vl, 3)
         bS = (bp - W * Vli * bl).flatten()
 
-        #delta_p = - solvePowerIts(Ul, W, Vli, bS, powerits)
         delta_p, powerits_run = solveByGDNesterov(Ul, W, Vli, bS, powerits)
+        #delta_p, powerits_run = solveByGDPolak(Ul, W, Vli, bS, powerits)
+        #delta_p, powerits_run = solvePowerIts(Ul, W, Vli, bS, powerits)
         delta_p = -delta_p
 
         delta_l = -Vli * ((W.transpose() * delta_p).flatten() + bl)
@@ -1864,10 +1906,12 @@ sequential = True
 globalIt = 0
 bestCost = fx_start
 resetIt = 0
+#tkk = globalIt - resetIt + 1
 failedNesterovAcceleration = 0 # count after k consecutive misses, restart (RNA might not need this)
 maxFailedNesterovAcceleration = 3 # 2,3 or 4. Check what needs to be send in parallel scheme
-extrapolate_parallel = True # then internally does not use sequential update? and
-use_inertia_in_sequential = False # 1. do not use inside sequentila update (tau =1) in palm_f.
+extrapolate_parallel = True # then internally does not use sequential update? and False does not work = sequential procedure without acceleration right now.
+# sequential does not leverage acceleration? hmm
+use_inertia_in_sequential = True # 1. do not use naive tau inertia inside sequential update (vs tau = 1) in palm_f but heavy ball After all updates are 'in'.
 always_acccept_acceleration = True # the problem we solve (can) has a different (local) minimum than original BA problem
 Gs = []
 Fs = []
@@ -1941,7 +1985,8 @@ else:
             point_indices_in_cluster,
             points_2d_in_cluster,
             res_indices_in_cluster,
-            additional_point_indices_in_cluster, additional_camera_indices_in_cluster, additional_points_2d_in_cluster, point_indices_already_covered_c,
+            additional_point_indices_in_cluster, additional_camera_indices_in_cluster,
+            additional_points_2d_in_cluster, point_indices_already_covered_c,
             covered_landmark_indices_c,
             old_vtxsToPart,
             kClusters
@@ -2206,7 +2251,7 @@ for globalIt in range(iterations):
                 rna_delta  = xk1 - np.concatenate([x0_p_old.flatten(), landmark_v_old.flatten()]) # delta(k) + delta(k-1) step! Best is delta(k-1) + delta(k-2)
                 if False and globalIt > 0: # about same?
                     rna_delta = wk
-                Gs, Fs, Fes, x_extr = RNA_P(Gs, Fs, xk1, rna_delta, it, rnaBufferSize, Fes, rna_delta, lamda = 1, h = -1)
+                Gs, Fs, Fes, x_extr = RNA_P(Gs, Fs, xk1, rna_delta, globalIt, rnaBufferSize, Fes, rna_delta, lamda = 1, h = -1)
                 camera_ext_ = x_extr[: 9 * n_cameras].reshape(n_cameras, 9)
                 point_ext_ = x_extr[9*n_cameras :].reshape(n_points, 3)
                 wk = wk1.copy()
@@ -2216,7 +2261,7 @@ for globalIt in range(iterations):
                 xk  = np.concatenate([x0_p_old.flatten(), landmark_v_old.flatten()]) # past
                 bfgs_r = -(xk1 - xk05) # this is the gradient xk05 + r = xk1 a gradient step.
                 # we want to estimate the hessian and d = H^-1* g defines new step we go into direction -d
-                dk = BFGS_direction(bfgs_r, bfgs_ps, bfgs_qs, bfgs_rhos, it, bfgs_mem, bfgs_mu)
+                dk = BFGS_direction(bfgs_r, bfgs_ps, bfgs_qs, bfgs_rhos, globalIt, bfgs_mem, bfgs_mu)
 
                 # cannot work since 2 things together.
                 dk_stepLength = np.linalg.norm(dk, 2)
@@ -2272,7 +2317,13 @@ for globalIt in range(iterations):
                     # Polyak's heavy-ball method: xk1 - xk05 define gradient and delta_v the past update.
                     heavyBall = True
                     if heavyBall:
-                        beta_nesterov = (globalIt-resetIt-1) / (globalIt-resetIt+2)
+                        beta_nesterov = (globalIt-resetIt-1) / (globalIt-resetIt+2) # where did i get this?
+                        # beta_nesterov = (globalIt-resetIt-1) / (globalIt-resetIt+1) # weird but slightly better ?
+                        #tkk1 = (1 + np.sqrt(4*tkk*tkk + 1)) / 2 # or tk = tk + 1
+                        #beta_nesterov = (tkk-1) / (tkk+2)
+                        #beta_nesterov = (tkk-1) / (tkk1)
+                        #print("beta_nesterov ",beta_nesterov, " tk ", tkk, " new tkk ",tkk1)
+                        #tkk = tkk1
                         delta_v = xk1 - xk05 + beta_nesterov * delta_v
                         x_extr = xk05 + delta_v
 
@@ -2378,9 +2429,9 @@ for globalIt in range(iterations):
         # TODO 1.4 adaptive getting smaller for more iterations --
         #
         # if loss by acc is > gain by step reject? # TODO: changed?
-        #
+        # TODO replace 1.4 with 1.2, or adaptive? RNA / nesterov
         #if primal_cost_ext < primal_cost_v or (always_acccept_acceleration and primal_cost_ext < 1.4 * primal_cost_v ):
-        if primal_cost_ext < primal_cost_v or (always_acccept_acceleration and primal_cost_ext < 1.4 * np.minimum(primal_cost_v, bestCost) ):
+        if primal_cost_ext < primal_cost_v or (always_acccept_acceleration and primal_cost_ext < 1.1 * np.minimum(primal_cost_v, bestCost) ):
 
             # TODO: changed
             if primal_cost_ext < primal_cost_v: # 931: awful, 1.4? or lower, or adaptive?
@@ -2389,7 +2440,7 @@ for globalIt in range(iterations):
                 x0_p = camera_ext.copy()
                 primal_cost_vs = [primal_costs_ext[i] for i in range(kClusters)]
 
-            else: # TODO: changed
+            else: # TODO: changed -- acceleration could always be based on ext / even 1st version? woudl demand 1 more step palm (x2 slow).
                 for ci in range(kClusters):
                     points_3d_in_cluster[ci] = landmark_v.copy()
                 x0_p = x0_p_new.copy()
@@ -2411,10 +2462,12 @@ for globalIt in range(iterations):
         if failedNesterovAcceleration >= maxFailedNesterovAcceleration:
             delta_v = 0 * delta_v
             resetIt = globalIt
+            #tkk = globalIt - resetIt + 1
             failedNesterovAcceleration = 0
             print("Reset Nesterov acceleration after ", maxFailedNesterovAcceleration, " consecutive failures.")
 
     else: # not extrapolate_parallel
+
         if use_inertia_in_sequential:
             use_inertia_simple = False # does a bit with small tau. Beware to use when done in sequential update!
             if use_inertia_simple: # RNA works, so maybe use here with L*delta, see acceleration
@@ -2487,6 +2540,7 @@ for globalIt in range(iterations):
                 x0_p = x0_p_new.copy()
 
         else:
+            primal_cost_ext = primal_cost_v + 1
             for ci in range(kClusters):
                 points_3d_in_cluster[ci] = landmark_v.copy()
             x0_p = x0_p_new.copy()
