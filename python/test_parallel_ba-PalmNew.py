@@ -1485,6 +1485,11 @@ def updateCluster_palm(
     # put in unique points, adjust point_indices_in_cluster[ci] by id in unique_points_in_c_
     points_3d_in_c = points_3d_in_cluster_[unique_points_in_c_]
 
+    #print("LM  Indices in part ", points_3d_in_cluster_.shape, (point_indices_in_c).shape, (covered_landmark_indices_c_).shape, (additional_covered_landmark_indices_c_).shape)
+    print("Cam Indices in part ", (cameras_indices_in_c_).shape, (x0_p_).shape, (additional_cameras_indices_in_c_).shape)
+    print("ULM  Indices in part ", points_3d_in_cluster_.shape, np.unique(point_indices_in_c).shape, np.unique(covered_landmark_indices_c_).shape, np.unique(additional_covered_landmark_indices_c_).shape)
+    #print("UCam Indices in part ", np.unique(cameras_indices_in_c_).shape, np.unique(x0_p_).shape, np.unique(additional_cameras_indices_in_c_).shape)
+
     cost_, x0_p_c_, x0_l_c_, Lnew_c_, Vl_c_, powerits_run, delta_old_c_, localCostGain_c_ = local_bundle_adjust(
         local_camera_indices_in_cluster, # LOCAL 1st res
         point_indices_in_c,   # LOCAL 1st res
@@ -1594,6 +1599,87 @@ def palm_f(x0_p_, camera_indices_in_cluster_, point_indices_in_cluster_,
         # print(ci, " vl ", vl.data.reshape(-1,9)[landmarks_only_in_cluster_,:])  # indeed diagonal
 
     return (cost_, L_in_cluster_, Vl_in_cluster_, landmark_v_, x0_p_out_, powerits_run, localCostGain_in_cluster_)
+
+# the idea is to apply inertia FIRST, on ONLY the block -- interesting question: does this matter? can be anything?
+def iPalm_f(x0_p_, camera_indices_in_cluster_, point_indices_in_cluster_,
+           points_2d_in_cluster_, points_3d_in_cluster_,
+           additional_point_indices_in_cluster, additional_camera_indices_in_cluster, additional_points_2d_in_cluster, point_indices_already_covered_c, covered_landmark_indices_c,
+           L_in_cluster_, Vl_in_cluster_, kClusters, innerIts, sequential) :
+    cost_ = np.zeros(kClusters)
+    landmark_v_ = points_3d_in_cluster_[0].copy()
+    x0_p_out_ = x0_p_.copy()
+    localCostGain_in_cluster_ = [0 for elem in range(kClusters)]
+    use_inertia = True # should be True
+    sequential = True # should be True
+    x0_p_in = x0_p_.copy()
+    landmark_v_in = landmark_v_.copy()
+
+    for ci in range(kClusters):
+    #for ci in np.random.permutation(kClusters):
+        if use_inertia and 'previousCameras' in globals(): # BEFORE block update.
+            #tau = 1./np.sqrt(2.) # 1 to try momentum
+            tau = 0.2
+            #tau = (globalIt-1) / (globalIt+2)
+            # camera and unique points are only in cluster, updated are also points not unique in cluster but also in others.
+            # so qw appear to share landmarks not cameras?
+            # cameras is cheaper? not clear how i do it.
+            # disjoiint partition of cams. then landmarks shared must be distributed somehow. To these we also add cameras.
+            # So some landmarks AND cameras need to be shared among processes. admm only cams duped.
+            update_cameras_indices_in_c_ = np.unique(camera_indices_in_cluster_[ci]) # indices into large vector from local: 0, .. , npart
+            x0_p_[update_cameras_indices_in_c_] = (1. + tau) * x0_p_[update_cameras_indices_in_c_] - tau * previousCameras[update_cameras_indices_in_c_]
+            #print(ci, " ", update_cameras_indices_in_c_)
+            update_point_indices_in_c_ = np.unique(point_indices_already_covered_c[ci])
+            #points_3d_in_cluster_[ci][update_point_indices_in_c_, :] = (1. + tau) * points_3d_in_cluster_[ci][update_point_indices_in_c_, :] - tau * previousLandmarks[update_point_indices_in_c_, :]
+
+        #print(ci, "IN delta_old_cluster ", delta_old_cluster, " delta_old_cluster[ci] ", delta_old_cluster[ci])
+        (
+            cost_c_,
+            x0_p_c_,
+            x0_l_c_,
+            Lnew_c_,
+            Vl_c_,
+            update_point_indices_in_c_,
+            update_cameras_indices_in_c_,
+            powerits_run,
+            delta_old_c,
+            localCostGain_c
+        ) = updateCluster_palm(
+            x0_p_,
+            camera_indices_in_cluster_[ci], # updated and all per res
+            point_indices_in_cluster_[ci],  # present, per res
+            points_2d_in_cluster_[ci],      # pre res
+            points_3d_in_cluster_[ci],      # all, just all, we select subset
+            Vl_in_cluster_[ci],             # maybe storage for latest Vl. then next turn use it?
+            L_in_cluster_[ci],              # maybe use for L*diag + Vl on prox linear term.
+            #additional_cameras_in_cluster[ci], # just unique additional_camera_indices
+            additional_point_indices_in_cluster[ci], # for the additional residuals.
+            additional_camera_indices_in_cluster[ci], # camera indices for additional residuals. needed to compute f, not gradient -> set grad to false
+            additional_points_2d_in_cluster[ci], # additional residuals (rhs of them)
+            point_indices_already_covered_c[ci],
+            covered_landmark_indices_c[ci], # those landmarks get updated in addition to unique (point_indices_in_cluster_) since totally covered
+            delta_old_cluster[ci],
+            its_ = innerIts,
+        )
+        delta_old_cluster[ci] = delta_old_c # private to cluster
+        #print(ci, "OUT delta_old_cluster ", delta_old_cluster, " delta_old_cluster[ci] ", delta_old_cluster[ci])
+        cost_[ci] = cost_c_
+        L_in_cluster_[ci] = Lnew_c_
+        Vl_in_cluster_[ci] = Vl_c_
+        localCostGain_in_cluster_[ci] = localCostGain_c
+
+        x0_p_out_[update_cameras_indices_in_c_] = x0_p_c_.copy() # ? not needed
+        landmark_v_[update_point_indices_in_c_, :] = x0_l_c_.copy() # global ensure disjoint
+        if sequential:
+            x0_p_[update_cameras_indices_in_c_] = x0_p_c_.copy() # this is also instant update.
+            for ci in range(kClusters): # update for all, clumsy landmark storage. hence for all.
+                points_3d_in_cluster_[ci][update_point_indices_in_c_, :] = x0_l_c_.copy()
+
+    if not 'previousCameras' in globals():
+        globals()["previousCameras"] = x0_p_in.copy()
+        globals()["previousLandmarks"] = landmark_v_in.copy()
+
+    return (cost_, L_in_cluster_, Vl_in_cluster_, landmark_v_, x0_p_out_, powerits_run, localCostGain_in_cluster_)
+
 
 # fill lists G and F, with g and f = g - old g, sets of size m, 
 # at position it % m, c^t compute F^tF c + lamda (c - 1/k)^2, sum c=1
@@ -1909,9 +1995,11 @@ resetIt = 0
 #tkk = globalIt - resetIt + 1
 failedNesterovAcceleration = 0 # count after k consecutive misses, restart (RNA might not need this)
 maxFailedNesterovAcceleration = 3 # 2,3 or 4. Check what needs to be send in parallel scheme
-extrapolate_parallel = True # then internally does not use sequential update? and False does not work = sequential procedure without acceleration right now.
+# todo: iPalm is sequential and inertia on sequential updates equals extrapolate_parallel = False, use_inertia_in_sequential = True
+# need to check, if this is heavy ball looks like not.
+extrapolate_parallel = False # then internally does not use sequential update? and False does not work = sequential procedure without acceleration right now.
 # sequential does not leverage acceleration? hmm
-use_inertia_in_sequential = True # 1. do not use naive tau inertia inside sequential update (vs tau = 1) in palm_f but heavy ball After all updates are 'in'.
+use_inertia_in_sequential = False # 1. do not use naive tau inertia inside sequential update (vs tau = 1) in palm_f but heavy ball After all updates are 'in'.
 always_acccept_acceleration = True # the problem we solve (can) has a different (local) minimum than original BA problem
 Gs = []
 Fs = []
@@ -2126,7 +2214,7 @@ for globalIt in range(iterations):
             x0_p_new,
             powerits_run,
             localCostGain_in_cluster
-        ) = palm_f(
+        ) = palm_f( # iPalm_f(
             x0_p, camera_indices_in_cluster, point_indices_in_cluster, points_2d_in_cluster, 
             points_3d_in_cluster, 
             additional_point_indices_in_cluster, additional_camera_indices_in_cluster, additional_points_2d_in_cluster, point_indices_already_covered_c, covered_landmark_indices_c,
@@ -2588,7 +2676,7 @@ import json
 result_dict = {"base_url": BASE_URL, "file_name": FILE_NAME, "iterations" : iterations, \
                "bestCost" : round(bestCost), "bestIt": bestIt, "kClusters" : kClusters, \
                "bestCost60" : round(bestCost60), "bestCost30" : round(bestCost30) }
-with open('results_palm.json', 'a') as json_file:
+with open('results_palmNew.json', 'a') as json_file:
     json.dump(result_dict, json_file)
 
 # either adjust points_3d_in_cluster -> copy over output.
