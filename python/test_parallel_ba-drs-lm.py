@@ -2184,7 +2184,7 @@ def updateCluster(
 
 def prox_f(camera_indices_in_cluster_, point_indices_in_cluster_, points_2d_in_cluster_,
     poses_in_cluster_, landmarks_, poses_s_in_cluster_, L_in_cluster_, Vl_in_cluster_, blockEig_in_cluster_,
-    kClusters, LipJ, innerIts=1, sequential=True) :
+    kClusters, LipJ, innerIts=1) :
     cost_ = np.zeros(kClusters)
     nabla_p_in_cluster_ = [0 for _ in range(kClusters)]
 
@@ -2243,6 +2243,111 @@ def prox_f(camera_indices_in_cluster_, point_indices_in_cluster_, points_2d_in_c
     #return (cost_, L_in_cluster_, Vl_in_cluster_, points_3d_in_cluster_, x0_p_, delta_l_in_cluster_, globalSingleLandmarksA_in_c, globalSingleLandmarksB_in_c)
     return (cost_, L_in_cluster_, Vl_in_cluster_, poses_in_cluster_, landmarks_, nabla_p_in_cluster_, blockEig_in_cluster_)
 
+
+def prox_f_parallel(camera_indices_in_cluster_, point_indices_in_cluster_, points_2d_in_cluster_,
+    poses_in_cluster_, landmarks_, poses_s_in_cluster_, L_in_cluster_, Vl_in_cluster_, blockEig_in_cluster_,
+    kClusters, LipJ, innerIts=1) :
+    cost_ = np.zeros(kClusters)
+    nabla_p_in_cluster_ = [0 for _ in range(kClusters)]
+
+    num_poses = poses_in_cluster_[0].shape[0]
+    pose_occurences = np.zeros(num_poses)
+    for ci_ in range(kClusters):
+        unique_poses_in_c_ = np.unique(camera_indices_in_cluster_[ci_])
+        pose_occurences[unique_poses_in_c_] +=1
+
+    # for ci in range(kClusters):
+    #     print(ci, " 3d " ,points_3d_in_cluster_[ci][landmark_occurences==1, :])
+
+    def prox_parallel(ci_, poses_in_cluster_,
+        camera_indices_in_cluster_,
+        point_indices_in_cluster_,
+        points_2d_in_cluster_,
+        landmarks_,
+        poses_s_in_cluster_,
+        Vl_in_cluster_,
+        L_in_cluster_,
+        pose_occurences, # haeh?
+        LipJ,
+        blockEig_in_cluster_,
+        cost_,
+        nabla_p_in_cluster_,
+        its_):
+
+        print("run procress", ci_)
+        (
+        cost_c_,
+        x0_p_c_,
+        x0_l_c_,
+        Lnew_c_,
+        Vl_c_,
+        unique_poses_in_c_,
+        landmark_indices_in_c_,
+        nabla_p_c_,
+        blockEig_in_c_
+        ) = updateCluster(
+            poses_in_cluster_[ci_],
+            camera_indices_in_cluster_[ci_],
+            point_indices_in_cluster_[ci_],
+            points_2d_in_cluster_[ci_],
+            landmarks_,
+            poses_s_in_cluster_[ci_],
+            Vl_in_cluster_[ci_],
+            L_in_cluster_[ci_],
+            pose_occurences, # haeh?
+            LipJ[ci_],
+            blockEig_in_cluster_[ci_],
+            ci_,
+            its_,
+        )
+        print("write procress", ci_) # never happens
+        cost_[ci_] = cost_c_
+        L_in_cluster_[ci_] = Lnew_c_
+        Vl_in_cluster_[ci_] = Vl_c_
+        poses_in_cluster_[ci_][unique_poses_in_c_, :] = x0_p_c_
+        landmarks_[landmark_indices_in_c_] = x0_l_c_
+        nabla_p_in_cluster_[ci_] = nabla_p_c_
+        blockEig_in_cluster_[ci_] = blockEig_in_c_
+        return
+
+    # this in parallel ?! .. what global variables am i abusing?
+    from multiprocessing import Process
+    process_list = []
+    for ci_ in range(kClusters):
+        p = Process(target=prox_parallel, args=(ci_, poses_in_cluster_, 
+                                                camera_indices_in_cluster_,
+                                                point_indices_in_cluster_,
+                                                points_2d_in_cluster_,
+                                                landmarks_,
+                                                poses_s_in_cluster_,
+                                                Vl_in_cluster_,
+                                                L_in_cluster_,
+                                                pose_occurences, # haeh?
+                                                LipJ,
+                                                blockEig_in_cluster_,
+                                                cost_,
+                                                nabla_p_in_cluster_,
+                                                innerIts,))
+        process_list.append(p)
+        print("start procress", ci_)
+        p.start()
+
+    print("joining procresses")
+    for process in process_list:
+        process.join()
+
+
+    # for ci_ in range(kClusters):
+    #     #vl = Vl_in_cluster_[ci_]
+    #     unique_poses_in_c_ = np.unique(camera_indices_in_cluster_[ci_])
+    #     poses_only_in_cluster_ = pose_occurences[unique_poses_in_c_] == 1
+    #     #globalSingleLandmarksA_in_c[ci] = poses_only_in_cluster_.copy()
+    #     #globalSingleLandmarksB_in_c[ci] = poses_only_in_cluster_==1
+
+        # print(ci, " 3d ", points_3d_in_cluster_[ci][landmark_occurences==1, :]) # indeed 1 changed rest is constant
+        # print(ci, " vl ", vl.data.reshape(-1,9)[landmarks_only_in_cluster_,:])  # indeed diagonal
+    #return (cost_, L_in_cluster_, Vl_in_cluster_, points_3d_in_cluster_, x0_p_, delta_l_in_cluster_, globalSingleLandmarksA_in_c, globalSingleLandmarksB_in_c)
+    return (cost_, L_in_cluster_, Vl_in_cluster_, poses_in_cluster_, landmarks_, nabla_p_in_cluster_, blockEig_in_cluster_)
 
 # fill lists G and F, with g and f = g - old g, sets of size m, 
 # at position it % m, c^t compute F^tF c + lamda (c - 1/k)^2, sum c=1
@@ -2344,10 +2449,10 @@ def perform_full_iteration(camera_indices_in_cluster_, point_indices_in_cluster_
         landmarks_,
         nabla_p_in_cluster_,
         blockEig_in_cluster__
-    ) = prox_f(
+    ) = prox_f( #prox_f_parallel( #prox_f(
         camera_indices_in_cluster_, point_indices_in_cluster_, points_2d_in_cluster_,
         poses_in_cluster_, landmarks_, poses_s_in_cluster_, L_in_cluster_, Ul_in_cluster_, blockEig_in_cluster__,
-        kClusters_, LipJ_, innerIts=innerIts_, sequential=True,
+        kClusters_, LipJ_, innerIts=innerIts_,
         )
     endT = time.time()
     primalCost_u = np.sum(primal_cost_)
@@ -2665,7 +2770,7 @@ resetIt = 0
 failedNesterovAcceleration = 0 # count after k consecutive misses, restart (RNA might not need this)
 maxFailedNesterovAcceleration = 3 # 3 or 4
 basic_version = False #True # accelerated or basic
-sequential = True
+#sequential = True
 linearize_at_last_solution = True # linearize at uk or v. maybe best to check energy. at u or v. DRE:
 lib = ctypes.CDLL("./libprocess_clusters.so")
 init_lib()
@@ -2763,7 +2868,7 @@ if basic_version:
         ) = prox_f(
             camera_indices_in_cluster, point_indices_in_cluster, points_2d_in_cluster,
             poses_in_cluster, landmarks, poses_s_in_cluster, L_in_cluster, Ul_in_cluster,
-            blockEig_in_cluster, kClusters, LipJ, innerIts=innerIts, sequential=True,
+            blockEig_in_cluster, kClusters, LipJ, innerIts=innerIts,
             )
         end = time.time()
 
@@ -3064,10 +3169,10 @@ else:
                 landmarks_bfgs,
                 nabla_p_in_cluster_bfgs,
                 blockEig_in_cluster_bfgs
-            ) = prox_f(
+            ) = prox_f( #prox_f_parallel( #prox_f(
                 camera_indices_in_cluster, point_indices_in_cluster, points_2d_in_cluster,
                 poses_in_cluster_bfgs, landmarks.copy(), poses_s_in_cluster_bfgs, L_in_cluster_bfgs,
-                Ul_in_cluster_bfgs, blockEig_in_cluster_bfgs, kClusters, LipJ, innerIts=innerIts, sequential=True,
+                Ul_in_cluster_bfgs, blockEig_in_cluster_bfgs, kClusters, LipJ, innerIts=innerIts,
                 )
             
             #print("2. x0_p", "points_3d_in_cluster", points_3d_in_cluster)
