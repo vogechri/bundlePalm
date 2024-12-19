@@ -22,7 +22,8 @@ import math
 import ctypes
 from torch.autograd.functional import jacobian
 from torch import tensor, from_numpy
-import torch.multiprocessing as mp
+#import torch.multiprocessing as mp
+from multiprocessing.pool import ThreadPool
 #import multiprocessing as mp # same slow
 #import open3d as o3d
 import sys
@@ -738,7 +739,7 @@ def ComputeDerivativeMatricesNewParallel(x0_t_cam, x0_t_land, camera_indices_, p
 
     return (J_pose, J_land, fx0_)
 
-def ComputeDerivativeMatricesNew(x0_t_cam, x0_t_land, camera_indices_, point_indices_, torch_points_2d, unique_poses_in_c_, Unorm, Vnorm
+def ComputeDerivativeMatricesNew(x0_t_cam, x0_t_land, camera_indices_, point_indices_, torch_points_2d, unique_poses_in_c_, camScale, landScale
 ):
     verbose = False
     if verbose:
@@ -747,15 +748,15 @@ def ComputeDerivativeMatricesNew(x0_t_cam, x0_t_land, camera_indices_, point_ind
     funx0_st1 = lambda X0, X1, X2: torchSingleResiduumX(X0.view(-1,9), X1.view(-1,3), X2.view(-1,2)) # 1d function -> grad possible
     funy0_st1 = lambda X0, X1, X2: torchSingleResiduumY(X0.view(-1,9), X1.view(-1,3), X2.view(-1,2)) # 1d function -> grad possible
 
-    camScale = 1./Unorm.data.reshape(-1,9)
-    camScale = camScale[unique_poses_in_c_]
-    camScale = from_numpy(camScale[camera_indices_[:]])
-    camScale.requires_grad_(False)
+    # camScale = 1./Unorm.data.reshape(-1,9)
+    # camScale = camScale[unique_poses_in_c_]
+    # camScale = from_numpy(camScale[camera_indices_[:]])
+    # camScale.requires_grad_(False)
 
-    #landScale = 1./Vnorm #.data.reshape(-1,3)[unique_landmarks_in_c_]
-    #landScale = landScale[unique_landmarks_in_c_]
-    landScale = from_numpy(1./Vnorm[point_indices_[:]]) # here direct, or not?
-    landScale.requires_grad_(False)
+    # #landScale = 1./Vnorm #.data.reshape(-1,3)[unique_landmarks_in_c_]
+    # #landScale = landScale[unique_landmarks_in_c_]
+    # landScale = from_numpy(1./Vnorm[point_indices_[:]]) # here direct, or not?
+    # landScale.requires_grad_(False)
 
     funx0_st1 = lambda X0, X1, X2: torchSingleResiduumXScaled(X0.view(-1,9), X1.view(-1,3), X2.view(-1,2), camScale, landScale)
     funy0_st1 = lambda X0, X1, X2: torchSingleResiduumYScaled(X0.view(-1,9), X1.view(-1,3), X2.view(-1,2), camScale, landScale)
@@ -1744,7 +1745,7 @@ def bundle_adjust(
             #start = time.time()
 
             J_pose, J_land, fx0 = ComputeDerivativeMatricesNew (
-                x0_t_cam, x0_t_land, camera_indices_, point_indices_, torch_points_2d, unique_poses_in_c_, Unorm, Vnorm )
+                x0_t_cam, x0_t_land, camera_indices_, point_indices_, torch_points_2d, unique_poses_in_c_, camScale, landScale )
             #print("Jac time ", time.time() - start )
 
             # 2 * JtJ majorizes, note JtJ:=(UW|W^TV), so W part majorized by *2:
@@ -2054,7 +2055,7 @@ def bundle_adjust(
     getBetterStepSize = False # this is used as approx of f in update of v and thus s. maybe change there u-v should be small.
     if getBetterStepSize: # needs to set L correctly
         J_pose, J_land, fx0 = ComputeDerivativeMatricesNew(
-            x0_t_cam, x0_t_land, camera_indices_, point_indices_, torch_points_2d, unique_poses_in_c_, Unorm, Vnorm)
+            x0_t_cam, x0_t_land, camera_indices_, point_indices_, torch_points_2d, unique_poses_in_c_, camScale, landScale)
         bp = J_pose.transpose() * fx0
         JtJ = J_pose.transpose() * J_pose
         #stepSize.data = np.maximum(stepSize.data, blockEigenvalue(JltJl, 3).data) # else diagSparse of it
@@ -2084,7 +2085,7 @@ def bundle_adjust(
     # acceptance this can be reused, rejection the above can be reused.
     if Derivative_at_end: # 646 more constrained but not better. maybe can lower some stuff.
         J_pose, J_land, fx0 = ComputeDerivativeMatricesNew (
-            x0_t_cam, x0_t_land, camera_indices_, point_indices_, torch_points_2d, unique_poses_in_c_, Unorm, Vnorm)
+            x0_t_cam, x0_t_land, camera_indices_, point_indices_, torch_points_2d, unique_poses_in_c_, camScale, landScale)
         JtJ = J_pose.transpose() * J_pose
         bp = J_pose.transpose() * fx0
         #JJ_mult = 1 + np.maximum(minimumL, np.minimum(L_in_cluster_ * 2, L)) # might have changed .. must be off sigh
@@ -2465,8 +2466,9 @@ def prox_f_parallel(pool, camera_indices_in_cluster_, point_indices_in_cluster_,
         while not queue.empty():
             print(queue.get())
 
-    # with ctx.Pool(processes = kClusters) as pool:
-    with pool:
+    #with ctx.Pool(processes = kClusters) as pool:
+    with ThreadPool(processes = kClusters) as pool: # same hmm?
+    #with pool:
         results = [pool.apply_async(prox_parallel, args=(rank, 0, poses_in_cluster_[rank],
                                                 camera_indices_in_cluster_[rank],
                                                 point_indices_in_cluster_[rank],
@@ -2799,7 +2801,7 @@ def UpdatePreconditioners(cameras_, points_3d_, points_2d_, camera_indices_, poi
 if __name__ == '__main__':
     #mp.set_start_method('spawn', force=True)
     # mp.set_start_method("spawn")  # Use spawn (can't pickle) method or fork (hangs, does not work even https://github.com/pytorch/pytorch/wiki/Autograd-and-Fork)
-    ctx = mp.get_context('spawn') # == forkserver ?
+    #ctx = mp.get_context('spawn') # == forkserver ?
 
     kClusters = 5 # 10
     its = 60
@@ -2830,7 +2832,7 @@ if __name__ == '__main__':
     n = 9 * n_cameras + 3 * n_points
     m = 2 * points_2d.shape[0]
 
-    pool = ctx.Pool(processes = kClusters)
+    pool = 0 #ctx.Pool(processes = kClusters)
     write_output = False
     read_output =  False
     if read_output:
@@ -3125,7 +3127,7 @@ if __name__ == '__main__':
                 points_2d_in_cluster, poses_in_cluster, landmarks, poses_s_in_cluster, L_in_cluster,
                 Ul_in_cluster, blockEig_in_cluster, kClusters, LipJ, innerIts, lastCost, Unorm, Vnorm, tempBlockEigen, globalIt)
         restartIteration = 0
-        pool = ctx.Pool(processes = kClusters)
+        # pool = ctx.Pool(processes = kClusters)
 
         # Only it 0: update s,u,v.
         # start = time.time()
@@ -3343,7 +3345,7 @@ if __name__ == '__main__':
                     poses_in_cluster_bfgs, landmarks.copy(), poses_s_in_cluster_bfgs, L_in_cluster_bfgs,
                     Ul_in_cluster_bfgs, blockEig_in_cluster_bfgs, kClusters, LipJ, Unorm, Vnorm, tempBlockEigen, globalIt, innerIts=innerIts,
                     )
-                pool = ctx.Pool(processes = kClusters)
+                #pool = ctx.Pool(processes = kClusters)
                 #print("2. x0_p", "points_3d_in_cluster", points_3d_in_cluster)
                 currentCost_bfgs = np.sum(cost_bfgs)
                 poses_v_bfgs, Ul_all_bfgs, U_cluster_zeros = average_cameras_new(
