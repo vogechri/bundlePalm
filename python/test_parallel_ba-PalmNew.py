@@ -16,7 +16,7 @@ import math
 import ctypes
 #from torch.autograd.functional import jacobian
 from torch import from_numpy #, tensor, flatten
-
+#from pyinstrument import Profiler
 #import open3d as o3d
 
 Use_Preconditioning = True
@@ -1485,10 +1485,9 @@ def updateCluster_palm(
     # put in unique points, adjust point_indices_in_cluster[ci] by id in unique_points_in_c_
     points_3d_in_c = points_3d_in_cluster_[unique_points_in_c_]
 
-    #print("LM  Indices in part ", points_3d_in_cluster_.shape, (point_indices_in_c).shape, (covered_landmark_indices_c_).shape, (additional_covered_landmark_indices_c_).shape)
-    print("Cam Indices in part ", (cameras_indices_in_c_).shape, (x0_p_).shape, (additional_cameras_indices_in_c_).shape)
-    print("ULM  Indices in part ", points_3d_in_cluster_.shape, np.unique(point_indices_in_c).shape, np.unique(covered_landmark_indices_c_).shape, np.unique(additional_covered_landmark_indices_c_).shape)
-    #print("UCam Indices in part ", np.unique(cameras_indices_in_c_).shape, np.unique(x0_p_).shape, np.unique(additional_cameras_indices_in_c_).shape)
+    # debug info. how many entries in 
+    # print("Cam Indices in part ", (cameras_indices_in_c_).shape, (x0_p_).shape, (additional_cameras_indices_in_c_).shape)
+    # print("ULM  Indices in part ", points_3d_in_cluster_.shape, np.unique(point_indices_in_c).shape, np.unique(covered_landmark_indices_c_).shape, np.unique(additional_covered_landmark_indices_c_).shape)
 
     cost_, x0_p_c_, x0_l_c_, Lnew_c_, Vl_c_, powerits_run, delta_old_c_, localCostGain_c_ = local_bundle_adjust(
         local_camera_indices_in_cluster, # LOCAL 1st res
@@ -1997,7 +1996,7 @@ failedNesterovAcceleration = 0 # count after k consecutive misses, restart (RNA 
 maxFailedNesterovAcceleration = 3 # 2,3 or 4. Check what needs to be send in parallel scheme
 # todo: iPalm is sequential and inertia on sequential updates equals extrapolate_parallel = False, use_inertia_in_sequential = True
 # need to check, if this is heavy ball looks like not.
-extrapolate_parallel = False # then internally does not use sequential update? and False does not work = sequential procedure without acceleration right now.
+extrapolate_parallel = True # then internally does not use sequential update? and False does not work = sequential procedure without acceleration right now.
 # sequential does not leverage acceleration? hmm
 use_inertia_in_sequential = False # 1. do not use naive tau inertia inside sequential update (vs tau = 1) in palm_f but heavy ball After all updates are 'in'.
 always_acccept_acceleration = True # the problem we solve (can) has a different (local) minimum than original BA problem
@@ -2155,6 +2154,8 @@ if plot3d:
     geometry.points = o3d.utility.Vector3dVector(landmark_v)
     vis.add_geometry(geometry)
     save_image = False
+
+#with Profiler(interval=0.1) as profiler:
 
 for globalIt in range(iterations):
     if multiCluster:
@@ -2509,7 +2510,7 @@ for globalIt in range(iterations):
         # TODO: local_bundle delivers cost in only relevant residuals to compare with. See where it fails.
         # , " basic ", round(primal_cost_v),
         print( globalIt, "==== acc. f(v)= ", round(primal_cost_ext), " Gain: ", \
-              round(primal_cost_v-primal_cost_ext), " cost per ci ", primal_costs_ext )
+            round(primal_cost_v-primal_cost_ext), " cost per ci ", primal_costs_ext )
         acc_gains.append(round(primal_cost_v-primal_cost_ext))
         if globalIt == iterations - 1:
             print("acc_gains ", acc_gains)
@@ -2674,8 +2675,8 @@ if write_output:
 
 import json
 result_dict = {"base_url": BASE_URL, "file_name": FILE_NAME, "iterations" : iterations, \
-               "bestCost" : round(bestCost), "bestIt": bestIt, "kClusters" : kClusters, \
-               "bestCost60" : round(bestCost60), "bestCost30" : round(bestCost30) }
+            "bestCost" : round(bestCost), "bestIt": bestIt, "kClusters" : kClusters, \
+            "bestCost60" : round(bestCost60), "bestCost30" : round(bestCost30) }
 with open('results_palmNew.json', 'a') as json_file:
     json.dump(result_dict, json_file)
 
@@ -2704,3 +2705,5 @@ with open('results_palmNew.json', 'a') as json_file:
 #     f(x) < f(y) + <nabla fy , x-y> + (x-y)^ Vl (x-y). Vl is making this strongly convex by design. s.t. this descent lemma holds. Even by design.
 # or  f(x) < f(y) + <nabla fy , x-y> + (x-y)^ JJl (x-y). New solution < old + penalty + <nabla fy, delta>
 # <=> f(x) < f(y) + <nabla fy + nabla fx, x-y>
+# profiler.print()
+# profiler.open_in_browser()
