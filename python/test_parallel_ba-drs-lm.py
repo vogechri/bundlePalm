@@ -23,6 +23,7 @@ import ctypes
 from torch.autograd.functional import jacobian
 from torch import tensor, from_numpy
 import torch.multiprocessing as mp
+#import multiprocessing as mp # same slow
 #import open3d as o3d
 import sys
 import json
@@ -737,7 +738,7 @@ def ComputeDerivativeMatricesNewParallel(x0_t_cam, x0_t_land, camera_indices_, p
 
     return (J_pose, J_land, fx0_)
 
-def ComputeDerivativeMatricesNew(x0_t_cam, x0_t_land, camera_indices_, point_indices_, torch_points_2d, unique_poses_in_c_, unique_landmarks_in_c_, Unorm, Vnorm
+def ComputeDerivativeMatricesNew(x0_t_cam, x0_t_land, camera_indices_, point_indices_, torch_points_2d, unique_poses_in_c_, Unorm, Vnorm
 ):
     verbose = False
     if verbose:
@@ -751,9 +752,9 @@ def ComputeDerivativeMatricesNew(x0_t_cam, x0_t_land, camera_indices_, point_ind
     camScale = from_numpy(camScale[camera_indices_[:]])
     camScale.requires_grad_(False)
 
-    landScale = 1./Vnorm.data.reshape(-1,3)
-    landScale = landScale[unique_landmarks_in_c_]
-    landScale = from_numpy(landScale[point_indices_[:]]) # here direct, or not?
+    #landScale = 1./Vnorm #.data.reshape(-1,3)[unique_landmarks_in_c_]
+    #landScale = landScale[unique_landmarks_in_c_]
+    landScale = from_numpy(1./Vnorm[point_indices_[:]]) # here direct, or not?
     landScale.requires_grad_(False)
 
     funx0_st1 = lambda X0, X1, X2: torchSingleResiduumXScaled(X0.view(-1,9), X1.view(-1,3), X2.view(-1,2), camScale, landScale)
@@ -1710,9 +1711,9 @@ def bundle_adjust(
     camScale = from_numpy(camScale[camera_indices_[:]]) # 2nd
     camScale.requires_grad_(False)
 
-    landScale = 1./Vnorm.data.reshape(-1,3)
-    landScale = landScale[unique_landmarks_in_c_]
-    landScale = from_numpy(landScale[point_indices_[:]]) # here direct?
+    #landScale = 1./Vnorm #.data.reshape(-1,3)[unique_landmarks_in_c_]
+    #landScale = landScale[unique_landmarks_in_c_]
+    landScale = from_numpy(1./Vnorm[point_indices_[:]]) # here direct?
     landScale.requires_grad_(False)
 
     funx0_st1 = lambda X0, X1, X2: \
@@ -1729,7 +1730,7 @@ def bundle_adjust(
             #start = time.time()
 
             J_pose, J_land, fx0 = ComputeDerivativeMatricesNew (
-                x0_t_cam, x0_t_land, camera_indices_, point_indices_, torch_points_2d, unique_poses_in_c_, unique_landmarks_in_c_, Unorm, Vnorm )
+                x0_t_cam, x0_t_land, camera_indices_, point_indices_, torch_points_2d, unique_poses_in_c_, Unorm, Vnorm )
             #print("Jac time ", time.time() - start )
 
             # 2 * JtJ majorizes, note JtJ:=(UW|W^TV), so W part majorized by *2:
@@ -2039,7 +2040,7 @@ def bundle_adjust(
     getBetterStepSize = False # this is used as approx of f in update of v and thus s. maybe change there u-v should be small.
     if getBetterStepSize: # needs to set L correctly
         J_pose, J_land, fx0 = ComputeDerivativeMatricesNew(
-            x0_t_cam, x0_t_land, camera_indices_, point_indices_, torch_points_2d, unique_poses_in_c_, unique_landmarks_in_c_, Unorm, Vnorm)
+            x0_t_cam, x0_t_land, camera_indices_, point_indices_, torch_points_2d, unique_poses_in_c_, Unorm, Vnorm)
         bp = J_pose.transpose() * fx0
         JtJ = J_pose.transpose() * J_pose
         #stepSize.data = np.maximum(stepSize.data, blockEigenvalue(JltJl, 3).data) # else diagSparse of it
@@ -2069,7 +2070,7 @@ def bundle_adjust(
     # acceptance this can be reused, rejection the above can be reused.
     if Derivative_at_end: # 646 more constrained but not better. maybe can lower some stuff.
         J_pose, J_land, fx0 = ComputeDerivativeMatricesNew (
-            x0_t_cam, x0_t_land, camera_indices_, point_indices_, torch_points_2d, unique_poses_in_c_, unique_landmarks_in_c_, Unorm, Vnorm)
+            x0_t_cam, x0_t_land, camera_indices_, point_indices_, torch_points_2d, unique_poses_in_c_, Unorm, Vnorm)
         JtJ = J_pose.transpose() * J_pose
         bp = J_pose.transpose() * fx0
         #JJ_mult = 1 + np.maximum(minimumL, np.minimum(L_in_cluster_ * 2, L)) # might have changed .. must be off sigh
@@ -2164,7 +2165,7 @@ def updateCluster(
     its_,
 ):
     landmark_indices_in_c_ = np.unique(landmark_indices_in_cluster_)
-    landmarks_in_c = landmarks_[landmark_indices_in_c_]
+    #landmarks_in_c = landmarks_[landmark_indices_in_c_]
     local_landmark_indices_in_cluster = np.zeros(landmark_indices_in_cluster_.shape[0], dtype=int)
     for i in range(landmark_indices_in_c_.shape[0]):
         local_landmark_indices_in_cluster[landmark_indices_in_cluster_ == landmark_indices_in_c_[i]] = i
@@ -2191,12 +2192,12 @@ def updateCluster(
     poses_in_c = poses_in_cluster_[unique_poses_in_c_]
     poses_s_in_c = poses_s_in_cluster_[unique_poses_in_c_] # same as landmarks
 
-    cost_, x0_p_c_, x0_l_c_, Lnew_c_, Vl_c_, nabla_p_c_, blockEig_in_c_, tempBlockEigen = bundle_adjust(
+    cost_, x0_p_c_, x0_l_c_, Lnew_c_, Vl_c_, nabla_p_c_, blockEig_in_c_, tempBlockEigen_c_ = bundle_adjust(
         local_landmark_indices_in_cluster, # these are indexing into landmarks_in_c, a subset of all landmarks, directly.
         pose_indices_in_c,
         poses_only_in_cluster_, # input those poses not present anywhere else to relax hold on those.
         torch_points_2d_in_c,
-        landmarks_in_c,
+        landmarks_,
         poses_in_c,
         poses_s_in_c,
         Vl_in_cluster_, # these are for those poses in cluster only. 
@@ -2257,7 +2258,7 @@ def prox_f(camera_indices_in_cluster_, point_indices_in_cluster_, points_2d_in_c
             camera_indices_in_cluster_[ci_],
             point_indices_in_cluster_[ci_],
             points_2d_in_cluster_[ci_],
-            landmarks_,
+            landmarks_[np.unique(point_indices_in_cluster_[ci_])],
             poses_s_in_cluster_[ci_],
             Vl_in_cluster_[ci_],
             L_in_cluster_[ci_],
@@ -2301,8 +2302,6 @@ def prox_parallel(ci_, queue, poses_in_cluster_,
     pose_occurences, # haeh?
     LipJ,
     blockEig_in_cluster_,
-    cost_,
-    nabla_p_in_cluster_,
     lock,
     Unorm,
     Vnorm,
@@ -2376,19 +2375,19 @@ def prox_parallel(ci_, queue, poses_in_cluster_,
     blockEig_in_c_,
     tempBlockEigen_c_
     ) = updateCluster(
-        poses_in_cluster_[ci_],
-        camera_indices_in_cluster_[ci_],
-        point_indices_in_cluster_[ci_],
-        points_2d_in_cluster_[ci_],
+        poses_in_cluster_,
+        camera_indices_in_cluster_,
+        point_indices_in_cluster_,
+        points_2d_in_cluster_,
         landmarks_,
-        poses_s_in_cluster_[ci_],
-        Vl_in_cluster_[ci_],
-        L_in_cluster_[ci_],
+        poses_s_in_cluster_,
+        Vl_in_cluster_,
+        L_in_cluster_,
         pose_occurences, # haeh?
-        LipJ[ci_],
-        blockEig_in_cluster_[ci_],
+        LipJ,
+        blockEig_in_cluster_,
         ci_,
-        Unorm, Vnorm, tempBlockEigen[ci_],
+        Unorm, Vnorm, tempBlockEigen,
         globalIt,
         its_,
     )
@@ -2403,7 +2402,7 @@ def prox_parallel(ci_, queue, poses_in_cluster_,
     #queue.put([ci_, cost_c_])
     return ci_, cost_c_, Lnew_c_, Vl_c_, unique_poses_in_c_, x0_p_c_, landmark_indices_in_c_, x0_l_c_, nabla_p_c_, blockEig_in_c_, tempBlockEigen_c_
 
-def prox_f_parallel(camera_indices_in_cluster_, point_indices_in_cluster_, points_2d_in_cluster_,
+def prox_f_parallel(pool, camera_indices_in_cluster_, point_indices_in_cluster_, points_2d_in_cluster_,
     poses_in_cluster_, landmarks_, poses_s_in_cluster_, L_in_cluster_, Vl_in_cluster_, blockEig_in_cluster_,
     kClusters, LipJ, Unorm, Vnorm, tempBlockEigen, globalIt, innerIts=1) :
     cost_ = np.zeros(kClusters)
@@ -2413,37 +2412,7 @@ def prox_f_parallel(camera_indices_in_cluster_, point_indices_in_cluster_, point
     pose_occurences = np.zeros(num_poses)
     for ci_ in range(kClusters):
         unique_poses_in_c_ = np.unique(camera_indices_in_cluster_[ci_])
-        pose_occurences[unique_poses_in_c_] +=1
-
-    # for ci in range(kClusters):
-    #     print(ci, " 3d " ,points_3d_in_cluster_[ci][landmark_occurences==1, :])
-
-    # this in parallel ?! .. what global variables am i abusing?
-    # from multiprocessing import Process
-    # process_list = []
-    # for ci_ in range(kClusters):
-    #     p = Process(target=prox_parallel, args=(ci_, poses_in_cluster_, 
-    #                                             camera_indices_in_cluster_,
-    #                                             point_indices_in_cluster_,
-    #                                             points_2d_in_cluster_,
-    #                                             landmarks_,
-    #                                             poses_s_in_cluster_,
-    #                                             Vl_in_cluster_,
-    #                                             L_in_cluster_,
-    #                                             pose_occurences, # haeh?
-    #                                             LipJ,
-    #                                             blockEig_in_cluster_,
-    #                                             cost_,
-    #                                             nabla_p_in_cluster_,
-    #                                             innerIts,))
-    #     process_list.append(p)
-    #     print("start procress", ci_)
-    #     p.start()
-
-    # print("joining procresses")
-    # for process in process_list:
-    #     process.join()
-
+        pose_occurences[unique_poses_in_c_] += 1
 
     # Create a list of processes and start each process with the train function 
     processes = [] 
@@ -2482,23 +2451,22 @@ def prox_f_parallel(camera_indices_in_cluster_, point_indices_in_cluster_, point
         while not queue.empty():
             print(queue.get())
 
-    with mp.Pool(processes=kClusters) as pool:
-        results = [pool.apply_async(prox_parallel, args=(rank, 0, poses_in_cluster_, 
-                                                camera_indices_in_cluster_,
-                                                point_indices_in_cluster_,
-                                                points_2d_in_cluster_,
-                                                landmarks_,
-                                                poses_s_in_cluster_,
-                                                Vl_in_cluster_,
-                                                L_in_cluster_,
+    # with ctx.Pool(processes = kClusters) as pool:
+    with pool:
+        results = [pool.apply_async(prox_parallel, args=(rank, 0, poses_in_cluster_[rank],
+                                                camera_indices_in_cluster_[rank],
+                                                point_indices_in_cluster_[rank],
+                                                points_2d_in_cluster_[rank],
+                                                landmarks_[np.unique(point_indices_in_cluster_[rank])],
+                                                poses_s_in_cluster_[rank],
+                                                Vl_in_cluster_[rank],
+                                                L_in_cluster_[rank],
                                                 pose_occurences, # haeh?
-                                                LipJ,
-                                                blockEig_in_cluster_,
-                                                cost_,
-                                                nabla_p_in_cluster_,
+                                                LipJ[rank],
+                                                blockEig_in_cluster_[rank],
                                                 lock,
-                                                Unorm, Vnorm, tempBlockEigen, globalIt,
-                                                innerIts,) ) for rank in range(kClusters)]
+                                                Unorm, Vnorm.data.reshape(-1,3)[np.unique(point_indices_in_cluster_[rank])], tempBlockEigen[rank],
+                                                globalIt, innerIts,) ) for rank in range(kClusters)]
         output = [p.get() for p in results]
         for out in output:
             (ci_, cost_c_, Lnew_c_, Vl_c_, unique_poses_in_c_, x0_p_c_, landmark_indices_in_c_, x0_l_c_, nabla_p_c_, blockEig_in_c_, tempBlockEigen_c_) = out
@@ -2511,7 +2479,8 @@ def prox_f_parallel(camera_indices_in_cluster_, point_indices_in_cluster_, point
             blockEig_in_cluster_[ci_] = blockEig_in_c_
             tempBlockEigen[ci_] = tempBlockEigen_c_
             #queue.put([ci_, cost_c_])
-
+    pool.close()
+    pool.join()
     # for ci_ in range(kClusters):
     #     #vl = Vl_in_cluster_[ci_]
     #     unique_poses_in_c_ = np.unique(camera_indices_in_cluster_[ci_])
@@ -2611,7 +2580,7 @@ def BFGS_direction(r, ps, qs, rhos, k, mem, mu):
     return dk_
 
 
-def perform_full_iteration(camera_indices_in_cluster_, point_indices_in_cluster_, points_2d_in_cluster_,
+def perform_full_iteration(pool, camera_indices_in_cluster_, point_indices_in_cluster_, points_2d_in_cluster_,
             poses_in_cluster_, landmarks_, poses_s_in_cluster_, L_in_cluster_, Ul_in_cluster_, blockEig_in_cluster__,
             kClusters_, LipJ_, innerIts_, lastCost_, Unorm, Vnorm, tempBlockEigen, globalIt):
     # Only it 0: update s,u,v.
@@ -2624,7 +2593,7 @@ def perform_full_iteration(camera_indices_in_cluster_, point_indices_in_cluster_
         landmarks_,
         nabla_p_in_cluster_,
         blockEig_in_cluster__
-    ) = prox_f_parallel( #prox_f(
+    ) = prox_f_parallel(pool, #prox_f(
         camera_indices_in_cluster_, point_indices_in_cluster_, points_2d_in_cluster_,
         poses_in_cluster_, landmarks_, poses_s_in_cluster_, L_in_cluster_, Ul_in_cluster_, blockEig_in_cluster__,
         kClusters_, LipJ_, Unorm, Vnorm, tempBlockEigen, globalIt, innerIts=innerIts_, 
@@ -2814,12 +2783,12 @@ def UpdatePreconditioners(cameras_, points_3d_, points_2d_, camera_indices_, poi
 ##############################################################################
 
 if __name__ == '__main__':
-    mp.set_start_method('spawn', force=True)
+    #mp.set_start_method('spawn', force=True)
+    # mp.set_start_method("spawn")  # Use spawn (can't pickle) method or fork (hangs, does not work even https://github.com/pytorch/pytorch/wiki/Autograd-and-Fork)
+    ctx = mp.get_context('spawn') # == forkserver ?
 
     kClusters = 5 # 10
     its = 60
-    # now here .. should be at top?
-    # mp.set_start_method("spawn")  # Use spawn (can't pickle) method or fork (hangs, does not work even https://github.com/pytorch/pytorch/wiki/Autograd-and-Fork)
 
     # total arguments
     num_args = len(sys.argv)
@@ -2847,6 +2816,7 @@ if __name__ == '__main__':
     n = 9 * n_cameras + 3 * n_points
     m = 2 * points_2d.shape[0]
 
+    pool = ctx.Pool(processes = kClusters)
     write_output = False
     read_output =  False
     if read_output:
@@ -2941,6 +2911,8 @@ if __name__ == '__main__':
     # 1. take problem and split, sort indices by camera, define local global map and test it.
     startL = 1
     innerIts = 1  # change to get an update, not 1 iteration
+    #p = ctx.Pool(4)
+    #pool = ctx.Pool(processes = kClusters)
     cost = np.zeros(kClusters)
     lastCost = np.sum(fx0**2)
     lastCostDRE = np.sum(fx0**2)
@@ -3135,10 +3107,11 @@ if __name__ == '__main__':
 
         (cost, dre, L_in_cluster, Ul_in_cluster, poses_in_cluster, poses_v, landmarks, \
         nabla_p_in_cluster, blockEig_in_cluster, poses_s_in_cluster_pre, U_cluster_zeros, steplength) = \
-            perform_full_iteration(camera_indices_in_cluster, point_indices_in_cluster,
+            perform_full_iteration(pool, camera_indices_in_cluster, point_indices_in_cluster,
                 points_2d_in_cluster, poses_in_cluster, landmarks, poses_s_in_cluster, L_in_cluster,
                 Ul_in_cluster, blockEig_in_cluster, kClusters, LipJ, innerIts, lastCost, Unorm, Vnorm, tempBlockEigen, globalIt)
         restartIteration = 0
+        pool = ctx.Pool(processes = kClusters)
 
         # Only it 0: update s,u,v.
         # start = time.time()
@@ -3351,12 +3324,12 @@ if __name__ == '__main__':
                     landmarks_bfgs,
                     nabla_p_in_cluster_bfgs,
                     blockEig_in_cluster_bfgs
-                ) = prox_f_parallel( #prox_f(
+                ) = prox_f_parallel( pool, #prox_f(
                     camera_indices_in_cluster, point_indices_in_cluster, points_2d_in_cluster,
                     poses_in_cluster_bfgs, landmarks.copy(), poses_s_in_cluster_bfgs, L_in_cluster_bfgs,
                     Ul_in_cluster_bfgs, blockEig_in_cluster_bfgs, kClusters, LipJ, Unorm, Vnorm, tempBlockEigen, globalIt, innerIts=innerIts,
                     )
-                
+                pool = ctx.Pool(processes = kClusters)
                 #print("2. x0_p", "points_3d_in_cluster", points_3d_in_cluster)
                 currentCost_bfgs = np.sum(cost_bfgs)
                 poses_v_bfgs, Ul_all_bfgs, U_cluster_zeros = average_cameras_new(
@@ -3462,7 +3435,7 @@ if __name__ == '__main__':
                 maxPctV = np.sqrt(maxPct)
                 #if reject and (np.min(LipJ) < LipJMax) and (ls_it == line_search_iterations-1) and (maxPct * lastCostDRE_bfgs < dre_bfgs) and (primal_cost_v > maxPctV * primal_cost_v_before): # or primal_cost_v > maxPct * primal_cost_u):
                 if reject and (beMin < globalBlockEigUpperLimit) and (ls_it == line_search_iterations-1) and (maxPct * lastCostDRE_bfgs < dre_bfgs) and (primal_cost_v > maxPctV * primal_cost_v_before): # or primal_cost_v > maxPct * primal_cost_u):
-                    print("Why enter is priaml v that bad or what", primal_cost_v, " ", primal_cost_v_before, " ", maxPctV * primal_cost_v_before)
+                    print("Why enter is primal v that bad or what", primal_cost_v, " ", primal_cost_v_before, " ", maxPctV * primal_cost_v_before)
 
                     # revert ! Not clear how to do this.
                     # before, _ = cost_DRE(camera_indices_in_cluster, poses_in_cluster, poses_s_in_cluster,
