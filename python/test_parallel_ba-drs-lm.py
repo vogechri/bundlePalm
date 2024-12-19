@@ -792,52 +792,50 @@ def buildResiduumNew(resX, resY) :
 def check_symmetric(a, tol=1e-5):
     return np.all(np.abs(a-a.T) < np.fmax(1, np.abs(a)) * tol)
 
-# bs : blocksize, eg 9 -> 9x9 or 3 -> 3x3 per block
 def blockInverse(M, bs):
     Mi = M.copy()
     if bs > 1:
         bs2 = bs * bs
-        for i in range(int(M.data.shape[0] / bs2)):
-            mat = Mi.data[bs2 * i : bs2 * i + bs2].reshape(bs, bs)
-            if not check_symmetric(mat):
+
+        symmetric = True
+        mat = M.data[0 : bs2].reshape(bs, bs)
+        if not check_symmetric(mat):
+            symmetric = False
+
+        for i_ in range(int(M.data.shape[0] / bs2)):
+            mat = Mi.data[bs2 * i_ : bs2 * i_ + bs2].reshape(bs, bs)
+            if not symmetric:
                 mat = np.fliplr(mat)
-                imat = np.fliplr(inv_dense(mat, hermitian=True)) # inv or pinv?
+                imat = inv_dense(mat, hermitian=True)
+                imat = np.fliplr(imat) # inv or pinv?
             else:
                 imat = inv_dense(mat, hermitian=True)
-            Mi.data[bs2 * i : bs2 * i + bs2] = imat.flatten()
+            Mi.data[bs2 * i_ : bs2 * i_ + bs2] = imat.flatten()
     else:
         Mi = M.copy()
-        for i in range(int(M.data.shape[0])):
-            Mi.data[i : i + 1] = 1.0 / Mi.data[i : i + 1]
+        for i_ in range(int(M.data.shape[0])):
+            Mi.data[i_ : i_ + 1] = 1.0 / Mi.data[i_ : i_ + 1]
     return Mi
 
 def blockEigenvalue(M, bs):
     Ei = np.zeros(M.shape[0])
     if bs > 1:
         bs2 = bs * bs
-        for i in range(int(M.data.shape[0] / bs2)):
-            mat = M.data[bs2 * i : bs2 * i + bs2].reshape(bs, bs).copy()
-            if not check_symmetric(mat):
+
+        symmetric = True
+        mat = M.data[0 : bs2].reshape(bs, bs)
+        if not check_symmetric(mat):
+            symmetric = False
+
+        for i_ in range(int(M.data.shape[0] / bs2)):
+            mat = M.data[bs2 * i_ : bs2 * i_ + bs2].copy().reshape(bs, bs)
+            if not symmetric:
                 mat = np.fliplr(mat)
-            # print(i, " ", mat)
             evs = eigvalsh(mat)
-            # if evs[0] <0:
-            #    mat = np.fliplr(mat)
-            #    evs = eigvalsh(mat)
-
-            # TODO: Needed?
-            Ei[bs*i:bs*i+bs] = evs[bs-1] # largest, unless negative present (numerics)
-
-            #evsMax = np.max(np.abs(evs)) # this delivers worse results!
-            #Ei[bs*i:bs*i+bs] = evsMax
-
-            # if evsMax != evs[bs-1]: # prints a lot with 'my' scaling.
-            #     print(evs)
-
+            Ei[bs * i_ : bs * i_ + bs] = evs[bs - 1] # largest
         Ei = diag_sparse(Ei)
     else:
         Ei = M.copy()
-
     return Ei
 
 # analysis
@@ -906,9 +904,15 @@ def minmaxEv(M, bs):
     minE = np.zeros(int(M.shape[0]/bs))
     if bs > 1:
         bs2 = bs * bs
+
+        symmetric = True
+        mat = M.data[0 : bs2].reshape(bs, bs)
+        if not check_symmetric(mat):
+            symmetric = False
+
         for i in range(int(M.data.shape[0] / bs2)):
             mat = M.data[bs2 * i : bs2 * i + bs2].reshape(bs, bs).copy()
-            if not check_symmetric(mat):
+            if not symmetric:
                 mat = np.fliplr(mat)
             evs = eigvalsh(mat)
             maxE[i] = evs[bs-1]
@@ -1614,7 +1618,7 @@ def bundle_adjust(
     tr_eta_2 = 0.25
     blockEigMultGain = 4 # 4 better than 2 at least if allowDecreaseBlockEig, feels random and weird
     threshWhereNeeded = 1e-6
-    verbose_Jac = True #False
+    verbose_Jac = False # True for debug
 
     newVersion = True
     # TODO: This parameter block is ok blockEigMultJtJ 1e-5, LipJ = 2, blockEigenvalueWhereNeeded 1e-2,
