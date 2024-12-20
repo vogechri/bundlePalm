@@ -2591,7 +2591,7 @@ import json
 result_dict = {"base_url": BASE_URL, "file_name": FILE_NAME, "iterations" : iterations, \
                "bestCost" : round(bestCost), "bestIt": bestIt, "kClusters" : kClusters, \
                "bestCost60" : round(bestCost60), "bestCost30" : round(bestCost30) }
-with open('results_palm.json', 'a') as json_file:
+with open('results_palm_new.json', 'a') as json_file:
     json.dump(result_dict, json_file)
 
 # either adjust points_3d_in_cluster -> copy over output.
