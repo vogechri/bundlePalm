@@ -9,6 +9,7 @@ from scipy.sparse import csr_array, csr_matrix, vstack #, issparse
 from scipy.sparse import diags as diag_sparse
 #from scipy.sparse.linalg import inv as inv_sparse
 from numpy.linalg import pinv as inv_dense
+from numpy.linalg import inv as inv_nonHermetian
 from numpy.linalg import eigvalsh, eigh
 # idea reimplement projection with torch to get a jacobian -> numpy then
 import torch
@@ -441,10 +442,12 @@ def blockInverse(M, bs):
             mat = Mi.data[bs2 * i_ : bs2 * i_ + bs2].reshape(bs, bs)
             if not symmetric:
                 mat = np.fliplr(mat)
-                imat = inv_dense(mat, hermitian=True)
+                #imat = inv_dense(mat, hermitian=True)
+                imat = inv_nonHermetian(mat) # check numerics: same quality?
                 imat = np.fliplr(imat) # inv or pinv?
             else:
-                imat = inv_dense(mat, hermitian=True)
+                #imat = inv_dense(mat, hermitian=True)
+                imat = inv_nonHermetian(mat)
             Mi.data[bs2 * i_ : bs2 * i_ + bs2] = imat.flatten()
     else:
         Mi = M.copy()
