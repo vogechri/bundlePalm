@@ -3009,6 +3009,42 @@ if __name__ == '__main__':
     poses_in_cluster = [cameras.copy() for _ in range(kClusters)]
     landmarks = points_3d.copy()
 
+    if False:
+        from multiprocessing import shared_memory
+        for ci in range(kClusters):
+            print("points_2d_in_cluster.nbytes ", points_2d_in_cluster[ci].nbytes, " ", points_2d_in_cluster[ci].dtype)
+            shm = shared_memory.SharedMemory(create=True, size=points_2d_in_cluster[ci].nbytes, name = 'points2d_' + str(ci))
+            points2d_0 = np.ndarray(points_2d_in_cluster[ci].shape, dtype=points_2d_in_cluster[ci].dtype, buffer=shm.buf)
+            points2d_0[:] = points_2d_in_cluster[ci][:]
+            #points_2d_in_cluster[ci] = points2d_0 # is this a link or copy? .. a link! anyway points 2d are NOT changed anyway.
+        # then use this in process ci:
+        # existing_shm = shared_memory.SharedMemory(name='points2d_' + str(ci)) # just a buffer.
+        # points_2d_in_cluster_0 = np.ndarray(points_2d_in_cluster[0].shape, dtype=points_2d_in_cluster[0].dtype, buffer=existing_shm.buf)
+
+        # now is this synonym or a copy? likely a copy.
+        # or this?
+        # print("here")
+        # print(points_2d_in_cluster[0][0])
+        # print(points2d_0[0])
+        # points_2d_in_cluster[0][0] = 888
+        # #points2d_0[0] = 888
+        # print(points_2d_in_cluster[0][0])
+        # print(points2d_0[0])
+
+        #print(points_2d_in_cluster[0][0]) # dead?
+        existing_shm = shared_memory.SharedMemory(name='points2d_' + str(0)) # just a buffer.
+        print(points_2d_in_cluster[0][0]) # ok
+        print(points_2d_in_cluster[1][0]) # ok
+        # Note that a.shape is (6,) and a.dtype is np.int64 in this example
+        points_2d_in_cluster_0 = np.ndarray(points_2d_in_cluster[0].shape, dtype=points_2d_in_cluster[0].dtype, buffer=existing_shm.buf)
+        print(points_2d_in_cluster[0][0])
+        print(points_2d_in_cluster_0[0])
+        # for ci in range(kClusters):
+        #     existing_shm = shared_memory.SharedMemory(name='points2d_' + str(ci)) # just a buffer.
+        #     existing_shm.close()
+        #     existing_shm.unlink()
+        # exit()
+
     primal_cost_v = 0
     for ci in range(kClusters):
         primal_cost_v += primal_cost(
@@ -3732,6 +3768,12 @@ if __name__ == '__main__':
                 "bestCost60" : round(bestCost60), "bestCost30" : round(bestCost30) }
     with open('results_lm.json', 'a') as json_file:
         json.dump(result_dict, json_file)
+
+    if False:
+        for ci in range(kClusters):
+            existing_shm = shared_memory.SharedMemory(name='points2d_' + str(ci)) # just a buffer.
+            existing_shm.close()
+            existing_shm.unlink()
 
     # Another issue 646 occurs, likely in focal length vs z-coord or kappa?
     # local optimization jumps big in 1 part. there is a huge gap parameter space from 1 part to the rest.
