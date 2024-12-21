@@ -9,6 +9,7 @@ from scipy.sparse import csr_array, csr_matrix, vstack #, issparse
 from scipy.sparse import diags as diag_sparse
 #from scipy.sparse.linalg import inv as inv_sparse
 from numpy.linalg import pinv as inv_dense
+from numpy.linalg import inv as inv_nonHermetian
 from numpy.linalg import eigvalsh, eigh
 # idea reimplement projection with torch to get a jacobian -> numpy then
 import torch
@@ -32,7 +33,7 @@ def remove_large_points(points_3d, camera_indices, points_2d, point_indices):
         point_indices = point_indices[~res_remove_ids]
         unique_numbers = np.unique(point_indices)
         # Step 2: Create a dictionary for mapping
-        mapping = {number: i for i, number in enumerate(unique_numbers)}    
+        mapping = {number: i for i, number in enumerate(unique_numbers)}
         # Step 3: Apply the mapping to the array
         vfunc = np.vectorize(mapping.get)
         point_indices = vfunc(point_indices)
@@ -441,10 +442,12 @@ def blockInverse(M, bs):
             mat = Mi.data[bs2 * i_ : bs2 * i_ + bs2].reshape(bs, bs)
             if not symmetric:
                 mat = np.fliplr(mat)
-                imat = inv_dense(mat, hermitian=True)
-                imat = np.fliplr(imat) # inv or pinv?
+                #imat = inv_dense(mat, hermitian=True) # numerics check
+                imat = inv_nonHermetian(mat, hermitian=True) # faster (also same numerics?)
+                imat = np.fliplr(imat)
             else:
-                imat = inv_dense(mat, hermitian=True)
+                #imat = inv_dense(mat, hermitian=True)
+                imat = inv_nonHermetian(mat, hermitian=True)
             Mi.data[bs2 * i_ : bs2 * i_ + bs2] = imat.flatten()
     else:
         Mi = M.copy()
@@ -1613,10 +1616,15 @@ def iPalm_f(x0_p_, camera_indices_in_cluster_, point_indices_in_cluster_,
     x0_p_in = x0_p_.copy()
     landmark_v_in = landmark_v_.copy()
 
+    for ci in range(kClusters): # needed?
+        update_point_indices_in_c_ = np.unique(point_indices_already_covered_c[ci])
+        landmark_v_in[update_point_indices_in_c_, :] = points_3d_in_cluster_[ci] [update_point_indices_in_c_, :].copy()
+
     for ci in range(kClusters):
     #for ci in np.random.permutation(kClusters):
         if use_inertia and 'previousCameras' in globals(): # BEFORE block update.
             #tau = 1./np.sqrt(2.) # 1 to try momentum
+            # nothing here works?
             tau = 0.2
             #tau = (globalIt-1) / (globalIt+2)
             # camera and unique points are only in cluster, updated are also points not unique in cluster but also in others.
