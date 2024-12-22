@@ -1605,39 +1605,28 @@ def palm_f(x0_p_, camera_indices_in_cluster_, point_indices_in_cluster_,
 # the idea is to apply inertia FIRST, on ONLY the block -- interesting question: does this matter? can be anything?
 def iPalm_f(x0_p_, camera_indices_in_cluster_, point_indices_in_cluster_,
            points_2d_in_cluster_, points_3d_in_cluster_,
-           additional_point_indices_in_cluster, additional_camera_indices_in_cluster, additional_points_2d_in_cluster, point_indices_already_covered_c, covered_landmark_indices_c,
+           additional_point_indices_in_cluster, additional_camera_indices_in_cluster,
+           additional_points_2d_in_cluster, point_indices_already_covered_c, covered_landmark_indices_c,
            L_in_cluster_, Vl_in_cluster_, kClusters, innerIts, sequential) :
     cost_ = np.zeros(kClusters)
     landmark_v_ = points_3d_in_cluster_[0].copy()
     x0_p_out_ = x0_p_.copy()
     localCostGain_in_cluster_ = [0 for elem in range(kClusters)]
-    use_inertia = False #True # should be True
+    use_inertia = True # should be True
     sequential = True # should be True
-    x0_p_in = x0_p_.copy()
-    landmark_v_in = landmark_v_.copy()
+    # x0_p_in = x0_p_.copy()
+    # landmark_v_in = landmark_v_.copy()
 
-    for ci in range(kClusters): # needed?
-        update_point_indices_in_c_ = np.unique(point_indices_already_covered_c[ci])
-        landmark_v_in[update_point_indices_in_c_, :] = points_3d_in_cluster_[ci] [update_point_indices_in_c_, :].copy()
+    if not 'previousCameras' in globals(): # only to generate global var and memory buffer.
+        globals()["previousCameras"] = x0_p_.copy()
+        globals()["previousLandmarks"] = landmark_v_.copy()
+
+    # for ci in range(kClusters): # needed?
+    #     update_point_indices_in_c_ = np.unique(point_indices_already_covered_c[ci])
+    #     landmark_v_in[update_point_indices_in_c_, :] = points_3d_in_cluster_[ci] [update_point_indices_in_c_, :].copy()
 
     for ci in range(kClusters):
     #for ci in np.random.permutation(kClusters):
-        if use_inertia and 'previousCameras' in globals(): # BEFORE block update.
-            #tau = 1./np.sqrt(2.) # 1 to try momentum
-            # nothing here works?
-            tau = 0.2
-            #tau = (globalIt-1) / (globalIt+2)
-            # camera and unique points are only in cluster, updated are also points not unique in cluster but also in others.
-            # so qw appear to share landmarks not cameras?
-            # cameras is cheaper? not clear how i do it.
-            # disjoiint partition of cams. then landmarks shared must be distributed somehow. To these we also add cameras.
-            # So some landmarks AND cameras need to be shared among processes. admm only cams duped.
-            update_cameras_indices_in_c_ = np.unique(camera_indices_in_cluster_[ci]) # indices into large vector from local: 0, .. , npart
-            x0_p_[update_cameras_indices_in_c_] = (1. + tau) * x0_p_[update_cameras_indices_in_c_] - tau * previousCameras[update_cameras_indices_in_c_]
-            #print(ci, " ", update_cameras_indices_in_c_)
-            update_point_indices_in_c_ = np.unique(point_indices_already_covered_c[ci])
-            #points_3d_in_cluster_[ci][update_point_indices_in_c_, :] = (1. + tau) * points_3d_in_cluster_[ci][update_point_indices_in_c_, :] - tau * previousLandmarks[update_point_indices_in_c_, :]
-
         #print(ci, "IN delta_old_cluster ", delta_old_cluster, " delta_old_cluster[ci] ", delta_old_cluster[ci])
         (
             cost_c_,
@@ -1667,6 +1656,42 @@ def iPalm_f(x0_p_, camera_indices_in_cluster_, point_indices_in_cluster_,
             delta_old_cluster[ci],
             its_ = innerIts,
         )
+
+        # palmnut: apply inertia here. Use previous solution here and current one. BEFORE inertia update.
+        # so always save this prox solution.
+        if use_inertia: # and globalIt > 0: #and 'previousCameras' in globals(): # BEFORE block update.
+            #tau = 1./np.sqrt(2.) # 1 to try momentum
+            # nothing here works?
+            #tau = 0.2
+            tau = np.maximum( (globalIt-1) / (globalIt+2), 0 )
+            # camera and unique points are only in cluster, updated are also points not unique in cluster but also in others.
+            # so qw appear to share landmarks not cameras?
+            # cameras is cheaper? not clear how i do it.
+            # disjoiint partition of cams. then landmarks shared must be distributed somehow. To these we also add cameras.
+            # So some landmarks AND cameras need to be shared among processes. admm only cams duped.
+            update_cameras_indices_in_c_ = np.unique(camera_indices_in_cluster_[ci]) # indices into large vector from local: 0, .. , npart
+            #print(ci, " ", update_cameras_indices_in_c_)
+            update_point_indices_in_c_ = np.unique(point_indices_already_covered_c[ci])
+
+            # Acceleration step updates 'next' input! return last input as solution
+            #x0_p_[update_cameras_indices_in_c_] = (1. + tau) * x0_p_c_[update_cameras_indices_in_c_] - tau * previousCameras[update_cameras_indices_in_c_]
+            x0_p_out_[update_cameras_indices_in_c_] = (1. + tau) * x0_p_c_ - tau * previousCameras[update_cameras_indices_in_c_]
+            landmark_v_[update_point_indices_in_c_, :] = (1. + tau) * x0_l_c_ - tau * previousLandmarks[update_point_indices_in_c_, :]
+            # also update 'next' cluster if sequential
+            if sequential:
+                x0_p_[update_cameras_indices_in_c_] = x0_p_out_[update_cameras_indices_in_c_].copy()
+                points_3d_in_cluster_[(ci+1) % kClusters][update_point_indices_in_c_, :] = landmark_v_[update_point_indices_in_c_, :]
+        else:
+            if sequential: # update input of next block.
+                x0_p_[update_cameras_indices_in_c_] = x0_p_c_.copy()
+                points_3d_in_cluster_[(ci+1) % kClusters][update_point_indices_in_c_, :] = x0_l_c_.copy()
+            x0_p_out_[update_cameras_indices_in_c_] = x0_p_c_.copy()
+            landmark_v_[update_point_indices_in_c_, :] = x0_l_c_.copy()
+
+        # Always update last prox solution.
+        previousCameras[update_cameras_indices_in_c_] = x0_p_c_.copy() #[update_cameras_indices_in_c_]
+        previousLandmarks[update_point_indices_in_c_, :] = x0_l_c_.copy() #[ci][update_point_indices_in_c_, :]
+
         delta_old_cluster[ci] = delta_old_c # private to cluster
         #print(ci, "OUT delta_old_cluster ", delta_old_cluster, " delta_old_cluster[ci] ", delta_old_cluster[ci])
         cost_[ci] = cost_c_
@@ -1674,19 +1699,7 @@ def iPalm_f(x0_p_, camera_indices_in_cluster_, point_indices_in_cluster_,
         Vl_in_cluster_[ci] = Vl_c_
         localCostGain_in_cluster_[ci] = localCostGain_c
 
-        x0_p_out_[update_cameras_indices_in_c_] = x0_p_c_.copy() # ? not needed
-        landmark_v_[update_point_indices_in_c_, :] = x0_l_c_.copy() # global ensure disjoint
-        if sequential:
-            x0_p_[update_cameras_indices_in_c_] = x0_p_c_.copy() # this is also instant update.
-            for ci in range(kClusters): # update for all, clumsy landmark storage. hence for all.
-                points_3d_in_cluster_[ci][update_point_indices_in_c_, :] = x0_l_c_.copy()
-
-    if not 'previousCameras' in globals():
-        globals()["previousCameras"] = x0_p_in.copy()
-        globals()["previousLandmarks"] = landmark_v_in.copy()
-
     return (cost_, L_in_cluster_, Vl_in_cluster_, landmark_v_, x0_p_out_, powerits_run, localCostGain_in_cluster_)
-
 
 # fill lists G and F, with g and f = g - old g, sets of size m, 
 # at position it % m, c^t compute F^tF c + lamda (c - 1/k)^2, sum c=1
