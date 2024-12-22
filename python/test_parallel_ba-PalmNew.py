@@ -443,11 +443,11 @@ def blockInverse(M, bs):
             if not symmetric:
                 mat = np.fliplr(mat)
                 #imat = inv_dense(mat, hermitian=True) # numerics check
-                imat = inv_nonHermetian(mat, hermitian=True) # faster (also same numerics?)
+                imat = inv_nonHermetian(mat) # faster (also same numerics?)
                 imat = np.fliplr(imat)
             else:
                 #imat = inv_dense(mat, hermitian=True)
-                imat = inv_nonHermetian(mat, hermitian=True)
+                imat = inv_nonHermetian(mat)
             Mi.data[bs2 * i_ : bs2 * i_ + bs2] = imat.flatten()
     else:
         Mi = M.copy()
@@ -1611,7 +1611,7 @@ def iPalm_f(x0_p_, camera_indices_in_cluster_, point_indices_in_cluster_,
     landmark_v_ = points_3d_in_cluster_[0].copy()
     x0_p_out_ = x0_p_.copy()
     localCostGain_in_cluster_ = [0 for elem in range(kClusters)]
-    use_inertia = True # should be True
+    use_inertia = False #True # should be True
     sequential = True # should be True
     x0_p_in = x0_p_.copy()
     landmark_v_in = landmark_v_.copy()
@@ -2004,7 +2004,7 @@ failedNesterovAcceleration = 0 # count after k consecutive misses, restart (RNA 
 maxFailedNesterovAcceleration = 3 # 2,3 or 4. Check what needs to be send in parallel scheme
 # todo: iPalm is sequential and inertia on sequential updates equals extrapolate_parallel = False, use_inertia_in_sequential = True
 # need to check, if this is heavy ball looks like not.
-extrapolate_parallel = True # then internally does not use sequential update? and False does not work = sequential procedure without acceleration right now.
+extrapolate_parallel = False # then internally does not use sequential update? and False does not work = sequential procedure without acceleration right now.
 # sequential does not leverage acceleration? hmm
 use_inertia_in_sequential = False # 1. do not use naive tau inertia inside sequential update (vs tau = 1) in palm_f but heavy ball After all updates are 'in'.
 always_acccept_acceleration = True # the problem we solve (can) has a different (local) minimum than original BA problem
@@ -2223,7 +2223,7 @@ for globalIt in range(iterations):
             x0_p_new,
             powerits_run,
             localCostGain_in_cluster
-        ) = palm_f( # iPalm_f(
+        ) = iPalm_f(
             x0_p, camera_indices_in_cluster, point_indices_in_cluster, points_2d_in_cluster, 
             points_3d_in_cluster, 
             additional_point_indices_in_cluster, additional_camera_indices_in_cluster, additional_points_2d_in_cluster, point_indices_already_covered_c, covered_landmark_indices_c,
