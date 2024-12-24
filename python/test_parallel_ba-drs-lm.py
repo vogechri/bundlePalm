@@ -81,6 +81,7 @@ if not os.path.isfile(FILE_NAME):
 def remove_large_points(points_3d, camera_indices, points_2d, point_indices):
     remove_ids = np.arange(points_3d.shape[0])[np.sum(points_3d**2, 1) > 1e6]
     if remove_ids.shape[0] >0:
+        #return points_3d, camera_indices, points_2d, point_indices
         points_3d = np.delete(points_3d, remove_ids, axis=0)
         num_all_res = camera_indices.shape[0]
         res_remove_ids = np.isin(point_indices, remove_ids)
@@ -89,7 +90,7 @@ def remove_large_points(points_3d, camera_indices, points_2d, point_indices):
         point_indices = point_indices[~res_remove_ids]
         unique_numbers = np.unique(point_indices)
         # Step 2: Create a dictionary for mapping
-        mapping = {number: i for i, number in enumerate(unique_numbers)}    
+        mapping = {number: i for i, number in enumerate(unique_numbers)}
         # Step 3: Apply the mapping to the array
         vfunc = np.vectorize(mapping.get)
         point_indices = vfunc(point_indices)
@@ -99,6 +100,7 @@ def remove_large_points(points_3d, camera_indices, points_2d, point_indices):
             (num_all_res - camera_indices.shape[0]) / remove_ids.shape[0], " observations in removed landmarks")
         print(np.max(point_indices))
         print(points_3d.shape)
+    #exit() # if nothing is removed == same performance anyway
     return points_3d, camera_indices, points_2d, point_indices
 
 def invert_focal_distance(camera_params_, camera_indices_, points_2d_):
