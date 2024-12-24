@@ -1577,7 +1577,7 @@ def palm_f(x0_p_, camera_indices_in_cluster_, point_indices_in_cluster_,
             x0_p_out_[update_cameras_indices_in_c_] = x0_p_c_.copy() # ? not needed
 
         if sequential:
-            tau = np.sqrt(1.1) # 1 to try momentum
+            tau = 1 #np.sqrt(1.1) # 1 to try momentum
             if use_inertia_in_sequential:
                 tau = 1
             if use_inertia:
@@ -1909,6 +1909,9 @@ resetIt = 0
 #tkk = globalIt - resetIt + 1
 failedNesterovAcceleration = 0 # count after k consecutive misses, restart (RNA might not need this)
 maxFailedNesterovAcceleration = 3 # 2,3 or 4. Check what needs to be send in parallel scheme
+
+#if i set use_inertia_in_sequential= extrapolate_parallel = False, do i get. non-accelerated sequential?
+
 extrapolate_parallel = True # then internally does not use sequential update? and False does not work = sequential procedure without acceleration right now.
 # sequential does not leverage acceleration? hmm
 use_inertia_in_sequential = True # 1. do not use naive tau inertia inside sequential update (vs tau = 1) in palm_f but heavy ball After all updates are 'in'.
