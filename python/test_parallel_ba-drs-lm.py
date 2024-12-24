@@ -24,8 +24,8 @@ import ctypes
 from torch.autograd.functional import jacobian
 from torch import tensor, from_numpy
 #import open3d as o3d
-#from pyinstrument import Profiler
-
+# from pyinstrument import Profiler
+#import pyinstrument
 # look at website. This is the smallest problem. guess: pytoch cpu is pure python?
 BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/ladybug/"
 FILE_NAME = "problem-49-7776-pre.txt.bz2"
@@ -708,7 +708,7 @@ def ComputeDerivativeMatrixInit(x0_c_, x0_l_, points_2d, camera_indices, point_i
 
     return (J_pose, J_land, fx0)
 
-def ComputeDerivativeMatricesNew(x0_t_cam, x0_t_land, camera_indices_, point_indices_, torch_points_2d, unique_poses_in_c_, unique_landmarks_in_c_
+def ComputeDerivativeMatricesNew(x0_t_cam, x0_t_land, camera_indices_, point_indices_, torch_points_2d, camScale, landScale #, unique_poses_in_c_, unique_landmarks_in_c_,
 ):
     verbose = False
     if verbose:
@@ -717,15 +717,15 @@ def ComputeDerivativeMatricesNew(x0_t_cam, x0_t_land, camera_indices_, point_ind
     funx0_st1 = lambda X0, X1, X2: torchSingleResiduumX(X0.view(-1,9), X1.view(-1,3), X2.view(-1,2)) # 1d function -> grad possible
     funy0_st1 = lambda X0, X1, X2: torchSingleResiduumY(X0.view(-1,9), X1.view(-1,3), X2.view(-1,2)) # 1d function -> grad possible
 
-    camScale = 1./Unorm.data.reshape(-1,9)
-    camScale = camScale[unique_poses_in_c_]
-    camScale = from_numpy(camScale[camera_indices_[:]])
-    camScale.requires_grad_(False)
+    # camScale = 1./Unorm.data.reshape(-1,9)
+    # camScale = camScale[unique_poses_in_c_]
+    # camScale = from_numpy(camScale[camera_indices_[:]])
+    # camScale.requires_grad_(False)
 
-    landScale = 1./Vnorm.data.reshape(-1,3)
-    landScale = landScale[unique_landmarks_in_c_]
-    landScale = from_numpy(landScale[point_indices_[:]]) # here direct, or not?
-    landScale.requires_grad_(False)
+    # landScale = 1./Vnorm.data.reshape(-1,3)
+    # landScale = landScale[unique_landmarks_in_c_]
+    # landScale = from_numpy(landScale[point_indices_[:]]) # here direct, or not?
+    # landScale.requires_grad_(False)
 
     funx0_st1 = lambda X0, X1, X2: torchSingleResiduumXScaled(X0.view(-1,9), X1.view(-1,3), X2.view(-1,2), camScale, landScale)
     funy0_st1 = lambda X0, X1, X2: torchSingleResiduumYScaled(X0.view(-1,9), X1.view(-1,3), X2.view(-1,2), camScale, landScale)
@@ -842,8 +842,8 @@ def blockInverse(M, bs):
             if not symmetric:
                 mat = np.fliplr(mat)
                 #imat = inv_dense(mat, hermitian=True)
-                imat = inv_nonHermetian(mat) # todo: faster but also same quality?
-                imat = np.fliplr(imat) # inv or pinv?
+                imat = inv_nonHermetian(mat) # faster.
+                imat = np.fliplr(imat)
             else:
                 #imat = inv_dense(mat, hermitian=True)
                 imat = inv_nonHermetian(mat)
@@ -1526,6 +1526,7 @@ def primal_cost(
     poses_in_cluster_,
     camera_indices_in_cluster_,
     point_indices_in_cluster_,
+    local_landmark_indices_in_cluster_,
     points_2d_in_cluster_,
     points_3d_in_cluster_,
 ):
@@ -1535,13 +1536,13 @@ def primal_cost(
     torch_points_2d_in_c.requires_grad_(False)
 
     unique_points_in_c_ = np.unique(point_indices_in_cluster_)
-    inverse_point_indices = -np.ones(np.max(unique_points_in_c_) + 1)  # all -1
-    for i in range(unique_points_in_c_.shape[0]):
-        inverse_point_indices[unique_points_in_c_[i]] = i
+    # inverse_point_indices = -np.ones(np.max(unique_points_in_c_) + 1)  # all -1
+    # for i in range(unique_points_in_c_.shape[0]):
+    #     inverse_point_indices[unique_points_in_c_[i]] = i
 
-    point_indices_in_c = point_indices_in_cluster_.copy()
-    for i in range(point_indices_in_cluster_.shape[0]):
-        point_indices_in_c[i] = inverse_point_indices[point_indices_in_c[i]]
+    # point_indices_in_c = point_indices_in_cluster_.copy()
+    # for i in range(point_indices_in_cluster_.shape[0]):
+    #     point_indices_in_c[i] = inverse_point_indices[point_indices_in_c[i]]
 
     points_3d_in_c = points_3d_in_cluster_[unique_points_in_c_]
 
@@ -1549,7 +1550,7 @@ def primal_cost(
     for i in range(cameras_indices_in_c_.shape[0]):
         camera_indices_[camera_indices_in_cluster_ == cameras_indices_in_c_[i]] = i
 
-    point_indices_ = point_indices_in_c
+    point_indices_ = local_landmark_indices_in_cluster_ #point_indices_in_c # todo: from stored globally.
     torch_points_2d = torch_points_2d_in_c
     cameras_in = cameras_in_c
     points_3d_in = points_3d_in_c
@@ -1709,7 +1710,7 @@ def bundle_adjust(
             #start = time.time()
 
             J_pose, J_land, fx0 = ComputeDerivativeMatricesNew (
-                x0_t_cam, x0_t_land, camera_indices_, point_indices_, torch_points_2d, unique_poses_in_c_, unique_landmarks_in_c_ )
+                x0_t_cam, x0_t_land, camera_indices_, point_indices_, torch_points_2d, camScale, landScale)
             #print("Jac time ", time.time() - start )
 
             # 2 * JtJ majorizes, note JtJ:=(UW|W^TV), so W part majorized by *2:
@@ -2126,10 +2127,12 @@ def bundle_adjust(
     # what is missing? maybe accumulate 'Vl' on the way or upper bound
     # as max eigenvalue per landmark 3x3, or just sum row/col -> blockEigen, and
 
+#@pyinstrument.profile()
 def updateCluster(
     poses_in_cluster_,
     camera_indices_in_cluster_,
     landmark_indices_in_cluster_,
+    local_landmark_indices_in_cluster,
     points_2d_in_cluster_,
     landmarks_,
     poses_s_in_cluster_,
@@ -2141,11 +2144,11 @@ def updateCluster(
     cluster_id,
     its_,
 ):
-    landmark_indices_in_c_ = np.unique(landmark_indices_in_cluster_)
+    landmark_indices_in_c_ = np.unique(landmark_indices_in_cluster_) # 3 input param
     landmarks_in_c = landmarks_[landmark_indices_in_c_]
-    local_landmark_indices_in_cluster = np.zeros(landmark_indices_in_cluster_.shape[0], dtype=int)
-    for i in range(landmark_indices_in_c_.shape[0]):
-        local_landmark_indices_in_cluster[landmark_indices_in_cluster_ == landmark_indices_in_c_[i]] = i
+    #local_landmark_indices_in_cluster = np.zeros(landmark_indices_in_cluster_.shape[0], dtype=int)
+    #for i in range(landmark_indices_in_c_.shape[0]): # TODO: precompute THESE: slow!
+    #    local_landmark_indices_in_cluster[landmark_indices_in_cluster_ == landmark_indices_in_c_[i]] = i
 
     torch_points_2d_in_c = from_numpy(points_2d_in_cluster_)
     torch_points_2d_in_c.requires_grad_(False)
@@ -2154,14 +2157,14 @@ def updateCluster(
     unique_poses_in_c_ = np.unique(camera_indices_in_cluster_)
     # unique_points_in_c_[i] -> i, map each pi : point_indices_in_cluster[ci] to position in unique_points_in_c_[i]
     inverse_pose_indices = -np.ones(np.max(unique_poses_in_c_) + 1)  # all -1
-    for i in range(unique_poses_in_c_.shape[0]):
+    for i in range(unique_poses_in_c_.shape[0]): # TODO: precompute THESE
         inverse_pose_indices[unique_poses_in_c_[i]] = i
 
     poses_only_in_cluster_ = pose_occurences[unique_poses_in_c_] == 1
     #print("Unique landmarks  ", landmark_occurences, " ", landmark_occurences.shape, " ", np.min(landmark_occurences), " ", np.max(landmark_occurences))
     #print("Unique landmarks  ", landmarks_only_in_cluster_, " ", np.sum(landmarks_only_in_cluster_), " vs ", np.sum(1 - landmarks_only_in_cluster_) )
 
-    pose_indices_in_c = camera_indices_in_cluster_.copy()  # np.zeros(point_indices_in_cluster_.shape)
+    pose_indices_in_c = camera_indices_in_cluster_.copy()# TODO: precompute THESE
     for i in range(camera_indices_in_cluster_.shape[0]):
         pose_indices_in_c[i] = inverse_pose_indices[pose_indices_in_c[i]]
 
@@ -2177,7 +2180,7 @@ def updateCluster(
         landmarks_in_c,
         poses_in_c,
         poses_s_in_c,
-        Vl_in_cluster_, # these are for those poses in cluster only. 
+        Vl_in_cluster_, # these are for those poses in cluster only.
         L_in_cluster_,
         LipJ,
         blockEig_in_c_,
@@ -2199,7 +2202,7 @@ def updateCluster(
         blockEig_in_c_
     )
 
-def prox_f(camera_indices_in_cluster_, point_indices_in_cluster_, points_2d_in_cluster_,
+def prox_f(camera_indices_in_cluster_, point_indices_in_cluster_, local_landmark_indices_in_cluster_, points_2d_in_cluster_,
     poses_in_cluster_, landmarks_, poses_s_in_cluster_, L_in_cluster_, Vl_in_cluster_, blockEig_in_cluster_,
     kClusters, LipJ, innerIts=1, sequential=True) :
     cost_ = np.zeros(kClusters)
@@ -2229,6 +2232,7 @@ def prox_f(camera_indices_in_cluster_, point_indices_in_cluster_, points_2d_in_c
             poses_in_cluster_[ci_],
             camera_indices_in_cluster_[ci_],
             point_indices_in_cluster_[ci_],
+            local_landmark_indices_in_cluster_[ci_],
             points_2d_in_cluster_[ci_],
             landmarks_,
             poses_s_in_cluster_[ci_],
@@ -2348,7 +2352,7 @@ def BFGS_direction(r, ps, qs, rhos, k, mem, mu):
     return dk_
 
 
-def perform_full_iteration(camera_indices_in_cluster_, point_indices_in_cluster_, points_2d_in_cluster_,
+def perform_full_iteration(camera_indices_in_cluster_, point_indices_in_cluster_, local_landmark_indices_in_cluster_, points_2d_in_cluster_,
             poses_in_cluster_, landmarks_, poses_s_in_cluster_, L_in_cluster_, Ul_in_cluster_, blockEig_in_cluster__,
             kClusters_, LipJ_, innerIts_, lastCost_, outerit = -1):
     # Only it 0: update s,u,v.
@@ -2362,7 +2366,7 @@ def perform_full_iteration(camera_indices_in_cluster_, point_indices_in_cluster_
         nabla_p_in_cluster_,
         blockEig_in_cluster__
     ) = prox_f(
-        camera_indices_in_cluster_, point_indices_in_cluster_, points_2d_in_cluster_,
+        camera_indices_in_cluster_, point_indices_in_cluster_, local_landmark_indices_in_cluster_, points_2d_in_cluster_,
         poses_in_cluster_, landmarks_, poses_s_in_cluster_, L_in_cluster_, Ul_in_cluster_, blockEig_in_cluster__,
         kClusters_, LipJ_, innerIts=innerIts_, sequential=True,
         )
@@ -2394,6 +2398,7 @@ def perform_full_iteration(camera_indices_in_cluster_, point_indices_in_cluster_
             poses_v_,
             camera_indices_in_cluster_[ci],
             point_indices_in_cluster_[ci],
+            local_landmark_indices_in_cluster_[ci],
             points_2d_in_cluster_[ci],
             landmarks_)
     primal_cost_u_ = 0
@@ -2402,6 +2407,7 @@ def perform_full_iteration(camera_indices_in_cluster_, point_indices_in_cluster_
             poses_in_cluster_[ci],
             camera_indices_in_cluster_[ci],
             point_indices_in_cluster_[ci],
+            local_landmark_indices_in_cluster_[ci],
             points_2d_in_cluster_[ci],
             landmarks_)
     dre_ = max( primal_cost_v_, dre_ ) # sandwich lemma, prevent maybe chaos
@@ -2736,6 +2742,15 @@ print(". minimum camera observations in total ", np.min(counts), " cams with < 5
 ) = cluster_deg_by_landmark(
     camera_indices, points_2d, point_indices, kClusters)
 
+# test:
+local_landmark_indices_in_cluster = []
+for ci in range(kClusters):
+    landmark_indices_in_c_ = np.unique(point_indices_in_cluster[ci])
+    #landmarks_in_c = landmarks_[landmark_indices_in_c_]
+    local_landmark_indices_in_cluster.append(np.zeros(point_indices_in_cluster[ci].shape[0], dtype=int))
+    for i in range(landmark_indices_in_c_.shape[0]): # TODO: precompute THESE: slow!
+        local_landmark_indices_in_cluster[ci][point_indices_in_cluster[ci] == landmark_indices_in_c_[i]] = i
+
 for ci in range(kClusters):
     values, counts = np.unique(camera_indices_in_cluster[ci], return_counts=True)
     print(ci, ". minimum camera observations in cluster ", np.min(counts), " cams with < 5 landmarks ", np.sum(counts < 5))
@@ -2757,6 +2772,7 @@ for ci in range(kClusters):
         poses_in_cluster[ci],
         camera_indices_in_cluster[ci],
         point_indices_in_cluster[ci],
+        local_landmark_indices_in_cluster[ci],
         points_2d_in_cluster[ci],
         landmarks)
 print("DEBUG scaled cost ", primal_cost_v)
@@ -2780,7 +2796,7 @@ if basic_version:
             nabla_p_in_cluster,
             blockEig_in_cluster
         ) = prox_f(
-            camera_indices_in_cluster, point_indices_in_cluster, points_2d_in_cluster,
+            camera_indices_in_cluster, point_indices_in_cluster, local_landmark_indices_in_cluster, points_2d_in_cluster,
             poses_in_cluster, landmarks, poses_s_in_cluster, L_in_cluster, Ul_in_cluster,
             blockEig_in_cluster, kClusters, LipJ, innerIts=innerIts, sequential=True,
             )
@@ -2815,6 +2831,7 @@ if basic_version:
                 poses_v,
                 camera_indices_in_cluster[ci],
                 point_indices_in_cluster[ci],
+                local_landmark_indices_in_cluster[ci],
                 points_2d_in_cluster[ci],
                 landmarks)
         primal_cost_u = 0
@@ -2823,6 +2840,7 @@ if basic_version:
                 poses_in_cluster[ci],
                 camera_indices_in_cluster[ci],
                 point_indices_in_cluster[ci],
+                local_landmark_indices_in_cluster[ci],
                 points_2d_in_cluster[ci],
                 landmarks)
 
@@ -2867,7 +2885,7 @@ else:
 
     (cost, dre, L_in_cluster, Ul_in_cluster, poses_in_cluster, poses_v, landmarks, \
     nabla_p_in_cluster, blockEig_in_cluster, poses_s_in_cluster_pre, U_cluster_zeros, steplength) = \
-        perform_full_iteration(camera_indices_in_cluster, point_indices_in_cluster,
+        perform_full_iteration(camera_indices_in_cluster, point_indices_in_cluster, local_landmark_indices_in_cluster,
             points_2d_in_cluster, poses_in_cluster, landmarks, poses_s_in_cluster, L_in_cluster,
             Ul_in_cluster, blockEig_in_cluster, kClusters, LipJ, innerIts, lastCost)
     restartIteration = 0
@@ -3084,7 +3102,7 @@ else:
                 nabla_p_in_cluster_bfgs,
                 blockEig_in_cluster_bfgs
             ) = prox_f(
-                camera_indices_in_cluster, point_indices_in_cluster, points_2d_in_cluster,
+                camera_indices_in_cluster, point_indices_in_cluster, local_landmark_indices_in_cluster, points_2d_in_cluster,
                 poses_in_cluster_bfgs, landmarks.copy(), poses_s_in_cluster_bfgs, L_in_cluster_bfgs,
                 Ul_in_cluster_bfgs, blockEig_in_cluster_bfgs, kClusters, LipJ, innerIts=innerIts, sequential=True,
                 )
@@ -3118,6 +3136,7 @@ else:
                     poses_v_bfgs, # v not u
                     camera_indices_in_cluster[ci],
                     point_indices_in_cluster[ci],
+                    local_landmark_indices_in_cluster[ci],
                     points_2d_in_cluster[ci],
                     landmarks_bfgs))
             primal_cost_v = np.sum(primal_cost_v_all)
@@ -3128,6 +3147,7 @@ else:
                     poses_in_cluster_bfgs[ci],
                     camera_indices_in_cluster[ci],
                     point_indices_in_cluster[ci],
+                    local_landmark_indices_in_cluster[ci],
                     points_2d_in_cluster[ci],
                     landmarks_bfgs))
             primal_cost_u = np.sum(primal_cost_u_all)
@@ -3177,6 +3197,7 @@ else:
                         best_poses_v, # v not u
                         camera_indices_in_cluster[ci],
                         point_indices_in_cluster[ci],
+                        local_landmark_indices_in_cluster[ci],
                         points_2d_in_cluster[ci],
                         best_landmarks)
             # do not if primal_v best and current are about the same.
@@ -3265,6 +3286,7 @@ else:
                                 poses_v, # v not u
                                 camera_indices_in_cluster[ci],
                                 point_indices_in_cluster[ci],
+                                local_landmark_indices_in_cluster[ci],
                                 points_2d_in_cluster[ci],
                                 landmarks)
                         # this outside maybe? maybe not even enter here at all.
@@ -3295,7 +3317,7 @@ else:
                         landmarks_test = landmarks.copy() # below overwrites landmarks internally.
                         (cost, dre, L_in_cluster, Ul_in_cluster, poses_in_cluster_test, poses_v_test, landmarks_test, \
                         nabla_p_in_cluster, blockEig_in_cluster_test, poses_s_in_cluster_pre_test, U_cluster_zeros, steplength) = \
-                            perform_full_iteration(camera_indices_in_cluster, point_indices_in_cluster,
+                            perform_full_iteration(camera_indices_in_cluster, point_indices_in_cluster, local_landmark_indices_in_cluster,
                                 points_2d_in_cluster, poses_in_cluster_test, landmarks_test, poses_s_in_cluster, L_in_cluster,
                                 Ul_in_cluster, blockEig_in_cluster_in, kClusters, LipJ, innerIts, lastCostDRE_bfgs, outerit = globalIt)
                         print("========== dre/dre_bfgs/lastCostDRE_bfgs  ===========", round(dre), " / " , round(dre_bfgs), " / ", round(lastCostDRE_bfgs), " BE ", blockEig_in_cluster_bfgs)
@@ -3479,5 +3501,5 @@ with open('results_lm.json', 'a') as json_file:
 
 # Another issue 646 occurs, likely in focal length vs z-coord or kappa?
 # local optimization jumps big in 1 part. there is a huge gap parameter space from 1 part to the rest.
-#profiler.print()
-#profiler.open_in_browser()
+# profiler.print()
+# profiler.open_in_browser()
