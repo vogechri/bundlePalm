@@ -1681,6 +1681,9 @@ def iPalm_f(x0_p_, camera_indices_in_cluster_, point_indices_in_cluster_,
             if sequential:
                 x0_p_[update_cameras_indices_in_c_] = x0_p_out_[update_cameras_indices_in_c_].copy()
                 points_3d_in_cluster_[(ci+1) % kClusters][update_point_indices_in_c_, :] = landmark_v_[update_point_indices_in_c_, :]
+            # Always update last prox solution.
+            previousCameras[update_cameras_indices_in_c_] = x0_p_c_.copy() #[update_cameras_indices_in_c_]
+            previousLandmarks[update_point_indices_in_c_, :] = x0_l_c_.copy() #[ci][update_point_indices_in_c_, :]
         else:
             if sequential: # update input of next block.
                 x0_p_[update_cameras_indices_in_c_] = x0_p_c_.copy()
@@ -1688,9 +1691,6 @@ def iPalm_f(x0_p_, camera_indices_in_cluster_, point_indices_in_cluster_,
             x0_p_out_[update_cameras_indices_in_c_] = x0_p_c_.copy()
             landmark_v_[update_point_indices_in_c_, :] = x0_l_c_.copy()
 
-        # Always update last prox solution.
-        previousCameras[update_cameras_indices_in_c_] = x0_p_c_.copy() #[update_cameras_indices_in_c_]
-        previousLandmarks[update_point_indices_in_c_, :] = x0_l_c_.copy() #[ci][update_point_indices_in_c_, :]
 
         delta_old_cluster[ci] = delta_old_c # private to cluster
         #print(ci, "OUT delta_old_cluster ", delta_old_cluster, " delta_old_cluster[ci] ", delta_old_cluster[ci])
@@ -2263,7 +2263,7 @@ for globalIt in range(iterations):
     # sequential update if parallel failed.
     # TODO: likely must run lone job if the rejected one is rejected again, or in general.
     # Also harming acceleration. likely not woking at all.
-    if True and old_primal_cost_v < primal_cost_v and always_acccept_acceleration: # set False to ensure it is doing good not bad.
+    if False and old_primal_cost_v < primal_cost_v and always_acccept_acceleration: # set False to ensure it is doing good not bad.
         sol_cam  = x0_p.copy()
         sol_land = points_3d_in_cluster[0].copy()
         # from 0 to 1 compared to all 0 (old) to all 1 (accepted).
