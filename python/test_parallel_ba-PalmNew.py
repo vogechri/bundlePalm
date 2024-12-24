@@ -9,6 +9,7 @@ from scipy.sparse import csr_array, csr_matrix, vstack #, issparse
 from scipy.sparse import diags as diag_sparse
 #from scipy.sparse.linalg import inv as inv_sparse
 from numpy.linalg import pinv as inv_dense
+from numpy.linalg import inv as inv_nonHermetian
 from numpy.linalg import eigvalsh, eigh
 # idea reimplement projection with torch to get a jacobian -> numpy then
 import torch
@@ -16,6 +17,7 @@ import math
 import ctypes
 #from torch.autograd.functional import jacobian
 from torch import from_numpy #, tensor, flatten
+#from pyinstrument import Profiler
 
 #import open3d as o3d
 
@@ -441,10 +443,12 @@ def blockInverse(M, bs):
             mat = Mi.data[bs2 * i_ : bs2 * i_ + bs2].reshape(bs, bs)
             if not symmetric:
                 mat = np.fliplr(mat)
-                imat = inv_dense(mat, hermitian=True)
+                #imat = inv_dense(mat, hermitian=True)
+                imat = inv_nonHermetian(mat) # check numerics: same quality?
                 imat = np.fliplr(imat) # inv or pinv?
             else:
-                imat = inv_dense(mat, hermitian=True)
+                #imat = inv_dense(mat, hermitian=True)
+                imat = inv_nonHermetian(mat)
             Mi.data[bs2 * i_ : bs2 * i_ + bs2] = imat.flatten()
     else:
         Mi = M.copy()
@@ -924,6 +928,7 @@ def primal_cost(
     camera_indices_in_cluster_,
     point_indices_in_cluster_,
     points_2d_in_cluster_,
+    local_landmark_indices_in_cluster_, inverse_point_indices_in_cluster_,
     points_3d_in_cluster_,
 ):
     cameras_indices_in_c_ = np.unique(camera_indices_in_cluster_)
@@ -932,13 +937,15 @@ def primal_cost(
     torch_points_2d_in_c.requires_grad_(False)
 
     unique_points_in_c_ = np.unique(point_indices_in_cluster_)
-    inverse_point_indices = -np.ones(np.max(unique_points_in_c_) + 1)  # all -1
-    for i in range(unique_points_in_c_.shape[0]):
-        inverse_point_indices[unique_points_in_c_[i]] = i
+    # inverse_point_indices = -np.ones(np.max(unique_points_in_c_) + 1)  # all -1
+    # for i in range(unique_points_in_c_.shape[0]):
+    #     inverse_point_indices[unique_points_in_c_[i]] = i
+    inverse_point_indices = inverse_point_indices_in_cluster_
 
-    point_indices_in_c = point_indices_in_cluster_.copy()
-    for i in range(point_indices_in_cluster_.shape[0]):
-        point_indices_in_c[i] = inverse_point_indices[point_indices_in_c[i]]
+    # point_indices_in_c = point_indices_in_cluster_.copy()
+    # for i in range(point_indices_in_cluster_.shape[0]):
+    #     point_indices_in_c[i] = inverse_point_indices[point_indices_in_c[i]]
+    point_indices_in_c = local_landmark_indices_in_cluster_
 
     #min_cam_index_in_c = np.min(camera_indices_in_cluster_)
     points_3d_in_c = points_3d_in_cluster_[unique_points_in_c_]
@@ -1012,12 +1019,12 @@ def local_bundle_adjust(
     # So if jacobian has GLOBAL landmark indices in its column we must x2 index those relevant ones out.
     # BUT point_indices_in_ are 'local indices' -- what does this mean?
     # if these indices are local how could i ever argh
-    additional_covered_landmark_indices_, # those are returned and updated, but present in additional res, so picking a subset of unique(additional_point_indices_in_)
+    #additional_covered_landmark_indices_, # those are returned and updated, but present in additional res, so picking a subset of unique(additional_point_indices_in_)
     # point is since additional_point_indices_in_ are only those to complete, it is all of them.
     unique_cameras_indices_in_c_,
     unique_additional_cameras_indices_in_c_,
     unique_points_in_c_,
-    unique_additional_points_in_c_,
+    #unique_additional_points_in_c_,
     Vl_in_cluster_,
     L_in_cluster_,
     delta_old_,
@@ -1404,6 +1411,7 @@ def updateCluster_palm(
     points_3d_in_cluster_,      # all, just all, we select subset, todo: stupid
     Vl_in_cluster_,             # maybe storage for latest Vl. then next turn use it?
     L_in_cluster_,
+    local_landmark_indices_in_cluster_, inverse_point_indices_in_cluster_,
     additional_point_indices_in_cluster_, # for the additional residuals.
     additional_camera_indices_in_cluster_,# camera indices for additional residuals. needed to compute f, not gradient -> set grad to false
     additional_points_2d_in_cluster_,     # additional residuals (rhs of them)
@@ -1413,7 +1421,7 @@ def updateCluster_palm(
     its_,
 ):
     cameras_indices_in_c_ = np.unique(camera_indices_in_cluster_) # indices into large vector from local: 0, .. , npart
-    cameras_in_c = x0_p_[cameras_indices_in_c_] # first index -> 0, second -> 1 etc. 
+    cameras_in_c = x0_p_[cameras_indices_in_c_] # first index -> 0, second -> 1 etc.
 
     local_camera_indices_in_cluster = np.zeros(camera_indices_in_cluster_.shape[0], dtype=int)
     for i in range(cameras_indices_in_c_.shape[0]):
@@ -1441,9 +1449,10 @@ def updateCluster_palm(
     # take point_indices_in_cluster[ci] unique:
     unique_points_in_c_ = np.unique(point_indices_in_cluster_)
     # unique_points_in_c_[i] -> i, map each pi : point_indices_in_cluster[ci] to position in unique_points_in_c_[i]
-    inverse_point_indices = -np.ones(np.max(unique_points_in_c_) + 1)  # all -1
-    for i in range(unique_points_in_c_.shape[0]):
-        inverse_point_indices[unique_points_in_c_[i]] = i # should be the index of all points -> index in cluster [as jacobian knows]
+    # inverse_point_indices = -np.ones(np.max(unique_points_in_c_) + 1)  # all -1
+    # for i in range(unique_points_in_c_.shape[0]):
+    #     inverse_point_indices[unique_points_in_c_[i]] = i # should be the index of all points -> index in cluster [as jacobian knows]
+    inverse_point_indices = inverse_point_indices_in_cluster_
 
     #print("point in c minus covered ", np.setdiff1d(unique_points_in_c_, covered_landmark_indices_in_cluster_))
     verbose = False
@@ -1456,9 +1465,10 @@ def updateCluster_palm(
 
         print("unique in a and u ", np.unique(additional_point_indices_in_cluster_).shape, np.unique(point_indices_in_cluster_).shape)
 
-    point_indices_in_c = point_indices_in_cluster_.copy()  # np.zeros(point_indices_in_cluster_.shape)
-    for i in range(point_indices_in_cluster_.shape[0]):
-        point_indices_in_c[i] = inverse_point_indices[point_indices_in_c[i]]
+    # point_indices_in_c = point_indices_in_cluster_.copy()  # np.zeros(point_indices_in_cluster_.shape)
+    # for i in range(point_indices_in_cluster_.shape[0]):
+    #     point_indices_in_c[i] = inverse_point_indices[point_indices_in_c[i]]
+    point_indices_in_c = local_landmark_indices_in_cluster_
     additional_point_indices_in_c = additional_point_indices_in_cluster_.copy() # np.zeros(point_indices_in_cluster_.shape)
     for i in range(additional_point_indices_in_c.shape[0]):
         additional_point_indices_in_c[i] = inverse_point_indices[additional_point_indices_in_c[i]] # for res
@@ -1468,19 +1478,19 @@ def updateCluster_palm(
     # later 3dp[covered_landmark_indices_in_cluster_] = lm_c_returned[covered_landmark_indices_c_]
 
     #########  need covered indices for the landmarks present in the additional subset of landmarks
-    unique_additional_points_in_c_ = np.unique(additional_point_indices_in_cluster_) # only these!
-    # unique_points_in_c_[i] -> i, map each pi : point_indices_in_cluster[ci] to position in unique_points_in_c_[i]
-    inverse_additional_point_indices = -np.ones(np.max(unique_additional_points_in_c_) + 1)  # all -1
-    for i in range(unique_additional_points_in_c_.shape[0]):
-        inverse_additional_point_indices[unique_additional_points_in_c_[i]] = i
-    # remove those not present in additional res 
-    #additional_covered_landmark_indices = np.setdiff1d(covered_landmark_indices_in_cluster_, np.unique(point_indices_in_cluster_))
-    additional_covered_landmark_indices_c_ = additional_covered_landmark_indices_in_cluster_.copy()
-    for i in range(additional_covered_landmark_indices_c_.shape[0]):
-        additional_covered_landmark_indices_c_[i] = inverse_additional_point_indices[additional_covered_landmark_indices_c_[i]] # 3dp[ids] = lm_c[ids]
+    # unique_additional_points_in_c_ = np.unique(additional_point_indices_in_cluster_) # only these!
+    # # unique_points_in_c_[i] -> i, map each pi : point_indices_in_cluster[ci] to position in unique_points_in_c_[i]
+    # inverse_additional_point_indices = -np.ones(np.max(unique_additional_points_in_c_) + 1)  # all -1
+    # for i in range(unique_additional_points_in_c_.shape[0]):
+    #     inverse_additional_point_indices[unique_additional_points_in_c_[i]] = i
+    # remove those not present in additional res
+
+    # additional_covered_landmark_indices_c_ = additional_covered_landmark_indices_in_cluster_.copy()
+    # for i in range(additional_covered_landmark_indices_c_.shape[0]):
+    #     additional_covered_landmark_indices_c_[i] = inverse_additional_point_indices[additional_covered_landmark_indices_c_[i]] # 3dp[ids] = lm_c[ids]    
     ################
     # delivers these additional_covered_landmark_indices_c_ -> from the landmarks present in additional, those that are covered by cluster
-    # covered == indices that are updated from cluster alone, thus completely covered and 
+    # covered == indices that are updated from cluster alone, thus completely covered and
 
     # put in unique points, adjust point_indices_in_cluster[ci] by id in unique_points_in_c_
     points_3d_in_c = points_3d_in_cluster_[unique_points_in_c_]
@@ -1496,11 +1506,11 @@ def updateCluster_palm(
         additional_torch_points_2d_in_c,            # 2nd res
         torch_additional_cameras_in_c,              # LOCAL 2nd part
         covered_landmark_indices_c_, # those will be returned, subset of points_3d_in_c to update current estimate
-        additional_covered_landmark_indices_c_, # covered landmarks present in additional res, subset of covered. 
+        #additional_covered_landmark_indices_c_, # covered landmarks present in additional res, subset of covered.
         cameras_indices_in_c_,
         additional_cameras_indices_in_c_,
         unique_points_in_c_,
-        unique_additional_points_in_c_,
+        #unique_additional_points_in_c_,
         Vl_in_cluster_,
         L_in_cluster_,
         delta_old_c_,
@@ -1523,7 +1533,9 @@ def updateCluster_palm(
 # difference: more input, update directly.
 def palm_f(x0_p_, camera_indices_in_cluster_, point_indices_in_cluster_,
            points_2d_in_cluster_, points_3d_in_cluster_,
-           additional_point_indices_in_cluster, additional_camera_indices_in_cluster, additional_points_2d_in_cluster, point_indices_already_covered_c, covered_landmark_indices_c,
+           local_landmark_indices_in_cluster, inverse_point_indices_in_cluster,
+           additional_point_indices_in_cluster, additional_camera_indices_in_cluster,
+           additional_points_2d_in_cluster, point_indices_already_covered_c, covered_landmark_indices_c,
            L_in_cluster_, Vl_in_cluster_, kClusters, innerIts, sequential) :
     cost_ = np.zeros(kClusters)
     landmark_v_ = points_3d_in_cluster_[0].copy()
@@ -1553,6 +1565,8 @@ def palm_f(x0_p_, camera_indices_in_cluster_, point_indices_in_cluster_,
             Vl_in_cluster_[ci],             # maybe storage for latest Vl. then next turn use it?
             L_in_cluster_[ci],              # maybe use for L*diag + Vl on prox linear term.
             #additional_cameras_in_cluster[ci], # just unique additional_camera_indices
+            local_landmark_indices_in_cluster[ci],
+            inverse_point_indices_in_cluster[ci],
             additional_point_indices_in_cluster[ci], # for the additional residuals.
             additional_camera_indices_in_cluster[ci], # camera indices for additional residuals. needed to compute f, not gradient -> set grad to false
             additional_points_2d_in_cluster[ci], # additional residuals (rhs of them)
@@ -1711,7 +1725,7 @@ def BFGS_direction(r, ps, qs, rhos, k, mem, mu):
         #print("j ", j, " ", r.shape, ps[j].shape)
         alpha[j] = np.dot(r, ps[j]) * rhos[j]
         r = r - alpha[j]*qs[j]
-        if (rhos[j]>0):
+        if rhos[j] > 0:
             print(j, " 1st. al ", alpha[j], " rh ", rhos[j], " qs " , np.linalg.norm(qs[j],2), " ps " , np.linalg.norm(ps[j],2) )
 
     dk_ = mu * r
@@ -1722,7 +1736,7 @@ def BFGS_direction(r, ps, qs, rhos, k, mem, mu):
         #print("2j", j)
         beta = rhos[j] * np.dot(dk_, qs[j])
         dk_ = dk_ + ps[j] * (alpha[j] - beta)
-        if (rhos[j]>0):
+        if rhos[j] > 0:
             print(j, " 2nd. al ", alpha[j], " rh ", rhos[j], " be ", beta, " qs " , np.linalg.norm(qs[j],2), " ps " , np.linalg.norm(ps[j],2) )
 
     return dk_
@@ -1793,6 +1807,8 @@ def GetPreconditioners(cameras_, points_3d_, points_2d_, camera_indices_, point_
 
 ##############################################################################
 #cameras, points_3d, camera_indices, point_indices, points_2d = read_bal_data(FILE_NAME)
+
+#with Profiler(interval=0.1) as profiler:
 
 kClusters_aim = 10
 iterations = 30
@@ -2021,7 +2037,8 @@ else:
             point_indices_in_cluster_2,
             points_2d_in_cluster_2,
             res_indices_in_cluster_2,
-            additional_point_indices_in_cluster_2, additional_camera_indices_in_cluster_2, additional_points_2d_in_cluster_2, point_indices_already_covered_c_2,
+            additional_point_indices_in_cluster_2, additional_camera_indices_in_cluster_2,
+            additional_points_2d_in_cluster_2, point_indices_already_covered_c_2,
             covered_landmark_indices_c_2,
             old_vtxsToPart,
             kClusters_2
@@ -2029,6 +2046,19 @@ else:
             camera_indices, points_2d, point_indices, kClusters_aim, pre_merges, old_vtxsToPart, baseline_clustering=False, init_cam_id=30, init_lm_id=5, seed=1234
         )
         Vl_in_cluster_2 = [0 for x in range(kClusters)] # dummy fill list
+
+local_landmark_indices_in_cluster = []
+inverse_point_indices_in_cluster = []
+for ci in range(kClusters):
+    unique_points_in_c_ = np.unique(point_indices_in_cluster[ci])
+    # unique_points_in_c_[i] -> i, map each pi : point_indices_in_cluster[ci] to position in unique_points_in_c_[i]
+    inverse_point_indices_in_cluster.append(-np.ones(np.max(unique_points_in_c_) + 1))  # all -1
+    for i in range(unique_points_in_c_.shape[0]):
+        inverse_point_indices_in_cluster[ci][unique_points_in_c_[i]] = i # should be the index of all points -> index in cluster [as jacobian knows]
+    local_landmark_indices_in_cluster.append(point_indices_in_cluster[ci].copy())  # np.zeros(point_indices_in_cluster_.shape)
+    for i in range(point_indices_in_cluster[ci].shape[0]):
+        local_landmark_indices_in_cluster[ci][i] = inverse_point_indices_in_cluster[ci][local_landmark_indices_in_cluster[ci][i]]
+    ###
 
 print(L_in_cluster)
 Vl_in_cluster = [0 for x in range(kClusters)] # dummy fill list
@@ -2086,6 +2116,7 @@ for globalIt in range(iterations):
             ) = palm_f(
                 x0_p, camera_indices_in_cluster, point_indices_in_cluster, points_2d_in_cluster,
                 points_3d_in_cluster,
+                local_landmark_indices_in_cluster, inverse_point_indices_in_cluster,
                 additional_point_indices_in_cluster, additional_camera_indices_in_cluster, additional_points_2d_in_cluster,
                 point_indices_already_covered_c, covered_landmark_indices_c,
                 L_in_cluster, Vl_in_cluster, kClusters, innerIts=innerIts, sequential=True,
@@ -2102,6 +2133,7 @@ for globalIt in range(iterations):
             ) = palm_f(
                 x0_p, camera_indices_in_cluster_2, point_indices_in_cluster_2, points_2d_in_cluster_2,
                 points_3d_in_cluster,
+                local_landmark_indices_in_cluster_2, inverse_point_indices_in_cluster_2,
                 additional_point_indices_in_cluster_2, additional_camera_indices_in_cluster_2, additional_points_2d_in_cluster_2,
                 point_indices_already_covered_c_2, covered_landmark_indices_c_2,
                 L_in_cluster_2, Vl_in_cluster_2, kClusters, innerIts=innerIts, sequential=True,
@@ -2130,8 +2162,9 @@ for globalIt in range(iterations):
             powerits_run,
             localCostGain_in_cluster
         ) = palm_f(
-            x0_p, camera_indices_in_cluster, point_indices_in_cluster, points_2d_in_cluster, 
-            points_3d_in_cluster, 
+            x0_p, camera_indices_in_cluster, point_indices_in_cluster, points_2d_in_cluster,
+            points_3d_in_cluster,
+            local_landmark_indices_in_cluster, inverse_point_indices_in_cluster,
             additional_point_indices_in_cluster, additional_camera_indices_in_cluster, additional_points_2d_in_cluster, point_indices_already_covered_c, covered_landmark_indices_c,
             L_in_cluster, Vl_in_cluster, kClusters, innerIts=innerIts, sequential = not extrapolate_parallel,
             )
@@ -2149,6 +2182,7 @@ for globalIt in range(iterations):
             camera_indices_in_cluster[ci],
             point_indices_in_cluster[ci], # WAIT covered_landmarks vs point_indices_in_cluster , correct since SAME lms and cams!
             points_2d_in_cluster[ci],
+            local_landmark_indices_in_cluster[ci], inverse_point_indices_in_cluster[ci],
             landmark_v)
         primal_cost_v += primal_cost_vs[ci]
         primal_cost_vs[ci] = round(primal_cost_vs[ci])
@@ -2172,6 +2206,7 @@ for globalIt in range(iterations):
                 camera_indices_in_cluster[ci],
                 point_indices_in_cluster[ci],
                 points_2d_in_cluster[ci],
+                local_landmark_indices_in_cluster[ci], inverse_point_indices_in_cluster[ci],
                 sol_land)
 
         if local_gains[arg_gain[0]] > 0:
@@ -2190,6 +2225,7 @@ for globalIt in range(iterations):
                     camera_indices_in_cluster[ci],
                     point_indices_in_cluster[ci],
                     points_2d_in_cluster[ci],
+                    local_landmark_indices_in_cluster[ci], inverse_point_indices_in_cluster[ci],
                     sol_land)
             print("Trying part ", i," cost ", cost_i, " <? ", cost_0, " old cost ", old_primal_cost_v)
             if cost_i > cost_0: # reject
@@ -2210,6 +2246,7 @@ for globalIt in range(iterations):
                 camera_indices_in_cluster[ci],
                 point_indices_in_cluster[ci],
                 points_2d_in_cluster[ci],
+                local_landmark_indices_in_cluster[ci], inverse_point_indices_in_cluster[ci],
                 landmark_v)
             primal_cost_v += primal_cost_vs[ci]
             primal_cost_vs[ci] = round(primal_cost_vs[ci])
@@ -2375,6 +2412,7 @@ for globalIt in range(iterations):
                         camera_indices_in_cluster[ci],
                         point_indices_in_cluster[ci],
                         points_2d_in_cluster[ci],
+                        local_landmark_indices_in_cluster[ci], inverse_point_indices_in_cluster[ci],
                         point_ext)
                     primal_cost_ext += primal_costs_ext[ci]
 
@@ -2414,6 +2452,7 @@ for globalIt in range(iterations):
                         camera_indices_in_cluster[ci],
                         point_indices_in_cluster[ci],
                         points_2d_in_cluster[ci],
+                        local_landmark_indices_in_cluster[ci], inverse_point_indices_in_cluster[ci],
                         point_ext)
                     primal_cost_ext += primal_costs_ext[ci]
                     primal_costs_ext[ci] = round(primal_costs_ext[ci])
@@ -2424,7 +2463,7 @@ for globalIt in range(iterations):
         # TODO: local_bundle delivers cost in only relevant residuals to compare with. See where it fails.
         # , " basic ", round(primal_cost_v),
         print( globalIt, "==== acc. f(v)= ", round(primal_cost_ext), " Gain: ", \
-              round(primal_cost_v-primal_cost_ext), " cost per ci ", primal_costs_ext )
+            round(primal_cost_v-primal_cost_ext), " cost per ci ", primal_costs_ext )
         acc_gains.append(round(primal_cost_v-primal_cost_ext))
         if globalIt == iterations - 1:
             print("acc_gains ", acc_gains)
@@ -2486,6 +2525,7 @@ for globalIt in range(iterations):
                         camera_indices_in_cluster[ci],
                         point_indices_in_cluster[ci],
                         points_2d_in_cluster[ci],
+                        local_landmark_indices_in_cluster[ci], inverse_point_indices_in_cluster[ci],
                         points_3d_in_cluster[ci])
                 print( globalIt, "==== + inertia f(v)= ", round(primal_cost_v), " and ", round(np.sum(cost)))
             else: # momentum polyak, need line search
@@ -2517,6 +2557,7 @@ for globalIt in range(iterations):
                         camera_indices_in_cluster[ci],
                         point_indices_in_cluster[ci],
                         points_2d_in_cluster[ci],
+                        local_landmark_indices_in_cluster[ci], inverse_point_indices_in_cluster[ci],
                         point_ext)
                     primal_cost_ext += primal_costs_ext[ci]
                     primal_costs_ext[ci] = round(primal_costs_ext[ci])
@@ -2589,8 +2630,8 @@ if write_output:
 
 import json
 result_dict = {"base_url": BASE_URL, "file_name": FILE_NAME, "iterations" : iterations, \
-               "bestCost" : round(bestCost), "bestIt": bestIt, "kClusters" : kClusters, \
-               "bestCost60" : round(bestCost60), "bestCost30" : round(bestCost30) }
+            "bestCost" : round(bestCost), "bestIt": bestIt, "kClusters" : kClusters, \
+            "bestCost60" : round(bestCost60), "bestCost30" : round(bestCost30) }
 with open('results_palm_new.json', 'a') as json_file:
     json.dump(result_dict, json_file)
 
@@ -2619,3 +2660,6 @@ with open('results_palm_new.json', 'a') as json_file:
 #     f(x) < f(y) + <nabla fy , x-y> + (x-y)^ Vl (x-y). Vl is making this strongly convex by design. s.t. this descent lemma holds. Even by design.
 # or  f(x) < f(y) + <nabla fy , x-y> + (x-y)^ JJl (x-y). New solution < old + penalty + <nabla fy, delta>
 # <=> f(x) < f(y) + <nabla fy + nabla fx, x-y>
+
+# profiler.print()
+# profiler.open_in_browser()
