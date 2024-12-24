@@ -17,6 +17,7 @@ import math
 import ctypes
 #from torch.autograd.functional import jacobian
 from torch import from_numpy #, tensor, flatten
+from pyinstrument import Profiler
 
 #import open3d as o3d
 
@@ -927,6 +928,7 @@ def primal_cost(
     camera_indices_in_cluster_,
     point_indices_in_cluster_,
     points_2d_in_cluster_,
+    local_landmark_indices_in_cluster_, inverse_point_indices_in_cluster_,
     points_3d_in_cluster_,
 ):
     cameras_indices_in_c_ = np.unique(camera_indices_in_cluster_)
@@ -935,13 +937,15 @@ def primal_cost(
     torch_points_2d_in_c.requires_grad_(False)
 
     unique_points_in_c_ = np.unique(point_indices_in_cluster_)
-    inverse_point_indices = -np.ones(np.max(unique_points_in_c_) + 1)  # all -1
-    for i in range(unique_points_in_c_.shape[0]):
-        inverse_point_indices[unique_points_in_c_[i]] = i
+    # inverse_point_indices = -np.ones(np.max(unique_points_in_c_) + 1)  # all -1
+    # for i in range(unique_points_in_c_.shape[0]):
+    #     inverse_point_indices[unique_points_in_c_[i]] = i
+    inverse_point_indices = inverse_point_indices_in_cluster_
 
-    point_indices_in_c = point_indices_in_cluster_.copy()
-    for i in range(point_indices_in_cluster_.shape[0]):
-        point_indices_in_c[i] = inverse_point_indices[point_indices_in_c[i]]
+    # point_indices_in_c = point_indices_in_cluster_.copy()
+    # for i in range(point_indices_in_cluster_.shape[0]):
+    #     point_indices_in_c[i] = inverse_point_indices[point_indices_in_c[i]]
+    point_indices_in_c = local_landmark_indices_in_cluster_
 
     #min_cam_index_in_c = np.min(camera_indices_in_cluster_)
     points_3d_in_c = points_3d_in_cluster_[unique_points_in_c_]
@@ -1015,12 +1019,12 @@ def local_bundle_adjust(
     # So if jacobian has GLOBAL landmark indices in its column we must x2 index those relevant ones out.
     # BUT point_indices_in_ are 'local indices' -- what does this mean?
     # if these indices are local how could i ever argh
-    additional_covered_landmark_indices_, # those are returned and updated, but present in additional res, so picking a subset of unique(additional_point_indices_in_)
+    #additional_covered_landmark_indices_, # those are returned and updated, but present in additional res, so picking a subset of unique(additional_point_indices_in_)
     # point is since additional_point_indices_in_ are only those to complete, it is all of them.
     unique_cameras_indices_in_c_,
     unique_additional_cameras_indices_in_c_,
     unique_points_in_c_,
-    unique_additional_points_in_c_,
+    #unique_additional_points_in_c_,
     Vl_in_cluster_,
     L_in_cluster_,
     delta_old_,
@@ -1407,6 +1411,7 @@ def updateCluster_palm(
     points_3d_in_cluster_,      # all, just all, we select subset, todo: stupid
     Vl_in_cluster_,             # maybe storage for latest Vl. then next turn use it?
     L_in_cluster_,
+    local_landmark_indices_in_cluster_, inverse_point_indices_in_cluster_,
     additional_point_indices_in_cluster_, # for the additional residuals.
     additional_camera_indices_in_cluster_,# camera indices for additional residuals. needed to compute f, not gradient -> set grad to false
     additional_points_2d_in_cluster_,     # additional residuals (rhs of them)
@@ -1416,7 +1421,7 @@ def updateCluster_palm(
     its_,
 ):
     cameras_indices_in_c_ = np.unique(camera_indices_in_cluster_) # indices into large vector from local: 0, .. , npart
-    cameras_in_c = x0_p_[cameras_indices_in_c_] # first index -> 0, second -> 1 etc. 
+    cameras_in_c = x0_p_[cameras_indices_in_c_] # first index -> 0, second -> 1 etc.
 
     local_camera_indices_in_cluster = np.zeros(camera_indices_in_cluster_.shape[0], dtype=int)
     for i in range(cameras_indices_in_c_.shape[0]):
@@ -1444,9 +1449,10 @@ def updateCluster_palm(
     # take point_indices_in_cluster[ci] unique:
     unique_points_in_c_ = np.unique(point_indices_in_cluster_)
     # unique_points_in_c_[i] -> i, map each pi : point_indices_in_cluster[ci] to position in unique_points_in_c_[i]
-    inverse_point_indices = -np.ones(np.max(unique_points_in_c_) + 1)  # all -1
-    for i in range(unique_points_in_c_.shape[0]):
-        inverse_point_indices[unique_points_in_c_[i]] = i # should be the index of all points -> index in cluster [as jacobian knows]
+    # inverse_point_indices = -np.ones(np.max(unique_points_in_c_) + 1)  # all -1
+    # for i in range(unique_points_in_c_.shape[0]):
+    #     inverse_point_indices[unique_points_in_c_[i]] = i # should be the index of all points -> index in cluster [as jacobian knows]
+    inverse_point_indices = inverse_point_indices_in_cluster_
 
     #print("point in c minus covered ", np.setdiff1d(unique_points_in_c_, covered_landmark_indices_in_cluster_))
     verbose = False
@@ -1459,9 +1465,10 @@ def updateCluster_palm(
 
         print("unique in a and u ", np.unique(additional_point_indices_in_cluster_).shape, np.unique(point_indices_in_cluster_).shape)
 
-    point_indices_in_c = point_indices_in_cluster_.copy()  # np.zeros(point_indices_in_cluster_.shape)
-    for i in range(point_indices_in_cluster_.shape[0]):
-        point_indices_in_c[i] = inverse_point_indices[point_indices_in_c[i]]
+    # point_indices_in_c = point_indices_in_cluster_.copy()  # np.zeros(point_indices_in_cluster_.shape)
+    # for i in range(point_indices_in_cluster_.shape[0]):
+    #     point_indices_in_c[i] = inverse_point_indices[point_indices_in_c[i]]
+    point_indices_in_c = local_landmark_indices_in_cluster_
     additional_point_indices_in_c = additional_point_indices_in_cluster_.copy() # np.zeros(point_indices_in_cluster_.shape)
     for i in range(additional_point_indices_in_c.shape[0]):
         additional_point_indices_in_c[i] = inverse_point_indices[additional_point_indices_in_c[i]] # for res
@@ -1471,19 +1478,19 @@ def updateCluster_palm(
     # later 3dp[covered_landmark_indices_in_cluster_] = lm_c_returned[covered_landmark_indices_c_]
 
     #########  need covered indices for the landmarks present in the additional subset of landmarks
-    unique_additional_points_in_c_ = np.unique(additional_point_indices_in_cluster_) # only these!
-    # unique_points_in_c_[i] -> i, map each pi : point_indices_in_cluster[ci] to position in unique_points_in_c_[i]
-    inverse_additional_point_indices = -np.ones(np.max(unique_additional_points_in_c_) + 1)  # all -1
-    for i in range(unique_additional_points_in_c_.shape[0]):
-        inverse_additional_point_indices[unique_additional_points_in_c_[i]] = i
-    # remove those not present in additional res 
-    #additional_covered_landmark_indices = np.setdiff1d(covered_landmark_indices_in_cluster_, np.unique(point_indices_in_cluster_))
-    additional_covered_landmark_indices_c_ = additional_covered_landmark_indices_in_cluster_.copy()
-    for i in range(additional_covered_landmark_indices_c_.shape[0]):
-        additional_covered_landmark_indices_c_[i] = inverse_additional_point_indices[additional_covered_landmark_indices_c_[i]] # 3dp[ids] = lm_c[ids]
+    # unique_additional_points_in_c_ = np.unique(additional_point_indices_in_cluster_) # only these!
+    # # unique_points_in_c_[i] -> i, map each pi : point_indices_in_cluster[ci] to position in unique_points_in_c_[i]
+    # inverse_additional_point_indices = -np.ones(np.max(unique_additional_points_in_c_) + 1)  # all -1
+    # for i in range(unique_additional_points_in_c_.shape[0]):
+    #     inverse_additional_point_indices[unique_additional_points_in_c_[i]] = i
+    # remove those not present in additional res
+
+    # additional_covered_landmark_indices_c_ = additional_covered_landmark_indices_in_cluster_.copy()
+    # for i in range(additional_covered_landmark_indices_c_.shape[0]):
+    #     additional_covered_landmark_indices_c_[i] = inverse_additional_point_indices[additional_covered_landmark_indices_c_[i]] # 3dp[ids] = lm_c[ids]    
     ################
     # delivers these additional_covered_landmark_indices_c_ -> from the landmarks present in additional, those that are covered by cluster
-    # covered == indices that are updated from cluster alone, thus completely covered and 
+    # covered == indices that are updated from cluster alone, thus completely covered and
 
     # put in unique points, adjust point_indices_in_cluster[ci] by id in unique_points_in_c_
     points_3d_in_c = points_3d_in_cluster_[unique_points_in_c_]
@@ -1499,11 +1506,11 @@ def updateCluster_palm(
         additional_torch_points_2d_in_c,            # 2nd res
         torch_additional_cameras_in_c,              # LOCAL 2nd part
         covered_landmark_indices_c_, # those will be returned, subset of points_3d_in_c to update current estimate
-        additional_covered_landmark_indices_c_, # covered landmarks present in additional res, subset of covered. 
+        #additional_covered_landmark_indices_c_, # covered landmarks present in additional res, subset of covered.
         cameras_indices_in_c_,
         additional_cameras_indices_in_c_,
         unique_points_in_c_,
-        unique_additional_points_in_c_,
+        #unique_additional_points_in_c_,
         Vl_in_cluster_,
         L_in_cluster_,
         delta_old_c_,
@@ -1526,7 +1533,9 @@ def updateCluster_palm(
 # difference: more input, update directly.
 def palm_f(x0_p_, camera_indices_in_cluster_, point_indices_in_cluster_,
            points_2d_in_cluster_, points_3d_in_cluster_,
-           additional_point_indices_in_cluster, additional_camera_indices_in_cluster, additional_points_2d_in_cluster, point_indices_already_covered_c, covered_landmark_indices_c,
+           local_landmark_indices_in_cluster, inverse_point_indices_in_cluster,
+           additional_point_indices_in_cluster, additional_camera_indices_in_cluster,
+           additional_points_2d_in_cluster, point_indices_already_covered_c, covered_landmark_indices_c,
            L_in_cluster_, Vl_in_cluster_, kClusters, innerIts, sequential) :
     cost_ = np.zeros(kClusters)
     landmark_v_ = points_3d_in_cluster_[0].copy()
@@ -1556,6 +1565,8 @@ def palm_f(x0_p_, camera_indices_in_cluster_, point_indices_in_cluster_,
             Vl_in_cluster_[ci],             # maybe storage for latest Vl. then next turn use it?
             L_in_cluster_[ci],              # maybe use for L*diag + Vl on prox linear term.
             #additional_cameras_in_cluster[ci], # just unique additional_camera_indices
+            local_landmark_indices_in_cluster[ci],
+            inverse_point_indices_in_cluster[ci],
             additional_point_indices_in_cluster[ci], # for the additional residuals.
             additional_camera_indices_in_cluster[ci], # camera indices for additional residuals. needed to compute f, not gradient -> set grad to false
             additional_points_2d_in_cluster[ci], # additional residuals (rhs of them)
@@ -1714,7 +1725,7 @@ def BFGS_direction(r, ps, qs, rhos, k, mem, mu):
         #print("j ", j, " ", r.shape, ps[j].shape)
         alpha[j] = np.dot(r, ps[j]) * rhos[j]
         r = r - alpha[j]*qs[j]
-        if (rhos[j]>0):
+        if rhos[j] > 0:
             print(j, " 1st. al ", alpha[j], " rh ", rhos[j], " qs " , np.linalg.norm(qs[j],2), " ps " , np.linalg.norm(ps[j],2) )
 
     dk_ = mu * r
@@ -1725,7 +1736,7 @@ def BFGS_direction(r, ps, qs, rhos, k, mem, mu):
         #print("2j", j)
         beta = rhos[j] * np.dot(dk_, qs[j])
         dk_ = dk_ + ps[j] * (alpha[j] - beta)
-        if (rhos[j]>0):
+        if rhos[j] > 0:
             print(j, " 2nd. al ", alpha[j], " rh ", rhos[j], " be ", beta, " qs " , np.linalg.norm(qs[j],2), " ps " , np.linalg.norm(ps[j],2) )
 
     return dk_
@@ -1797,284 +1808,348 @@ def GetPreconditioners(cameras_, points_3d_, points_2d_, camera_indices_, point_
 ##############################################################################
 #cameras, points_3d, camera_indices, point_indices, points_2d = read_bal_data(FILE_NAME)
 
-kClusters_aim = 10
-iterations = 30
+with Profiler(interval=0.1) as profiler:
 
-import sys
-# total arguments
-num_args = len(sys.argv)
-if num_args > 2:
-    print("Total arguments passed:", num_args)
-    # Arguments passed
-    print("\nName of Python script:", sys.argv[0], "url ", sys.argv[1], "file ", sys.argv[2])
-    BASE_URL =  sys.argv[1]
-    FILE_NAME = sys.argv[2]
+    kClusters_aim = 10
+    iterations = 30
 
-    if num_args > 3:
-        iterations = int(sys.argv[3])
-    if num_args > 4:
-        kClusters_aim = int(sys.argv[4])
+    import sys
+    # total arguments
+    num_args = len(sys.argv)
+    if num_args > 2:
+        print("Total arguments passed:", num_args)
+        # Arguments passed
+        print("\nName of Python script:", sys.argv[0], "url ", sys.argv[1], "file ", sys.argv[2])
+        BASE_URL =  sys.argv[1]
+        FILE_NAME = sys.argv[2]
 
-    URL = BASE_URL + FILE_NAME
-    if not os.path.isfile(FILE_NAME):
-        urllib.request.urlretrieve(URL, FILE_NAME)
+        if num_args > 3:
+            iterations = int(sys.argv[3])
+        if num_args > 4:
+            kClusters_aim = int(sys.argv[4])
 
-cameras, points_3d, camera_indices, point_indices, points_2d = read_bal_data(FILE_NAME)
+        URL = BASE_URL + FILE_NAME
+        if not os.path.isfile(FILE_NAME):
+            urllib.request.urlretrieve(URL, FILE_NAME)
 
-n_cameras = cameras.shape[0]
-n_points = points_3d.shape[0]
-n_residuums = points_2d.shape[0]
+    cameras, points_3d, camera_indices, point_indices, points_2d = read_bal_data(FILE_NAME)
 
-n = 9 * n_cameras + 3 * n_points
-m = 2 * points_2d.shape[0]
+    n_cameras = cameras.shape[0]
+    n_points = points_3d.shape[0]
+    n_residuums = points_2d.shape[0]
 
-np.set_printoptions(formatter={"float": "{: 0.2f}".format})
+    n = 9 * n_cameras + 3 * n_points
+    m = 2 * points_2d.shape[0]
 
-print("n_cameras: {}".format(n_cameras))
-print("n_points: {}".format(n_points))
-print("Total number of parameters: {}".format(n))
-print("Total number of residuals: {}".format(m))
+    np.set_printoptions(formatter={"float": "{: 0.2f}".format})
 
-c345_mult = 1; c6_mult = 1; c7_mult = 1; c8_mult = 1
-if Use_Preconditioning:
-    Unorm, Vnorm, fx0 = GetPreconditioners(cameras, points_3d, points_2d, camera_indices, point_indices)
-    cameras = (Unorm * cameras.flatten()).reshape(-1,9)
-    points_3d = (Vnorm * points_3d.flatten()).reshape(-1,3)
-else:
-    fx0 = 1e20
-    c345_mult = 20; c6_mult = 3000; c7_mult = 10; c8_mult = 20
-    cameras[:,3:6] = cameras[:,3:6] / c345_mult
-    cameras[:,6] = cameras[:,6] / c6_mult
-    cameras[:,7] = cameras[:,7] / c7_mult
-    cameras[:,8] = cameras[:,8] / c8_mult
+    print("n_cameras: {}".format(n_cameras))
+    print("n_points: {}".format(n_points))
+    print("Total number of parameters: {}".format(n))
+    print("Total number of residuals: {}".format(m))
 
-fx_start = np.sum(fx0**2)
+    c345_mult = 1; c6_mult = 1; c7_mult = 1; c8_mult = 1
+    if Use_Preconditioning:
+        Unorm, Vnorm, fx0 = GetPreconditioners(cameras, points_3d, points_2d, camera_indices, point_indices)
+        cameras = (Unorm * cameras.flatten()).reshape(-1,9)
+        points_3d = (Vnorm * points_3d.flatten()).reshape(-1,3)
+    else:
+        fx0 = 1e20
+        c345_mult = 20; c6_mult = 3000; c7_mult = 10; c8_mult = 20
+        cameras[:,3:6] = cameras[:,3:6] / c345_mult
+        cameras[:,6] = cameras[:,6] / c6_mult
+        cameras[:,7] = cameras[:,7] / c7_mult
+        cameras[:,8] = cameras[:,8] / c8_mult
 
-x0_p = cameras.ravel()
-# x0_l = points_3d.ravel()
-# x0 = np.hstack((x0_p, x0_l))
-x0_p = x0_p.reshape(n_cameras, 9)
-# x0_l = x0_l.reshape(n_points, 3)
+    fx_start = np.sum(fx0**2)
 
-# torch_points_2d = from_numpy(points_2d)
-# torch_points_2d.requires_grad_(False)
-# x0_t = from_numpy(x0)
-
-# init. Duplicate only non unique variables. s and u contain only those duplicates.
-# initially all variables are contained, but selected by indices ..
-# Init s = v = u. = dupe all landmarks, now twice.
-# 1. s+ = s + v-u = s.
-# prox on (s+)
-# prox on 2u+ - s+. Adjust average fct.
-# update s+ = s + v+ - u+ = s + 2u+ - s - u+ = u+ .. Actually not since v+ != 2u-s
-# u := points_3d_in_cluster
-# s := landmark_s_in_cluster
-# v := output, temporary
-
-write_output = False
-read_output =  False
-if read_output:
-    #camera_params_np = np.fromfile("camera_params.dat", dtype=np.float64)
-    #point_params_np = np.fromfile("point_params.dat", dtype=np.float64)
-    camera_params_np = np.fromfile("camera_params_palm_2.dat", dtype=np.float64)
-    point_params_np = np.fromfile("camera_params_palm_2.dat", dtype=np.float64)
-
-    #camera_params_np = np.fromfile("camera_params_base.dat", dtype=np.float64)
-    #point_params_np = np.fromfile("point_params_base.dat", dtype=np.float64)
-
-    #res_indices_in_cluster_np = np.fromfile("res_indices_in_cluster.dat", dtype=np.int)
-    x0_p = camera_params_np.reshape(-1)
-    x0_l = point_params_np.reshape(-1)
-    #x0 = np.concatenate([x0_p, x0_l])
-    x0 = np.hstack((x0_p, x0_l))
-    x0_t = from_numpy(x0)
+    x0_p = cameras.ravel()
+    # x0_l = points_3d.ravel()
+    # x0 = np.hstack((x0_p, x0_l))
     x0_p = x0_p.reshape(n_cameras, 9)
-    #x0_l = x0_l.reshape(n_points, 3) #?
-    cameras   = x0_p.reshape(n_cameras,9)
-    points_3d = x0_l.reshape(n_points,3)
+    # x0_l = x0_l.reshape(n_points, 3)
 
-# 1. take problem and split, sort indices by camera, define local global map and test it.
-startL = 1
-kClusters = kClusters_aim
-innerIts = 1  # change to get an update, not 1 iteration Does help only at start yet. then never again. large L? get caught anyway later.
-cost = np.zeros(kClusters_aim)
-lastCost = fx_start
-lastCostDRE = fx_start
-old_primal_cost_v = fx_start
-costs = []
-gains = []
-powerits_runs = []
-acc_gains = []
-sequential = True
-globalIt = 0
-bestCost = fx_start
-resetIt = 0
-#tkk = globalIt - resetIt + 1
-failedNesterovAcceleration = 0 # count after k consecutive misses, restart (RNA might not need this)
-maxFailedNesterovAcceleration = 3 # 2,3 or 4. Check what needs to be send in parallel scheme
-extrapolate_parallel = True # then internally does not use sequential update? and False does not work = sequential procedure without acceleration right now.
-# sequential does not leverage acceleration? hmm
-use_inertia_in_sequential = True # 1. do not use naive tau inertia inside sequential update (vs tau = 1) in palm_f but heavy ball After all updates are 'in'.
-always_acccept_acceleration = True # the problem we solve (can) has a different (local) minimum than original BA problem
-Gs = []
-Fs = []
-Fes = []
-delta_old_cluster = [0 for elem in range(kClusters)]
-rnaBufferSize = 6
-# TODO: clustering. Do not split very near landmarks. Or try to figure out final 394 data set. What is leading to the jumps?
-lib = ctypes.CDLL("./libprocess_clusters.so")
-init_lib()
-baseline_clustering = False
-reCluster = False
-old_vtxsToPart = 0
-pre_merges = int(0.01 * n_cameras) # play to get 'best' cluster. Depends quite a lot
-if reCluster: # maybe less often. verbose!
-    pre_merges = int(0.01 * n_cameras) # random merges 20%? Also try explicitly different.
-# DRE:
-# f(x) + 1/2 (v^T Vlk * v - v^T 2 * Vlk (2x - sk) ) for x=u/v. Does not look right .. haeh
-#
-# The Lagrangian is sum_k f_k (x_k^t) - <mu^t_k, x_k^t - Bk z^t> + rho_k/2 | Bk z^t-x_k^t |^2
-# Apparently the difference is only (for Y = x_k^t or Bk z):
-# f_k (Y) + rho_k/2 | Y - Bk z^t |^2 - <mu^t_k, Y - Bk z^t>.
-# and we recall lambda = s^+ - v = s + (v-u) - v = s - u.
-#
-# Hence it is fv' * fv versus fu' * fu + rho_k|u_k - v_k|^2 - rho_k <s_k - u_k, u_k - v_k> in DRS variables.
-# how did this turn into my dre cost?
-# insert v -> only fk(v) remains. insert u:
+    # torch_points_2d = from_numpy(points_2d)
+    # torch_points_2d.requires_grad_(False)
+    # x0_t = from_numpy(x0)
 
-read_cluster = False
-write_cluster = False
+    # init. Duplicate only non unique variables. s and u contain only those duplicates.
+    # initially all variables are contained, but selected by indices ..
+    # Init s = v = u. = dupe all landmarks, now twice.
+    # 1. s+ = s + v-u = s.
+    # prox on (s+)
+    # prox on 2u+ - s+. Adjust average fct.
+    # update s+ = s + v+ - u+ = s + 2u+ - s - u+ = u+ .. Actually not since v+ != 2u-s
+    # u := points_3d_in_cluster
+    # s := landmark_s_in_cluster
+    # v := output, temporary
 
-points_3d_in_cluster = []
-L_in_cluster = []
-L_in_cluster_2 = []
-for _ in range(kClusters):
-    points_3d_in_cluster.append(points_3d.copy())
-    L_in_cluster.append(startL)
-    L_in_cluster_2.append(startL)
+    write_output = False
+    read_output =  False
+    if read_output:
+        #camera_params_np = np.fromfile("camera_params.dat", dtype=np.float64)
+        #point_params_np = np.fromfile("point_params.dat", dtype=np.float64)
+        camera_params_np = np.fromfile("camera_params_palm_2.dat", dtype=np.float64)
+        point_params_np = np.fromfile("camera_params_palm_2.dat", dtype=np.float64)
 
-if read_cluster:
-    L_in_cluster = [0 for x in range(kClusters)] # dummy fill list
-    camera_indices_in_cluster = [0 for x in range(kClusters)] # dummy fill list
-    point_indices_in_cluster = [0 for x in range(kClusters)] # dummy fill list
-    points_2d_in_cluster = [0 for x in range(kClusters)] # dummy fill list
-    cluster_to_camera = [0 for x in range(kClusters)] # dummy fill list
-    points_3d_in_cluster = [0 for x in range(kClusters)] # dummy fill list
-    additional_point_indices_in_cluster = [0 for x in range(kClusters)] # dummy fill list
-    additional_camera_indices_in_cluster = [0 for x in range(kClusters)] # dummy fill list
-    additional_points_2d_in_cluster = [0 for x in range(kClusters)] # dummy fill list
-    point_indices_already_covered_c = [0 for x in range(kClusters)] # dummy fill list
-    covered_landmark_indices_c = [0 for x in range(kClusters)] # dummy fill list
-    for ci in range(kClusters):
-        camera_indices_in_cluster[ci] = np.fromfile("camera_indices_in_cluster" + str(ci) + ".dat", dtype=int)
-        point_indices_in_cluster[ci] = np.fromfile("point_indices_in_cluster" + str(ci) + ".dat", dtype=int)
-        print("ci", point_indices_in_cluster[ci].shape)
-        points_2d_in_cluster[ci] = np.fromfile("points_2d_in_cluster" + str(ci) + ".dat", dtype=float).reshape(-1,2)
-        cluster_to_camera[ci] = np.fromfile("cluster_to_camera" + str(ci) + ".dat", dtype=int)
-        points_3d_in_cluster[ci] = np.fromfile("points_3d_in_cluster" + str(ci) + ".dat", dtype=float).reshape(-1,3)
-        print("ci", points_3d_in_cluster[ci].shape)
-        print("ci", points_2d_in_cluster[ci].shape)
-        additional_point_indices_in_cluster[ci] = np.fromfile("additional_point_indices_in_cluster" + str(ci) + ".dat", dtype=int)
-        additional_camera_indices_in_cluster[ci] = np.fromfile("additional_camera_indices_in_cluster" + str(ci) + ".dat", dtype=int)
-        additional_points_2d_in_cluster[ci] = np.fromfile("additional_points_2d_in_cluster" + str(ci) + ".dat", dtype=float).reshape(-1,2)
-        point_indices_already_covered_c[ci] = np.fromfile("point_indices_already_covered_c" + str(ci) + ".dat", dtype=int)
-        covered_landmark_indices_c[ci] = np.fromfile("covered_landmark_indices_c" + str(ci) + ".dat", dtype=int)
-        L_in_cluster[ci] = startL
-    #exit()
-else:
-    if not reCluster:
-        (
-            camera_indices_in_cluster,
-            point_indices_in_cluster,
-            points_2d_in_cluster,
-            res_indices_in_cluster,
-            additional_point_indices_in_cluster, additional_camera_indices_in_cluster,
-            additional_points_2d_in_cluster, point_indices_already_covered_c,
-            covered_landmark_indices_c,
-            old_vtxsToPart,
-            kClusters
-        ) = cluster_by_camera_gpt( # todo clustering takes old edges broken in and joins them into same cluster early. not sure this works at all. or just for some
-            camera_indices, points_2d, point_indices, kClusters_aim, pre_merges, old_vtxsToPart, baseline_clustering
-        )
+        #camera_params_np = np.fromfile("camera_params_base.dat", dtype=np.float64)
+        #point_params_np = np.fromfile("point_params_base.dat", dtype=np.float64)
 
-    if write_cluster:
+        #res_indices_in_cluster_np = np.fromfile("res_indices_in_cluster.dat", dtype=np.int)
+        x0_p = camera_params_np.reshape(-1)
+        x0_l = point_params_np.reshape(-1)
+        #x0 = np.concatenate([x0_p, x0_l])
+        x0 = np.hstack((x0_p, x0_l))
+        x0_t = from_numpy(x0)
+        x0_p = x0_p.reshape(n_cameras, 9)
+        #x0_l = x0_l.reshape(n_points, 3) #?
+        cameras   = x0_p.reshape(n_cameras,9)
+        points_3d = x0_l.reshape(n_points,3)
+
+    # 1. take problem and split, sort indices by camera, define local global map and test it.
+    startL = 1
+    kClusters = kClusters_aim
+    innerIts = 1  # change to get an update, not 1 iteration Does help only at start yet. then never again. large L? get caught anyway later.
+    cost = np.zeros(kClusters_aim)
+    lastCost = fx_start
+    lastCostDRE = fx_start
+    old_primal_cost_v = fx_start
+    costs = []
+    gains = []
+    powerits_runs = []
+    acc_gains = []
+    sequential = True
+    globalIt = 0
+    bestCost = fx_start
+    resetIt = 0
+    #tkk = globalIt - resetIt + 1
+    failedNesterovAcceleration = 0 # count after k consecutive misses, restart (RNA might not need this)
+    maxFailedNesterovAcceleration = 3 # 2,3 or 4. Check what needs to be send in parallel scheme
+    extrapolate_parallel = True # then internally does not use sequential update? and False does not work = sequential procedure without acceleration right now.
+    # sequential does not leverage acceleration? hmm
+    use_inertia_in_sequential = True # 1. do not use naive tau inertia inside sequential update (vs tau = 1) in palm_f but heavy ball After all updates are 'in'.
+    always_acccept_acceleration = True # the problem we solve (can) has a different (local) minimum than original BA problem
+    Gs = []
+    Fs = []
+    Fes = []
+    delta_old_cluster = [0 for elem in range(kClusters)]
+    rnaBufferSize = 6
+    # TODO: clustering. Do not split very near landmarks. Or try to figure out final 394 data set. What is leading to the jumps?
+    lib = ctypes.CDLL("./libprocess_clusters.so")
+    init_lib()
+    baseline_clustering = False
+    reCluster = False
+    old_vtxsToPart = 0
+    pre_merges = int(0.01 * n_cameras) # play to get 'best' cluster. Depends quite a lot
+    if reCluster: # maybe less often. verbose!
+        pre_merges = int(0.01 * n_cameras) # random merges 20%? Also try explicitly different.
+    # DRE:
+    # f(x) + 1/2 (v^T Vlk * v - v^T 2 * Vlk (2x - sk) ) for x=u/v. Does not look right .. haeh
+    #
+    # The Lagrangian is sum_k f_k (x_k^t) - <mu^t_k, x_k^t - Bk z^t> + rho_k/2 | Bk z^t-x_k^t |^2
+    # Apparently the difference is only (for Y = x_k^t or Bk z):
+    # f_k (Y) + rho_k/2 | Y - Bk z^t |^2 - <mu^t_k, Y - Bk z^t>.
+    # and we recall lambda = s^+ - v = s + (v-u) - v = s - u.
+    #
+    # Hence it is fv' * fv versus fu' * fu + rho_k|u_k - v_k|^2 - rho_k <s_k - u_k, u_k - v_k> in DRS variables.
+    # how did this turn into my dre cost?
+    # insert v -> only fk(v) remains. insert u:
+
+    read_cluster = False
+    write_cluster = False
+
+    points_3d_in_cluster = []
+    L_in_cluster = []
+    L_in_cluster_2 = []
+    for _ in range(kClusters):
+        points_3d_in_cluster.append(points_3d.copy())
+        L_in_cluster.append(startL)
+        L_in_cluster_2.append(startL)
+
+    if read_cluster:
+        L_in_cluster = [0 for x in range(kClusters)] # dummy fill list
+        camera_indices_in_cluster = [0 for x in range(kClusters)] # dummy fill list
+        point_indices_in_cluster = [0 for x in range(kClusters)] # dummy fill list
+        points_2d_in_cluster = [0 for x in range(kClusters)] # dummy fill list
+        cluster_to_camera = [0 for x in range(kClusters)] # dummy fill list
+        points_3d_in_cluster = [0 for x in range(kClusters)] # dummy fill list
+        additional_point_indices_in_cluster = [0 for x in range(kClusters)] # dummy fill list
+        additional_camera_indices_in_cluster = [0 for x in range(kClusters)] # dummy fill list
+        additional_points_2d_in_cluster = [0 for x in range(kClusters)] # dummy fill list
+        point_indices_already_covered_c = [0 for x in range(kClusters)] # dummy fill list
+        covered_landmark_indices_c = [0 for x in range(kClusters)] # dummy fill list
         for ci in range(kClusters):
-            camera_indices_in_cluster[ci].tofile("camera_indices_in_cluster" + str(ci) + ".dat")
-            point_indices_in_cluster[ci].tofile("point_indices_in_cluster" + str(ci) + ".dat")
-            points_2d_in_cluster[ci].tofile("points_2d_in_cluster"+ str(ci) +".dat")
-            #cluster_to_camera[ci].tofile("cluster_to_camera"+ str(ci) +".dat")
-            points_3d_in_cluster[ci].tofile("points_3d_in_cluster"+ str(ci) +".dat")
+            camera_indices_in_cluster[ci] = np.fromfile("camera_indices_in_cluster" + str(ci) + ".dat", dtype=int)
+            point_indices_in_cluster[ci] = np.fromfile("point_indices_in_cluster" + str(ci) + ".dat", dtype=int)
+            print("ci", point_indices_in_cluster[ci].shape)
+            points_2d_in_cluster[ci] = np.fromfile("points_2d_in_cluster" + str(ci) + ".dat", dtype=float).reshape(-1,2)
+            cluster_to_camera[ci] = np.fromfile("cluster_to_camera" + str(ci) + ".dat", dtype=int)
+            points_3d_in_cluster[ci] = np.fromfile("points_3d_in_cluster" + str(ci) + ".dat", dtype=float).reshape(-1,3)
             print("ci", points_3d_in_cluster[ci].shape)
             print("ci", points_2d_in_cluster[ci].shape)
-            additional_point_indices_in_cluster[ci].tofile("additional_point_indices_in_cluster"+ str(ci) +".dat")
-            additional_camera_indices_in_cluster[ci].tofile("additional_camera_indices_in_cluster"+ str(ci) +".dat")
-            additional_points_2d_in_cluster[ci].tofile("additional_points_2d_in_cluster"+ str(ci) +".dat")
-            point_indices_already_covered_c[ci].tofile("point_indices_already_covered_c"+ str(ci) +".dat")
-            covered_landmark_indices_c[ci].tofile("covered_landmark_indices_c"+ str(ci) +".dat")
-            print("ci", point_indices_in_cluster[ci].shape)
+            additional_point_indices_in_cluster[ci] = np.fromfile("additional_point_indices_in_cluster" + str(ci) + ".dat", dtype=int)
+            additional_camera_indices_in_cluster[ci] = np.fromfile("additional_camera_indices_in_cluster" + str(ci) + ".dat", dtype=int)
+            additional_points_2d_in_cluster[ci] = np.fromfile("additional_points_2d_in_cluster" + str(ci) + ".dat", dtype=float).reshape(-1,2)
+            point_indices_already_covered_c[ci] = np.fromfile("point_indices_already_covered_c" + str(ci) + ".dat", dtype=int)
+            covered_landmark_indices_c[ci] = np.fromfile("covered_landmark_indices_c" + str(ci) + ".dat", dtype=int)
+            L_in_cluster[ci] = startL
         #exit()
+    else:
+        if not reCluster:
+            (
+                camera_indices_in_cluster,
+                point_indices_in_cluster,
+                points_2d_in_cluster,
+                res_indices_in_cluster,
+                additional_point_indices_in_cluster, additional_camera_indices_in_cluster,
+                additional_points_2d_in_cluster, point_indices_already_covered_c,
+                covered_landmark_indices_c,
+                old_vtxsToPart,
+                kClusters
+            ) = cluster_by_camera_gpt( # todo clustering takes old edges broken in and joins them into same cluster early. not sure this works at all. or just for some
+                camera_indices, points_2d, point_indices, kClusters_aim, pre_merges, old_vtxsToPart, baseline_clustering
+            )
 
-    multiCluster = False # verify overlap ? setting L delayed is a slow down. Tried to increase variance, about same. Also same as non clustered. Maybe each step different clusters?
-    if multiCluster:
-        (
-            camera_indices_in_cluster_2,
-            point_indices_in_cluster_2,
-            points_2d_in_cluster_2,
-            res_indices_in_cluster_2,
-            additional_point_indices_in_cluster_2, additional_camera_indices_in_cluster_2, additional_points_2d_in_cluster_2, point_indices_already_covered_c_2,
-            covered_landmark_indices_c_2,
-            old_vtxsToPart,
-            kClusters_2
-        ) = cluster_by_camera_gpt(
-            camera_indices, points_2d, point_indices, kClusters_aim, pre_merges, old_vtxsToPart, baseline_clustering=False, init_cam_id=30, init_lm_id=5, seed=1234
-        )
-        Vl_in_cluster_2 = [0 for x in range(kClusters)] # dummy fill list
+        if write_cluster:
+            for ci in range(kClusters):
+                camera_indices_in_cluster[ci].tofile("camera_indices_in_cluster" + str(ci) + ".dat")
+                point_indices_in_cluster[ci].tofile("point_indices_in_cluster" + str(ci) + ".dat")
+                points_2d_in_cluster[ci].tofile("points_2d_in_cluster"+ str(ci) +".dat")
+                #cluster_to_camera[ci].tofile("cluster_to_camera"+ str(ci) +".dat")
+                points_3d_in_cluster[ci].tofile("points_3d_in_cluster"+ str(ci) +".dat")
+                print("ci", points_3d_in_cluster[ci].shape)
+                print("ci", points_2d_in_cluster[ci].shape)
+                additional_point_indices_in_cluster[ci].tofile("additional_point_indices_in_cluster"+ str(ci) +".dat")
+                additional_camera_indices_in_cluster[ci].tofile("additional_camera_indices_in_cluster"+ str(ci) +".dat")
+                additional_points_2d_in_cluster[ci].tofile("additional_points_2d_in_cluster"+ str(ci) +".dat")
+                point_indices_already_covered_c[ci].tofile("point_indices_already_covered_c"+ str(ci) +".dat")
+                covered_landmark_indices_c[ci].tofile("covered_landmark_indices_c"+ str(ci) +".dat")
+                print("ci", point_indices_in_cluster[ci].shape)
+            #exit()
 
-print(L_in_cluster)
-Vl_in_cluster = [0 for x in range(kClusters)] # dummy fill list
-landmark_s_in_cluster = [elem.copy() for elem in points_3d_in_cluster]
-landmark_v = points_3d_in_cluster[0].copy()
-x0_p_old = x0_p.copy()
-landmark_v_old = landmark_v.copy()
-primal_cost_vs = [1e15 for elem in range(kClusters)]
+        multiCluster = False # verify overlap ? setting L delayed is a slow down. Tried to increase variance, about same. Also same as non clustered. Maybe each step different clusters?
+        if multiCluster:
+            (
+                camera_indices_in_cluster_2,
+                point_indices_in_cluster_2,
+                points_2d_in_cluster_2,
+                res_indices_in_cluster_2,
+                additional_point_indices_in_cluster_2, additional_camera_indices_in_cluster_2,
+                additional_points_2d_in_cluster_2, point_indices_already_covered_c_2,
+                covered_landmark_indices_c_2,
+                old_vtxsToPart,
+                kClusters_2
+            ) = cluster_by_camera_gpt(
+                camera_indices, points_2d, point_indices, kClusters_aim, pre_merges, old_vtxsToPart, baseline_clustering=False, init_cam_id=30, init_lm_id=5, seed=1234
+            )
+            Vl_in_cluster_2 = [0 for x in range(kClusters)] # dummy fill list
 
-bfgs_mem = 6
-bfgs_mu = 1.0
-bfgs_qs = np.zeros([bfgs_mem, 9 * n_cameras + 3 * n_points]) # access/write with % mem
-bfgs_ps = np.zeros([bfgs_mem, 9 * n_cameras + 3 * n_points])
-bfgs_rhos = np.zeros([bfgs_mem, 1])
+    local_landmark_indices_in_cluster = []
+    inverse_point_indices_in_cluster = []
+    for ci in range(kClusters):
+        unique_points_in_c_ = np.unique(point_indices_in_cluster[ci])
+        # unique_points_in_c_[i] -> i, map each pi : point_indices_in_cluster[ci] to position in unique_points_in_c_[i]
+        inverse_point_indices_in_cluster.append(-np.ones(np.max(unique_points_in_c_) + 1))  # all -1
+        for i in range(unique_points_in_c_.shape[0]):
+            inverse_point_indices_in_cluster[ci][unique_points_in_c_[i]] = i # should be the index of all points -> index in cluster [as jacobian knows]
+        local_landmark_indices_in_cluster.append(point_indices_in_cluster[ci].copy())  # np.zeros(point_indices_in_cluster_.shape)
+        for i in range(point_indices_in_cluster[ci].shape[0]):
+            local_landmark_indices_in_cluster[ci][i] = inverse_point_indices_in_cluster[ci][local_landmark_indices_in_cluster[ci][i]]
+        ###
 
-def printPoints(points_3d):
-    import open3d as o3d
-    pcd = o3d.geometry.PointCloud()
-    print(points_3d.shape)
-    pcd.points = o3d.utility.Vector3dVector(points_3d)
-    print(pcd)
-    o3d.visualization.draw_geometries([pcd])    # Visualize point cloud
+    print(L_in_cluster)
+    Vl_in_cluster = [0 for x in range(kClusters)] # dummy fill list
+    landmark_s_in_cluster = [elem.copy() for elem in points_3d_in_cluster]
+    landmark_v = points_3d_in_cluster[0].copy()
+    x0_p_old = x0_p.copy()
+    landmark_v_old = landmark_v.copy()
+    primal_cost_vs = [1e15 for elem in range(kClusters)]
 
-def rerender(vis, geometry, landmarks, save_image):
-    geometry.points = o3d.utility.Vector3dVector(landmarks) #?
-    vis.update_geometry(geometry)
-    vis.poll_events()
-    vis.update_renderer()
-    if save_image:
-        vis.capture_screen_image("temp_%04d.jpg" % i)
-    #vis.destroy_window()
+    bfgs_mem = 6
+    bfgs_mu = 1.0
+    bfgs_qs = np.zeros([bfgs_mem, 9 * n_cameras + 3 * n_points]) # access/write with % mem
+    bfgs_ps = np.zeros([bfgs_mem, 9 * n_cameras + 3 * n_points])
+    bfgs_rhos = np.zeros([bfgs_mem, 1])
 
-plot3d = False
-if plot3d:
-    o3d.utility.set_verbosity_level(o3d.utility.VerbosityLevel.Debug)
-    vis = o3d.visualization.Visualizer()
-    vis.create_window()
-    geometry = o3d.geometry.PointCloud()
-    geometry.points = o3d.utility.Vector3dVector(landmark_v)
-    vis.add_geometry(geometry)
-    save_image = False
+    def printPoints(points_3d):
+        import open3d as o3d
+        pcd = o3d.geometry.PointCloud()
+        print(points_3d.shape)
+        pcd.points = o3d.utility.Vector3dVector(points_3d)
+        print(pcd)
+        o3d.visualization.draw_geometries([pcd])    # Visualize point cloud
 
-for globalIt in range(iterations):
-    if multiCluster:
-        # need to map points_3d_in_cluster to points_3d_in_cluster_ just copy
-        if globalIt %2 == 0:
+    def rerender(vis, geometry, landmarks, save_image):
+        geometry.points = o3d.utility.Vector3dVector(landmarks) #?
+        vis.update_geometry(geometry)
+        vis.poll_events()
+        vis.update_renderer()
+        if save_image:
+            vis.capture_screen_image("temp_%04d.jpg" % i)
+        #vis.destroy_window()
+
+    plot3d = False
+    if plot3d:
+        o3d.utility.set_verbosity_level(o3d.utility.VerbosityLevel.Debug)
+        vis = o3d.visualization.Visualizer()
+        vis.create_window()
+        geometry = o3d.geometry.PointCloud()
+        geometry.points = o3d.utility.Vector3dVector(landmark_v)
+        vis.add_geometry(geometry)
+        save_image = False
+
+    for globalIt in range(iterations):
+        if multiCluster:
+            # need to map points_3d_in_cluster to points_3d_in_cluster_ just copy
+            if globalIt %2 == 0:
+                (
+                    cost,
+                    L_in_cluster,
+                    Vl_in_cluster,
+                    landmark_v,
+                    x0_p_new,
+                    powerits_run,
+                    localCostGain_in_cluster
+                ) = palm_f(
+                    x0_p, camera_indices_in_cluster, point_indices_in_cluster, points_2d_in_cluster,
+                    points_3d_in_cluster,
+                    local_landmark_indices_in_cluster, inverse_point_indices_in_cluster,
+                    additional_point_indices_in_cluster, additional_camera_indices_in_cluster, additional_points_2d_in_cluster,
+                    point_indices_already_covered_c, covered_landmark_indices_c,
+                    L_in_cluster, Vl_in_cluster, kClusters, innerIts=innerIts, sequential=True,
+                    )
+            else:
+                (
+                    cost,
+                    L_in_cluster_2,
+                    Vl_in_cluster_2,
+                    landmark_v,
+                    x0_p_new,
+                    powerits_run,
+                    localCostGain_in_cluster
+                ) = palm_f(
+                    x0_p, camera_indices_in_cluster_2, point_indices_in_cluster_2, points_2d_in_cluster_2,
+                    points_3d_in_cluster,
+                    local_landmark_indices_in_cluster_2, inverse_point_indices_in_cluster_2,
+                    additional_point_indices_in_cluster_2, additional_camera_indices_in_cluster_2, additional_points_2d_in_cluster_2,
+                    point_indices_already_covered_c_2, covered_landmark_indices_c_2,
+                    L_in_cluster_2, Vl_in_cluster_2, kClusters, innerIts=innerIts, sequential=True,
+                    )
+        else:
+            if reCluster and globalIt % 10 == 0: # 3 no gain?! if cost gain stalls?
+                (
+                    camera_indices_in_cluster,
+                    point_indices_in_cluster,
+                    points_2d_in_cluster,
+                    res_indices_in_cluster,
+                    additional_point_indices_in_cluster, additional_camera_indices_in_cluster, additional_points_2d_in_cluster, point_indices_already_covered_c,
+                    covered_landmark_indices_c,
+                    old_vtxsToPart,
+                    kClusters
+                ) = cluster_by_camera_gpt( # todo clustering takes old edges broken in and joins them into same cluster early. not sure this works at all. or just for some
+                    camera_indices, points_2d, point_indices, kClusters_aim, pre_merges, 0, baseline_clustering
+                )
+
             (
                 cost,
                 L_in_cluster,
@@ -2086,536 +2161,502 @@ for globalIt in range(iterations):
             ) = palm_f(
                 x0_p, camera_indices_in_cluster, point_indices_in_cluster, points_2d_in_cluster,
                 points_3d_in_cluster,
-                additional_point_indices_in_cluster, additional_camera_indices_in_cluster, additional_points_2d_in_cluster,
-                point_indices_already_covered_c, covered_landmark_indices_c,
-                L_in_cluster, Vl_in_cluster, kClusters, innerIts=innerIts, sequential=True,
+                local_landmark_indices_in_cluster, inverse_point_indices_in_cluster,
+                additional_point_indices_in_cluster, additional_camera_indices_in_cluster, additional_points_2d_in_cluster, point_indices_already_covered_c, covered_landmark_indices_c,
+                L_in_cluster, Vl_in_cluster, kClusters, innerIts=innerIts, sequential = not extrapolate_parallel,
                 )
-        else:
-            (
-                cost,
-                L_in_cluster_2,
-                Vl_in_cluster_2,
-                landmark_v,
-                x0_p_new,
-                powerits_run,
-                localCostGain_in_cluster
-            ) = palm_f(
-                x0_p, camera_indices_in_cluster_2, point_indices_in_cluster_2, points_2d_in_cluster_2,
-                points_3d_in_cluster,
-                additional_point_indices_in_cluster_2, additional_camera_indices_in_cluster_2, additional_points_2d_in_cluster_2,
-                point_indices_already_covered_c_2, covered_landmark_indices_c_2,
-                L_in_cluster_2, Vl_in_cluster_2, kClusters, innerIts=innerIts, sequential=True,
-                )
-    else:
-        if reCluster and globalIt % 10 == 0: # 3 no gain?! if cost gain stalls?
-            (
-                camera_indices_in_cluster,
-                point_indices_in_cluster,
-                points_2d_in_cluster,
-                res_indices_in_cluster,
-                additional_point_indices_in_cluster, additional_camera_indices_in_cluster, additional_points_2d_in_cluster, point_indices_already_covered_c,
-                covered_landmark_indices_c,
-                old_vtxsToPart,
-                kClusters
-            ) = cluster_by_camera_gpt( # todo clustering takes old edges broken in and joins them into same cluster early. not sure this works at all. or just for some
-                camera_indices, points_2d, point_indices, kClusters_aim, pre_merges, 0, baseline_clustering
-            )
 
-        (
-            cost,
-            L_in_cluster,
-            Vl_in_cluster,
-            landmark_v,
-            x0_p_new,
-            powerits_run,
-            localCostGain_in_cluster
-        ) = palm_f(
-            x0_p, camera_indices_in_cluster, point_indices_in_cluster, points_2d_in_cluster, 
-            points_3d_in_cluster, 
-            additional_point_indices_in_cluster, additional_camera_indices_in_cluster, additional_points_2d_in_cluster, point_indices_already_covered_c, covered_landmark_indices_c,
-            L_in_cluster, Vl_in_cluster, kClusters, innerIts=innerIts, sequential = not extrapolate_parallel,
-            )
+        if plot3d:
+            #printPoints(landmark_v)
+            rerender(vis, geometry, landmark_v, save_image)
 
-    if plot3d:
-        #printPoints(landmark_v)
-        rerender(vis, geometry, landmark_v, save_image)
-
-    primal_cost_v = 0
-    primal_cost_vs_old = [primal_cost_vs[ci] for ci in range(kClusters)]
-    old_primal_cost_v = np.sum(primal_cost_vs_old)
-    for ci in range(kClusters):
-        primal_cost_vs[ci] = primal_cost(
-            x0_p_new,
-            camera_indices_in_cluster[ci],
-            point_indices_in_cluster[ci], # WAIT covered_landmarks vs point_indices_in_cluster , correct since SAME lms and cams!
-            points_2d_in_cluster[ci],
-            landmark_v)
-        primal_cost_v += primal_cost_vs[ci]
-        primal_cost_vs[ci] = round(primal_cost_vs[ci])
-
-    # sequential update if parallel failed.
-    # TODO: likely must run lone job if the rejected one is rejected again, or in general.
-    # Also harming acceleration. likely not woking at all.
-    if True and old_primal_cost_v < primal_cost_v and always_acccept_acceleration: # set False to ensure it is doing good not bad.
-        sol_cam  = x0_p.copy()
-        sol_land = points_3d_in_cluster[0].copy()
-        # from 0 to 1 compared to all 0 (old) to all 1 (accepted).
-        local_gains = [localCostGain_in_cluster[i] for i in range(kClusters)] #  - primal_cost_vs[i]
-        print("Fix gains per part ", local_gains)
-        arg_gain = np.flip(np.argsort(local_gains))
-        print("gains arg_gain ", arg_gain)
-
-        cost_0 = 0
-        for ci in range(kClusters):
-            cost_0 += primal_cost(
-                sol_cam,
-                camera_indices_in_cluster[ci],
-                point_indices_in_cluster[ci],
-                points_2d_in_cluster[ci],
-                sol_land)
-
-        if local_gains[arg_gain[0]] > 0:
-            print("Should not happen gains ", local_gains)
-        for i in arg_gain[0:].tolist():
-            # if (gains[arg_gain[i]] <0): # do not care / stop here. not sure if makes sense
-            #     break
-            sol_land[covered_landmark_indices_c[i]] = landmark_v[covered_landmark_indices_c[i]].copy()
-            sol_cam[camera_indices_in_cluster[i]] = x0_p_new[camera_indices_in_cluster[i]].copy()
-            # compute over ALL part i influences, here no idea just use all.
-
-            cost_i = 0
-            for ci in range(kClusters):
-                cost_i += primal_cost(
-                    sol_cam,
-                    camera_indices_in_cluster[ci],
-                    point_indices_in_cluster[ci],
-                    points_2d_in_cluster[ci],
-                    sol_land)
-            print("Trying part ", i," cost ", cost_i, " <? ", cost_0, " old cost ", old_primal_cost_v)
-            if cost_i > cost_0: # reject
-                print("Rejected")
-                sol_land[covered_landmark_indices_c[i]] = points_3d_in_cluster[0][covered_landmark_indices_c[i]].copy()
-                sol_cam[camera_indices_in_cluster[i]] = x0_p[camera_indices_in_cluster[i]].copy()
-            else:
-                print("Accepted")
-                cost_0 = cost_i
-        x0_p_new = sol_cam
-        landmark_v = sol_land
-        # for debugging.
-        print("-----=================== Running sequential fix =========----- ")
         primal_cost_v = 0
+        primal_cost_vs_old = [primal_cost_vs[ci] for ci in range(kClusters)]
+        old_primal_cost_v = np.sum(primal_cost_vs_old)
         for ci in range(kClusters):
             primal_cost_vs[ci] = primal_cost(
                 x0_p_new,
                 camera_indices_in_cluster[ci],
-                point_indices_in_cluster[ci],
+                point_indices_in_cluster[ci], # WAIT covered_landmarks vs point_indices_in_cluster , correct since SAME lms and cams!
                 points_2d_in_cluster[ci],
+                local_landmark_indices_in_cluster[ci], inverse_point_indices_in_cluster[ci],
                 landmark_v)
             primal_cost_v += primal_cost_vs[ci]
             primal_cost_vs[ci] = round(primal_cost_vs[ci])
 
-    # " and ", round(np.sum(cost)),
-    print( globalIt, "========= f(v)= ", round(primal_cost_v), " Gain: ", round(old_primal_cost_v - primal_cost_v), " cost per ci ", primal_cost_vs)
-    if globalIt == iterations-1: #> 3:
-        gains.append(round(old_primal_cost_v - primal_cost_v))
-        print("Gains: ", gains)
-        print("powerIts: ", powerits_runs)
-    old_primal_cost_v = primal_cost_v
-    costs.append(primal_cost_v)
-    powerits_runs.append(powerits_run)
+        # sequential update if parallel failed.
+        # TODO: likely must run lone job if the rejected one is rejected again, or in general.
+        # Also harming acceleration. likely not woking at all.
+        if True and old_primal_cost_v < primal_cost_v and always_acccept_acceleration: # set False to ensure it is doing good not bad.
+            sol_cam  = x0_p.copy()
+            sol_land = points_3d_in_cluster[0].copy()
+            # from 0 to 1 compared to all 0 (old) to all 1 (accepted).
+            local_gains = [localCostGain_in_cluster[i] for i in range(kClusters)] #  - primal_cost_vs[i]
+            print("Fix gains per part ", local_gains)
+            arg_gain = np.flip(np.argsort(local_gains))
+            print("gains arg_gain ", arg_gain)
 
-    # todo new sequential update.
-    # 1. if cost is worse, start with old solution
-    # 2. repeat
-    # 3. pick best partial solution, update only that one.
-    # 4. accept if energy gain else reject.
-    # until all are tested.
-    # idea is 1st always is aceepted. Also all disjoint one are accepted.
-    # rejected ones will be updated with new neigh info in next step.
-    # worst case: converge in sequential time if all parallel is same speed, but convergence is guaranteed.
+            cost_0 = 0
+            for ci in range(kClusters):
+                cost_0 += primal_cost(
+                    sol_cam,
+                    camera_indices_in_cluster[ci],
+                    point_indices_in_cluster[ci],
+                    points_2d_in_cluster[ci],
+                    local_landmark_indices_in_cluster[ci], inverse_point_indices_in_cluster[ci],
+                    sol_land)
 
-    if extrapolate_parallel:
-        base_acceleration = False
-        if base_acceleration:
-            tau = np.sqrt(1.1)
-            point_ext_  = landmark_v_old + tau * (landmark_v - landmark_v_old)
-            # point_ext_  = landmark_v + tau * (landmark_v - landmark_v_old) # try this
-            camera_ext_ = x0_p_old + tau * (x0_p_new - x0_p_old)
-            x0_p_old = x0_p.copy()
-            landmark_v_old = landmark_v.copy()
-        else:
-            baseRNA = False # does work now -- with x2 steps :)
-            use_bfgs = False
-            if baseRNA:
-                xk1 = np.concatenate([x0_p_new.flatten(), landmark_v.flatten()])
-                xk = np.concatenate([x0_p_old.flatten(), landmark_v_old.flatten()]) # x2 step
-                wk1 = xk1 - xk # delta k + delta k-1
-                # original only this: might be better.
-                rna_delta  = xk1 - np.concatenate([x0_p_old.flatten(), landmark_v_old.flatten()]) # delta(k) + delta(k-1) step! Best is delta(k-1) + delta(k-2)
-                if False and globalIt > 0: # about same?
-                    rna_delta = wk
-                Gs, Fs, Fes, x_extr = RNA_P(Gs, Fs, xk1, rna_delta, globalIt, rnaBufferSize, Fes, rna_delta, lamda = 1, h = -1)
-                camera_ext_ = x_extr[: 9 * n_cameras].reshape(n_cameras, 9)
-                point_ext_ = x_extr[9*n_cameras :].reshape(n_points, 3)
-                wk = wk1.copy()
-            elif use_bfgs:
-                xk05 = np.concatenate([x0_p.flatten(), points_3d_in_cluster[0].flatten()])
-                xk1 = np.concatenate([x0_p_new.flatten(), landmark_v.flatten()])
-                xk  = np.concatenate([x0_p_old.flatten(), landmark_v_old.flatten()]) # past
-                bfgs_r = -(xk1 - xk05) # this is the gradient xk05 + r = xk1 a gradient step.
-                # we want to estimate the hessian and d = H^-1* g defines new step we go into direction -d
-                dk = BFGS_direction(bfgs_r, bfgs_ps, bfgs_qs, bfgs_rhos, globalIt, bfgs_mem, bfgs_mu)
+            if local_gains[arg_gain[0]] > 0:
+                print("Should not happen gains ", local_gains)
+            for i in arg_gain[0:].tolist():
+                # if (gains[arg_gain[i]] <0): # do not care / stop here. not sure if makes sense
+                #     break
+                sol_land[covered_landmark_indices_c[i]] = landmark_v[covered_landmark_indices_c[i]].copy()
+                sol_cam[camera_indices_in_cluster[i]] = x0_p_new[camera_indices_in_cluster[i]].copy()
+                # compute over ALL part i influences, here no idea just use all.
 
-                # cannot work since 2 things together.
-                dk_stepLength = np.linalg.norm(dk, 2)
-                steplength = np.linalg.norm(bfgs_r, 2)
-                multiplier = steplength / dk_stepLength
-                dk = dk * 1 * multiplier
-                print(" ..... step length ", steplength, " bfgs step ", dk_stepLength, " ratio ", multiplier)
+                cost_i = 0
+                for ci in range(kClusters):
+                    cost_i += primal_cost(
+                        sol_cam,
+                        camera_indices_in_cluster[ci],
+                        point_indices_in_cluster[ci],
+                        points_2d_in_cluster[ci],
+                        local_landmark_indices_in_cluster[ci], inverse_point_indices_in_cluster[ci],
+                        sol_land)
+                print("Trying part ", i," cost ", cost_i, " <? ", cost_0, " old cost ", old_primal_cost_v)
+                if cost_i > cost_0: # reject
+                    print("Rejected")
+                    sol_land[covered_landmark_indices_c[i]] = points_3d_in_cluster[0][covered_landmark_indices_c[i]].copy()
+                    sol_cam[camera_indices_in_cluster[i]] = x0_p[camera_indices_in_cluster[i]].copy()
+                else:
+                    print("Accepted")
+                    cost_0 = cost_i
+            x0_p_new = sol_cam
+            landmark_v = sol_land
+            # for debugging.
+            print("-----=================== Running sequential fix =========----- ")
+            primal_cost_v = 0
+            for ci in range(kClusters):
+                primal_cost_vs[ci] = primal_cost(
+                    x0_p_new,
+                    camera_indices_in_cluster[ci],
+                    point_indices_in_cluster[ci],
+                    points_2d_in_cluster[ci],
+                    local_landmark_indices_in_cluster[ci], inverse_point_indices_in_cluster[ci],
+                    landmark_v)
+                primal_cost_v += primal_cost_vs[ci]
+                primal_cost_vs[ci] = round(primal_cost_vs[ci])
 
-                camera_ext_ = (xk1 - dk)[: 9 * n_cameras].reshape(n_cameras, 9)
-                point_ext_  = (xk1 - dk)[9*n_cameras :].reshape(n_points, 3)
+        # " and ", round(np.sum(cost)),
+        print( globalIt, "========= f(v)= ", round(primal_cost_v), " Gain: ", round(old_primal_cost_v - primal_cost_v), " cost per ci ", primal_cost_vs)
+        if globalIt == iterations-1: #> 3:
+            gains.append(round(old_primal_cost_v - primal_cost_v))
+            print("Gains: ", gains)
+            print("powerIts: ", powerits_runs)
+        old_primal_cost_v = primal_cost_v
+        costs.append(primal_cost_v)
+        powerits_runs.append(powerits_run)
 
-                #bfgs_ps[it % bfgs_mem] = dk #* multiplier
-                bfgs_ps[globalIt % bfgs_mem] = bfgs_r
-                bfgs_qs[globalIt % bfgs_mem] = -(xk1 - xk05 - (xk05 - xk)) # - or + ?
-                bfgs_rhos[globalIt % bfgs_mem] = np.maximum(0., 1./ bfgs_qs[globalIt % bfgs_mem].dot(bfgs_ps[globalIt % bfgs_mem]))
-            else: #################### HERE NESTEROV ###################
-                # other idea would be
-                # wk+1 = rna_delta
-                # Fk = [wk+1 - wk, ...] Ek = [xk - xk-1, ...]
-                # gamma_k = argmin [wk+1 - Fk * gamma_k]
-                # xk+1 = xk + wk+1 - (Ek+Fk) * gamma_k =
-                #
-                xk05 = np.concatenate([x0_p.flatten(), points_3d_in_cluster[0].flatten()])
-                xk1 = np.concatenate([x0_p_new.flatten(), landmark_v.flatten()])
-                xk  = np.concatenate([x0_p_old.flatten(), landmark_v_old.flatten()]) # todo this is one iteration behind even for cams, but maybe better?
-                #xk  = np.concatenate([x0_p.flatten(), landmark_v_old.flatten()])
-                wk1 = xk1 - xk # delta k + delta k-1
+        # todo new sequential update.
+        # 1. if cost is worse, start with old solution
+        # 2. repeat
+        # 3. pick best partial solution, update only that one.
+        # 4. accept if energy gain else reject.
+        # until all are tested.
+        # idea is 1st always is aceepted. Also all disjoint one are accepted.
+        # rejected ones will be updated with new neigh info in next step.
+        # worst case: converge in sequential time if all parallel is same speed, but convergence is guaranteed.
+
+        if extrapolate_parallel:
+            base_acceleration = False
+            if base_acceleration:
+                tau = np.sqrt(1.1)
+                point_ext_  = landmark_v_old + tau * (landmark_v - landmark_v_old)
+                # point_ext_  = landmark_v + tau * (landmark_v - landmark_v_old) # try this
+                camera_ext_ = x0_p_old + tau * (x0_p_new - x0_p_old)
+                x0_p_old = x0_p.copy()
+                landmark_v_old = landmark_v.copy()
+            else:
+                baseRNA = False # does work now -- with x2 steps :)
+                use_bfgs = False
+                if baseRNA:
+                    xk1 = np.concatenate([x0_p_new.flatten(), landmark_v.flatten()])
+                    xk = np.concatenate([x0_p_old.flatten(), landmark_v_old.flatten()]) # x2 step
+                    wk1 = xk1 - xk # delta k + delta k-1
+                    # original only this: might be better.
+                    rna_delta  = xk1 - np.concatenate([x0_p_old.flatten(), landmark_v_old.flatten()]) # delta(k) + delta(k-1) step! Best is delta(k-1) + delta(k-2)
+                    if False and globalIt > 0: # about same?
+                        rna_delta = wk
+                    Gs, Fs, Fes, x_extr = RNA_P(Gs, Fs, xk1, rna_delta, globalIt, rnaBufferSize, Fes, rna_delta, lamda = 1, h = -1)
+                    camera_ext_ = x_extr[: 9 * n_cameras].reshape(n_cameras, 9)
+                    point_ext_ = x_extr[9*n_cameras :].reshape(n_points, 3)
+                    wk = wk1.copy()
+                elif use_bfgs:
+                    xk05 = np.concatenate([x0_p.flatten(), points_3d_in_cluster[0].flatten()])
+                    xk1 = np.concatenate([x0_p_new.flatten(), landmark_v.flatten()])
+                    xk  = np.concatenate([x0_p_old.flatten(), landmark_v_old.flatten()]) # past
+                    bfgs_r = -(xk1 - xk05) # this is the gradient xk05 + r = xk1 a gradient step.
+                    # we want to estimate the hessian and d = H^-1* g defines new step we go into direction -d
+                    dk = BFGS_direction(bfgs_r, bfgs_ps, bfgs_qs, bfgs_rhos, globalIt, bfgs_mem, bfgs_mu)
+
+                    # cannot work since 2 things together.
+                    dk_stepLength = np.linalg.norm(dk, 2)
+                    steplength = np.linalg.norm(bfgs_r, 2)
+                    multiplier = steplength / dk_stepLength
+                    dk = dk * 1 * multiplier
+                    print(" ..... step length ", steplength, " bfgs step ", dk_stepLength, " ratio ", multiplier)
+
+                    camera_ext_ = (xk1 - dk)[: 9 * n_cameras].reshape(n_cameras, 9)
+                    point_ext_  = (xk1 - dk)[9*n_cameras :].reshape(n_points, 3)
+
+                    #bfgs_ps[it % bfgs_mem] = dk #* multiplier
+                    bfgs_ps[globalIt % bfgs_mem] = bfgs_r
+                    bfgs_qs[globalIt % bfgs_mem] = -(xk1 - xk05 - (xk05 - xk)) # - or + ?
+                    bfgs_rhos[globalIt % bfgs_mem] = np.maximum(0., 1./ bfgs_qs[globalIt % bfgs_mem].dot(bfgs_ps[globalIt % bfgs_mem]))
+                else: #################### HERE NESTEROV ###################
+                    # other idea would be
+                    # wk+1 = rna_delta
+                    # Fk = [wk+1 - wk, ...] Ek = [xk - xk-1, ...]
+                    # gamma_k = argmin [wk+1 - Fk * gamma_k]
+                    # xk+1 = xk + wk+1 - (Ek+Fk) * gamma_k =
+                    #
+                    xk05 = np.concatenate([x0_p.flatten(), points_3d_in_cluster[0].flatten()])
+                    xk1 = np.concatenate([x0_p_new.flatten(), landmark_v.flatten()])
+                    xk  = np.concatenate([x0_p_old.flatten(), landmark_v_old.flatten()]) # todo this is one iteration behind even for cams, but maybe better?
+                    #xk  = np.concatenate([x0_p.flatten(), landmark_v_old.flatten()])
+                    wk1 = xk1 - xk # delta k + delta k-1
+                    if globalIt > 0:
+                        fk  = wk1 - wk
+                        ek  = xk - xk_old # = wk
+                        #alpha = 0
+                        #Gs, Fs, Fes, update = RNA_P(Gs, Fs, ek, fk, it, rnaBufferSize, Fes, fk, lamda = 10, h = -alpha)
+                        #x_extr = xk + wk1 - update
+                        # x_extr = xk + alpha * wk1 + update # haeh ? from paper it is this? was awful.
+                        # reminds on some acceleration. lookup.
+                        # x_extr = xk + wk1 + ek + (np.sqrt(1.1) - 1.) * fk # avoids storing shit. 1- sqrt(1.1) also ok. maybe no fk at all?
+                        # could be like this or similar (without fk part, but without much worse, still beta = something might stil work)
+                        #beta = 1.0 # beta * wk # test different values. find scheme, hmm. 1: 195209. 1.1 & 0.9 are a lot worse. one could also update with accepted version if accepted?
+                        # could also dig more into past?
+                        #alpha = 0.0
+                        # so a sum of deltas works well. About 2 delta of size. so alpha=0 in RNA. or sum ci xi = 0 then sum ci xi + deltai = sum delta i
+                        # so original rna, on top of xk1 and * 2? nope.
+                        # rna does deriv to 0: sum_i ci d_fxi -> min.
+                        # this is xk + delta k + delta k-1 + delta k-2.
+                        x_extr = xk1 + wk #+ alpha * (xk1 - xk05) # wk is delta k-1 + delta k-2. works best ?
+
+                        # if it > 1:
+                        #     #x_extr = xk1 + wk + d0 # delta k-1 + delta k-2 + delta k-3
+                        #     x_extr = xk1 + d1 + d0 # delta k-2 + delta k-3
+
+                        # An interpretation of this is momentum:
+                        # update = delta_v + beta * past update.
+                        # Polyak's heavy-ball method: xk1 - xk05 define gradient and delta_v the past update.
+                        heavyBall = True
+                        if heavyBall:
+                            beta_nesterov = (globalIt-resetIt-1) / (globalIt-resetIt+2) # where did i get this?
+                            # beta_nesterov = (globalIt-resetIt-1) / (globalIt-resetIt+1) # weird but slightly better ?
+                            #tkk1 = (1 + np.sqrt(4*tkk*tkk + 1)) / 2 # or tk = tk + 1
+                            #beta_nesterov = (tkk-1) / (tkk+2)
+                            #beta_nesterov = (tkk-1) / (tkk1)
+                            #print("beta_nesterov ",beta_nesterov, " tk ", tkk, " new tkk ",tkk1)
+                            #tkk = tkk1
+                            delta_v = xk1 - xk05 + beta_nesterov * delta_v
+                            x_extr = xk05 + delta_v
+
+                        camera_ext_ = x_extr[: 9 * n_cameras].reshape(n_cameras, 9)
+                        point_ext_ = x_extr[9 * n_cameras :].reshape(n_points, 3)
+                    else:
+                        point_ext_  = landmark_v
+                        camera_ext_ = x0_p_new
+                        delta_v = xk1 - xk05 # for momentum
+
+                    #d1 = xk05 - xk # delta k-1, so in run delta k-2. d0 is delta k-3. wk is delta k-1 + delta k-2
+                    wk = wk1.copy()
+                    xk_old = xk.copy()
+
+                # newer more sound?
+                # x0_p_old = x0_p_new.copy()
+                # landmark_v_old = landmark_v.copy()
+                # older just weird? twice the new?
+                x0_p_old = x0_p.copy() # older
+                #landmark_v_old = points_3d_in_cluster[0].copy() # older
+                landmark_v_old = landmark_v.copy() # TODO: changed
+
+            new_line_search = False # FALSE! much better. maybe delete other part.
+            if new_line_search: # appears wrong except for the restart idea. But this is to be tackled from new sequential update.
+                # Idea pick best per part. not only overall!
+                # init from OLD solution. not new.
+                #best_land = landmark_v.copy()
+                #best_cam = x0_p_new.copy()
+                best_land = points_3d_in_cluster[0].copy()
+                best_cam = x0_p.copy()
                 if globalIt > 0:
-                    fk  = wk1 - wk
-                    ek  = xk - xk_old # = wk
-                    #alpha = 0
-                    #Gs, Fs, Fes, update = RNA_P(Gs, Fs, ek, fk, it, rnaBufferSize, Fes, fk, lamda = 10, h = -alpha)
-                    #x_extr = xk + wk1 - update
-                    # x_extr = xk + alpha * wk1 + update # haeh ? from paper it is this? was awful.
-                    # reminds on some acceleration. lookup.
-                    # x_extr = xk + wk1 + ek + (np.sqrt(1.1) - 1.) * fk # avoids storing shit. 1- sqrt(1.1) also ok. maybe no fk at all?
-                    # could be like this or similar (without fk part, but without much worse, still beta = something might stil work)
-                    #beta = 1.0 # beta * wk # test different values. find scheme, hmm. 1: 195209. 1.1 & 0.9 are a lot worse. one could also update with accepted version if accepted?
-                    # could also dig more into past?
-                    #alpha = 0.0
-                    # so a sum of deltas works well. About 2 delta of size. so alpha=0 in RNA. or sum ci xi = 0 then sum ci xi + deltai = sum delta i
-                    # so original rna, on top of xk1 and * 2? nope.
-                    # rna does deriv to 0: sum_i ci d_fxi -> min.
-                    # this is xk + delta k + delta k-1 + delta k-2.
-                    x_extr = xk1 + wk #+ alpha * (xk1 - xk05) # wk is delta k-1 + delta k-2. works best ?
+                    primal_costs_best = [primal_cost_vs_old[ci] for ci in range(kClusters)]
+                else:
+                    primal_costs_best = [primal_cost_vs[ci] for ci in range(kClusters)]
 
-                    # if it > 1:
-                    #     #x_extr = xk1 + wk + d0 # delta k-1 + delta k-2 + delta k-3
-                    #     x_extr = xk1 + d1 + d0 # delta k-2 + delta k-3
+                line_search_iterations = 3
+                for ls_it in range(line_search_iterations):
+                    tk = ls_it / (line_search_iterations-1)
+                    camera_ext = (1 - tk) * camera_ext_ + tk * x0_p_new
+                    point_ext = (1 - tk) * point_ext_ + tk * landmark_v
+                    primal_cost_ext = 0
+                    primal_costs_ext = [0 for elem in range(kClusters)]
+                    for ci in range(kClusters):
+                        primal_costs_ext[ci] = primal_cost(
+                            camera_ext,
+                            camera_indices_in_cluster[ci],
+                            point_indices_in_cluster[ci],
+                            points_2d_in_cluster[ci],
+                            local_landmark_indices_in_cluster[ci], inverse_point_indices_in_cluster[ci],
+                            point_ext)
+                        primal_cost_ext += primal_costs_ext[ci]
 
-                    # An interpretation of this is momentum:
-                    # update = delta_v + beta * past update.
-                    # Polyak's heavy-ball method: xk1 - xk05 define gradient and delta_v the past update.
+                        if (primal_costs_best[ci] > primal_costs_ext[ci]):
+                            #best_land[point_indices_in_cluster[ci]] = point_ext[point_indices_in_cluster[ci]].copy() # TODO: was wrong before ?
+                            best_land[covered_landmark_indices_c[ci]] = point_ext[covered_landmark_indices_c[ci]].copy()
+                            best_cam[camera_indices_in_cluster[ci]] = camera_ext[camera_indices_in_cluster[ci]].copy()
+                            primal_costs_best[ci] = primal_costs_ext[ci]
+
+                        #primal_costs_ext[ci] = round(primal_costs_ext[ci])
+                    # before 1st with overall lower cost
+                    # if primal_cost_ext <= primal_cost_v:
+                    #     break
+                point_ext = best_land
+                camera_ext = best_cam
+                primal_cost_ext = np.sum(primal_costs_best)
+                primal_costs_ext = [round(primal_costs_best[ci]) for ci in range(kClusters)]
+            else:
+                line_search_iterations = 3 # 2 is a bit worse, 1 is worse.
+                for ls_it in range(line_search_iterations):
+                    if always_acccept_acceleration:
+                        # line_search_iterations=3: 0, 1/3, 2/3 ..
+                        # line_search_iterations=2: 0, 1/2
+                        tk = ls_it / line_search_iterations # 0, 1/3, 2/3 ..
+                    else: # regular case
+                        tk = ls_it / max(1, (line_search_iterations-1))
+                    # (1-tk) * (x_new + delta) + tk * x_new = x_new + (1-tk) * delta
+                    # Goal tk = -1/2, 0. So (tk=1 is just x-new itself)
+                    #tk = tk - 0.5# extrapolation does not work, eg, 142.
+                    camera_ext = (1 - tk) * camera_ext_ + tk * x0_p_new
+                    point_ext = (1 - tk) * point_ext_ + tk * landmark_v
+                    primal_cost_ext = 0
+                    primal_costs_ext = [0 for elem in range(kClusters)]
+                    for ci in range(kClusters):
+                        primal_costs_ext[ci] = primal_cost(
+                            camera_ext,
+                            camera_indices_in_cluster[ci],
+                            point_indices_in_cluster[ci],
+                            points_2d_in_cluster[ci],
+                            local_landmark_indices_in_cluster[ci], inverse_point_indices_in_cluster[ci],
+                            point_ext)
+                        primal_cost_ext += primal_costs_ext[ci]
+                        primal_costs_ext[ci] = round(primal_costs_ext[ci])
+
+                    if primal_cost_ext <= primal_cost_v or (always_acccept_acceleration and ls_it == line_search_iterations-1):
+                        break
+            # TODO maybe need to revert extrapolation if next enrgy jumped
+            # TODO: local_bundle delivers cost in only relevant residuals to compare with. See where it fails.
+            # , " basic ", round(primal_cost_v),
+            print( globalIt, "==== acc. f(v)= ", round(primal_cost_ext), " Gain: ", \
+                round(primal_cost_v-primal_cost_ext), " cost per ci ", primal_costs_ext )
+            acc_gains.append(round(primal_cost_v-primal_cost_ext))
+            if globalIt == iterations - 1:
+                print("acc_gains ", acc_gains)
+
+            # TODO 1.4 adaptive getting smaller for more iterations --
+            #
+            # if loss by acc is > gain by step reject? # TODO: changed?
+            # TODO replace 1.4 with 1.2, or adaptive? RNA / nesterov
+            #if primal_cost_ext < primal_cost_v or (always_acccept_acceleration and primal_cost_ext < 1.4 * primal_cost_v ):
+            if primal_cost_ext < primal_cost_v or (always_acccept_acceleration and primal_cost_ext < 1.1 * np.minimum(primal_cost_v, bestCost) ):
+
+                # TODO: changed
+                if primal_cost_ext < primal_cost_v: # 931: awful, 1.4? or lower, or adaptive?
+                    for ci in range(kClusters):
+                        points_3d_in_cluster[ci] = point_ext.copy()
+                    x0_p = camera_ext.copy()
+                    primal_cost_vs = [primal_costs_ext[i] for i in range(kClusters)]
+
+                else: # TODO: changed -- acceleration could always be based on ext / even 1st version? woudl demand 1 more step palm (x2 slow).
+                    for ci in range(kClusters):
+                        points_3d_in_cluster[ci] = landmark_v.copy()
+                    x0_p = x0_p_new.copy()
+                #wk = x_extr - xk # update w accepted change
+
+                # if this happens n consecutive times, reset to avoid bad acceleration.
+                if primal_cost_ext > primal_cost_v:
+                    failedNesterovAcceleration += 1
+                else:
+                    failedNesterovAcceleration = 0
+
+            else: # reset momentum as well?
+                for ci in range(kClusters):
+                    points_3d_in_cluster[ci] = landmark_v.copy()
+                x0_p = x0_p_new.copy()
+
+                failedNesterovAcceleration += maxFailedNesterovAcceleration # always reset
+
+            if failedNesterovAcceleration >= maxFailedNesterovAcceleration:
+                delta_v = 0 * delta_v
+                resetIt = globalIt
+                #tkk = globalIt - resetIt + 1
+                failedNesterovAcceleration = 0
+                print("Reset Nesterov acceleration after ", maxFailedNesterovAcceleration, " consecutive failures.")
+
+        else: # not extrapolate_parallel
+
+            if use_inertia_in_sequential:
+                use_inertia_simple = False # does a bit with small tau. Beware to use when done in sequential update!
+                if use_inertia_simple: # RNA works, so maybe use here with L*delta, see acceleration
+                    tau = np.sqrt(1.1)
+                    for ci in range(kClusters):
+                        points_3d_in_cluster[ci]  = points_3d_in_cluster[ci] + tau * (landmark_v - points_3d_in_cluster[ci])
+                    x0_p = x0_p + tau * (x0_p_new -x0_p)
+
+                    primal_cost_v = 0
+                    for ci in range(kClusters):
+                        primal_cost_v += primal_cost(
+                            x0_p,
+                            camera_indices_in_cluster[ci],
+                            point_indices_in_cluster[ci],
+                            points_2d_in_cluster[ci],
+                            local_landmark_indices_in_cluster[ci], inverse_point_indices_in_cluster[ci],
+                            points_3d_in_cluster[ci])
+                    print( globalIt, "==== + inertia f(v)= ", round(primal_cost_v), " and ", round(np.sum(cost)))
+                else: # momentum polyak, need line search
                     heavyBall = True
-                    if heavyBall:
-                        beta_nesterov = (globalIt-resetIt-1) / (globalIt-resetIt+2) # where did i get this?
-                        # beta_nesterov = (globalIt-resetIt-1) / (globalIt-resetIt+1) # weird but slightly better ?
-                        #tkk1 = (1 + np.sqrt(4*tkk*tkk + 1)) / 2 # or tk = tk + 1
-                        #beta_nesterov = (tkk-1) / (tkk+2)
-                        #beta_nesterov = (tkk-1) / (tkk1)
-                        #print("beta_nesterov ",beta_nesterov, " tk ", tkk, " new tkk ",tkk1)
-                        #tkk = tkk1
+                    xk05 = np.concatenate([x0_p.flatten(), points_3d_in_cluster[0].flatten()])
+                    xk1 = np.concatenate([x0_p_new.flatten(), landmark_v.flatten()])
+
+                    if globalIt > 0:
+                        beta_nesterov = (globalIt-1) / (globalIt+2)
                         delta_v = xk1 - xk05 + beta_nesterov * delta_v
                         x_extr = xk05 + delta_v
+                        camera_ext_ = x_extr[: 9 * n_cameras].reshape(n_cameras, 9)
+                        point_ext_ = x_extr[9 * n_cameras :].reshape(n_points, 3)
+                    else:
+                        point_ext_  = landmark_v
+                        camera_ext_ = x0_p_new
+                        delta_v = xk1 - xk05 # for momentum
 
-                    camera_ext_ = x_extr[: 9 * n_cameras].reshape(n_cameras, 9)
-                    point_ext_ = x_extr[9 * n_cameras :].reshape(n_points, 3)
+                line_search_iterations = 3
+                for ls_it in range(line_search_iterations):
+                    tk = ls_it / (line_search_iterations-1)
+                    camera_ext = (1 - tk) * camera_ext_ + tk * x0_p_new
+                    point_ext = (1 - tk) * point_ext_ + tk * landmark_v
+                    primal_cost_ext = 0
+                    primal_costs_ext = [0 for elem in range(kClusters)]
+                    for ci in range(kClusters):
+                        primal_costs_ext[ci] = primal_cost(
+                            camera_ext,
+                            camera_indices_in_cluster[ci],
+                            point_indices_in_cluster[ci],
+                            points_2d_in_cluster[ci],
+                            local_landmark_indices_in_cluster[ci], inverse_point_indices_in_cluster[ci],
+                            point_ext)
+                        primal_cost_ext += primal_costs_ext[ci]
+                        primal_costs_ext[ci] = round(primal_costs_ext[ci])
+
+                    if primal_cost_ext <= primal_cost_v:
+                        primal_cost_vs = [primal_costs_ext[i] for i in range(kClusters)]
+                        break
+                # TODO maybe need to revert extrapolation if next energy jumped
+                # TODO: local_bundle delivers cost in only relevant residuals to compare with. See where it fails.
+                print( globalIt, "==== acc. f(v)= ", round(primal_cost_ext), " basic ", round(primal_cost_v), " gain ", round(primal_cost_v-primal_cost_ext), " cost per ci ", primal_costs_ext )
+                if globalIt > 1:
+                    acc_gains.append(round(primal_cost_v-primal_cost_ext))
+                    if globalIt == iterations - 1:
+                        print("acc_gains ", acc_gains)
+
+                if primal_cost_ext < primal_cost_v:
+                    for ci in range(kClusters):
+                        points_3d_in_cluster[ci] = point_ext.copy()
+                    x0_p = camera_ext.copy()
+                    #wk = x_extr - xk # update w accepted change
                 else:
-                    point_ext_  = landmark_v
-                    camera_ext_ = x0_p_new
-                    delta_v = xk1 - xk05 # for momentum
+                    for ci in range(kClusters):
+                        points_3d_in_cluster[ci] = landmark_v.copy()
+                    x0_p = x0_p_new.copy()
 
-                #d1 = xk05 - xk # delta k-1, so in run delta k-2. d0 is delta k-3. wk is delta k-1 + delta k-2
-                wk = wk1.copy()
-                xk_old = xk.copy()
-
-            # newer more sound?
-            # x0_p_old = x0_p_new.copy()
-            # landmark_v_old = landmark_v.copy()
-            # older just weird? twice the new?
-            x0_p_old = x0_p.copy() # older
-            #landmark_v_old = points_3d_in_cluster[0].copy() # older
-            landmark_v_old = landmark_v.copy() # TODO: changed
-
-        new_line_search = False # FALSE! much better. maybe delete other part.
-        if new_line_search: # appears wrong except for the restart idea. But this is to be tackled from new sequential update.
-            # Idea pick best per part. not only overall!
-            # init from OLD solution. not new.
-            #best_land = landmark_v.copy()
-            #best_cam = x0_p_new.copy()
-            best_land = points_3d_in_cluster[0].copy()
-            best_cam = x0_p.copy()
-            if globalIt > 0:
-                primal_costs_best = [primal_cost_vs_old[ci] for ci in range(kClusters)]
             else:
-                primal_costs_best = [primal_cost_vs[ci] for ci in range(kClusters)]
-
-            line_search_iterations = 3
-            for ls_it in range(line_search_iterations):
-                tk = ls_it / (line_search_iterations-1)
-                camera_ext = (1 - tk) * camera_ext_ + tk * x0_p_new
-                point_ext = (1 - tk) * point_ext_ + tk * landmark_v
-                primal_cost_ext = 0
-                primal_costs_ext = [0 for elem in range(kClusters)]
-                for ci in range(kClusters):
-                    primal_costs_ext[ci] = primal_cost(
-                        camera_ext,
-                        camera_indices_in_cluster[ci],
-                        point_indices_in_cluster[ci],
-                        points_2d_in_cluster[ci],
-                        point_ext)
-                    primal_cost_ext += primal_costs_ext[ci]
-
-                    if (primal_costs_best[ci] > primal_costs_ext[ci]):
-                        #best_land[point_indices_in_cluster[ci]] = point_ext[point_indices_in_cluster[ci]].copy() # TODO: was wrong before ?
-                        best_land[covered_landmark_indices_c[ci]] = point_ext[covered_landmark_indices_c[ci]].copy()
-                        best_cam[camera_indices_in_cluster[ci]] = camera_ext[camera_indices_in_cluster[ci]].copy()
-                        primal_costs_best[ci] = primal_costs_ext[ci]
-
-                    #primal_costs_ext[ci] = round(primal_costs_ext[ci])
-                # before 1st with overall lower cost
-                # if primal_cost_ext <= primal_cost_v:
-                #     break
-            point_ext = best_land
-            camera_ext = best_cam
-            primal_cost_ext = np.sum(primal_costs_best)
-            primal_costs_ext = [round(primal_costs_best[ci]) for ci in range(kClusters)]
-        else:
-            line_search_iterations = 3 # 2 is a bit worse, 1 is worse.
-            for ls_it in range(line_search_iterations):
-                if always_acccept_acceleration:
-                    # line_search_iterations=3: 0, 1/3, 2/3 ..
-                    # line_search_iterations=2: 0, 1/2
-                    tk = ls_it / line_search_iterations # 0, 1/3, 2/3 ..
-                else: # regular case
-                    tk = ls_it / max(1, (line_search_iterations-1))
-                # (1-tk) * (x_new + delta) + tk * x_new = x_new + (1-tk) * delta
-                # Goal tk = -1/2, 0. So (tk=1 is just x-new itself)
-                #tk = tk - 0.5# extrapolation does not work, eg, 142.
-                camera_ext = (1 - tk) * camera_ext_ + tk * x0_p_new
-                point_ext = (1 - tk) * point_ext_ + tk * landmark_v
-                primal_cost_ext = 0
-                primal_costs_ext = [0 for elem in range(kClusters)]
-                for ci in range(kClusters):
-                    primal_costs_ext[ci] = primal_cost(
-                        camera_ext,
-                        camera_indices_in_cluster[ci],
-                        point_indices_in_cluster[ci],
-                        points_2d_in_cluster[ci],
-                        point_ext)
-                    primal_cost_ext += primal_costs_ext[ci]
-                    primal_costs_ext[ci] = round(primal_costs_ext[ci])
-
-                if primal_cost_ext <= primal_cost_v or (always_acccept_acceleration and ls_it == line_search_iterations-1):
-                    break
-        # TODO maybe need to revert extrapolation if next enrgy jumped
-        # TODO: local_bundle delivers cost in only relevant residuals to compare with. See where it fails.
-        # , " basic ", round(primal_cost_v),
-        print( globalIt, "==== acc. f(v)= ", round(primal_cost_ext), " Gain: ", \
-              round(primal_cost_v-primal_cost_ext), " cost per ci ", primal_costs_ext )
-        acc_gains.append(round(primal_cost_v-primal_cost_ext))
-        if globalIt == iterations - 1:
-            print("acc_gains ", acc_gains)
-
-        # TODO 1.4 adaptive getting smaller for more iterations --
-        #
-        # if loss by acc is > gain by step reject? # TODO: changed?
-        # TODO replace 1.4 with 1.2, or adaptive? RNA / nesterov
-        #if primal_cost_ext < primal_cost_v or (always_acccept_acceleration and primal_cost_ext < 1.4 * primal_cost_v ):
-        if primal_cost_ext < primal_cost_v or (always_acccept_acceleration and primal_cost_ext < 1.1 * np.minimum(primal_cost_v, bestCost) ):
-
-            # TODO: changed
-            if primal_cost_ext < primal_cost_v: # 931: awful, 1.4? or lower, or adaptive?
-                for ci in range(kClusters):
-                    points_3d_in_cluster[ci] = point_ext.copy()
-                x0_p = camera_ext.copy()
-                primal_cost_vs = [primal_costs_ext[i] for i in range(kClusters)]
-
-            else: # TODO: changed -- acceleration could always be based on ext / even 1st version? woudl demand 1 more step palm (x2 slow).
+                primal_cost_ext = primal_cost_v + 1
                 for ci in range(kClusters):
                     points_3d_in_cluster[ci] = landmark_v.copy()
                 x0_p = x0_p_new.copy()
-            #wk = x_extr - xk # update w accepted change
+        #print("x0_p ", x0_p)
 
-            # if this happens n consecutive times, reset to avoid bad acceleration.
-            if primal_cost_ext > primal_cost_v:
-                failedNesterovAcceleration += 1
-            else:
-                failedNesterovAcceleration = 0
+        # if primal_cost_v < bestCost:
+        #     best_poses_v = poses_v_bfgs.copy()
+        #     best_landmarks = landmarks_bfgs.copy()
+        bestCost = np.minimum(np.minimum(primal_cost_ext, primal_cost_v), bestCost)
+        bestIt = globalIt
+        if globalIt < 60:
+            bestCost60 = bestCost
+        if globalIt < 30:
+            bestCost30 = bestCost
 
-        else: # reset momentum as well?
-            for ci in range(kClusters):
-                points_3d_in_cluster[ci] = landmark_v.copy()
-            x0_p = x0_p_new.copy()
+    # here bfgs is better, but dre has better cost for the drs solution.
+    if plot3d:
+        vis.destroy_window()
 
-            failedNesterovAcceleration += maxFailedNesterovAcceleration # always reset
+    import matplotlib.pyplot as plt
+    if len(costs) > 5:
+        costs = costs[4:] # drop too high start
+    xS = np.arange(len(costs))
+    plt.plot(xS, np.log(costs), label='costs')
+    plt.title(FILE_NAME)
+    plt.legend()
 
-        if failedNesterovAcceleration >= maxFailedNesterovAcceleration:
-            delta_v = 0 * delta_v
-            resetIt = globalIt
-            #tkk = globalIt - resetIt + 1
-            failedNesterovAcceleration = 0
-            print("Reset Nesterov acceleration after ", maxFailedNesterovAcceleration, " consecutive failures.")
+    plt.savefig("mygraph.png")
+    #plt.show()
 
-    else: # not extrapolate_parallel
+    # later add gains
+    # costs
+    # powerits_runs
 
-        if use_inertia_in_sequential:
-            use_inertia_simple = False # does a bit with small tau. Beware to use when done in sequential update!
-            if use_inertia_simple: # RNA works, so maybe use here with L*delta, see acceleration
-                tau = np.sqrt(1.1)
-                for ci in range(kClusters):
-                    points_3d_in_cluster[ci]  = points_3d_in_cluster[ci] + tau * (landmark_v - points_3d_in_cluster[ci])
-                x0_p = x0_p + tau * (x0_p_new -x0_p)
-
-                primal_cost_v = 0
-                for ci in range(kClusters):
-                    primal_cost_v += primal_cost(
-                        x0_p,
-                        camera_indices_in_cluster[ci],
-                        point_indices_in_cluster[ci],
-                        points_2d_in_cluster[ci],
-                        points_3d_in_cluster[ci])
-                print( globalIt, "==== + inertia f(v)= ", round(primal_cost_v), " and ", round(np.sum(cost)))
-            else: # momentum polyak, need line search
-                heavyBall = True
-                xk05 = np.concatenate([x0_p.flatten(), points_3d_in_cluster[0].flatten()])
-                xk1 = np.concatenate([x0_p_new.flatten(), landmark_v.flatten()])
-
-                if globalIt > 0:
-                    beta_nesterov = (globalIt-1) / (globalIt+2)
-                    delta_v = xk1 - xk05 + beta_nesterov * delta_v
-                    x_extr = xk05 + delta_v
-                    camera_ext_ = x_extr[: 9 * n_cameras].reshape(n_cameras, 9)
-                    point_ext_ = x_extr[9 * n_cameras :].reshape(n_points, 3)
-                else:
-                    point_ext_  = landmark_v
-                    camera_ext_ = x0_p_new
-                    delta_v = xk1 - xk05 # for momentum
-
-            line_search_iterations = 3
-            for ls_it in range(line_search_iterations):
-                tk = ls_it / (line_search_iterations-1)
-                camera_ext = (1 - tk) * camera_ext_ + tk * x0_p_new
-                point_ext = (1 - tk) * point_ext_ + tk * landmark_v
-                primal_cost_ext = 0
-                primal_costs_ext = [0 for elem in range(kClusters)]
-                for ci in range(kClusters):
-                    primal_costs_ext[ci] = primal_cost(
-                        camera_ext,
-                        camera_indices_in_cluster[ci],
-                        point_indices_in_cluster[ci],
-                        points_2d_in_cluster[ci],
-                        point_ext)
-                    primal_cost_ext += primal_costs_ext[ci]
-                    primal_costs_ext[ci] = round(primal_costs_ext[ci])
-
-                if primal_cost_ext <= primal_cost_v:
-                    primal_cost_vs = [primal_costs_ext[i] for i in range(kClusters)]
-                    break
-            # TODO maybe need to revert extrapolation if next energy jumped
-            # TODO: local_bundle delivers cost in only relevant residuals to compare with. See where it fails.
-            print( globalIt, "==== acc. f(v)= ", round(primal_cost_ext), " basic ", round(primal_cost_v), " gain ", round(primal_cost_v-primal_cost_ext), " cost per ci ", primal_costs_ext )
-            if globalIt > 1:
-                acc_gains.append(round(primal_cost_v-primal_cost_ext))
-                if globalIt == iterations - 1:
-                    print("acc_gains ", acc_gains)
-
-            if primal_cost_ext < primal_cost_v:
-                for ci in range(kClusters):
-                    points_3d_in_cluster[ci] = point_ext.copy()
-                x0_p = camera_ext.copy()
-                #wk = x_extr - xk # update w accepted change
-            else:
-                for ci in range(kClusters):
-                    points_3d_in_cluster[ci] = landmark_v.copy()
-                x0_p = x0_p_new.copy()
-
-        else:
-            primal_cost_ext = primal_cost_v + 1
-            for ci in range(kClusters):
-                points_3d_in_cluster[ci] = landmark_v.copy()
-            x0_p = x0_p_new.copy()
-    #print("x0_p ", x0_p)
-
-    # if primal_cost_v < bestCost:
-    #     best_poses_v = poses_v_bfgs.copy()
-    #     best_landmarks = landmarks_bfgs.copy()
-    bestCost = np.minimum(np.minimum(primal_cost_ext, primal_cost_v), bestCost)
-    bestIt = globalIt
-    if globalIt < 60:
-        bestCost60 = bestCost
-    if globalIt < 30:
-        bestCost30 = bestCost
-
-# here bfgs is better, but dre has better cost for the drs solution.
-if plot3d:
-    vis.destroy_window()
-
-import matplotlib.pyplot as plt
-if len(costs) > 5:
-    costs = costs[4:] # drop too high start
-xS = np.arange(len(costs))
-plt.plot(xS, np.log(costs), label='costs')
-plt.title(FILE_NAME)
-plt.legend()
-
-plt.savefig("mygraph.png")
-#plt.show()
-
-# later add gains
-# costs
-# powerits_runs
-
-if write_output:
-    x0_p.tofile("camera_params_palm_3.dat")
-    landmark_v.tofile("point_params_palm_3.dat")
-    res_indices_to_cluster = np.zeros(n_residuums)
-    for ci in range (kClusters):
-        res_indices_to_cluster[res_indices_in_cluster[ci]] = ci
-    np.array(res_indices_to_cluster).tofile("res_indices_to_cluster.dat")
+    if write_output:
+        x0_p.tofile("camera_params_palm_3.dat")
+        landmark_v.tofile("point_params_palm_3.dat")
+        res_indices_to_cluster = np.zeros(n_residuums)
+        for ci in range (kClusters):
+            res_indices_to_cluster[res_indices_in_cluster[ci]] = ci
+        np.array(res_indices_to_cluster).tofile("res_indices_to_cluster.dat")
 
 
-import json
-result_dict = {"base_url": BASE_URL, "file_name": FILE_NAME, "iterations" : iterations, \
-               "bestCost" : round(bestCost), "bestIt": bestIt, "kClusters" : kClusters, \
-               "bestCost60" : round(bestCost60), "bestCost30" : round(bestCost30) }
-with open('results_palm_new.json', 'a') as json_file:
-    json.dump(result_dict, json_file)
+    import json
+    result_dict = {"base_url": BASE_URL, "file_name": FILE_NAME, "iterations" : iterations, \
+                "bestCost" : round(bestCost), "bestIt": bestIt, "kClusters" : kClusters, \
+                "bestCost60" : round(bestCost60), "bestCost30" : round(bestCost30) }
+    with open('results_palm_new.json', 'a') as json_file:
+        json.dump(result_dict, json_file)
 
-# either adjust points_3d_in_cluster -> copy over output.
-# or let output as input to ba -- and Lfk
-# descent lemma for landmarks only
-# f(x) <= f(y) + <nabla f(y), x-y> + Lf/2 |x-y|^2
-# e.g. update from y to x, nabla f(y) Jac_l * res(y)
-# x=y+delta, [f(x) - f(y) - b^T delta] / delta^2 <= Lf/2, defines Lf
-# trust region
-#        fx0_new = fx0 + (J_pose * delta_p + J_land * delta_l) = fx0 + J^t H^-1 nabla fx0
-#        costQuad = np.sum(fx0_new**2)
-#        tr_check = (costStart - costEnd) / (costStart - costQuad)
-#
-# TODO:
-# maybe estimate locally per lm -> change in f(x) from LOCAL residuums. x->y. gradient from nabla -> get local Lfk per lm!
-# will fix close ones more strongly.
-# xl -> xl + delta == sum of residduums^2 of that landmark involved. Fix cam, use new gradient L* diag * delta!
-# new residuum f(x) is fast.
-#
-# Then use this for fixing landmarks / updating. enven use VLi / Vl instead? argmin_x sum_y=lm_in_cluster (x-y) VL (x-y) of last Vl.
-# ==> x^t sum Vl x - 2 x sum (Vl y) + const =>  x = (sum Vl)^-1 [sum (Vl*y)].
-# above should lead to better? solutions at least. At next local updates we work with Vl?
-# 1. return last Vl. recall Vl * delta = nabla l is solved. or use L * diag Vl and return it (cheaper) or L * Vl ?
-# return 3x3 matrix per lm.
-#     f(x) < f(y) + <nabla fy , x-y> + (x-y)^ Vl (x-y). Vl is making this strongly convex by design. s.t. this descent lemma holds. Even by design.
-# or  f(x) < f(y) + <nabla fy , x-y> + (x-y)^ JJl (x-y). New solution < old + penalty + <nabla fy, delta>
-# <=> f(x) < f(y) + <nabla fy + nabla fx, x-y>
+    # either adjust points_3d_in_cluster -> copy over output.
+    # or let output as input to ba -- and Lfk
+    # descent lemma for landmarks only
+    # f(x) <= f(y) + <nabla f(y), x-y> + Lf/2 |x-y|^2
+    # e.g. update from y to x, nabla f(y) Jac_l * res(y)
+    # x=y+delta, [f(x) - f(y) - b^T delta] / delta^2 <= Lf/2, defines Lf
+    # trust region
+    #        fx0_new = fx0 + (J_pose * delta_p + J_land * delta_l) = fx0 + J^t H^-1 nabla fx0
+    #        costQuad = np.sum(fx0_new**2)
+    #        tr_check = (costStart - costEnd) / (costStart - costQuad)
+    #
+    # TODO:
+    # maybe estimate locally per lm -> change in f(x) from LOCAL residuums. x->y. gradient from nabla -> get local Lfk per lm!
+    # will fix close ones more strongly.
+    # xl -> xl + delta == sum of residduums^2 of that landmark involved. Fix cam, use new gradient L* diag * delta!
+    # new residuum f(x) is fast.
+    #
+    # Then use this for fixing landmarks / updating. enven use VLi / Vl instead? argmin_x sum_y=lm_in_cluster (x-y) VL (x-y) of last Vl.
+    # ==> x^t sum Vl x - 2 x sum (Vl y) + const =>  x = (sum Vl)^-1 [sum (Vl*y)].
+    # above should lead to better? solutions at least. At next local updates we work with Vl?
+    # 1. return last Vl. recall Vl * delta = nabla l is solved. or use L * diag Vl and return it (cheaper) or L * Vl ?
+    # return 3x3 matrix per lm.
+    #     f(x) < f(y) + <nabla fy , x-y> + (x-y)^ Vl (x-y). Vl is making this strongly convex by design. s.t. this descent lemma holds. Even by design.
+    # or  f(x) < f(y) + <nabla fy , x-y> + (x-y)^ JJl (x-y). New solution < old + penalty + <nabla fy, delta>
+    # <=> f(x) < f(y) + <nabla fy + nabla fx, x-y>
+
+profiler.print()
+profiler.open_in_browser()
