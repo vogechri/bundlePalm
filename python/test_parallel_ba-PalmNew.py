@@ -2366,6 +2366,8 @@ for globalIt in range(iterations):
                         #tkk = tkk1
                         delta_v = xk1 - xk05 + beta_nesterov * delta_v
                         x_extr = xk05 + delta_v
+                        # delta_v = xk1 - xk05 # do not accumulate, delayed step: also works not as good.
+                        # x_extr = xk1 + beta_nesterov * (xk1 - xk05) # worst of 3.
 
                     camera_ext_ = x_extr[: 9 * n_cameras].reshape(n_cameras, 9)
                     point_ext_ = x_extr[9 * n_cameras :].reshape(n_points, 3)
