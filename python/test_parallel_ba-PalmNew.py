@@ -751,7 +751,7 @@ def cluster_covis_lib(kClusters, pre_merges_, camera_indices__, point_indices__,
     res_to_cluster_c_out = lib.new_vector()
     res_to_cluster_c_sizes = lib.new_vector_of_size(kClusters)
 
-    if (isinstance(old_vtxsToPart_, list)):
+    if isinstance(old_vtxsToPart_, list):
         c_old_vtxsToPart_ptr = (ctypes.c_int * len(old_vtxsToPart_))(*old_vtxsToPart_)
         old_vtxsToPart_cpp = lib.new_vector_by_copy(c_old_vtxsToPart_ptr, len(c_old_vtxsToPart_ptr))
     else:
@@ -1416,7 +1416,7 @@ def updateCluster_palm(
     its_,
 ):
     cameras_indices_in_c_ = np.unique(camera_indices_in_cluster_) # indices into large vector from local: 0, .. , npart
-    cameras_in_c = x0_p_[cameras_indices_in_c_] # first index -> 0, second -> 1 etc. 
+    cameras_in_c = x0_p_[cameras_indices_in_c_] # first index -> 0, second -> 1 etc.
 
     local_camera_indices_in_cluster = np.zeros(camera_indices_in_cluster_.shape[0], dtype=int)
     for i in range(cameras_indices_in_c_.shape[0]):
@@ -1483,12 +1483,12 @@ def updateCluster_palm(
         additional_covered_landmark_indices_c_[i] = inverse_additional_point_indices[additional_covered_landmark_indices_c_[i]] # 3dp[ids] = lm_c[ids]
     ################
     # delivers these additional_covered_landmark_indices_c_ -> from the landmarks present in additional, those that are covered by cluster
-    # covered == indices that are updated from cluster alone, thus completely covered and 
+    # covered == indices that are updated from cluster alone, thus completely covered and
 
     # put in unique points, adjust point_indices_in_cluster[ci] by id in unique_points_in_c_
     points_3d_in_c = points_3d_in_cluster_[unique_points_in_c_]
 
-    # debug info. how many entries in 
+    # debug info. how many entries in
     # print("Cam Indices in part ", (cameras_indices_in_c_).shape, (x0_p_).shape, (additional_cameras_indices_in_c_).shape)
     # print("ULM  Indices in part ", points_3d_in_cluster_.shape, np.unique(point_indices_in_c).shape, np.unique(covered_landmark_indices_c_).shape, np.unique(additional_covered_landmark_indices_c_).shape)
 
@@ -1617,9 +1617,15 @@ def iPalm_f(x0_p_, camera_indices_in_cluster_, point_indices_in_cluster_,
     # x0_p_in = x0_p_.copy()
     # landmark_v_in = landmark_v_.copy()
 
+    camera_ext = x0_p_.copy()
+    point_ext = landmark_v_.copy()
+    primal_cost_ext_ = [1e15 for elem in range(kClusters)]
+
     if not 'previousCameras' in globals(): # only to generate global var and memory buffer.
         globals()["previousCameras"] = x0_p_.copy()
         globals()["previousLandmarks"] = landmark_v_.copy()
+        globals()["previousUpdateCameras"] = np.zeros(x0_p_.shape)
+        globals()["previousUpdateLandmarks"] = np.zeros(landmark_v_.shape)
 
     # for ci in range(kClusters): # needed?
     #     update_point_indices_in_c_ = np.unique(point_indices_already_covered_c[ci])
@@ -1675,15 +1681,93 @@ def iPalm_f(x0_p_, camera_indices_in_cluster_, point_indices_in_cluster_,
 
             # Acceleration step updates 'next' input! return last input as solution
             #x0_p_[update_cameras_indices_in_c_] = (1. + tau) * x0_p_c_[update_cameras_indices_in_c_] - tau * previousCameras[update_cameras_indices_in_c_]
-            x0_p_out_[update_cameras_indices_in_c_] = (1. + tau) * x0_p_c_ - tau * previousCameras[update_cameras_indices_in_c_]
-            landmark_v_[update_point_indices_in_c_, :] = (1. + tau) * x0_l_c_ - tau * previousLandmarks[update_point_indices_in_c_, :]
+            #x0_p_out_[update_cameras_indices_in_c_] = (1. + tau) * x0_p_c_ - tau * previousCameras[update_cameras_indices_in_c_]
+            #landmark_v_[update_point_indices_in_c_, :] = (1. + tau) * x0_l_c_ - tau * previousLandmarks[update_point_indices_in_c_, :]
+
+            # accumulated:
+            # previousUpdateLandmarks[update_point_indices_in_c_] = tau * previousUpdateLandmarks[update_point_indices_in_c_] + \
+            #     x0_l_c_ - previousLandmarks[update_point_indices_in_c_]
+            # previousUpdateCameras[update_cameras_indices_in_c_] = tau * previousUpdateCameras[update_cameras_indices_in_c_] + \
+            #     x0_p_c_ - previousCameras[update_cameras_indices_in_c_]
+            # x0_p_out_[update_cameras_indices_in_c_] = previousCameras[update_cameras_indices_in_c_] + previousUpdateCameras[update_cameras_indices_in_c_]
+            # landmark_v_[update_point_indices_in_c_, :] = previousLandmarks[update_point_indices_in_c_] + previousUpdateLandmarks[update_point_indices_in_c_]
+
+            # current not past update like in palmnut. Dis/enable for test
+            current_update = False
+            if current_update:
+                previousUpdateCameras[update_cameras_indices_in_c_] = x0_p_c_ - previousCameras[update_cameras_indices_in_c_]
+                previousUpdateLandmarks[update_point_indices_in_c_] = x0_l_c_ - previousLandmarks[update_point_indices_in_c_]
+
+            # past update:
+            camera_ext_ = x0_p_c_ + tau * previousUpdateCameras[update_cameras_indices_in_c_]
+            point_ext_ = x0_l_c_ + tau * previousUpdateLandmarks[update_point_indices_in_c_]
+            line_search_iterations = 2
+            CompareStoredCost = False
+            if CompareStoredCost:
+                # Version 1: compare with old stored cost.
+                for ls_it in range(line_search_iterations):
+                    tk = ls_it / max(1, (line_search_iterations-1))
+                    camera_ext[update_cameras_indices_in_c_,:] = (1 - tk) * camera_ext_ + tk * x0_p_c_
+                    point_ext[update_point_indices_in_c_,:] = (1 - tk) * point_ext_ + tk * x0_l_c_
+                    primal_cost_ext_[ci] = primal_cost(
+                        camera_ext,
+                        camera_indices_in_cluster_[ci],
+                        point_indices_in_cluster_[ci],
+                        points_2d_in_cluster_[ci],
+                        point_ext)
+                    if primal_cost_ext_[ci] <= primal_costs_ext[ci]:
+                        break
+                primal_cost_ext_[ci] = round(primal_cost_ext_[ci])
+                # compare to: compute both costs, pick lower one.
+            else:
+                # Version 2: compare with current cost
+                cost = [0,0]
+                for ls_it in range(line_search_iterations):
+                    tk = ls_it / max(1, (line_search_iterations-1))
+                    camera_ext[update_cameras_indices_in_c_,:] = (1 - tk) * camera_ext_ + tk * x0_p_c_
+                    point_ext[update_point_indices_in_c_,:] = (1 - tk) * point_ext_ + tk * x0_l_c_
+                    cost[ls_it] = primal_cost(
+                        camera_ext,
+                        camera_indices_in_cluster_[ci],
+                        point_indices_in_cluster_[ci],
+                        points_2d_in_cluster_[ci],
+                        point_ext)
+                if cost[0] < cost[1]:
+                    camera_ext[update_cameras_indices_in_c_,:] = camera_ext_
+                    point_ext[update_point_indices_in_c_,:] = point_ext_
+
+            x0_p_out_[update_cameras_indices_in_c_] = camera_ext[update_cameras_indices_in_c_]
+            landmark_v_[update_point_indices_in_c_] = point_ext[update_point_indices_in_c_]
+
+            # also past update:
+            previousUpdateCameras[update_cameras_indices_in_c_] = x0_p_c_ - previousCameras[update_cameras_indices_in_c_]
+            previousUpdateLandmarks[update_point_indices_in_c_] = x0_l_c_ - previousLandmarks[update_point_indices_in_c_]
+            # i could add a safeguard: eval cost, decrease tau
+
             # also update 'next' cluster if sequential
-            if sequential:
+            sequential = False # if false, inertia would mean local only!
+            if sequential: # thing is we anyway need to store/write somewhere. Still asynchronous.
                 x0_p_[update_cameras_indices_in_c_] = x0_p_out_[update_cameras_indices_in_c_].copy()
-                points_3d_in_cluster_[(ci+1) % kClusters][update_point_indices_in_c_, :] = landmark_v_[update_point_indices_in_c_, :]
+                points_3d_in_cluster_[(ci+1) % kClusters][update_point_indices_in_c_, :] = landmark_v_[update_point_indices_in_c_, :].copy()
+            if not sequential: # cost computation is based on proviuos not sequential data.
+                camera_ext[update_cameras_indices_in_c_,:] = x0_p_[update_cameras_indices_in_c_]
+                point_ext[update_point_indices_in_c_,:] = points_3d_in_cluster_[ci][update_point_indices_in_c_, :]
             # Always update last prox solution.
             previousCameras[update_cameras_indices_in_c_] = x0_p_c_.copy() #[update_cameras_indices_in_c_]
-            previousLandmarks[update_point_indices_in_c_, :] = x0_l_c_.copy() #[ci][update_point_indices_in_c_, :]
+            previousLandmarks[update_point_indices_in_c_] = x0_l_c_.copy() #[ci][update_point_indices_in_c_, :]
+
+            # previousCameras[update_cameras_indices_in_c_] = x0_p_out_[update_cameras_indices_in_c_].copy()
+            # previousLandmarks[update_point_indices_in_c_] = landmark_v_[update_point_indices_in_c_, :].copy()
+
+            # version above only uses current change, palm is best on accumulated changes and better on past update
+            # so x1: current prox solution, x05: previous prox solution
+            # accumulated:
+            # delta_v = xk1 - xk05 + beta_nesterov * delta_v
+            # x_extr = xk05 + delta_v = x1 + beta_nesterov * delta_v # but delta now accumulates all past changes.
+            # delta only hold last past change:
+            # x_extr = xk1 + delta_v
+            # delta_v = xk1 - xk05 # so previous diff.
+
         else:
             if sequential: # update input of next block.
                 x0_p_[update_cameras_indices_in_c_] = x0_p_c_.copy()
@@ -1691,13 +1775,16 @@ def iPalm_f(x0_p_, camera_indices_in_cluster_, point_indices_in_cluster_,
             x0_p_out_[update_cameras_indices_in_c_] = x0_p_c_.copy()
             landmark_v_[update_point_indices_in_c_, :] = x0_l_c_.copy()
 
-
         delta_old_cluster[ci] = delta_old_c # private to cluster
         #print(ci, "OUT delta_old_cluster ", delta_old_cluster, " delta_old_cluster[ci] ", delta_old_cluster[ci])
         cost_[ci] = cost_c_
         L_in_cluster_[ci] = Lnew_c_
         Vl_in_cluster_[ci] = Vl_c_
         localCostGain_in_cluster_[ci] = localCostGain_c
+
+    #print("ipalm cost per ci \n   ", primal_costs_ext, " \n   ", primal_cost_ext_)
+    for ci in range(kClusters):
+        primal_costs_ext[ci] = round(primal_cost_ext_[ci])
 
     return (cost_, L_in_cluster_, Vl_in_cluster_, landmark_v_, x0_p_out_, powerits_run, localCostGain_in_cluster_)
 
@@ -1817,7 +1904,7 @@ def BFGS_direction(r, ps, qs, rhos, k, mem, mu):
         #print("j ", j, " ", r.shape, ps[j].shape)
         alpha[j] = np.dot(r, ps[j]) * rhos[j]
         r = r - alpha[j]*qs[j]
-        if (rhos[j]>0):
+        if rhos[j] > 0:
             print(j, " 1st. al ", alpha[j], " rh ", rhos[j], " qs " , np.linalg.norm(qs[j],2), " ps " , np.linalg.norm(ps[j],2) )
 
     dk_ = mu * r
@@ -1828,7 +1915,7 @@ def BFGS_direction(r, ps, qs, rhos, k, mem, mu):
         #print("2j", j)
         beta = rhos[j] * np.dot(dk_, qs[j])
         dk_ = dk_ + ps[j] * (alpha[j] - beta)
-        if (rhos[j]>0):
+        if rhos[j] > 0:
             print(j, " 2nd. al ", alpha[j], " rh ", rhos[j], " be ", beta, " qs " , np.linalg.norm(qs[j],2), " ps " , np.linalg.norm(ps[j],2) )
 
     return dk_
@@ -2142,6 +2229,7 @@ landmark_v = points_3d_in_cluster[0].copy()
 x0_p_old = x0_p.copy()
 landmark_v_old = landmark_v.copy()
 primal_cost_vs = [1e15 for elem in range(kClusters)]
+primal_costs_ext= [1e15 for elem in range(kClusters)]
 
 bfgs_mem = 6
 bfgs_mu = 1.0
@@ -2485,7 +2573,7 @@ for globalIt in range(iterations):
                         point_ext)
                     primal_cost_ext += primal_costs_ext[ci]
 
-                    if (primal_costs_best[ci] > primal_costs_ext[ci]):
+                    if primal_costs_best[ci] > primal_costs_ext[ci]:
                         #best_land[point_indices_in_cluster[ci]] = point_ext[point_indices_in_cluster[ci]].copy() # TODO: was wrong before ?
                         best_land[covered_landmark_indices_c[ci]] = point_ext[covered_landmark_indices_c[ci]].copy()
                         best_cam[camera_indices_in_cluster[ci]] = camera_ext[camera_indices_in_cluster[ci]].copy()
