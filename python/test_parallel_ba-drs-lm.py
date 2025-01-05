@@ -1357,12 +1357,12 @@ def average_cameras_new(
         for q in range(num_cameras):
             # print(q, " ", j, " ", point_indices_.shape[0], " ", np.array([9*j+3, 9*j+6, 9*j+9]) )
             if j < camera_indices_.shape[0] and camera_indices_[j] == q:
-                indptr.append(np.array([81 * j +  9, 81 * j + 18, 81 * j + 27, 
-                                        81 * j + 36, 81 * j + 45, 81 * j + 54, 
+                indptr.append(np.array([81 * j +  9, 81 * j + 18, 81 * j + 27,
+                                        81 * j + 36, 81 * j + 45, 81 * j + 54,
                                         81 * j + 63, 81 * j + 72, 81 * j + 81]).flatten())
                 j = j + 1
             else: # 9x9 block of "0's" not present in data
-                indptr.append(np.array([81 * j, 81 * j, 81 * j, 81 * j, 
+                indptr.append(np.array([81 * j, 81 * j, 81 * j, 81 * j,
                                         81 * j, 81 * j, 81 * j, 81 * j, 81 * j]).flatten())
         indptr = np.concatenate(indptr)
         U_pose = csr_matrix(
@@ -1388,6 +1388,13 @@ def average_cameras_new(
             nabla_p = np.zeros(num_cameras * 9)
             nabla_p[np.array([9 * camera_indices_ + j for j in range(9)]).transpose().flatten()] = nabla_p_in_cluster_[i]
             sum_D_u2_s += U_pose * poses_in_cluster_[i].flatten() - nabla_p
+            # So nabla_p = U_pose * (u-s) , see bundle .. kind of.
+            # Issue! need to send num cams data (matrix and pose) back == 6+9*9 floats, vs 3 floats per lm. no gain.
+            # pose = 3 angle, 3 pos, 3 focal+distort. compress U_pose?
+            # compared to 1/3 floats per cam. palm needs to send landmarks. 87 floats * cam vs 3 floats * lm, still factor 30.
+            # lms are owned per node by drs. Also send more cams + lms in palm overlap.
+            # DRS: send lms once back, once forth. Send poses, average, send back to compute cost, send cost, compare, resend maybe.
+            #
 
         # print(i, "averaging u2_s ", u2_s.reshape(-1,3)[globalSingleLandmarksB_in_c[i], :]) # indeed 1 changed rest is constant
 
@@ -1500,7 +1507,6 @@ def cost_DRE(
         if prox_solution:
             # rho_k/2 |u_k - v_k|^2 - rho_k <s_k - u_k, u_k - v_k>
             # rho_k/2 <u_k - v_k - 2s_k + 2u_k , u_k - v_k>
-            # rho_k/2 <3u_k - v_k - 2s_k, u_k - v_k>:
             local_cost = 0.5 * u_v.dot(U_pose * (u_v + 2 * u_s))
         else: # assuming we do not solve the problem exactly
             nabla_p = np.zeros(num_cams * 9)
@@ -1510,10 +1516,10 @@ def cost_DRE(
         cost_dre  += local_cost
         dre_per_part.append(round(local_cost.copy()))
 
-        if i == 0:
-            Ul_all = U_pose
-        else:
-            Ul_all += U_pose
+        # if i == 0:
+        #     Ul_all = U_pose
+        # else:
+        #     Ul_all += U_pose
 
     # analyis 646 small and large mixed.
     #     EV.append(blockEigenvalueSet(U_pose, 9))
@@ -1531,8 +1537,27 @@ def cost_DRE(
     #cost_input  = 0.5 * (pose_v_.flatten().dot(Ul_all * pose_v_.flatten() - 2 * sum_Ds_2u) + sum_constant_term)
     print("---- |u-s|^2_D ", round(sum_u_s), "|u-v|^2_D ", round(sum_u_v), "|2u-s-v|^2_D ", round(sum_2u_s_v),
           "|u-v|^2 ", round(sum_u_v_), " cost_dre ", cost_dre, file=sys.stderr)
-    print("---- dre_per_part --- ", dre_per_part, file=sys.stderr)
+    print("---- dre_per_part --- ", dre_per_part, file=sys.stderr) # must be < 0.
     return cost_dre, dre_per_part
+    # Why is f(v) supposed to be < f(u), check: since insert u for w into definition of envelope. argmin_w <s-u, u-w> + |u-w|_H^2, so argmin_w should be lower.
+    # so envelope < f(u) should be true.
+    # Here we see that local_cost should be < 0 <-> <u_k - v_k - 2s_k + 2u_k , u_k - v_k> < 0.
+    #
+    # 2. v in prox (2u-s) = prox(u - (s-u)), and optimality: 0 in nabla f(u) + rho(s-u), from u = argmin (f(uk) + <nabla f(uk), u-uk> + rho/2 |u-s|_2^2),
+    # k-> inf (until convergence) -> nabla f(uk) + rho (u-s) = 0. -> s-u = nabla f(uk) / rho
+    # v = prox(u - (s-u)) = prox(u  - nabla f(uk) / rho) = argmin_v sum_k  rho_k |v - (u - nabla f(uk) / rho_k)|^2
+    #
+    # def envelope in v is sum_k f_k ( u_k ) + <nabla f_k, vk-uk> + rho_k/2 |uk-sk|_2^2)
+    # by Lf smoothness f_k(v_k) <= f_k ( u_k ) + <nabla f_k(uk), vk - uk> + Lfk/2 |uk-vk|^2, so
+    # f_k(v_k) - Lfk/2 |uk-vk|^2 <= f_k ( u_k ) + <nabla f_k(uk), vk - uk> insert
+    # <= f_k(v_k) - Lfk/2 |uk-vk|^2 + rho_k/2 |uk-sk|_2^2) = f_k(v_k) + (rho_k-L_fk)/2 |uk-sk|_2^2.
+    # So, envelope in s >= cost in v + (rho_k-L_fk)/2 |uk-sk|_2^2 something positive if rho_k > L_fk.
+    #
+    # In other words, if we desire this, then we assume --
+    # f_k(v_k) <= f_k ( u_k ) + <nabla f_k(uk), vk - uk> + Lfk/2 |uk-vk|^2, ok, but Lf not known
+    # and we assume rho_k >= L_fk.
+    # Can we use the above to compute/approx Lk?
+
 
 # TODO: shorten
 def primal_cost(
@@ -1793,7 +1818,7 @@ def bundle_adjust(
                 else:
                     # paper: why is this needed? since nearby hess are different especially for small eigen values -> add max ev.
                     blockEigenvalueJtJ = 1e1 * blockEigenvalue(JtJ, 9)
-                    #blockEigenvalueJtJ = 1e1 * maxDiag(JtJ, 9)
+                    # blockEigenvalueJtJ = 1e1 * maxDiag(JtJ, 9) # almost ..? maybe just random
                     stepSize = LipJ_ * JtJ.copy() + blockEigMult * blockEigenvalueJtJ
                     JtJDiag = JtJ.copy() + blockEigMultJtJ * blockEigenvalueJtJ # new 1e-2 * same as for  JltJlDiag
 
@@ -2449,6 +2474,16 @@ def perform_full_iteration(camera_indices_in_cluster_, point_indices_in_cluster_
 
     return primalCost_u, dre_, L_in_cluster_, Ul_in_cluster_, poses_in_cluster_, poses_v_, landmarks_, \
         nabla_p_in_cluster_, blockEig_in_cluster__, poses_s_in_cluster_pre_, U_cluster_zeros_, steplength_
+
+def getBlockEigUsed():
+    retBlock = []
+    tempBlockEigenCopy = [elem.copy() for elem in tempBlockEigen]
+    for ci in range(kClusters):
+        if len(tempBlockEigenCopy[ci]) > 1:
+            if len(tempBlockEigenCopy[ci]) > globalIt % memory_be:
+                tempBlockEigenCopy[ci][globalIt % memory_be] = 0 # remove current
+            retBlock.append(np.max(np.array(tempBlockEigen[ci]), axis=0))
+    return retBlock
 
 def getScaling(min_, max_): # aim at max * min = 1. So max * x = 1/(min * x). x^2 = 1/(min * max)
     # max * np.sqrt(1. / (min * max)) = np.sqrt(max^2 / (min * max)) = np.sqrt(max / min)
@@ -3207,8 +3242,9 @@ else:
             primal_cost_u_all = [round(cost) for cost in primal_cost_u_all]
 
             dre_bfgs = max(dre_bfgs, primal_cost_v) # sandwich lemma
+            blockEigLastIt = getBlockEigUsed() # the actual used not the one written into memory or whatever blockEig_in_cluster_bfgs is.
             print( globalIt, "/", ls_it, " ======== DRE BFGS ====== ", round(dre_bfgs) , " ========= gain " , \
-                round(lastCostDRE_bfgs - dre_bfgs), "==== f(v)= ", round(primal_cost_v), " f(u)= ", round(primal_cost_u), " BE ", blockEig_in_cluster_bfgs)
+                round(lastCostDRE_bfgs - dre_bfgs), "==== f(v)= ", round(primal_cost_v), " f(u)= ", round(primal_cost_u), " BE ", blockEigLastIt)#blockEig_in_cluster_bfgs)
             print( globalIt, "/", ls_it, " f(v) = ", primal_cost_v_all, " f(u) = ", primal_cost_u_all)
             if primal_cost_v < bestCost:
                 best_poses_v = poses_v_bfgs.copy()
@@ -3323,6 +3359,12 @@ else:
                     print("LipJ *= sqrt(2) = ", np.mean(LipJ), " Be ", tmp)
 
                     # TODO: equalize / reset nesterov(acceleration) here.
+                    AlsoResetNesterovAcceleration = True # test on 646, 1266, 1064, 961, 427, 1778 -> no conclusion.
+                    if AlsoResetNesterovAcceleration:
+                        prev_dk = 0 * prev_dk
+                        resetIt = globalIt
+                        failedNesterovAcceleration = 0
+                        print("Reset Nesterov acceleration after ", maxFailedNesterovAcceleration, " consecutive failures.")
 
                     # if 1 fails alawya will.
                     while oneRound and (np.min(LipJ) < LipJMax) and (maxPct * lastCostDRE_bfgs < dre_bfgs) and (primal_cost_v > maxPctV * primal_cost_v_before): # while since LipJ must be large enough.
