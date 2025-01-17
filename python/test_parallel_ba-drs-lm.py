@@ -9,8 +9,9 @@ from joblib import Parallel, delayed
 from scipy.sparse import csr_array, csr_matrix, issparse
 from scipy.sparse import diags as diag_sparse
 from scipy.sparse import hstack as sparse_hstack
+from scipy.sparse import block_diag
 #from scipy.sparse.linalg import splu # slow as FUCK
-from scipy.sparse.linalg import spsolve # slow as FUCK
+#from scipy.sparse.linalg import spsolve # slow as FUCK
 #from scipy.linalg import cholesky, cho_solve, cho_factor
 #from sksparse.cholmod import cholesky # install suitesparse and ... and ..
 from scipy.sparse.linalg import inv as inv_sparse # Slowest ever.
@@ -708,7 +709,21 @@ def ComputeDerivativeMatrixInit(x0_c_, x0_l_, points_2d, camera_indices, point_i
 
     return (J_pose, J_land, fx0)
 
-def ComputeDerivativeMatricesNew(x0_t_cam, x0_t_land, camera_indices_, point_indices_, torch_points_2d, camScale, landScale #, unique_poses_in_c_, unique_landmarks_in_c_,
+# |f(y) + J (f(y)) |^2 = |f(s*x) + J (s*x)|^2, derivative changes to
+# s * J (s*x)^T f(s*x)  + s * J (s*x)^t J (s*x) * s, looks ok if
+# s = diag(sum(abs rows J (y)^t J (y)))^-1/2, is that so? recall M = J (y)^t J (y) is symmetric
+# J (s*x) = s * J (y), or  J (y) * s, then (J (y) * s)^T (J (y) * s) = s * J (y)^t J (y) * s.
+# Case s -> P symmetric matrix
+
+# |f(x) + Jf(x) delta |^2 = |f(P * P^-1 * x) + Jf (P * P^-1 * x) delta |^2 = |f(P * y) + Jf (P * y) delta|^2
+# delta^T [P^T * Jf (P y)^T f(P y)] + delta^T [ P^T * Jf (P y)^t Jf (P y) * P ] delta
+# delta^T [P^T * Jf (x)^T f(x)] + delta^T [P^T * Jf (x)^t Jf (x) * P] delta
+# P := [Jf (x)^t Jf (x)]^-1/2 at x=x0 fixed.
+# at x=x0 at least
+# delta [P^T * Jf (P y)^T f(P y)] + |delta|^2
+# replace Jf(x) with P^T * Jf(x). That is all except that delta update is on y = P^-1 * x. hence we can
+# 1. transfer all in y and convert here and everywhere
+def ComputeDerivativeMatricesNew(x0_t_cam, x0_t_land, camera_indices_, point_indices_, torch_points_2d, camScale, landScale #, PCGU_local #, unique_poses_in_c_, unique_landmarks_in_c_,
 ):
     verbose = False
     if verbose:
@@ -729,6 +744,12 @@ def ComputeDerivativeMatricesNew(x0_t_cam, x0_t_land, camera_indices_, point_ind
 
     funx0_st1 = lambda X0, X1, X2: torchSingleResiduumXScaled(X0.view(-1,9), X1.view(-1,3), X2.view(-1,2), camScale, landScale)
     funy0_st1 = lambda X0, X1, X2: torchSingleResiduumYScaled(X0.view(-1,9), X1.view(-1,3), X2.view(-1,2), camScale, landScale)
+
+    # DDD: done outside, since indices are based on residuals in part not just all cameras
+    # print(PCGU_local.shape, " " , x0_t_cam.shape)
+    # x0_t_cam = (PCGU_local * x0_t_cam.flatten()).reshape(-1,9)
+    # x0_t_cam = P x0_t_cam or use latter, and J_pose = P J_pose. Inside has the advantage to do it only once. 
+    # I might need to slice the part from the part here first. .. of P.
 
     torch_cams = x0_t_cam[camera_indices_[:],:] #x0_t[:n_cameras*9].reshape(n_cameras,9)[camera_indices[:],:]
     torch_lands = x0_t_land[point_indices_[:],:] #x0_t[n_cameras*9:].reshape(n_points,3)[point_indices[:],:]
@@ -765,6 +786,7 @@ def ComputeDerivativeMatricesNew(x0_t_cam, x0_t_land, camera_indices_, point_ind
         start = time.time()
 
     J_pose = buildMatrixNew(cam_grad_x, cam_grad_y, camera_indices_, sz=9)
+    # J_pose = PCGU_local * J_pose
     if verbose:
         end = time.time()
         print(" build Matrix & residuum took ", end-start, "s")
@@ -993,6 +1015,36 @@ def blockEigenvalueFull(M, bs, x0_t_cam_):
             #print("evv ", evv[bs-1])
             print("evv ", evv)
             print(" cam " , x0_t_cam_[i,:])
+            mat = evv.dot(diag_sparse(evs) * evv.transpose())
+            if flip:
+                mat = np.fliplr(mat)
+            Ei.data[bs2 * i : bs2 * i + bs2] = mat.flatten()
+    return Ei
+
+# Inverse also needed -> block inverse, add smth to diag.
+def MatrixToSqrt(M, bs, x0_t_cam_=0):
+    Ei = M.copy()
+    if bs > 1:
+        bs2 = bs * bs
+
+        flip = False
+        mat = M.data[0 : bs2].reshape(bs, bs)
+        if not check_symmetric(mat):
+            mat = np.fliplr(mat)
+            flip = True
+
+        for i in range(int(M.data.shape[0] / bs2)):
+            #print(M.data.shape)
+            mat = M.data[bs2 * i : bs2 * i + bs2].reshape(bs, bs)
+            if flip:
+                mat = np.fliplr(mat)
+            evs, evv = eigh(mat)
+            #evs = np.fmax(evs, evs[bs-1] * 1e-6) # e.g. ?
+            evs = np.sqrt(evs)
+            #print("evs ", evs[bs-1] / evs)
+            #print("evv ", evv[bs-1])
+            #print("evv ", evv)
+            #print(" cam " , x0_t_cam_[i,:])
             mat = evv.dot(diag_sparse(evs) * evv.transpose())
             if flip:
                 mat = np.fliplr(mat)
@@ -1562,6 +1614,31 @@ def primal_cost(
     # for i in range(cameras_indices_in_c_.shape[0]): # TODO: this might be slow if many cameras. make global, do once
     #     camera_indices_[camera_indices_in_cluster_ == cameras_indices_in_c_[i]] = i
 
+    # DDD.
+    # So I could trafo x0_t_cam each time I use it to eval fct or deriv as P * x0_t_cam, like this
+    # x0_t_cam = P * x0_t_cam .. assuming a global P and P^-1 exist.
+    # deriv trafos manually as Jp = P Jp, that is it.
+    
+    pcgData = PCGU.data.copy().reshape(-1, 9, 9)[cameras_indices_in_c__,:,:]
+    # Example data for 3 blocks, each 9x9
+    # data = np.arange(81 * 3).reshape(3, 9, 9)
+    # # Create individual 9x9 blocks in CSR format
+    #blocks = [csr_matrix(pcgData[i]) for i in range(pcgData.shape[0])]
+    blocks = [pcgData[i] for i in range(pcgData.shape[0])]
+    # # Combine blocks into a block diagonal matrix in CSR format
+    PCGU_local = block_diag(blocks, format='csr') 
+    # # Print the resulting matrix
+    #print(PCGU_local)
+
+    if False:
+        orig_cameras = cameras_in_c.copy()
+        pcgData_ = PCGU.data.copy().reshape(-1, 9, 9)[:,:,:]
+        blocks_ = [pcgData_[i] for i in range(pcgData_.shape[0])]
+        PCGU_local_ = block_diag(blocks_, format='csr')
+        back_cameras = (PCGU_local_ * cameras_in_c.flatten()).reshape(-1,9)
+        #print("trafo back cameras ", back_cameras)
+        print ("Differenz ", orig_cameras - back_cameras)
+
     if False:
         x0_l_ = points_3d_in_cluster_[unique_points_in_c_].flatten()
         # holds all cameras, only use fraction, camera_indices_ can be adjusted - min index
@@ -1578,6 +1655,13 @@ def primal_cost(
         # simpler:
         x0_t_cam = from_numpy(cameras_in_c)
         x0_t_land = from_numpy(points_3d_in_cluster_[unique_points_in_c_])
+
+    # OMG its is pose in cluster .. maybe precompute the matrix per cluster? global.
+    # its the same .. but cost differs
+    #x0_t_cam = from_numpy((PCGU_local * cameras_in_c.flatten()).reshape(-1,9))
+    x0_t_cam = from_numpy((cameras_in_c.flatten()).reshape(-1,9))
+    # print("trafo in primal ", x0_t_cam.reshape(-1,9)) # works but cost is wrong.
+    # print("cameras_indices_in_c__ ", cameras_indices_in_c__)
 
     #camScale = 1./Unorm.data.reshape(-1,9)
     camScale = from_numpy(Unorm[cameras_indices_in_c__])
@@ -1683,6 +1767,9 @@ def bundle_adjust(
         blockEigMult = blockEig_in_c_
         print("blockEig_in_c_ ", blockEig_in_c_, file=sys.stderr)
 
+    # Lesson this does not work -- locally decide and alter. What is better is global fail (fv > fu) -> adjust blockEigMultJtJ for all threads
+    # We still keep the mem since that is what we adjust for all threads if f(v) jumps
+    # but we set allowDecreaseBlockEig = False
     use_be_memory = True
     if use_be_memory and len(tempBlockEigen[cluster_id]) > 1:
         if len(tempBlockEigen[cluster_id]) > globalIt % memory_be:
@@ -1698,6 +1785,10 @@ def bundle_adjust(
 
     #camScale = 1./Unorm.data.reshape(-1,9)
     camScale = Unorm[unique_poses_in_c_] # 1st, problem
+    # print("camScale ", camScale, " diff to all 1s ", np.sum(np.abs(camScale -np.ones(camScale.shape))))
+    # print("camScale diff to all 1s ", np.sum(np.abs(camScale -np.ones(camScale.shape))))
+    #camScale = np.ones(camScale.shape) # diag only ones fails
+    #print("camScale ", camScale )
     camScale = from_numpy(camScale[camera_indices_[:]]) # 2nd
     camScale.requires_grad_(False)
 
@@ -1706,6 +1797,37 @@ def bundle_adjust(
     landScale = from_numpy(landScale[point_indices_[:]]) # here direct?
     landScale.requires_grad_(False)
 
+    # # ugh .. remove all rows .. shit .. ok make -1, 81 array from data, select by indices
+    # # convert to 9x9 block matrix .. how?
+    # # attention to indices flip shit. by hand
+    # pcgData = PCGU.data.copy().reshape(-1, 9, 9)[camera_indices_,:,:]   
+    # # Example data for 3 blocks, each 9x9
+    # # data = np.arange(81 * 3).reshape(3, 9, 9)
+    # # # Create individual 9x9 blocks in CSR format
+    # blocks = [csr_matrix(pcgData[i]) for i in range(pcgData.shape[0])]
+    # # # Combine blocks into a block diagonal matrix in CSR format
+    # PCGU_local = block_diag(blocks, format='csr')
+    # # # Print the resulting matrix
+    # print(PCGU_local)
+
+    #cameras_indices_in_c__ = np.unique(camera_indices_)
+    pcgData = PCGU.data.copy().reshape(-1, 9, 9)[unique_poses_in_c_,:,:]
+    blocks = [pcgData[i] for i in range(pcgData.shape[0])]
+    PCGU_local = block_diag(blocks, format='csr')
+
+    us = 1000
+    camScaleT = Unorm[unique_poses_in_c_].copy()
+    # print("camScale ", us * camScaleT, " diag ", us * camScaleT.diagonal())
+    # print("PCGU_local ", us * PCGU_local.diagonal())
+    # print("Unorm ", us * Unorm, " diag " , us * Unorm.diagonal())
+    # print("pcgData ", us * pcgData.diagonal())
+    # print("PCGU ", us * PCGU.diagonal())
+
+    # 0 if unorm is as before. ok maybe off diagonal too large and bad.
+    # print("Diff on diag: ", us * np.sum(np.abs(camScaleT.flatten() - PCGU_local.diagonal())))
+    #exit()
+
+    # DDD each time we apply this function trafo cameras by P.
     funx0_st1 = lambda X0, X1, X2: \
         torchSingleResiduumScaled(X0.view(-1, 9), X1.view(-1, 3), X2.view(-1, 2), camScale, landScale)
 
@@ -1720,6 +1842,12 @@ def bundle_adjust(
             x0_t_land = x0_t_[n_cameras_ * 9 :].reshape(n_points_, 3)
             #start = time.time()
 
+            # print(PCGU.shape, " " , x0_t_cam.shape)
+            # print(PCGU_local.shape, " " , x0_t_cam.shape)
+
+            #J_pose, J_land, fx0 = ComputeDerivativeMatricesNew (
+            #    from_numpy(PCGU_local * x0_t_cam.flatten()).reshape(n_cameras_, 9), x0_t_land, camera_indices_, point_indices_, torch_points_2d, camScale, landScale)
+            #J_pose = J_pose * PCGU_local
             J_pose, J_land, fx0 = ComputeDerivativeMatricesNew (
                 x0_t_cam, x0_t_land, camera_indices_, point_indices_, torch_points_2d, camScale, landScale)
             #print("Jac time ", time.time() - start )
@@ -1795,6 +1923,9 @@ def bundle_adjust(
                     blockEigenvalueJtJ = 1e1 * blockEigenvalue(JtJ, 9)
                     #blockEigenvalueJtJ = 1e1 * maxDiag(JtJ, 9)
                     stepSize = LipJ_ * JtJ.copy() + blockEigMult * blockEigenvalueJtJ
+                    # once again, diagonal is 45 times less data. 9x9 / 2 (=45) vs 1 per block
+                    # stepSize = 0.01 * blockEigenvalueJtJ + blockEigMult * blockEigenvalueJtJ + 1e-8 * JtJ.copy() # assumes 3x3 blocks
+                    # 88/52/89? python test_parallel_ba-drs-lm.py http://grail.cs.washington.edu/projects/bal/data/ladybug/ problem-49-7776-pre.txt.bz2 90 10 2> lm49.txt
                     JtJDiag = JtJ.copy() + blockEigMultJtJ * blockEigenvalueJtJ # new 1e-2 * same as for  JltJlDiag
 
                 # maxE, minE = minmaxEv(JtJ, 9)
@@ -1855,6 +1986,14 @@ def bundle_adjust(
         # TODO: solve the whole! thing with cholesky and compare. maybe this is better.
         # Advantage DRS in parts: can be parallelized, no memory issues. Disadvantage: not as good as a whole -- maybe.
 
+        # diagonal as 1 - 1 / (1+L^2)
+        # once again, diagonal is 45 times less data. 9x9 / 2 (=45) vs 1 per block
+        # 52 super slow with diag, cost gain is constant, 49 ok. 
+        # what is holding this back, some special structure. need better pgc?
+        # e.g. better pcg? recall we can invert the matrix actually.
+        stepSize = 0.0 * blockEigenvalueJtJ + blockEigMult * blockEigenvalueJtJ + 1e-16 * JtJ.copy() # assumes 3x3 blocks
+        # stepSize = 0.1 * JtJ.copy() + blockEigMult * blockEigenvalueJtJ + 1e-16 * JtJ.copy() # assumes 3x3 blocks
+
         # start_ = time.time()
         Vl = JltJl + L * JltJlDiag
         Ul = JtJ + L * JtJDiag
@@ -1902,10 +2041,9 @@ def bundle_adjust(
         x0_t_cam = x0_t_[: n_cameras_ * 9].reshape(n_cameras_, 9)
         x0_t_land = x0_t_[n_cameras_ * 9 :].reshape(n_points_, 3)
 
-        fx1 = funx0_st1(
-            x0_t_cam[camera_indices_[:]],
-            x0_t_land[point_indices_[:]],
-            torch_points_2d)
+        # fx1 = funx0_st1(
+        #     from_numpy(PCGU_local * x0_t_cam.flatten()).reshape(n_cameras_, 9)[camera_indices_[:]], x0_t_land[point_indices_[:]], torch_points_2d)
+        fx1 = funx0_st1(x0_t_cam[camera_indices_[:]], x0_t_land[point_indices_[:]], torch_points_2d)
         costEnd = np.sum(fx1.numpy() ** 2)
         print(it_, "it. cost 1     ", round(costEnd), "      + penalty ", round(costEnd + penaltyL + penaltyP), file=sys.stderr,)
 
@@ -2021,7 +2159,7 @@ def bundle_adjust(
                 JtJDiag = 2 * JtJDiag # we return this maybe -- of course stupid to do in a release version
 
         # TODO: this basically disables lowering blockEigMult !?
-        allowDecreaseBlockEig = True
+        allowDecreaseBlockEig = False
         if (newVersion and LfkSafe and not steSizeTouched) and allowDecreaseBlockEig: # 394 escalates if True here.
             blockEigMult = np.minimum(globalBlockEigUpperLimit, np.maximum(blockEigMultLimit, blockEigMult / 2))
 
@@ -2457,7 +2595,7 @@ def getScaling(min_, max_): # aim at max * min = 1. So max * x = 1/(min * x). x^
 
 # next a local version of this? keep relative weight?
 def GetPcgScalingDiag(JtJ):
-    temp_  = np.squeeze(np.asarray((np.abs(JtJ)).sum(axis=0) ))
+    temp_  = np.squeeze(np.asarray((np.abs(JtJ)).sum(axis=0) )) # COMPARE WITH POCK tau should be sum of squares, then sqrt (1/2) and sigma is sqrt(sum of entries)
     # temp_W = np.squeeze(np.asarray((np.abs(W)).sum(axis=1) ))
     # temp_  = temp_ + temp_W
     print("min/max Unorm before ", np.min(temp_), np.max(temp_))
@@ -2552,7 +2690,15 @@ def GetPreconditioners(cameras_, points_3d_, points_2d_, camera_indices_, point_
         temp_ = np.sqrt(temp_) # tiny bit better with sqrt. likely random
         Vnorm_ = diag_sparse(temp_.flatten())
 
-    return Unorm_, Vnorm_, fx0_
+    #PCGU_ = MatrixToSqrt(JtJ + 1e-4 * maxDiag(JtJ, 9), 9) # also need inver of this one.
+    PCGU_ = MatrixToSqrt(1e-16 * JtJ + diag_sparse(JtJ.diagonal()), 9) # Jacobi style, Should work as before.
+
+    PCGU_ = 1e-18 * JtJ + Unorm_ # Jacobi style, Should work as before.
+
+    # cam -> PCGU * cam and PCGU^-1 is the precond.
+    # PCGU_ = MatrixToSqrt(1e-16 * JtJ + 100 * diag_sparse(np.ones(JtJ.diagonal().shape[0])), 9) # Should be have as before.
+
+    return Unorm_, Vnorm_, fx0_, PCGU_
 
 def UpdatePreconditioners(cameras_, points_3d_, points_2d_, camera_indices_, point_indices_, Unorm_old, Vnorm_old):
     Unorm_old_ = Unorm_old.copy()
@@ -2650,7 +2796,28 @@ print("min k2 distance ", np.min(cameras[:,8].flatten()), " ", np.max(cameras[:,
 # alternative: this defines a basis. then we return not 9x9 but 9 values wrt basis bounding the actual
 
 c02_mult = 1; c34_mult = 1; c5_mult = 1; c6_mult = 1; c7_mult = 1; c8_mult = 1
-Unorm, Vnorm, fx0 = GetPreconditioners(cameras, points_3d, points_2d, camera_indices, point_indices)
+Unorm, Vnorm, fx0, PCGU_ = GetPreconditioners(cameras, points_3d, points_2d, camera_indices, point_indices)
+#print("cameras ", cameras)
+#orig_cameras = cameras.copy()
+
+PCGU_ = 1e-16 * PCGU_ + diag_sparse(np.ones(PCGU_.diagonal().shape[0])) # this constant just use U
+
+cameras = (PCGU_ * cameras.flatten()).reshape(-1,9) # this fails .. Haeh?
+#print("trafo cameras ", cameras)
+print("PCGU_ ", PCGU_.diagonal())
+PCGU = blockInverse(PCGU_, 9)
+print("Unorm ", Unorm)
+
+#Unorm = diag_sparse(np.ones(PCGU.shape[0])) # already present in PCGU
+#print("Unorm ds",Unorm)
+
+#pcgData = PCGU.data.copy().reshape(-1, 9, 9)[:,:,:]
+#blocks = [pcgData[i] for i in range(pcgData.shape[0])]
+#PCGU_local = block_diag(blocks, format='csr')
+#back_cameras = (PCGU_local * cameras.flatten()).reshape(-1,9)
+#print("trafo back cameras ", back_cameras)
+#print ("Differenz ", orig_cameras - back_cameras)
+
 cameras = (Unorm * cameras.flatten()).reshape(-1,9)
 points_3d = (Vnorm * points_3d.flatten()).reshape(-1,3)
 Vnorm = 1./Vnorm.data.reshape(-1,3)
@@ -2823,7 +2990,8 @@ for ci in range(kClusters):
         local_landmark_indices_in_cluster[ci],
         points_2d_in_cluster[ci],
         landmarks)
-print("DEBUG scaled cost ", primal_cost_v)
+print("DEBUG scaled cost ", primal_cost_v, " ", lastCost)
+# exit()
 
 o3d_defined = False
 if o3d_defined:
@@ -3266,7 +3434,7 @@ else:
                     failedNesterovAcceleration = 0
                     print("Reset Nesterov acceleration after ", maxFailedNesterovAcceleration, " consecutive failures.")
 
-            maxPctV = np.sqrt(maxPct)
+            maxPctV = np.maximum(1.001, np.sqrt(maxPct)) # 0.1% drop
             #if reject and (np.min(LipJ) < LipJMax) and (ls_it == line_search_iterations-1) and (maxPct * lastCostDRE_bfgs < dre_bfgs) and (primal_cost_v > maxPctV * primal_cost_v_before): # or primal_cost_v > maxPct * primal_cost_u):
             if reject and (beMin < globalBlockEigUpperLimit) and (ls_it == line_search_iterations-1 and line_search_iterations > 1) and (maxPct * lastCostDRE_bfgs < dre_bfgs) and (primal_cost_v > maxPctV * primal_cost_v_before): # or primal_cost_v > maxPct * primal_cost_u):
                 print("Why enter is priaml v that bad or what", primal_cost_v, " ", primal_cost_v_before, " ", maxPctV * primal_cost_v_before)
@@ -3316,9 +3484,13 @@ else:
                     # TODO: LipJ or tempBlockEigen.
                     #LipJ *= np.sqrt(2)
                     tmp = []
+                    # We observed: mult in bundle_adjust of 12 never jumps, but some results are worse some bad (52)
+                    # Fall back to global change, 1, 4, 16 -> fails at most twice. 1,2,4,8,16 would fails 4 times at most.
+                    # We need to set allowDecreaseBlockEig = False as well!
+                    tempBlockEigenMultiplier = 4
                     for ci in range(kClusters):
                         tempBlockEigen[ci][globalIt % memory_be] = \
-                            np.minimum(tempBlockEigen[ci][globalIt % memory_be] * 2, globalBlockEigUpperLimit)
+                            np.minimum(tempBlockEigen[ci][globalIt % memory_be] * tempBlockEigenMultiplier, globalBlockEigUpperLimit)
                         tmp.append(tempBlockEigen[ci][globalIt % memory_be])
                     print("LipJ *= sqrt(2) = ", np.mean(LipJ), " Be ", tmp)
 
