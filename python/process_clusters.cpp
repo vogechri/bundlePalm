@@ -1932,7 +1932,7 @@ std::vector<std::set<int>> find_identical_lms(const std::vector<std::vector<int>
     const int n_normals = 31;
     for (unsigned int n = 0; n < n_normals; ++n) {
       const unsigned long ul(1ul << n);
-      std::cout << " ul " << ul << std::endl;
+      // std::cout << " ul " << ul << std::endl;
 
       // const int num_normal_entries = mean_cams_seen;
       std::shuffle(n_ids.begin(), n_ids.end(), mt);
