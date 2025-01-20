@@ -1977,21 +1977,22 @@ std::vector<std::set<int>> find_identical_lms(const std::vector<std::vector<int>
   for (int l = 0; l < lm_to_hashes[0].size(); ++l) {
     hash_to_lmSet[{lm_to_hashes[0][l], lm_to_hashes[1][l]}].insert(l);
   }
-  std::cout << "Mean_cams_seen " << mean_cams_seen << " Num hashes " << hash_to_lmSet.size() << "\n";
 
-  for (const auto& [hash, lm_set] : hash_to_lmSet) {
-    if (lm_set.size() <2) {continue;}
-    std::cout << "(" << hash.first << " " << hash.second << ") " << lm_set.size() << "\n";
-    for( const int lm_id : lm_set) {
-      std::cout << lm_id << " : ";
-      for(const int c : cams_from_lm[lm_id]) {
-        std::cout << c << " ";
-      } 
-      std::cout << std::endl;
-    }
-  }
+  // std::cout << "Mean_cams_seen " << mean_cams_seen << " Num hashes " << hash_to_lmSet.size() << "\n";
+  // for (const auto& [hash, lm_set] : hash_to_lmSet) {
+  //   if (lm_set.size() <2) {continue;}
+  //   std::cout << "(" << hash.first << " " << hash.second << ") " << lm_set.size() << "\n";
+  //   for( const int lm_id : lm_set) {
+  //     std::cout << lm_id << " : ";
+  //     for(const int c : cams_from_lm[lm_id]) {
+  //       std::cout << c << " ";
+  //     } 
+  //     std::cout << std::endl;
+  //   }
+  // }
 
   // return .. a vec of sets of lmids -> 1
+  int numDuplicateLms = 0;
   std::vector<std::set<int>> duplicate_lm_ids;
   for (const auto& [hash, lm_set] : hash_to_lmSet) {
     if (lm_set.size() <2) {continue;}
@@ -2010,12 +2011,13 @@ std::vector<std::set<int>> find_identical_lms(const std::vector<std::vector<int>
       }
       if (identical_set.size() > 1) {
         duplicate_lm_ids.push_back(identical_set);
+        numDuplicateLms += identical_set.size() - 1;
         for(const int lm3 : identical_set)
         dupe_set.erase(lm3);
       }
-      
     }
   }
+  std::cout << "Number of landmarks with identical cameras " << numDuplicateLms << std::endl;
   return duplicate_lm_ids;
 }
 
@@ -2088,6 +2090,7 @@ void cluster_cameras_degeneracy(
 
     int num_parts = num_lands;
     // Clamp landmarks with identical camera set into one part.
+    // Likely better to make code believe only single lm is in part (searches voer cams .. ?) Does it do anything?
     std::vector<std::set<int>> list_of_identical_lms = find_identical_lms(cams_from_lm, num_cams, num_lands);
     for (const auto& set_of_idential_lms : list_of_identical_lms) {
       const int keptPartId = *(set_of_idential_lms.begin());
