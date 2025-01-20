@@ -131,3 +131,5 @@ extern "C" {
 // llvm-cov-15 show profile_coverage  -instr-profile=merge_mew.out
 
 // no: clang++-15 -c -std=c++17 -o process_clusters.o process_clusters.cpp -fPIC -fprofile-instr-generate -femit-coverage-data -femit-coverage-notes
+// This does compile and link?
+// clang++-15 -O3 -c -fPIC -std=c++17 process_clusters.cpp -o process_clusters.o;clang++-15 -shared -o libprocess_clusters.so process_clusters.o -Wl,--export-dynamic

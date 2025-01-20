@@ -1889,6 +1889,136 @@ double MergeParts(int partId, int otherPartId,
     // i popped one already, push this back in. Set cost to -inf for other part [we can drop this one, when popping it just looking up its cost]
 }
 
+bool do_entries_match(const std::vector<int> &a, const std::vector<int> &b) {
+  if (a.size() != a.size()) {
+    return false;
+  }
+  for (int i = 0; i < a.size(); ++i) {
+    if (a[i] != b[i]) {
+      return false;
+    }
+  }
+  return true;
+}
+
+// Find out if hashing works to find lms that see the same cameras.
+std::vector<std::set<int>> find_identical_lms(const std::vector<std::vector<int>>& cams_from_lm, int num_cams, int num_lms) {
+  // cams_from_lm[lm_id] is a vector of cameras observing the lm.
+  // idea was to find mean vector. Identify this as a 01 vector: v[c] = 1: c observers lm, v[c] = 0 else 
+  //const int num_lms = cams_from_lm.size();
+  std::vector<double> mean(num_cams, 0);
+  int mean_cams_seen = 0;
+  const double val = 1./ static_cast<double> (num_lms);
+  for (const auto& cam_vec : cams_from_lm) {
+    for(int c: cam_vec) {
+      mean[c] += val;
+      mean_cams_seen++;
+    }
+  }
+  const int cams_seen = mean_cams_seen;
+  mean_cams_seen *= val;
+  // sample n normals with mean
+  std::mt19937 mt{ static_cast<std::mt19937::result_type>( _rngseed_ ) };
+  //std::uniform_int_distribution dist{ 0, num_cams-1 };
+  std::vector<int> n_ids(num_cams);
+  std::iota(n_ids.begin(), n_ids.end(), 0);
+  // sample normal, not clear if 1s and 0's or +- 1's
+  // 64 bits
+  int num_hashes = 2;
+  std::vector<std::vector<unsigned long>> lm_to_hashes(num_hashes);
+  for (int hash_id = 0; hash_id < num_hashes; ++hash_id) {
+    std::vector<unsigned long> &lm_to_hash = lm_to_hashes[hash_id];
+    lm_to_hash.resize(num_lms, 0);
+    const int n_normals = 31;
+    for (unsigned int n = 0; n < n_normals; ++n) {
+      const unsigned long ul(1ul << n);
+      std::cout << " ul " << ul << std::endl;
+
+      // const int num_normal_entries = mean_cams_seen;
+      std::shuffle(n_ids.begin(), n_ids.end(), mt);
+      const int num_normal_entries = num_cams / 2;
+      std::vector<int> normal_ids(num_normal_entries);
+      std::vector<int> normal(num_cams, -1);
+      for (int i = 0; i < num_normal_entries; ++i) {
+        const int n_id = n_ids[i];
+        normal[n_id] = 1;
+        normal_ids[i] = n_id;
+      }
+      // normal ^T 1 = 0. mean_cams_seen 1s, num_cams - mean_cams_seen: - mean_cams_seen / (num_cams - mean_cams_seen)
+      // compute n times mean: all -1 -> n^t mean = -1 * sum mean + 2 * sum n_entry mean[nentry]
+      // double mean_times_normal = -cams_seen * mean_cams_seen / static_cast<double>(num_cams - mean_cams_seen);
+      // for (int n_id : normal_ids) {
+      //   mean_times_normal += mean[n_id] * (1 + mean_cams_seen / static_cast<double>(num_cams - mean_cams_seen));
+      // }
+      // now 1 full pass.
+      double mean_times_normal = 0;
+      for (int n_id = 0; n_id < num_cams; ++n_id) {
+        mean_times_normal += mean[n_id] * normal[n_id];
+      }
+
+      // compute dot product for all, compute part of hash of lm.
+      for (int l = 0; l < num_lms; ++l) {
+        double dot = -mean_times_normal;
+        for (int cam_id : cams_from_lm[l]) {
+          dot += normal[cam_id]; // normal + or -1, lm[cam_id] =1, 0 else.
+        }
+        // now per lm compute hash / side of normal it falls onto. problem both sparse vectors.
+        if (dot > 0) {
+          lm_to_hash[l] += ul;
+        } // 2^n
+      }
+    }
+  }
+
+  // hash codes.
+  // 1. write entries per bin. num_cams / 32. Not so much / 64: better
+  // std::vector<int> entries(1 << n_normals);
+  std::map<std::pair<int, int>, std::set<int>> hash_to_lmSet;
+  for (int l = 0; l < lm_to_hashes[0].size(); ++l) {
+    hash_to_lmSet[{lm_to_hashes[0][l], lm_to_hashes[1][l]}].insert(l);
+  }
+  std::cout << "Mean_cams_seen " << mean_cams_seen << " Num hashes " << hash_to_lmSet.size() << "\n";
+
+  for (const auto& [hash, lm_set] : hash_to_lmSet) {
+    if (lm_set.size() <2) {continue;}
+    std::cout << "(" << hash.first << " " << hash.second << ") " << lm_set.size() << "\n";
+    for( const int lm_id : lm_set) {
+      std::cout << lm_id << " : ";
+      for(const int c : cams_from_lm[lm_id]) {
+        std::cout << c << " ";
+      } 
+      std::cout << std::endl;
+    }
+  }
+
+  // return .. a vec of sets of lmids -> 1
+  std::vector<std::set<int>> duplicate_lm_ids;
+  for (const auto& [hash, lm_set] : hash_to_lmSet) {
+    if (lm_set.size() <2) {continue;}
+    // Compare lm set exhaustively and put inot set (identical ones)
+    std::set<int> dupe_set = lm_set;
+    for(const int lm : lm_set) {
+      std::set<int> identical_set;
+      identical_set.insert(lm);
+      const std::vector<int>& cam_vec_lm = cams_from_lm[lm];
+      dupe_set.erase(lm);
+      for(const int lm2 : dupe_set) {
+        if (do_entries_match(cam_vec_lm, cams_from_lm[lm2])){
+          // else match to each other.
+          identical_set.insert(lm2);
+        }
+      }
+      if (identical_set.size() > 1) {
+        duplicate_lm_ids.push_back(identical_set);
+        for(const int lm3 : identical_set)
+        dupe_set.erase(lm3);
+      }
+      
+    }
+  }
+  return duplicate_lm_ids;
+}
+
 void cluster_cameras_degeneracy(
     int kClusters,
     const std::vector<int>& camera_indices_in,  // per res -> cam involved
@@ -1957,6 +2087,26 @@ void cluster_cameras_degeneracy(
     }
 
     int num_parts = num_lands;
+    // Clamp landmarks with identical camera set into one part.
+    std::vector<std::set<int>> list_of_identical_lms = find_identical_lms(cams_from_lm, num_cams, num_lands);
+    for (const auto& set_of_idential_lms : list_of_identical_lms) {
+      const int keptPartId = *(set_of_idential_lms.begin());
+      for (const int deletedPartId : set_of_idential_lms) {
+        if (keptPartId == deletedPartId) {continue;}
+        const double newCost = MergeParts(keptPartId, deletedPartId,
+              landmarkFromCameraPerPart,
+              res_per_cluster,
+              lmToPart, 
+              costOfPart, // if set to -1 blocks other parts to go up in q. must invalidate extra.
+              maxLmPerCam, 
+              temperature,
+              num_res, 
+              kClusters);
+        costOfPart[keptPartId] = newCost; // should suffice. no pop needed as merging set num res to 0 of 
+        num_parts--;
+      }
+    }
+
     while (!pq.empty() && num_parts > kClusters) {
       const int partId = pq.top();
       if(res_per_cluster[partId] <= 0) {pq.pop();continue;} // invalid / merged
