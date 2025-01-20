@@ -38,6 +38,7 @@ process_clusters(
     std::vector<int>& covered_landmark_indices_c_out, std::vector<int>& covered_landmark_indices_c_sizes, 
     std::vector<int>& res_to_cluster_by_landmark_out);
 
+//2. moves residual s.t. more balanced.
 extern "C" void
 recluster_cameras(
     int kClusters,
@@ -45,6 +46,7 @@ recluster_cameras(
     const std::vector<int>& landmark_indices_in,
     std::vector<int>& res_to_cluster_by_landmark);
 
+//1. this is run. then 2. minimum camera observations in cluster should be large, residuals evenly spread, ideally cameras in few clusters. so sum_i |cam(ci)| small. and 
 extern "C" void
 cluster_cameras_degeneracy(
     int kClusters,

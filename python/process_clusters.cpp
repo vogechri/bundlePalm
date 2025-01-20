@@ -1889,6 +1889,7 @@ double MergeParts(int partId, int otherPartId,
     // i popped one already, push this back in. Set cost to -inf for other part [we can drop this one, when popping it just looking up its cost]
 }
 
+// simple speedup: use hasing to find lms seen by same cams. those merge at once.
 void cluster_cameras_degeneracy(
     int kClusters,
     const std::vector<int>& camera_indices_in,  // per res -> cam involved

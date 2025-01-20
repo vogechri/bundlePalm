@@ -14,6 +14,7 @@ from scipy.sparse.linalg import spsolve # slow as FUCK
 #from scipy.linalg import cholesky, cho_solve, cho_factor
 #from sksparse.cholmod import cholesky # install suitesparse and ... and ..
 from scipy.sparse.linalg import inv as inv_sparse # Slowest ever.
+from scipy.sparse import block_diag
 from numpy.linalg import pinv as inv_dense
 from numpy.linalg import inv as inv_nonHermetian
 from numpy.linalg import eigvalsh, eigh
@@ -854,6 +855,36 @@ def blockInverse(M, bs):
             Mi.data[i_ : i_ + 1] = 1.0 / Mi.data[i_ : i_ + 1]
     return Mi
 
+# Inverse also needed -> block inverse, add smth to diag.
+def MatrixToSqrt(M, bs, x0_t_cam_=0):
+    Ei = M.copy()
+    if bs > 1:
+        bs2 = bs * bs
+
+        flip = False
+        mat = M.data[0 : bs2].reshape(bs, bs)
+        if not check_symmetric(mat):
+            mat = np.fliplr(mat)
+            flip = True
+
+        for i in range(int(M.data.shape[0] / bs2)):
+            #print(M.data.shape)
+            mat = M.data[bs2 * i : bs2 * i + bs2].reshape(bs, bs)
+            if flip:
+                mat = np.fliplr(mat)
+            evs, evv = eigh(mat)
+            #evs = np.fmax(evs, evs[bs-1] * 1e-6) # e.g. ?
+            evs = np.sqrt(evs)
+            #print("evs ", evs[bs-1] / evs)
+            #print("evv ", evv[bs-1])
+            #print("evv ", evv)
+            #print(" cam " , x0_t_cam_[i,:])
+            mat = evv.dot(diag_sparse(evs) * evv.transpose())
+            if flip:
+                mat = np.fliplr(mat)
+            Ei.data[bs2 * i : bs2 * i + bs2] = mat.flatten()
+    return Ei
+
 def blockEigenvalue(M, bs):
     Ei = np.zeros(M.shape[0])
     if bs > 1:
@@ -917,8 +948,8 @@ def maxRow(M, bs):
             mat = M.data[bs2 * i : bs2 * i + bs2].reshape(bs, bs).copy()
             if not symmetric:
                 mat = np.fliplr(mat)
-            # if bs == 9:
-            #     print(mat)
+            if bs == 9:
+                print(mat)
             maxrow = np.max(np.abs(mat), axis=1) # symmetric: axis does not matter
             maxrow = maxrow + 1e-4 * np.max(maxrow)
             Ei[bs * i : bs * i + bs] = maxrow
@@ -1643,6 +1674,11 @@ def primal_cost(
         x0_t_cam = from_numpy(cameras_in_c)
         x0_t_land = from_numpy(points_3d_in_cluster_[unique_points_in_c_])
 
+    pcgData = PCGU.data.copy().reshape(-1, 9, 9)[cameras_indices_in_c__,:,:]
+    blocks = [pcgData[i] for i in range(pcgData.shape[0])]
+    PCGU_local = block_diag(blocks, format='csr')
+    x0_t_cam = from_numpy(PCGU_local * cameras_in_c.flatten()).reshape(-1,9) # DDD
+
     #camScale = 1./Unorm.data.reshape(-1,9)
     camScale = from_numpy(Unorm[cameras_indices_in_c__])
     camScale.requires_grad_(False)
@@ -1703,7 +1739,7 @@ def bundle_adjust(
     # 1e-8 fluctuates but faster 1e-6. increase JJ_mult?
     # problem dies at 173 example. 1e-5 ok more not.
     #J_eps = 1e-4
-    minimumL = 1e-6 # 1e-8 also ok
+    minimumL = 1e-6 # 1e-8 also ok, 1e-4: ok, default 1e-6
     #minDiag = 1e-5
     L = max(minimumL, L_in_cluster_)
     JJ_mult = 4 # TODO 4 / 2. 4 should suffice everywhere?
@@ -1719,7 +1755,7 @@ def bundle_adjust(
     n_cameras_ = int(x0_p_.shape[0] / 9)
     n_points_ = int(x0_l_.shape[0] / 3)
     powerits = 100 # kind of any value works here? > =5?
-    tr_eta_1 = 0.8
+    tr_eta_1 = 0.8 # 0.75 textbook value ..
     tr_eta_2 = 0.25
     blockEigMultGain = 4 # 4 better than 2 at least if allowDecreaseBlockEig, feels random and weird
     threshWhereNeeded = 1e-6
@@ -1778,6 +1814,10 @@ def bundle_adjust(
     # if issparse(Ul_in_c_): # only increase -- if needed.
     #     stepSize = diag_sparse(Ul_in_c_.diagonal())
 
+    pcgData = PCGU.data.copy().reshape(-1, 9, 9)[unique_poses_in_c_,:,:]
+    blocks = [pcgData[i] for i in range(pcgData.shape[0])]
+    PCGU_local = block_diag(blocks, format='csr')
+
     steSizeTouched = False
     while it_ < successfull_its_:
 
@@ -1786,10 +1826,13 @@ def bundle_adjust(
             x0_t_land = x0_t_[n_cameras_ * 9 :].reshape(n_points_, 3)
             #start = time.time()
 
-            J_pose, J_land, fx0 = ComputeDerivativeMatricesNew (
-                x0_t_cam, x0_t_land, camera_indices_, point_indices_, torch_points_2d, camScale, landScale)
+            # J_pose, J_land, fx0 = ComputeDerivativeMatricesNew (
+            #     x0_t_cam, x0_t_land, camera_indices_, point_indices_, torch_points_2d, camScale, landScale)
             #print("Jac time ", time.time() - start )
-
+            J_pose, J_land, fx0 = ComputeDerivativeMatricesNew ( # DDD
+                from_numpy(PCGU_local * x0_t_cam.flatten()).reshape(n_cameras_, 9),
+                x0_t_land, camera_indices_, point_indices_, torch_points_2d, camScale, landScale)
+            J_pose = J_pose * PCGU_local
             # 2 * JtJ majorizes, note JtJ:=(UW|W^TV), so W part majorized by *2:
             # clearly: 2a^2+b^2 > (a+b)^2 = a^2 + b^2 + 2ab. Since (a-b)^2 = a^2 + b^2 - 2ab > 0, so a^2 + b^2 > 2ab.
             # a^2 = p^t* Jp^TJp * p , b^2 = l^tJl^TJl l. ab = p^tJp^T Jl*l.
@@ -1867,10 +1910,13 @@ def bundle_adjust(
                     # paper: why is this needed? since nearby hess are different especially for small eigen values -> add max ev.
                     # blockEigenvalueJtJ = 1e1 * blockEigenvalue(JtJ, 9) # a bit better, maybe random.
                     blockEigenvalueJtJ = 1e1 * maxDiagA(JtJ, 9) # almost ..? maybe just random
-                    #blockEigenvalueJtJ = 1e1 * maxRow(JtJ, 9) # ? does it matter?
-                    stepSize = LipJ_ * JtJ.copy() + blockEigMult * blockEigenvalueJtJ # 12 already does not jump, but some results are not good: 52
+                    # blockEigenvalueJtJ = 1e1 * maxRow(JtJ, 9) # ? does it matter?
+                    # stepSize = LipJ_ * JtJ.copy() + blockEigMult * blockEigenvalueJtJ # pcg l1 norm: 12 already does not jump, jacobi needs more, but some results are not good: 52.
                     # best? or 8 for my single .. above is producing less jumps.
-                    # stepSize = 32 * blockEigMult * blockEigenvalueJtJ + 1e-16 * JtJ.copy() # ? * 2 appear better. larger rather not.
+                    stepSize = 16 * blockEigMult * blockEigenvalueJtJ + 1e-16 * JtJ.copy() # ? * 2 appear better. larger rather not.
+
+                    # How far can reaise this with PCGU.
+                    stepSize = 0.008 * blockEigenvalueJtJ + 1e-16 * JtJ.copy() # ? * 2 appear better. larger rather not.
                     JtJDiag = JtJ.copy() + blockEigMultJtJ * blockEigenvalueJtJ # new 1e-2 * same as for  JltJlDiag
 
                 # how does diag value change over iterations? mean/max of last k iterations?
@@ -2034,10 +2080,8 @@ def bundle_adjust(
         x0_t_cam = x0_t_[: n_cameras_ * 9].reshape(n_cameras_, 9)
         x0_t_land = x0_t_[n_cameras_ * 9 :].reshape(n_points_, 3)
 
-        fx1 = funx0_st1(
-            x0_t_cam[camera_indices_[:]],
-            x0_t_land[point_indices_[:]],
-            torch_points_2d)
+        # fx1 = funx0_st1( x0_t_cam[camera_indices_[:]], x0_t_land[point_indices_[:]], torch_points_2d)
+        fx1 = funx0_st1( from_numpy(PCGU_local * x0_t_cam.flatten()).reshape(n_cameras_, 9)[camera_indices_[:]], x0_t_land[point_indices_[:]], torch_points_2d) #DDD
         costEnd = np.sum(fx1.numpy() ** 2)
         print(it_, "it. cost 1     ", round(costEnd), "      + penalty ", round(costEnd + penaltyL + penaltyP), file=sys.stderr,)
 
@@ -2725,7 +2769,7 @@ def GetPcgScalingDiag(JtJ, W):
 
     return temp_
 
-def GetPreconditioners(cameras_, points_3d_, points_2d_, camera_indices_, point_indices_):
+def GetPreconditioners(cameras_, points_3d_, points_2d_, camera_indices_, point_indices_, kClusters_):
     J_pose, J_land, fx0_ = ComputeDerivativeMatrixInit(cameras_, points_3d_, points_2d_, camera_indices_, point_indices_)
 
     JtJ = J_pose.transpose() * J_pose
@@ -2774,7 +2818,13 @@ def GetPreconditioners(cameras_, points_3d_, points_2d_, camera_indices_, point_
         # temp_ = np.sqrt(temp_) # a bit better with sqrt (especially for diag prox).
         Vnorm_ = diag_sparse(temp_.flatten())
 
-    return Unorm_, Vnorm_, fx0_
+    # 1064: does not work. FUCK (1. / kClusters_) *
+    PCGU_ = MatrixToSqrt( JtJ + 1e-4 * maxDiag(JtJ, 9), 9) # also need inver of this one.
+    #PCGU_ = 1e-1 *MatrixToSqrt( JtJ + 1e-8 * maxDiag(JtJ, 9), 9) + 1e-1 * Unorm_ # also need inver of this one.
+    #PCGU_ = MatrixToSqrt(1e-16 * JtJ + diag_sparse(JtJ.diagonal()), 9) # Jacobi style, Should work as before.
+    # PCGU_ = 1e-18 * JtJ + Unorm_ # Jacobi style, Should work as Unorm, Jacoib.
+
+    return Unorm_, Vnorm_, fx0_, PCGU_
 
 def UpdatePreconditioners(cameras_, points_3d_, points_2d_, camera_indices_, point_indices_, Unorm_old, Vnorm_old):
     Unorm_old_ = Unorm_old.copy()
@@ -2872,7 +2922,16 @@ print("min k2 distance ", np.min(cameras[:,8].flatten()), " ", np.max(cameras[:,
 # alternative: this defines a basis. then we return not 9x9 but 9 values wrt basis bounding the actual
 
 c02_mult = 1; c34_mult = 1; c5_mult = 1; c6_mult = 1; c7_mult = 1; c8_mult = 1
-Unorm, Vnorm, fx0 = GetPreconditioners(cameras, points_3d, points_2d, camera_indices, point_indices)
+Unorm, Vnorm, fx0, PCGU_ = GetPreconditioners(cameras, points_3d, points_2d, camera_indices, point_indices, kClusters)
+# PCGU_ = 1e-16 * PCGU_ + diag_sparse(np.ones(PCGU_.diagonal().shape[0])) # this constant just use U
+# PCGU_ = 1e-18 * PCGU_ + Unorm # Jacobi style, Should work as Unorm.
+
+cameras = (PCGU_ * cameras.flatten()).reshape(-1,9) # DDD
+#print("PCGU_ ", PCGU_.diagonal())
+PCGU = blockInverse(PCGU_, 9)
+#print("Unorm ", Unorm)
+Unorm = diag_sparse(np.ones(PCGU.shape[0])) # DDD
+
 cameras = (Unorm * cameras.flatten()).reshape(-1,9)
 points_3d = (Vnorm * points_3d.flatten()).reshape(-1,3)
 Vnorm = 1./Vnorm.data.reshape(-1,3)
@@ -2956,8 +3015,8 @@ init_lib()
 
 # todo LipJ_ = ? 1.005? globalBlockEigUpperLimit, globalBlockEigUpperLimit
 LipJ = 1 * np.ones(kClusters)
-#globalBlockEigUpperLimit = 5e-1 # 1e-1, 1e1? # simple stepsize vs JtJ + eps * diag: 1e-3
-globalBlockEigUpperLimit = 1e-3 #1e-3 # 13k cam dataset needs more than 1e-3 and maybe alsobetter partitioning. CCC
+globalBlockEigUpperLimit = 5e-1 # 1e-1, 1e1? # simple stepsize vs JtJ + eps * diag: 1e-3
+#globalBlockEigUpperLimit = 1e-3 #1e-3 # 13k cam dataset needs more than 1e-3 and maybe alsobetter partitioning. CCC
 blockEig_in_cluster = 1e-5 * np.ones(kClusters) # 1e-4 or 1e-5
 memory_be = 4 # here can shrink, below this only grow.
 print("input blockEig_in_cluster[ci] ", blockEig_in_cluster[0])
