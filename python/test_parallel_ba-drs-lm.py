@@ -1870,7 +1870,7 @@ def bundle_adjust(
                     #blockEigenvalueJtJ = 1e1 * maxRow(JtJ, 9) # ? does it matter?
                     stepSize = LipJ_ * JtJ.copy() + blockEigMult * blockEigenvalueJtJ # 12 already does not jump, but some results are not good: 52
                     # best? or 8 for my single .. above is producing less jumps.
-                    # stepSize = 32 * blockEigMult * blockEigenvalueJtJ + 1e-16 * JtJ.copy() # ? * 2 appear better. larger rather not.
+                    stepSize = 16 * blockEigMult * blockEigenvalueJtJ + 1e-16 * JtJ.copy() # ? * 2 appear better. larger rather not.
                     JtJDiag = JtJ.copy() + blockEigMultJtJ * blockEigenvalueJtJ # new 1e-2 * same as for  JltJlDiag
 
                 # how does diag value change over iterations? mean/max of last k iterations?
@@ -2956,8 +2956,8 @@ init_lib()
 
 # todo LipJ_ = ? 1.005? globalBlockEigUpperLimit, globalBlockEigUpperLimit
 LipJ = 1 * np.ones(kClusters)
-#globalBlockEigUpperLimit = 5e-1 # 1e-1, 1e1? # simple stepsize vs JtJ + eps * diag: 1e-3
-globalBlockEigUpperLimit = 1e-3 #1e-3 # 13k cam dataset needs more than 1e-3 and maybe alsobetter partitioning. CCC
+globalBlockEigUpperLimit = 5e-1 # 1e-1, 1e1? # simple stepsize vs JtJ + eps * diag: 1e-3
+#globalBlockEigUpperLimit = 1e-3 #1e-3 # 13k cam dataset needs more than 1e-3 and maybe alsobetter partitioning. CCC
 blockEig_in_cluster = 1e-5 * np.ones(kClusters) # 1e-4 or 1e-5
 memory_be = 4 # here can shrink, below this only grow.
 print("input blockEig_in_cluster[ci] ", blockEig_in_cluster[0])
@@ -3444,8 +3444,8 @@ else:
             diffToGain = np.maximum(round(primal_cost_v) - round(primal_cost_u) - round(lastCostDRE_bfgs - dre_bfgs), 0.) / round(primal_cost_u)
             #gapToGain = np.maximum(1, round(lastCostDRE_bfgs - dre_bfgs)) / np.maximum(round(primal_cost_v) - round(primal_cost_u), 1)
             # ~its to fill gap
-            gapToGain = np.maximum(round(primal_cost_v) - round(primal_cost_u) - round(lastCostDRE_bfgs - dre_bfgs), 1.) / np.maximum(1, round(lastCostDRE_bfgs - dre_bfgs))
-            currentGap = np.maximum(round(primal_cost_v) - round(primal_cost_u), 1. ) #- round(lastCostDRE_bfgs - dre_bfgs), 1) # not sure .. 
+            gapToGain = np.maximum(1. * round(primal_cost_v- primal_cost_u) - round(lastCostDRE_bfgs - dre_bfgs), 1.) / np.maximum(1, round(lastCostDRE_bfgs - dre_bfgs))
+            currentGap = np.maximum(1. * round(primal_cost_v - primal_cost_u), 1. ) #- round(lastCostDRE_bfgs - dre_bfgs), 1) # not sure .. 
             differentialGap = prevGap - currentGap
             costGain = lastCostDRE_bfgs - dre_bfgs
             print( globalIt, "/", ls_it, " ======== DRE BFGS ====== ", round(dre_bfgs) , " ========= gain " , \
@@ -3565,8 +3565,8 @@ else:
                     #LipJ *= np.sqrt(2)
                     tmp = []
                     # innerIts = 2 # BBB inc temporaily at failure, avoid direct failure again? can we?
-                    #be_mult = 2 # 4 for diag stepsize?
-                    be_mult = 4 #for JtJ? CCC
+                    be_mult = 2 # 4 for diag stepsize?
+                    #be_mult = 4 #for JtJ? CCC
                     for ci in range(kClusters):
                         tempBlockEigen[ci][globalIt % memory_be] = \
                             np.minimum(tempBlockEigen[ci][globalIt % memory_be] * be_mult, globalBlockEigUpperLimit)
@@ -3693,8 +3693,8 @@ else:
             else:
 
                 # differentialGap / np.maximum(costGain, 1)
-                # if diffToGain > 0.2:
-                if costGain < 0 and differentialGap <= 0 and currentGap >=0: # gap present fv - fu >0, gets wider and cost higher than best
+                # if diffToGain > 0.2: CCC: turn off for JtJ stepsize?
+                if costGain < 0 and differentialGap <= 0 and currentGap >=0 and (ls_it == line_search_iterations-1): # gap present fv - fu >0, gets wider and cost higher than best
                     be_mult__ = np.sqrt(2)
                     tmp__ = []
                     for ci in range(kClusters):

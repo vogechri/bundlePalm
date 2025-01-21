@@ -3,6 +3,9 @@
 // Order landmark shift by 
 #define _select_by_even_cost_
 
+// Should work .. but it does not. Different random seeds needed .. lol?
+// #define __clusteridentical_lms_early__
+
 #include "process_clusters.h"
 
 #include <assert.h>
@@ -2017,7 +2020,7 @@ std::vector<std::set<int>> find_identical_lms(const std::vector<std::vector<int>
       }
     }
   }
-  std::cout << "Number of landmarks with identical cameras " << numDuplicateLms << std::endl;
+  std::cout << "Number of landmarks with identical cameras " << numDuplicateLms << " / " << num_lms << std::endl;
   return duplicate_lm_ids;
 }
 
@@ -2089,6 +2092,7 @@ void cluster_cameras_degeneracy(
     }
 
     int num_parts = num_lands;
+#ifdef __clusteridentical_lms_early__
     // Clamp landmarks with identical camera set into one part.
     // Likely better to make code believe only single lm is in part (searches voer cams .. ?) Does it do anything?
     std::vector<std::set<int>> list_of_identical_lms = find_identical_lms(cams_from_lm, num_cams, num_lands);
@@ -2109,6 +2113,7 @@ void cluster_cameras_degeneracy(
         num_parts--;
       }
     }
+#endif
 
     while (!pq.empty() && num_parts > kClusters) {
       const int partId = pq.top();
