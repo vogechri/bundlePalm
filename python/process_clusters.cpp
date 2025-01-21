@@ -1622,7 +1622,7 @@ double GetCost(const std::map<int, std::set<int>> &landmarkFromCameraOfPart,
   for(const auto& [cam, landmarksFromCam] : landmarkFromCameraOfPart) {
     const int numLandmarks = landmarksFromCam.size();
     if (numLandmarks > maxLmPerCam) {continue;}
-    cost += std::exp(-numLandmarks / static_cast<double>(maxLmPerCam) * temperature);
+    cost += std::exp(-numLandmarks / static_cast<double>(maxLmPerCam) * temperature); // should 0 be a cost? not correct to skip 0.. hmm. does not do anything.
   }
 
   double costKlDivEquality = 0;
@@ -2024,6 +2024,12 @@ std::vector<std::set<int>> find_identical_lms(const std::vector<std::vector<int>
   return duplicate_lm_ids;
 }
 
+
+// Slected part to be merged by metric GetOrderCost.
+// pop next part.
+// for that part find best part to merge with.
+// minimize what. GetCost(part) = sum _c in part exp-|lms(c)| / maxLmPerCam * temperature, if lms(c) < maxLmPerCam, 0 else.
+// High cost for few lms seen. 0 for none! not sure this works for greedy. no idea to approx as well.
 void cluster_cameras_degeneracy(
     int kClusters,
     const std::vector<int>& camera_indices_in,  // per res -> cam involved

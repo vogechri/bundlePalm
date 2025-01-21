@@ -3051,6 +3051,7 @@ best_landmarks = landmarks.copy()
 bestCost = primal_cost_v
 prevGap = 0
 differentialGap = 0
+prev_dk = 0
 
 o3d_defined = False
 if o3d_defined:
@@ -3210,7 +3211,7 @@ else:
     for globalIt in range(its): ##########################################################################################
         # get line search direction and update bfgs data
         # operate with np concatenate to get large vector and reshape search_direction here?
-        RNA_or_bfgs = False #True # RNA is best here ?! ok. else nesterov
+        RNA_or_bfgs = True # RNA is best here ?! ok. else nesterov: False
         if RNA_or_bfgs:
             use_bfgs = False # maybe full u,v?
             bfgs_r = np.zeros(kClusters * 9 * n_cameras)
@@ -3273,10 +3274,17 @@ else:
                 # print("dk - bfgs_r - rna_s ", dk - bfgs_r - rna_s, " |dk - bfgs_r - rna_s| ", np.linalg.norm(dk - bfgs_r - rna_s, 2))
 
                 U_diag = np.zeros(rna_s.shape)
+                RNA_thresh = 1e-6 # 1e-6? - no clue. U_cluster should be around 1 .. could also use Unorm here.
                 for ci in range(kClusters):
-                    U_diag[ci * 9 * n_cameras: (ci+1) * 9 * n_cameras] = blockEigenvalue(U_cluster_zeros[ci], 9).diagonal()
+                    #U_diag[ci * 9 * n_cameras: (ci+1) * 9 * n_cameras] = blockEigenvalue(U_cluster_zeros[ci], 9).diagonal()
+                    #CCC , inverse as done now or 1?
+                    U_diag[ci * 9 * n_cameras: (ci+1) * 9 * n_cameras] = np.fmax(1./np.fmax(np.abs(maxDiagA(U_cluster_zeros[ci], 9).diagonal()), RNA_thresh), RNA_thresh)
+
                 U_diag = diag_sparse(U_diag)
-                U_diag.data = np.ones(U_diag.data.shape) # appears better .. ? why?
+                #print(U_diag) # 
+                U_diag.data = np.ones(U_diag.data.shape) # appears better .. ? Does not matter / same (with pcg once)
+                # U_diag.data = np.fmax(1./U_diag.data, RNA_thresh) # somewhat better ? maybe best/ or random
+
                 #U_diag = np.ones(rna_s.shape)
                 #lambdaScale = np.sqrt(np.mean(U_diag.diagonal()))
                 #lambdaScale *= 10.
@@ -3509,6 +3517,10 @@ else:
                     prev_dk = 0 * prev_dk
                     resetIt = globalIt
                     failedNesterovAcceleration = 0
+                    restartIteration = globalIt # reset RNA has no effect.
+                    Gs = []
+                    Fs = []
+                    Fes = []
                     print("Reset Nesterov acceleration after ", maxFailedNesterovAcceleration, " consecutive failures.")
 
             maxPctV = np.maximum(1.001, np.sqrt(maxPct)) # max 0.1 % AAA
