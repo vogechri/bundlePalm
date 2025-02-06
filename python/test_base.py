@@ -9,6 +9,7 @@ from scipy.sparse import csr_array, csr_matrix
 from scipy.sparse import diags as diag_sparse
 from scipy.sparse.linalg import inv as inv_sparse
 from numpy.linalg import pinv as inv_dense
+from numpy.linalg import inv as inv_nonHermetian
 from numpy.linalg import eigvalsh
 
 # idea reimplement projection with torch to get a jacobian -> numpy then 
@@ -363,6 +364,36 @@ def torchSingleResiduum(camera_params, point_params, p2d) :
     residual = torch.cat([resX[:,], resY[:,]], dim=1)
     return residual
 
+# scaling should be per UNorm.data.reshape(9,-1)[cam index,:], even torch no grad
+def torchSingleResiduumScaled(camera_params_, point_params_, p2d):
+    scaling = Unorm.reshape(-1,9)
+    scaling = from_numpy(scaling[camera_indices[:]])
+    scaling.requires_grad_(False)
+    scalingP = Vnorm.reshape(-1,3)
+    scalingP = from_numpy(scalingP[point_indices[:]]) # here direct, or not?
+    scalingP.requires_grad_(False)
+
+    camera_params_ = camera_params_ * scaling
+    point_params_ = point_params_ * scalingP
+    angle_axis = camera_params_[:, :3] #* scaling[:,:3]
+    points_cam = AngleAxisRotatePoint(angle_axis, point_params_)
+    points_cam[:,0:2] = points_cam[:,0:2] + camera_params_[:, 3:5] #* scaling[:, 3:5]
+    points_cam[:,2] = points_cam[:,2] + camera_params_[:, 5] #* scaling[:, 5]
+    points_projX = -points_cam[:, 0] / points_cam[:, 2]
+    points_projY = -points_cam[:, 1] / points_cam[:, 2]
+    f  = camera_params_[:, 6] #* scaling[:, 6]
+    k1 = camera_params_[:, 7] #* scaling[:, 7]
+    k2 = camera_params_[:, 8] #* scaling[:, 8]
+    r2 = points_projX * points_projX + points_projY * points_projY
+    #distortion = 1. + r2 * (k1 + 1e-16 * k2) #
+    distortion = 1.0 + r2 * (k1 + k2 * r2)
+    points_reprojX = points_projX * distortion * f
+    points_reprojY = points_projY * distortion * f
+    resX = (points_reprojX - p2d[:, 0]).reshape((p2d.shape[0], 1))
+    resY = (points_reprojY - p2d[:, 1]).reshape((p2d.shape[0], 1))
+    residual = torch.cat([resX[:,], resY[:,]], dim=1)
+    return residual
+
 def torchSingleResiduumX(camera_params, point_params, p2d) :
     angle_axis = camera_params[:,:3] * c02_mult
     points_cam = AngleAxisRotatePoint(angle_axis, point_params)
@@ -467,6 +498,240 @@ def torchSingleResiduumY(camera_params, point_params, p2d) :
 #     residual = jnp.concatenate([resX[:,], resY[:,]], axis=1)
 #     return residual
 
+def buildMatrixNew(dx, dy, v_indices, sz=9) :
+    data = []
+    indptr = []
+    indices = []
+
+    start = 0
+    end = v_indices.shape[0]
+
+    data.append(dx.flatten())
+    data.append(dy.flatten())
+    # print("dx datavals ", dx)
+    # print("dy datavals ", dy)
+    indptr.append(np.arange(2*start*sz, 2*end*sz, sz).flatten())
+    indices.append(np.array([sz * v_indices[start:end] + j for j in range(sz)]).transpose().flatten())
+    indices.append(np.array([sz * v_indices[start:end] + j for j in range(sz)]).transpose().flatten())
+    indptr.append(np.array([sz+ indptr[-1][-1]])) # closing
+
+    datavals = np.concatenate(data)
+    # debug: set all inner parameters to 0
+    if False:
+        #datavals[0:end:9] = 0
+        #datavals[1:end:9] = 0
+        #datavals[2:end:9] = 0
+
+        #datavals[3:end:9] = 0
+        #datavals[4:end:9] = 0
+        #datavals[5:end:9] = 0
+
+        datavals[6:end:9] = 0
+        datavals[7:end:9] = 0
+        datavals[8:end:9] = 0
+
+    crs_pose = csr_array((datavals, np.concatenate(indices), np.concatenate(indptr)))
+
+    J_pose = csr_matrix(crs_pose)
+    return J_pose
+
+def buildResiduumNew(resX, resY) :
+    data = []
+    data.append(resX.flatten().numpy())
+    data.append(resY.flatten().numpy())
+    res = np.concatenate(data)
+    return res
+
+def torchSingleResiduumXScaled(camera_params, point_params, p2d, scaling, scalingP) :
+    angle_axis = camera_params[:,:3] * scaling[:,:3]
+    point_params = point_params * scalingP
+    points_cam = AngleAxisRotatePoint(angle_axis, point_params)
+    points_cam[:,0:2] = points_cam[:,0:2] + camera_params[:, 3:5] * scaling[:, 3:5]
+    points_cam[:,2] = points_cam[:,2] + camera_params[:, 5] * scaling[:, 5]
+    points_projX = -points_cam[:, 0] / points_cam[:, 2]
+    points_projY = -points_cam[:, 1] / points_cam[:, 2]
+    f  = camera_params[:, 6] * scaling[:, 6]
+    k1 = camera_params[:, 7] * scaling[:, 7]
+    k2 = camera_params[:, 8] * scaling[:, 8]
+    r2 = points_projX*points_projX + points_projY*points_projY
+    #distortion = 1. + r2 * (k1 + 1e-16 * k2) # 
+    distortion = 1. + r2 * (k1 + k2 * r2)
+    points_reprojX = points_projX * distortion * f
+    resX = (points_reprojX-p2d[:,0])
+    return resX
+
+def torchSingleResiduumYScaled(camera_params, point_params, p2d, scaling, scalingP) :
+    angle_axis = camera_params[:,:3] * scaling[:,:3]
+    point_params = point_params * scalingP
+    points_cam = AngleAxisRotatePoint(angle_axis, point_params)
+    points_cam[:,0:2] = points_cam[:,0:2] + camera_params[:, 3:5] * scaling[:, 3:5]
+    points_cam[:,2] = points_cam[:,2] + camera_params[:, 5] * scaling[:, 5]
+    points_projX = -points_cam[:, 0] / points_cam[:, 2]
+    points_projY = -points_cam[:, 1] / points_cam[:, 2]
+    f  = camera_params[:, 6] * scaling[:, 6]
+    k1 = camera_params[:, 7] * scaling[:, 7]
+    k2 = camera_params[:, 8] * scaling[:, 8]
+    r2 = points_projX*points_projX + points_projY*points_projY
+    #distortion = 1. + r2 * (k1 + 1e-16 * k2) #
+    distortion = 1. + r2 * (k1 + k2 * r2)
+    points_reprojY = points_projY * distortion * f
+    resY = (points_reprojY-p2d[:,1])
+    return resY
+
+def ComputeDerivativeMatrixInit(x0_c_, x0_l_, points_2d, camera_indices, point_indices):
+    funx0_st1 = lambda X0, X1, X2: torchSingleResiduumX(X0.view(-1,9), X1.view(-1,3), X2.view(-1,2)) # 1d fucntion -> grad possible
+    funy0_st1 = lambda X0, X1, X2: torchSingleResiduumY(X0.view(-1,9), X1.view(-1,3), X2.view(-1,2)) # 1d fucntion -> grad possible
+
+    torch_cams = from_numpy(x0_c_.reshape(-1,9)[camera_indices[:],:])
+    torch_lands = from_numpy(x0_l_.reshape(-1,3)[point_indices[:],:])
+    torch_lands.requires_grad_()
+    torch_cams.requires_grad_()
+    torch_cams.retain_grad()
+    torch_lands.retain_grad()
+
+    torch_points_2d = from_numpy(points_2d)
+    torch_points_2d.requires_grad_(False)
+
+    resX = funx0_st1(torch_cams, torch_lands, torch_points_2d[:,:]).flatten()
+    lossX = torch.sum(resX)
+    lossX.backward()
+
+    cam_grad_x = torch_cams.grad.detach().numpy().copy()
+    land_grad_x = torch_lands.grad.detach().numpy().copy()
+
+    torch_cams.grad.zero_()
+    torch_lands.grad.zero_()
+    resY = funy0_st1(torch_cams, torch_lands, torch_points_2d[:,:]).flatten()
+    lossY = torch.sum(resY)
+    lossY.backward()
+    cam_grad_y = torch_cams.grad.detach().numpy().copy()
+    land_grad_y = torch_lands.grad.detach().numpy().copy()
+
+    J_pose = buildMatrixNew(cam_grad_x, cam_grad_y, camera_indices, sz=9)
+    J_land = buildMatrixNew(land_grad_x, land_grad_y, point_indices, sz=3)
+    fx0 = buildResiduumNew(resX.detach(), resY.detach())
+
+    return (J_pose, J_land, fx0)
+
+def getScaling(min_, max_): # aim at max * min = 1. So max * x = 1/(min * x). x^2 = 1/(min * max)
+    # max * np.sqrt(1. / (min * max)) = np.sqrt(max^2 / (min * max)) = np.sqrt(max / min)
+    # 1/ (min * np.sqrt(1. / (min * max)) = np.sqrt(min * max / min^2) = np.sqrt(max / min).
+    return np.sqrt(1. / (min_ * max_) )
+
+# Looking at entangled variables, what if we use JtJ + eps * diag(JtJ)^-1/2 as preconditioner?
+# JtJ^-1/2 * JtJ * JtJ^-1/2 = I
+# send to node once (need also to send lms once, poses all the time)
+# how to? compute JtJ+e*diag(JtJ), eigendecomposition, 1/sqrt eigenvalues on diag.
+# Let P := JtJ^1/2, Q = JtJ^-1/2
+# New variables are y := JtJ^1/2 x
+# Yet. use old vars in bundle, apply intenally Q * JtJ * Q? also apply on W.
+# problem is what happens to Ws non zero pattern. As I would need to apply on JtJ and W.
+# Then when averaging we need to apply P on the input, solve system and apply Q on the output.
+
+def GetPcgScalingDiag(JtJ, W):
+    baseVersion = False
+    if baseVersion:
+        temp_  = np.squeeze(np.asarray((np.abs(JtJ)).sum(axis=0) )) # ATTENTION: must adjust / add sqrt on lms here below. CCC
+        #[[ 0.11  0.00 -0.07 -0.00  0.11 -0.10 -0.09 -0.09 -0.10]
+        # [ 0.00  0.12 -0.03 -0.12  0.00 -0.02 -0.02 -0.03 -0.03]
+        # [-0.07 -0.03  0.12  0.03 -0.07  0.07  0.07  0.07  0.07]
+        # [-0.00 -0.12  0.03  0.12 -0.00  0.03  0.02  0.03  0.03]
+        # [ 0.11  0.00 -0.07 -0.00  0.11 -0.10 -0.09 -0.09 -0.09]
+        # [-0.10 -0.02  0.07  0.03 -0.10  0.15  0.14  0.15  0.16]
+        # [-0.09 -0.02  0.07  0.02 -0.09  0.14  0.12  0.13  0.14]
+        # [-0.09 -0.03  0.07  0.03 -0.09  0.15  0.13  0.17  0.20]
+        # [-0.10 -0.03  0.07  0.03 -0.09  0.16  0.14  0.20  0.27]]
+    else:
+        squared = False
+        if squared:
+            JtJ_ = JtJ.copy()
+            W_ = W.copy()
+            JtJ_.data = np.square(JtJ_.data)
+            W_.data = np.square(W_.data)
+            temp_ = np.squeeze(np.asarray((np.abs(JtJ_)).sum(axis=0) ))
+            temp_W = np.squeeze(np.asarray((np.abs(W_)).sum(axis=0) ))
+            temp_ = np.sqrt(temp_ + temp_W)
+            #[[ 0.07 -0.00 -0.06 -0.00  0.07 -0.07 -0.07 -0.07 -0.06]
+            # [-0.00  0.07 -0.03 -0.07 -0.00 -0.02 -0.02 -0.02 -0.02]
+            # [-0.06 -0.03  0.13  0.03 -0.07  0.07  0.07  0.06  0.06]
+            # [-0.00 -0.07  0.03  0.07 -0.00  0.02  0.02  0.02  0.02]
+            # [ 0.07 -0.00 -0.07 -0.00  0.07 -0.07 -0.07 -0.06 -0.06]
+            # [-0.07 -0.02  0.07  0.02 -0.07  0.12  0.12  0.11  0.11]
+            # [-0.07 -0.02  0.07  0.02 -0.07  0.12  0.11  0.11  0.11]
+            # [-0.07 -0.02  0.06  0.02 -0.06  0.11  0.11  0.13  0.15]
+            # [-0.06 -0.02  0.06  0.02 -0.06  0.11  0.11  0.15  0.18]]
+        else: # just jacobi, looks best?
+            temp_ = np.squeeze(np.asarray((np.abs(JtJ)).sum(axis=0) ))
+            temp_W = np.squeeze(np.asarray((np.abs(W)).sum(axis=0) ))
+            temp_  = temp_ + temp_W # + 1e-6 does nothing
+            # Jacobi pcg: here sqrt here on both, not only on landm. externally
+            temp_ = np.squeeze(np.asarray((np.abs(JtJ.diagonal()))))
+            temp_ = np.sqrt(temp_) # works on Jacobi, not on rest ?
+            #[[ 0.10 -0.01  0.08  0.00  0.10 -0.03 -0.03 -0.03 -0.03]
+            # [-0.01  0.10 -0.06 -0.10 -0.01 -0.01 -0.01 -0.01 -0.01]
+            # [ 0.08 -0.06  0.10  0.05  0.08 -0.02 -0.02 -0.02 -0.02]
+            # [ 0.00 -0.10  0.05  0.10  0.00  0.01  0.01  0.01  0.00]
+            # [ 0.10 -0.01  0.08  0.00  0.10 -0.03 -0.02 -0.03 -0.03]
+            # [-0.03 -0.01 -0.02  0.01 -0.03  0.10  0.10  0.09  0.08]
+            # [-0.03 -0.01 -0.02  0.01 -0.02  0.10  0.10  0.09  0.08]
+            # [-0.03 -0.01 -0.02  0.01 -0.03  0.09  0.09  0.10  0.09]
+            # [-0.03 -0.01 -0.02  0.00 -0.03  0.08  0.08  0.09  0.09]]
+
+    print("min/max Unorm before ", np.min(temp_), np.max(temp_))
+    t = getScaling(np.min(temp_[np.nonzero(temp_)]), np.max(temp_))
+    temp_  = temp_ * t
+    # temp_  = np.squeeze(np.asarray((np.abs(t * JtJ_)).sum(axis=0) ))
+    # temp_W = np.squeeze(np.asarray((np.abs(t * W)).sum(axis=1) ))
+    # temp_  = temp_ + temp_W
+    print("min/max Unorm after ", np.min(temp_), np.max(temp_), " t ", t, " min*max= ", np.min(temp_) * np.max(temp_))
+    #temp_  = temp_.reshape(-1,9)
+    print("Preconditioners min/max Unorm ", np.min(temp_), np.max(temp_))
+    # e-14 to e16 at -2. -6 ->
+    minTresh = 1e-18 # 12 -> 14 for 245 and scale!
+    maxTresh = 1e18
+    temp_ = np.fmin(np.fmax(temp_, minTresh), maxTresh) #np.sqrt(np.minimum(np.maximum(t, minTresh), maxTresh))
+    #temp_ = np.fmin(np.fmax(temp_, 1e-14), 1e16) # TODO. pick most singular example? 646? 173 maybe / any dubrovnik
+    print("Preconditioners min/max Unorm after thresholding ", np.min(temp_), np.max(temp_))
+
+    scaleToHaveValuesAroundOneForHess = True # cosmetics mostly.
+    if scaleToHaveValuesAroundOneForHess:
+        absDiagJtJ = np.abs(JtJ.diagonal())
+        guess = diag_sparse(1./temp_.flatten()) * absDiagJtJ * diag_sparse(1./temp_.flatten())
+        print("Preconditioners min/max guess ", np.min(guess), np.max(guess))
+        scale = np.sqrt(np.median(guess)) # same as 1e-1 * np.sqrt(np.median(guess))
+        print("scale ", scale) # there has to be a stepsize issue?
+        temp_ = temp_ * scale # * 1e5 works but not as well ()
+        print("Preconditioners min/max Unorm after scaling 2: ", np.min(temp_), np.max(temp_))
+        guess = diag_sparse(1./temp_.flatten()) * absDiagJtJ * diag_sparse(1./temp_.flatten())
+        print("Preconditioners min/max guess ", np.min(guess), np.max(guess))
+
+    return temp_
+
+def GetPreconditioners(cameras_, points_3d_, points_2d_, camera_indices_, point_indices_):
+    J_pose, J_land, fx0_ = ComputeDerivativeMatrixInit(cameras_, points_3d_, points_2d_, camera_indices_, point_indices_)
+
+    JtJ = J_pose.transpose() * J_pose
+    #W = J_pose.transpose() * J_land
+    orig = False
+    if orig:
+        temp_ = np.squeeze(np.asarray(0.0001 * ( (np.abs(JtJ)/1000).sum(axis=0) )))
+        temp_  = temp_.reshape(-1,9)
+        temp_[:,0:5] *= 0.4
+        temp_ = np.fmin(np.fmax(temp_, 1e-14), 1e14) # e-14 to e16 at 1e-2.
+        print("GetPreconditioners min/max Unorm ", np.min(temp_), np.max(temp_))
+        #temp_ = np.fmin(np.fmax(temp_, 1e-14), 1e16) # TODO. pick most singular example? 646? 173 maybe / any dubrovnik
+        print("GetPreconditioners min/max Unorm ", np.min(temp_), np.max(temp_))
+    else:
+        temp_ = GetPcgScalingDiag(JtJ, J_land.transpose() * J_pose)
+
+    Unorm_ = diag_sparse(temp_.copy().flatten())
+    # could also compute locally / all the time! 542: appears to 'go crazy' after 20 its.
+    JltJl = J_land.transpose() * J_land
+    temp_ = GetPcgScalingDiag(JltJl, J_pose.transpose() * J_land)
+    Vnorm_ = diag_sparse(temp_.flatten())
+
+    return Unorm_, Vnorm_, fx0_
+
 iterations = 100
 import sys
 # total arguments
@@ -497,7 +762,7 @@ c5_mult = 1
 c6_mult = 1
 c7_mult = 1
 c8_mult = 1
-if True:
+if False: #True:
     c02_mult = 0.01
     c34_mult = 1
     c5_mult = 10
@@ -511,6 +776,13 @@ if True:
     cameras[:,6] = cameras[:,6] / c6_mult
     cameras[:,7] = cameras[:,7] / c7_mult
     cameras[:,8] = cameras[:,8] / c8_mult
+else:
+    c02_mult = 1; c34_mult = 1; c5_mult = 1; c6_mult = 1; c7_mult = 1; c8_mult = 1
+    Unorm, Vnorm, fx0 = GetPreconditioners(cameras, points_3d, points_2d, camera_indices, point_indices)
+    cameras = (Unorm * cameras.flatten()).reshape(-1,9)
+    points_3d = (Vnorm * points_3d.flatten()).reshape(-1,3)
+    Vnorm = 1./Vnorm.data.reshape(-1,3)
+    Unorm = 1./Unorm.data.reshape(-1,9)
 
 # # better define function. data in as batch -> normal gradient.
 # # Dp this with the jacobian ?!
@@ -795,6 +1067,77 @@ def ComputeDerivativeMatrices():
     return (J_pose, J_land, fx0)
 
 def ComputeDerivativeMatricesNew():
+    verbose = False
+    if verbose:
+        start = time.time() # this is not working at all. Slower then iteratively
+
+    #funx0_st1 = lambda X0, X1, X2: torchSingleResiduumX(X0.view(-1,9), X1.view(-1,3), X2.view(-1,2)) # 1d function -> grad possible
+    #funy0_st1 = lambda X0, X1, X2: torchSingleResiduumY(X0.view(-1,9), X1.view(-1,3), X2.view(-1,2)) # 1d function -> grad possible
+
+    torch_cams = x0_t[:n_cameras*9].reshape(n_cameras,9)[camera_indices[:],:]
+    torch_lands = x0_t[n_cameras*9:].reshape(n_points,3)[point_indices[:],:]
+
+    camScale = Unorm.reshape(-1,9)
+    camScale = from_numpy(camScale[camera_indices[:]])
+    camScale.requires_grad_(False)
+
+    landScale = Vnorm.reshape(-1,3)
+    landScale = from_numpy(landScale[point_indices[:]]) # here direct, or not?
+    landScale.requires_grad_(False)
+
+    funx0_st1 = lambda X0, X1, X2: torchSingleResiduumXScaled(X0.view(-1,9), X1.view(-1,3), X2.view(-1,2), camScale, landScale)
+    funy0_st1 = lambda X0, X1, X2: torchSingleResiduumYScaled(X0.view(-1,9), X1.view(-1,3), X2.view(-1,2), camScale, landScale)
+
+    # torch_cams = x0_t_cam[camera_indices_[:],:] #x0_t[:n_cameras*9].reshape(n_cameras,9)[camera_indices[:],:]
+    # torch_lands = x0_t_land[point_indices_[:],:] #x0_t[n_cameras*9:].reshape(n_points,3)[point_indices[:],:]
+    torch_lands.requires_grad_()
+    torch_cams.requires_grad_()
+    torch_cams.retain_grad()
+    torch_lands.retain_grad()
+
+    # print("camScale ", camScale)
+    # print("torch_cams ", torch_cams)
+
+    resX = funx0_st1(torch_cams, torch_lands, torch_points_2d[:,:]).flatten()
+    lossX = torch.sum(resX)
+    lossX.backward()
+
+    cam_grad_x = torch_cams.grad.detach().numpy().copy()
+    #cam_grad_x.detach()
+    land_grad_x = torch_lands.grad.detach().numpy().copy()
+    #land_grad_x.detach()
+    #print("torch_lands.grad X ", land_grad_x)
+
+    torch_cams.grad.zero_()
+    torch_lands.grad.zero_()
+    resY = funy0_st1(torch_cams, torch_lands, torch_points_2d[:,:]).flatten()
+    lossY = torch.sum(resY)
+    lossY.backward()
+    cam_grad_y = torch_cams.grad.detach().numpy().copy()
+    land_grad_y = torch_lands.grad.detach().numpy().copy()
+    #print("torch_lands.grad Y ", land_grad_y)
+
+    if verbose:
+        end = time.time()
+        print("All torch grads take ", end - start, "s")
+        start = time.time()
+
+    J_pose = buildMatrixNew(cam_grad_x, cam_grad_y, camera_indices, sz=9)
+    if verbose:
+        end = time.time()
+        print(" build Matrix & residuum took ", end-start, "s")
+        start = time.time()
+    J_land = buildMatrixNew(land_grad_x, land_grad_y, point_indices, sz=3)
+
+    fx0_ = buildResiduumNew(resX.detach(), resY.detach())
+
+    if verbose:
+        print(" build Matrix & residuum took ", end-start, "s")
+        end = time.time()
+
+    return (J_pose, J_land, fx0_)
+
+def ComputeDerivativeMatricesNewOld():
     start = time.time() # this is not working at all. Slower then iteratively
     funx0_st1 = lambda X0, X1, X2: torchSingleResiduumX(X0.view(-1,9), X1.view(-1,3), X2.view(-1,2)) # 1d fucntion -> grad possible
     funy0_st1 = lambda X0, X1, X2: torchSingleResiduumY(X0.view(-1,9), X1.view(-1,3), X2.view(-1,2)) # 1d fucntion -> grad possible
@@ -848,76 +1191,91 @@ def ComputeDerivativeMatricesNew():
 
     return (J_pose, J_land, fx0)
 
-def buildMatrixNew(dx, dy, varset=0) :
-    data = []
-    indptr = []
-    indices = []
-    if varset == 0:
-        v_indices = camera_indices
-        sz = 9
-    if varset == 1:
-        v_indices = point_indices
-        sz = 3
+# # def buildMatrixNew(dx, dy, varset=0) :
+# #     data = []
+# #     indptr = []
+# #     indices = []
+# #     if varset == 0:
+# #         v_indices = camera_indices
+# #         sz = 9
+# #     if varset == 1:
+# #         v_indices = point_indices
+# #         sz = 3
 
-    start = 0
-    end = v_indices.shape[0]
+# #     start = 0
+# #     end = v_indices.shape[0]
 
-    data.append(dx.flatten())
-    data.append(dy.flatten())
-    # print("dx datavals ", dx)
-    # print("dy datavals ", dy)
-    indptr.append(np.arange(2*start*sz, 2*end*sz, sz).flatten())
-    indices.append(np.array([sz * v_indices[start:end] + j for j in range(sz)]).transpose().flatten())
-    indices.append(np.array([sz * v_indices[start:end] + j for j in range(sz)]).transpose().flatten())
+# #     data.append(dx.flatten())
+# #     data.append(dy.flatten())
+# #     # print("dx datavals ", dx)
+# #     # print("dy datavals ", dy)
+# #     indptr.append(np.arange(2*start*sz, 2*end*sz, sz).flatten())
+# #     indices.append(np.array([sz * v_indices[start:end] + j for j in range(sz)]).transpose().flatten())
+# #     indices.append(np.array([sz * v_indices[start:end] + j for j in range(sz)]).transpose().flatten())
 
-    indptr.append(np.array([sz+ indptr[-1][-1]])) # closing
+# #     indptr.append(np.array([sz+ indptr[-1][-1]])) # closing
 
-    datavals = np.concatenate(data)
-    # debug: set all inner parameters to 0
-    if False and varset == 0:
-        #datavals[0:end:9] = 0
-        #datavals[1:end:9] = 0
-        #datavals[2:end:9] = 0
+# #     datavals = np.concatenate(data)
+# #     # debug: set all inner parameters to 0
+# #     if False and varset == 0:
+# #         #datavals[0:end:9] = 0
+# #         #datavals[1:end:9] = 0
+# #         #datavals[2:end:9] = 0
 
-        #datavals[3:end:9] = 0
-        #datavals[4:end:9] = 0
-        #datavals[5:end:9] = 0
+# #         #datavals[3:end:9] = 0
+# #         #datavals[4:end:9] = 0
+# #         #datavals[5:end:9] = 0
 
-        datavals[6:end:9] = 0
-        datavals[7:end:9] = 0
-        datavals[8:end:9] = 0
+# #         datavals[6:end:9] = 0
+# #         datavals[7:end:9] = 0
+# #         datavals[8:end:9] = 0
 
-    crs_pose = csr_array((datavals, np.concatenate(indices), np.concatenate(indptr)))
-    J_pose = csr_matrix(crs_pose)
-    return J_pose
+# #     crs_pose = csr_array((datavals, np.concatenate(indices), np.concatenate(indptr)))
+# #     J_pose = csr_matrix(crs_pose)
+# #     return J_pose
 
-def buildResiduumNew(resX, resY) :
-    data = []
-    data.append(resX.flatten().numpy())
-    data.append(resY.flatten().numpy())
-    # print("build res")
-    # print(resX.flatten().numpy())
-    # print(resY.flatten().numpy())
-    res = np.concatenate(data)
-    return res
+# def buildResiduumNew(resX, resY) :
+#     data = []
+#     data.append(resX.flatten().numpy())
+#     data.append(resY.flatten().numpy())
+#     # print("build res")
+#     # print(resX.flatten().numpy())
+#     # print(resY.flatten().numpy())
+#     res = np.concatenate(data)
+#     return res
 
+def check_symmetric(a, tol=1e-8):
+    return np.all(np.abs(a-a.T) < tol)
 
 # bs : blocksize, eg 9 -> 9x9 or 3 -> 3x3 per block
-def blockInverse(M,bs):
+def blockInverse(M, bs):
     Mi = M.copy()
-    if bs>1:
-        bs2 = bs*bs
-        for i in range(int(M.data.shape[0]/bs2)):
-            mat = Mi.data[bs2*i:bs2*i+bs2].reshape(bs,bs)
-            # print(i, " ", mat)
-            imat = inv_dense(mat)
-            Mi.data[bs2*i:bs2*i+bs2] = imat.flatten()
+    if bs > 1:
+        bs2 = bs * bs
+
+        symmetric = True
+        mat = M.data[0 : bs2].reshape(bs, bs)
+        if not check_symmetric(mat):
+            symmetric = False
+
+        for i_ in range(int(M.data.shape[0] / bs2)):
+            mat = Mi.data[bs2 * i_ : bs2 * i_ + bs2].reshape(bs, bs)
+            if not symmetric:
+                mat = np.fliplr(mat)
+                #imat = inv_dense(mat, hermitian=True)
+                imat = inv_nonHermetian(mat) # faster.
+                imat = np.fliplr(imat)
+            else:
+                #imat = inv_dense(mat, hermitian=True)
+                imat = inv_nonHermetian(mat)
+            Mi.data[bs2 * i_ : bs2 * i_ + bs2] = imat.flatten()
     else:
         Mi = M.copy()
-        for i in range(int(M.data.shape[0])):
-            Mi.data[i:i+1] = 1./ Mi.data[i:i+1]
+        for i_ in range(int(M.data.shape[0])):
+            Mi.data[i_ : i_ + 1] = 1.0 / Mi.data[i_ : i_ + 1]
     return Mi
-#S = Ul - W * Vli * W.transpose()
+
+# S = Ul - W * Vli * W.transpose()
 # alternative power its on Ul - W * Vli * W.transpose()
 # better on Ul [I - Uli * W * Vli * W.transpose()] or rather
 # sum_k [Uli * W * Vli * W.transpose()]^k (Ul^-1 * b)
@@ -1245,14 +1603,18 @@ def blockEigenvalue(M, bs):
     Ei = np.zeros(M.shape[0])
     if bs > 1:
         bs2 = bs * bs
+
+        symmetric = True
+        mat = M.data[0 : bs2].reshape(bs, bs)
+        if not check_symmetric(mat):
+            symmetric = False
+
         for i in range(int(M.data.shape[0] / bs2)):
-            mat = M.data[bs2 * i : bs2 * i + bs2].reshape(bs, bs)
-            mat = np.fliplr(mat)
+            mat = M.data[bs2 * i : bs2 * i + bs2].copy().reshape(bs, bs)
+            if not symmetric:
+                mat = np.fliplr(mat)
             #print(i, " ", mat) # kind of flipped, so eigenval is crap.
             evs = eigvalsh(mat)
-            if evs[0] <0:
-                mat = np.fliplr(mat)
-                evs = eigvalsh(mat)
             Ei[bs*i:bs*i+bs] = evs[bs-1]
         Ei = diag_sparse(Ei)
     else:
@@ -1474,22 +1836,6 @@ L = L0
 verbose = False
 debug = False
 useInvSolver = False
-# VENICE
-#SOLVER 14 it. cost 1      780196.0678238661
-#        9 it. cost 1      857776.3171311354
-# power its 10
-#  9                 1116206.857252748       with penalty  1129433.474213173
-# 14 it. cost 1      1080683.541304447       with penalty  1083019
-# power 20 
-#9 it. cost 1      981319.3290127576       with penalty  986289.6641950987
-#14 it. cost 1      965701.3471037014       with penalty  967042.
-# powerits = 30
-# 9 it.  cost 1      863494.3923218106       with penalty  889793.9636650706
-# 14 it. cost 1      649813.2902730353       with penalty  657871.82424686
-# issue is L grows too large sometimes.
-#Polak 1o its
-#9 it. cost 1      1082638.0196162288       with penalty  1098187.86145675
-#14 it. cost 1      701979.4950357398
 
 powerits = 200
 gamma = 1/1
@@ -1657,7 +2003,7 @@ while it < iterations:
         print("x0_p int", camera_params[:,6:9]) # to check validity -- what goes wrong?
 
     start = time.time()
-    funx0_st1 = lambda X0, X1, X2: torchSingleResiduum(X0.view(-1,9), X1.view(-1,3), X2.view(-1,2))
+    funx0_st1 = lambda X0, X1, X2: torchSingleResiduumScaled(X0.view(-1,9), X1.view(-1,3), X2.view(-1,2))
     fx1 = funx0_st1(camera_params[camera_indices[:]], point_params[point_indices[:]], torch_points_2d[:,:])
     end = time.time()
     costEnd = np.sum(fx1.numpy()**2)

@@ -108,6 +108,9 @@ FILE_NAME = "problem-257-65132-pre.txt.bz2" # 193123.30793304814
 BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/ladybug/"
 FILE_NAME = "problem-138-19878-pre.txt.bz2"
 
+BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/venice/"
+FILE_NAME = "problem-52-64053-pre.txt.bz2"
+
 URL = BASE_URL + FILE_NAME
 
 if not os.path.isfile(FILE_NAME):
@@ -238,6 +241,11 @@ x0 = np.hstack((camera_params.ravel(), points_3d.ravel()))
 f0 = fun(x0, n_cameras, n_points, camera_indices, point_indices, points_2d)
 #plt.plot(f0)
 
+camera_params = x0[:n_cameras * 9].reshape((n_cameras, 9))
+print("min focal distance ", np.min(camera_params[:,6].flatten()), " ", np.max(camera_params[:,6].flatten()) )
+print("min k1 distance ", np.min(camera_params[:,7].flatten()), " ", np.max(camera_params[:,7].flatten()) )
+print("min k2 distance ", np.min(camera_params[:,8].flatten()), " ", np.max(camera_params[:,8].flatten()) )
+
 print("Residuum initial ", f0, " ", f0.shape)
 print("Residuum equals initially ", np.sum(f0**2))
 
@@ -246,7 +254,7 @@ A = bundle_adjustment_sparsity(n_cameras, n_points, camera_indices, point_indice
 t0 = time.time()
 # ftol=1e-5 can be very slow. interested in ballpark estimate how good it should get.
 # since my base is sometimes badnot good, eg problem venice'52'
-res = least_squares(fun, x0, jac_sparsity=A, verbose=2, x_scale='jac', ftol=1e-3, method='trf', # test method = 'lm' or 'dogbox'
+res = least_squares(fun, x0, jac_sparsity=A, verbose=2, x_scale='jac', ftol=1e-4, method='trf', # test method = 'lm' or 'dogbox'
                     args=(n_cameras, n_points, camera_indices, point_indices, points_2d))
 t1 = time.time()
 
@@ -254,3 +262,8 @@ print("Optimization took {0:.0f} seconds".format(t1 - t0))
 #plt.plot(res.fun)
 print("Residuum final ", res.fun, " ", res.fun.shape)
 print("Residuum equals finally ", np.sum(res.fun**2))
+
+camera_params = res.x[:n_cameras * 9].reshape((n_cameras, 9))
+print("min focal distance ", np.min(camera_params[:,6].flatten()), " ", np.max(camera_params[:,6].flatten()) )
+print("min k1 distance ", np.min(camera_params[:,7].flatten()), " ", np.max(camera_params[:,7].flatten()) )
+print("min k2 distance ", np.min(camera_params[:,8].flatten()), " ", np.max(camera_params[:,8].flatten()) )
