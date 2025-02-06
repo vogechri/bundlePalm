@@ -49,16 +49,17 @@ def readData(data):
 # with open('A.json', 'r') as file:
 #     data = json.load(file)
 # plotName = "allInOneA.png"
-# with open('C.json', 'r') as file:
-#      data = json.load(file)
-# plotName = "allInOneC.png"
+with open('C.json', 'r') as file:
+    data = json.load(file)
+plotName = "allInOneCluster.png"
 
 # with open('All.json', 'r') as file:
 #     data = json.load(file)
 # plotName = "allInOneAll.png"
-with open('Compress.json', 'r') as file:
-    data = json.load(file)
-plotName = "allInOneCompress.png"
+
+# with open('Compress.json', 'r') as file:
+#     data = json.load(file)
+# plotName = "allInOneCompress.png"
 
 
 A = readData(data)
