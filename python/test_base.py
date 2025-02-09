@@ -86,8 +86,11 @@ FILE_NAME = "problem-138-19878-pre.txt.bz2"
 FILE_NAME = "problem-646-73584-pre.txt.bz2"
 #22 it. cost 0       377834, stuck
 
-#BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/dubrovnik/"
-#FILE_NAME = "problem-173-111908-pre.txt.bz2" # on/off remove far points 498296 (37 its) off 524180
+BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/dubrovnik/"
+FILE_NAME = "problem-173-111908-pre.txt.bz2" # on/off remove far points 498296 (37 its) off 524180
+
+#BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/ladybug/"
+#FILE_NAME = "problem-49-7776-pre.txt.bz2"
 
 
 URL = BASE_URL + FILE_NAME
@@ -1594,7 +1597,7 @@ def solveByGDPolak(Ul, W, Vli, bS, m, L, mu):
 # stop criterion is 
 # stop_criterion(np.linalg.norm(delta, 2), np.linalg.norm(delta_i, 2), it)
 def stop_criterion(delta, delta_i, i):
-    eps = 1e-6 #1e-2 used in paper, tune. might allow smaller as faster? TODO: confusing first step, not av step
+    eps = 1e-3 #1e-2 used in paper, tune. might allow smaller as faster? TODO: confusing first step, not av step
     return (i+1) * delta_i / delta < eps
 
 # |f(x0) + J(xo) * delta|^2 + lambda | [Ip,Il] * delta|^2
@@ -1831,13 +1834,13 @@ bfgs_rhos = np.zeros([bfgs_mem, 1])
 # compute f(x0) and Jacobians given x0
 # do not understand can elad to hicup despite being better per step.
 useExtInCost = True # with using extrapolation, does it lead to lower cost, how much? -- must use with TR as well?
-L0 = 1.0 #e-3
+L0 = 0.1 #e-3
 L = L0
 verbose = False
 debug = False
 useInvSolver = False
 
-powerits = 200
+powerits = 100
 gamma = 1/1
 Gs = [] 
 Fs = []
