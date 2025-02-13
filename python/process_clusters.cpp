@@ -1497,6 +1497,7 @@ void recluster_cameras(
     // try last succesful cl again?
     const int receive_candidate_cluster_id = (consecutive_failures == 1) ? last_receive_cluster : sample_cl(mt);
 
+    // residual do not become more even.
     if (move_candidate_cluster_id == receive_candidate_cluster_id || 
         res_per_cluster[receive_candidate_cluster_id] + 2 * cams_from_lm[candidate_lm_id].size() > res_per_cluster[move_candidate_cluster_id]) {
       //std::cout << " move_candidate_cluster_id " << move_candidate_cluster_id  << " skipped\n";
@@ -1618,6 +1619,7 @@ double GetCost(const std::map<int, std::set<int>> &landmarkFromCameraOfPart,
   double cost = 0;
   for(const auto& [cam, landmarksFromCam] : landmarkFromCameraOfPart) {
     const int numLandmarks = landmarksFromCam.size();
+    if (numLandmarks == 0) {continue;}
     if (numLandmarks > maxLmPerCam) {continue;}
     cost += std::exp(-numLandmarks / static_cast<double>(maxLmPerCam) * temperature);
   }
@@ -1658,20 +1660,25 @@ double GetOrderCost(const std::map<int, std::set<int>> &landmarkFromCameraOfPart
                int maxLmPerCam, double temperature, int res_in_cluster, int total_res, int kClusters) {
   double cost = 0;
   int entries = 0;
-  for(const auto& [cam, landmarksFromCam] : landmarkFromCameraOfPart){
+  for (const auto& [cam, landmarksFromCam] : landmarkFromCameraOfPart) {
     const int numLandmarks = landmarksFromCam.size();
+    if (numLandmarks == 0) {continue;}
     if (numLandmarks > maxLmPerCam) {continue;}
     cost += std::exp(-numLandmarks / static_cast<double>(maxLmPerCam) * temperature);
     entries++;
   }
-    
+
   double p = static_cast<double>(res_in_cluster) / static_cast<double>(total_res);
   double costKlDivEquality = - std::log(p * static_cast<double>(kClusters)) / static_cast<double>(kClusters); // quite strong yet impacts degeneracy
   // mean 
   // TODO: 356 was 1e-3 one component remains. 1e-2: better, still 4 large 6 small cluster.
   // Could also use 1e-3, eval if not recompute with 1e-2, etc.
 
-  return cost / static_cast<double>(std::max(1, entries)) + 1e-0 / static_cast<double>(res_in_cluster) + _order_div_mult_ * costKlDivEquality;
+  // prefers lms (used to define order) that are seen in many cameras. Why those first?
+
+  //return cost / static_cast<double>(std::max(1, entries)) + 1e-0 / static_cast<double>(res_in_cluster) + _order_div_mult_ * costKlDivEquality;
+  return cost / static_cast<double>(std::max(1, entries)) + 1e-1 * _order_div_mult_ * costKlDivEquality;
+
   // return cost / std::sqrt(static_cast<double>(std::max(1, entries))) + 1e-0 / static_cast<double>(res_in_cluster);
 }
 
@@ -2075,7 +2082,7 @@ void cluster_cameras_degeneracy(
     };
     std::priority_queue<int, std::vector<int>, decltype(cmp)> pq(cmp);
 
-    for(int partId=0;partId < num_lands; partId++ ) {
+    for (int partId = 0;partId < num_lands; partId++ ) {
       // This could be a different cost.
 #ifdef _select_by_even_cost_
       // order by order cost. prefer small parts.
