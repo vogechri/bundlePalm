@@ -3,6 +3,9 @@
 // Order landmark shift by 
 #define _select_by_even_cost_
 
+// Should work .. but it does not. Different random seeds needed .. lol?
+// #define __clusteridentical_lms_early__
+
 #include "process_clusters.h"
 
 #include <assert.h>
@@ -24,8 +27,10 @@
 //#define _rngseed_ 123 // 527k, but intermediate (60 its) results bad. Still: BEST overall
 //#define _rngseed_ 456 works for large DL
 //#define _rngseed_ 666 // be2 552k
-#define _rngseed_ 4567 // be2 547k
-//#define _rngseed_ 9753
+#define _rngseed_ 4567 // be2 547k // BEST
+// find new best seed for __clusteridentical_lms_early__ could also compare 9 clusters or 11 with wither.
+//#define _rngseed_ 9753 // SHIT at 3068 -- all
+
 #define _order_div_mult_  1e-1
 
 // Speedup, very little worse, else retries rejected merges.
@@ -975,7 +980,7 @@ fill_vec_and_size(res_to_cluster, res_to_cluster_sizes, res_indices_in_cluster);
 
 ///////////////////////
 
-// relevantCameras hold part and camId
+// relevantCameras hold part and camId, maps from #lms obsered by cam in part. 
 void FillRelevantCameras(const std::vector<std::map<int, std::set<int>>> &landmarkFromCameraPerPart,
                          const std::vector<std::set<int>>& lms_from_cam,
                          int maxLmPerCam,
@@ -1229,7 +1234,7 @@ void recluster_cameras(
     // accept with 1-exp(-cost * temperature), pick with  ? prevent x2 picking .. sigh.
 
     // A relevant cameras / parts. 
-    static int maxLmPerCam = 6;
+    static int maxLmPerCam = 6; // ?
     static double temperature = 10;
     std::vector<std::vector<std::pair<int,int>>> relevantCameras(maxLmPerCam); // cam obs in part -> cam id.
 
@@ -1240,19 +1245,37 @@ void recluster_cameras(
     std::vector<int> finished(maxLmPerCam, 0);
 
 //#ifdef __disabled__for__testing__
+// temperature = 30;  // does something -- but, if not good start here not much gain.
+for(int runs = 0; runs < 2; ++runs) { // more uns do not change things WTF?
 
+    // new:
+    maxLmPerCam = 6;
+    relevantCameras.clear();
+    relevantCameras.resize(maxLmPerCam); // cam obs in part -> part and camId
+    temperature -= runs;
+    movable = 0;
+    repeats = 30;
+    started.clear();started.resize(maxLmPerCam, 0);
+    finished.clear();finished.resize(maxLmPerCam, 0);
+    // end new
+
+    // relevantCameras maps from #lms obsered by cam in part. e.g. relevantCameras[1] -> all cams and part seeing 1 lm only in part.
+    // Those are candidayes to receive / send lms. Likely we should try BOTH here? 
+    // curently we HERE only send from cam with few to other cam/part. 
     FillRelevantCameras(landmarkFromCameraPerPart, lms_from_cam, maxLmPerCam, relevantCameras);
     for(int camObservations = 1 ; camObservations < relevantCameras.size(); ++camObservations) {
       started[camObservations] = relevantCameras[camObservations].size();
       movable += started[camObservations];
     }
 
+    // TODO: lower parity in #residuals over time here. lower temperature over time? residuals cost is done how -- why not entropy?
     while(movable > 0 && repeats >= 0) {
       --repeats;
       for (std::vector<std::pair<int, int>> relevantCamerasPerLm : relevantCameras) {
         for (std::pair<int, int> partAndCamIdx : relevantCamerasPerLm) {
           int fromPartId = partAndCamIdx.first;
           int camId = partAndCamIdx.second;
+          do { // loop here until no more moves possible?
           const auto [toPartId, lmIdx] =
             GetBestMoveCost(fromPartId, camId, kClusters, // should consider # res in cluster as tie breaker.
               landmarkFromCameraPerPart, cams_from_lm, res_per_cluster, maxLmPerCam, temperature);
@@ -1260,8 +1283,12 @@ void recluster_cameras(
             //std::cout << " Moving " << lmIdx << " from " << fromPartId << " observed by cam " << camId << " to " << toPartId << "\n";
             ApplyMove(lmIdx, fromPartId, toPartId, cams_from_lm, landmarkFromCameraPerPart, res_per_cluster);
             // could break if enters here after for loop end, to ensure we process small 1st. also could use pq.
-          }
+          }else{break;}
+          } while(false); // set to false to recive original behavior.
         }
+        // Maybe we need to treat 2 lms by cam 1st?
+        //Cam observations started/finished: 1 : 347/35, 2 : 431/25, 3 : 380/14, 4 : 382/11, 5 : 337/9,  left 94: true
+        //Cam observations started/finished: 1 : 347/34, 2 : 431/28, 3 : 380/11, 4 : 382/10, 5 : 337/5,  left 88: false
       }
 
       movable = 0;
@@ -1357,6 +1384,7 @@ void recluster_cameras(
   }
   std::cout << " left " << movable << std::endl;
 
+} // repeats
 //#endif
 
   // inverse: find cams in small clusters. those cams observe lms in other clusters.
@@ -1613,14 +1641,53 @@ void recluster_cameras(
 // for a part receive landmark from camera: cam -> landmarks oberserved.
 // go over cams, for landmarks with only few observations -> merge
 // Leads to 1 big cluster in some cases trafalgar problem-257 and problem-253 dubrovnik
+// Order cost uses mean of 'cost' here.
+//
+// Where do I prefer to have fewer cameras in part? its in here. as is sum over cameras with few lms. this prefers cams to have > maxLmPerCam = 20 lms. then the cam does not count.
+//#define __testThis__
 double GetCost(const std::map<int, std::set<int>> &landmarkFromCameraOfPart, 
                int maxLmPerCam, double temperature, int res_in_cluster, int total_res, int kClusters) {
   double cost = 0;
-  for(const auto& [cam, landmarksFromCam] : landmarkFromCameraOfPart) {
-    const int numLandmarks = landmarksFromCam.size();
-    if (numLandmarks > maxLmPerCam) {continue;}
-    cost += std::exp(-numLandmarks / static_cast<double>(maxLmPerCam) * temperature);
+
+  // auto cmp = [](double left, double right) {
+  //   return left < right; // smallest first?
+  // };
+  // std::priority_queue<double, std::vector<double>, decltype(cmp)> pq(cmp);
+
+  for (const auto& [cam, landmarksFromCam] : landmarkFromCameraOfPart) {
+    // TODO: EVAL THE CHANGE.
+#ifdef __testThis__
+    temperature = 20; // make fit here. lower: more weight on not having isolated lms in cam.
+    const int numLandmarks = std::min(static_cast<int>(landmarksFromCam.size()), maxLmPerCam);
+    // if (numLandmarks > maxLmPerCam) {continue;} // excluding this -> num cams does matter as well.
+    if (numLandmarks == 0) {continue;}  // no cost.
+    // orig:
+    // cost += std::exp(-(numLandmarks-1) / static_cast<double>(maxLmPerCam-1) * temperature); // gain is exp(-t) ->exp(-2t) etc. 
+    // new:
+    cost += std::pow(static_cast<double>(maxLmPerCam-1) / static_cast<double>(numLandmarks-0.5) * temperature, 1.5); // gain is exp(-t) ->exp(-2t) etc.     
+#else
+    // const int numLandmarks = landmarksFromCam.size();
+    // if (numLandmarks > maxLmPerCam) {continue;}
+
+    const int numLandmarks = std::min(static_cast<int>(landmarksFromCam.size()), maxLmPerCam);
+    if (numLandmarks == 0) {continue;}  // no cost.
+
+    cost += std::exp(-numLandmarks / static_cast<double>(maxLmPerCam) * temperature); // should 0 be a cost? not correct to skip 0.. hmm. does not do anything.
+#endif
+
+
+    // cost += std::exp(static_cast<double>(maxLmPerCam-numLandmarks) * temperature); // '-' -> ? same
+
+    // pq.push(std::exp(-numLandmarks / static_cast<double>(maxLmPerCam) * temperature));
+    // if (pq.size() > 20) {pq.pop();}
   }
+
+  // effective:
+  // cost = 0;
+  // for(int i = 0; i < pq.size(); ++i) {
+  //   cost += pq.top();
+  //   pq.pop();
+  // }
 
   double costKlDivEquality = 0;
   const int target_residual = total_res / kClusters;
@@ -1644,34 +1711,78 @@ double GetCost(const std::map<int, std::set<int>> &landmarkFromCameraOfPart,
     // 1st part is constant = - 1/10 * log( res )
     // 2nd divergence is 
     // res_in_cl / total_res * log (10 * res_in_cl / total_res) 
-    //costKlDivEquality = 1e-2 * costKlDivEquality1 + 1e-1 * costKlDivEquality2;
-    //costKlDivEquality = 1e-3 * costKlDivEquality2;
+    // costKlDivEquality = 1e-2 * costKlDivEquality1 + 1e-1 * costKlDivEquality2;
+    // costKlDivEquality = 1e-3 * costKlDivEquality2;
     costKlDivEquality = 1e-3 * costKlDivEquality1; // does something, but should merge small clusters -> desired 10 -> out 8 or so ..
   }
-  
+
+#ifdef __testThis__ // might not make ANY difference
+  // test this long term. done. worse
+
+  double targetRes = static_cast<double>(total_res) / static_cast<double>(kClusters);
+  // Might need to mult by #cams / kClusters? 
+  double mult = 1; // the larger the more even. Can still fail to do very even. I guess before i only had this on but very soft. as + 1/res.
+  // I guess for even we would need to grow such that small still exist AT THE END to fill gaps.
+  // orig:
+  // return cost + 1 * std::exp( mult * std::max(0., (static_cast<double>(res_in_cluster) - targetRes / 2.))  / targetRes / 2. ); // at > T/2 -> penalty. very large at the end.
+  // now lin cost new:
+  return cost + std::pow(1e0 / static_cast<double>(res_in_cluster), 1.0); // could also return mean cost
+
+  // Maybe other way round so log(sum(exp())) + 1/ res? 1/res: merge 2 small ones + do not like large clusters. 
+  const double target = 3. * targetRes / 4.;
+  return 1e2 * std::log(cost) + 1e-0 / static_cast<double>(res_in_cluster) + mult * std::max(0., (static_cast<double>(res_in_cluster) - target)) / target; // at > T/2 -> penalty. very large at the end.
+
+  return cost + costKlDivEquality + 1e-0 / static_cast<double>(res_in_cluster); // could also return mean cost
+  return cost + costKlDivEquality + 10 * 1e-0 / static_cast<double>(res_in_cluster); // could also return mean cost
+#else
+  // 1/ res -> get rid of small clusters first. e.g. merge small into 1 is better than merge 2 middle sized ones.
   return cost + costKlDivEquality + 1e-0 / static_cast<double>(res_in_cluster); // could also return mean cost
   //return cost + costKlDivEquality + 1e-0 / std::sqrt(static_cast<double>(res_in_cluster));
+#endif
 }
 
-// GetAverageCost
+// prefers landmarks seen by few cameras with few observations in those cameras on average -- so not few observations first.
 double GetOrderCost(const std::map<int, std::set<int>> &landmarkFromCameraOfPart, 
                int maxLmPerCam, double temperature, int res_in_cluster, int total_res, int kClusters) {
   double cost = 0;
   int entries = 0;
-  for(const auto& [cam, landmarksFromCam] : landmarkFromCameraOfPart){
+  // maybe take average of worst ten? not average of all?
+
+  // auto cmp = [](double left, double right) {
+  //   return left < right; // smallest first?
+  // };
+  // std::priority_queue<double, std::vector<double>, decltype(cmp)> pq(cmp);
+
+  for(const auto& [cam, landmarksFromCam] : landmarkFromCameraOfPart) {
     const int numLandmarks = landmarksFromCam.size();
     if (numLandmarks > maxLmPerCam) {continue;}
     cost += std::exp(-numLandmarks / static_cast<double>(maxLmPerCam) * temperature);
+    //cost += std::exp(-(maxLmPerCam-numLandmarks) / static_cast<double>(maxLmPerCam) * temperature);
+
+    //pq.push(std::exp(-numLandmarks / static_cast<double>(maxLmPerCam) * temperature));
+    // pq.push(std::exp(-(maxLmPerCam-numLandmarks) / static_cast<double>(maxLmPerCam) * temperature));
+    // if (pq.size() > 10) {pq.pop();}
     entries++;
   }
-    
+  cost /= static_cast<double>(std::max(1, entries));
+  // cost = 0;
+  // for(int i = 0; i < pq.size(); ++i) {
+  //   cost += pq.top() / static_cast<double>(pq.size());
+  //   pq.pop();
+  // }
+
   double p = static_cast<double>(res_in_cluster) / static_cast<double>(total_res);
   double costKlDivEquality = - std::log(p * static_cast<double>(kClusters)) / static_cast<double>(kClusters); // quite strong yet impacts degeneracy
   // mean 
   // TODO: 356 was 1e-3 one component remains. 1e-2: better, still 4 large 6 small cluster.
   // Could also use 1e-3, eval if not recompute with 1e-2, etc.
 
-  return cost / static_cast<double>(std::max(1, entries)) + 1e-0 / static_cast<double>(res_in_cluster) + _order_div_mult_ * costKlDivEquality;
+  // Slow: merges only small ones. why slow then ? no idea.
+  // return cost + /// static_cast<double>(std::max(1, entries)) +
+  //        (1e-0 / static_cast<double>(res_in_cluster) +
+  //         _order_div_mult_ * costKlDivEquality);
+
+  return cost + 1e-0 / static_cast<double>(res_in_cluster) + _order_div_mult_ * costKlDivEquality;
   // return cost / std::sqrt(static_cast<double>(std::max(1, entries))) + 1e-0 / static_cast<double>(res_in_cluster);
 }
 
@@ -1721,7 +1832,7 @@ std::pair<int, double> FindbestMatchForPart(int partId, //const std::vector<std:
   const std::vector<int>& lmToPart, const std::vector<double>& costOfPart, 
   int maxLmPerCam, double temperature, int num_res, int kClusters, bool verbose = false) {
   // idea: find k cams with fewest landmarks in part.
-  constexpr int topK = 1; // 1 -> 3: 24 -> 38s
+  constexpr int topK = 1; // 1 -> 3: 24 -> 38s, before used 1. maybe 3 is better 3068. not clear what defines better for 3068.
   constexpr int topL = 30;  // change to 20 does 4s -> 5s .. + 25% likely trade off with below.
   // test: 3000 replacing 1500. run on probem 52.
   constexpr int topM = 1500;// 1500 -> 4500: 24s ->27s // we do not use all but 700 random landmarks for a cam -- there can be 30k.
@@ -1783,14 +1894,14 @@ std::pair<int, double> FindbestMatchForPart(int partId, //const std::vector<std:
 
       const double cost = costOfPart[otherPartId];
       //std::cout << "lm " << lmId << " " << cost << "\n";
-      if(pq.size() < topL) { // always push if less than desired
+      if (pq.size() < topL) { // always push if less than desired
         otherPartCost.push_back({otherPartId, cost});
         //std::cout << "Pushing "  << otherPartId << " with " << cost << " for merge\n";
         pq.push(otherPartCost.size() - 1);
         continue;
       }
 
-      if(otherPartCost[pq.top()].second < cost) { // new is better (== random pick?)
+      if (otherPartCost[pq.top()].second < cost) { // new is better (== random pick?)
         const int id = pq.top();
         pq.pop();
         //std::cout << "Considering "  << otherPartId << " with " << cost << " for merge replacing " << otherPartCost[id].first << " c: " << otherPartCost[id].second << "\n";
@@ -2017,10 +2128,16 @@ std::vector<std::set<int>> find_identical_lms(const std::vector<std::vector<int>
       }
     }
   }
-  std::cout << "Number of landmarks with identical cameras " << numDuplicateLms << std::endl;
+  std::cout << "Number of landmarks with identical cameras " << numDuplicateLms << " / " << num_lms << std::endl;
   return duplicate_lm_ids;
 }
 
+
+// Slected part to be merged by metric GetOrderCost.
+// pop next part.
+// for that part find best part to merge with.
+// minimize what. GetCost(part) = sum _c in part exp-|lms(c)| / maxLmPerCam * temperature, if lms(c) < maxLmPerCam, 0 else.
+// High cost for few lms seen. 0 for none! not sure this works for greedy. no idea to approx as well.
 void cluster_cameras_degeneracy(
     int kClusters,
     const std::vector<int>& camera_indices_in,  // per res -> cam involved
@@ -2040,7 +2157,8 @@ void cluster_cameras_degeneracy(
     }
 
     static int maxLmPerCam = 10;
-    static double temperature = 20;
+    // Guess this is hard to trade off. Will lead to 1 large many small cluster
+    static double temperature = 20; // todo: lower -> more weight on few cams. maybe slower?
     static int nLowestPartsToTry = 1;
 
     // 2. map lm to cluster index. start each lm is a cluster.
@@ -2089,6 +2207,7 @@ void cluster_cameras_degeneracy(
     }
 
     int num_parts = num_lands;
+#ifdef __clusteridentical_lms_early__
     // Clamp landmarks with identical camera set into one part.
     // Likely better to make code believe only single lm is in part (searches voer cams .. ?) Does it do anything?
     std::vector<std::set<int>> list_of_identical_lms = find_identical_lms(cams_from_lm, num_cams, num_lands);
@@ -2109,6 +2228,14 @@ void cluster_cameras_degeneracy(
         num_parts--;
       }
     }
+#endif
+
+    // TODO: Merge parts that are full subsets of another part.
+    // maybe hash all. take hash of one. find similar one. small to large would suffice. also can be ordered simply.
+    // n hashes. P(same ) hash subsets for all but smallest parts (those have no subsets?).
+    // problem 2 subsets are quadratic already in total size.
+    // per view this is not so bad. go over all parts that share a view (for smaller one). I.e. 2 elements -> 2 views.
+        
 
     while (!pq.empty() && num_parts > kClusters) {
       const int partId = pq.top();
