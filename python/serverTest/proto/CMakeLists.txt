@@ -1,0 +1,15 @@
+#INCLUDE(FindProtobuf)
+#FIND_PACKAGE(Protobuf REQUIRED)
+#INCLUDE_DIRECTORIES(${PROTOBUF_INCLUDE_DIR})
+#protobuf_generate_cpp(PROTO_SRCS PROTO_HDRS message.proto)
+#add_library(proto STATIC ${PROTO_SRCS} ${PROTO_HDRS})
+# protobuf_generate(
+#     LANGUAGE cpp
+#     PROTOS test.proto)
+# ADD_LIBRARY(test_proto ${PROTO_HEADER} ${PROTO_SRC})
+
+#PROTOBUF_GENERATE_CPP(PROTO_SRC PROTO_HEADER test.proto)
+#ADD_LIBRARY(test_proto ${PROTO_HEADER} ${PROTO_SRC})
+
+#PROTOBUF_GENERATE_CPP(MY_PROTO_SRC MY_PROTO_HEADER my_msg.proto)
+#ADD_LIBRARY(my_proto ${MY_PROTO_HEADER} ${MY_PROTO_SRC})
