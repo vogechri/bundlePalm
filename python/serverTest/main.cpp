@@ -10,6 +10,8 @@
 
 #include <Eigen/Core>
 #include <Eigen/Sparse>
+#include<Eigen/Dense>
+#include <Eigen/Eigenvalues> 
 
 #include "ceres/ceres.h"
 #include "ceres/rotation.h"
@@ -102,6 +104,45 @@ struct SnavelyReprojectionError {
   double observed_y;
 };
 
+template<int N>
+void BlockSqrt(SparseMatrix<double, Eigen::RowMajor>& mat) {
+    int numrows = mat.rows();
+    THROW_IF(mat.rows() != mat.cols());
+    //THROW_IF(mat.);
+    double* values = mat.valuePtr();
+    //std::cout << "before  "<< values[0]<< " " << values[1]<< " " << values[2]<< " " << values[3] << "\n";
+    for (int i = 0; i < numrows / N; i++) {
+        auto mat9x9 = Eigen::Map< Eigen::Matrix<double,N,N> > (&(values[i * N*N]));//,  Eigen::Stride<0, 0>);
+        //std::cout << "before "<< mat9x9 << " \n";
+
+        Eigen::SelfAdjointEigenSolver<Eigen::Matrix<double,N,N> > eigensolver;
+        eigensolver.computeDirect(mat9x9, Eigen::DecompositionOptions::ComputeEigenvectors);
+        //VPQ_EXPECT_EQ(eigensolver.info(), Eigen::Success);
+  
+        // SqrtCovEigenValues are sorted in decreasing order.
+        Eigen::Vector<double, N> sqrtEigenValues = eigensolver.eigenvalues().cwiseSqrt();//.cwiseMax(lowerBoundSquared).cwiseSqrt().cwiseInverse();
+        mat9x9 = eigensolver.eigenvectors() * sqrtEigenValues.asDiagonal() * eigensolver.eigenvectors().transpose();
+        //std::cout << "after  "<< mat9x9.transpose() * mat9x9 << " \n";
+    }
+    //std::cout << "after  "<< values[0]<< " " << values[1]<< " " << values[2]<< " " << values[3] << "\n";
+}
+
+template<int N>
+void BlockInverse(SparseMatrix<double, Eigen::RowMajor>& mat) {
+    int numrows = mat.rows();
+    THROW_IF(mat.rows() != mat.cols());
+    //THROW_IF(mat.);
+    double* values = mat.valuePtr();
+    //std::cout << "before  "<< values[0]<< " " << values[1]<< " " << values[2]<< " " << values[3] << "\n";
+    for (int i = 0; i < numrows / N; i++) {
+        auto mat9x9 = Eigen::Map< Eigen::Matrix<double,N,N> > (&(values[i * N*N]));//,  Eigen::Stride<0, 0>);
+        std::cout << "before "<< mat9x9 << " \n";
+        mat9x9 = mat9x9.inverse();
+        std::cout << "after "<< mat9x9 << " \n";        
+    }
+    //std::cout << "after  "<< values[0]<< " " << values[1]<< " " << values[2]<< " " << values[3] << "\n";
+}
+
 int main() {
     // Initialize the context
     zmq::context_t context(1);
@@ -114,6 +155,9 @@ int main() {
     socket.bind("tcp://*:5555");
 
     // Those are permanent, variables can change.
+    int numCameras = 0;
+    int numLandmarks = 0;
+
     std::vector<double> cameras;
     std::vector<int> cameras_to_ceres; // need to map ceres id to camera id and back
     std::vector<int> landmark_to_ceres;
@@ -200,6 +244,8 @@ int main() {
                 // std::cout << std::endl;
                 // execute run 
 
+                numCameras = pro.cameras_size() / 9;
+                numLandmarks = pro.landmarks_size() / 3;
                 // Copy
                 cameras.clear();
                 cameras.reserve(pro.cameras_size());
@@ -212,15 +258,25 @@ int main() {
                     landmarks.push_back(v);
                 }
                 cameras_to_ceres.clear();
-                cameras_to_ceres.resize(pro.cameras_size() /9, -1);
+                cameras_to_ceres.resize(numCameras, -1);
                 landmark_to_ceres.clear();
-                landmark_to_ceres.resize(pro.landmarks_size() / 3, -1);
+                landmark_to_ceres.resize(numLandmarks, -1);
                 ceres_to_camera_and_landmark.clear();
                 ceres_to_camera_and_landmark.resize(pro.cameras_size() + pro.landmarks_size(), -1);
        
                 // setup problem again.
                 problem = ceres::Problem(); // overwrite ..?
                 int ceres_id = 0;
+                // try to make my life simpler .. make ids match: OK. cameras are 1st landmark second.
+                for (int i = 0; i < cameras.size(); i += 9) {
+                    problem.AddParameterBlock(&cameras[i], 9);
+                }
+                for (int i = 0; i < landmarks.size(); i += 3) {
+                    problem.AddParameterBlock(&landmarks[i], 3);
+                }
+
+                std::cout << "Parameter block added\n";
+                // SetParameterBlockVariable -> could set cameras constant, could use for 's'.
                 for (int i = 0; i < pro.observations_size() / 2; ++i) {
                     // Each Residual block takes a point and a camera as input and outputs a 2
                     // dimensional residual. Internally, the cost function stores the observed
@@ -241,6 +297,8 @@ int main() {
                     // std::cout << "ceresId " << ceres_id << " of " << ceres_to_camera_and_landmark.size() 
                     //           << " -> " << pro.cam_id(i) << " of " << cameras_to_ceres.size() << "=" << cameras_to_ceres[pro.cam_id(i)] 
                     //           << " | " << pro.lm_id(i) << " of " << landmark_to_ceres.size() << "="  << landmark_to_ceres[pro.lm_id(i)] << "\n";
+
+                    // Not needed any more.
                     if (cameras_to_ceres[pro.cam_id(i)] == -1) {
                         ceres_to_camera_and_landmark[ceres_id] = pro.cam_id(i);
                         cameras_to_ceres[pro.cam_id(i)] = ceres_id;
@@ -267,8 +325,9 @@ int main() {
                 std::cout << "Finished eval problem \n";
                 // Now. I need JpTJp, hence.
 
-                SparseMatrix<double, Eigen::RowMajor> Jp(jacobian.num_rows, 9 * cameras_to_ceres.size());
-                SparseMatrix<double, Eigen::RowMajor> Jl(jacobian.num_rows, 3 * landmark_to_ceres.size());
+                if(false) {
+                SparseMatrix<double, Eigen::RowMajor> Jp(jacobian.num_rows, 9 * numCameras);
+                SparseMatrix<double, Eigen::RowMajor> Jl(jacobian.num_rows, 3 * numLandmarks);
                 Jp.reserve(VectorXi::Constant(2 * jacobian.num_rows,9));
                 Jl.reserve(VectorXi::Constant(2 * jacobian.num_rows,3));
                 // JP.setFromTriplets(coefficients.begin(), coefficients.end());
@@ -309,33 +368,77 @@ int main() {
                 Jp.makeCompressed();
                 Jl.makeCompressed();
 
-                SparseMatrix<double, Eigen::RowMajor> JpJ(9 * cameras_to_ceres.size(), 9 * cameras_to_ceres.size());
-                SparseMatrix<double, Eigen::RowMajor> JlJ(3 * landmark_to_ceres.size(), 3 * landmark_to_ceres.size());
-                JpJ.reserve(VectorXi::Constant(9 * cameras_to_ceres.size(),9));
-                JlJ.reserve(VectorXi::Constant(3 * landmark_to_ceres.size(),3));
+                SparseMatrix<double, Eigen::RowMajor> JpJ(9 * numCameras, 9 * numCameras);
+                SparseMatrix<double, Eigen::RowMajor> JlJ(3 * numLandmarks, 3 * numLandmarks);
+                JpJ.reserve(VectorXi::Constant(9 * numCameras, 9));
+                JlJ.reserve(VectorXi::Constant(3 * numLandmarks, 3));
 
                 JpJ = Jp.transpose() * Jp;
                 JlJ = Jl.transpose() * Jl;
                 auto JpJ_diag = JpJ.diagonal().array();
                 // maybe block diag as well.
                 double be = 1e-4;
-                JpJ.diagonal().array() += be * JpJ.diagonal().array(); 
+                JpJ.diagonal().array() += be * JpJ.diagonal().array();
+                
+                // using SparseMatrix = Eigen::SparseMatrix<double, Eigen::RowMajor>;
+                // Eigen::Map<SparseMatrix> mapped_jacobian(jacobian.num_rows,
+                //                                          jacobian.num_cols,
+                //                                          jacobian.values.size(),
+                //                                          jacobian.rows.data(),
+                //                                          jacobian.cols.data(),
+                //                                          jacobian.values.data());
 
-                using SparseMatrix = Eigen::SparseMatrix<double, Eigen::RowMajor>;
-                Eigen::Map<SparseMatrix> mapped_jacobian(jacobian.num_rows,
-                                                         jacobian.num_cols,
-                                                         jacobian.values.size(),
-                                                         jacobian.rows.data(),
-                                                         jacobian.cols.data(),
-                                                         jacobian.values.data());
-
+                // 2. add to problem, [p-s]JpJ[p-s] for s fixed.
+                // Worst case. read 9x9 block compute eigendecomp, sqrt diagonal.
 
                 // const Eigen::JacobiSVD<ceres::Matrix> svd(denseJacobian,
                 // Eigen::ComputeThinU | Eigen::ComputeThinV);
                 // const ceres::Vector singularValues = svd.singularValues();
 
                 // problem Jp we do not know the var-indices of the cameras :( in ceres.
+            }
+            else {
+                SparseMatrix<double, Eigen::RowMajor> Jp(jacobian.num_rows, 9 * cameras_to_ceres.size());
+                SparseMatrix<double, Eigen::RowMajor> Jl(jacobian.num_rows, 3 * landmark_to_ceres.size());
+                Jp.reserve(VectorXi::Constant(2 * jacobian.num_rows,9));
+                Jl.reserve(VectorXi::Constant(2 * jacobian.num_rows,3));
+                // JP.setFromTriplets(coefficients.begin(), coefficients.end());
+                for (Eigen::Index r = 0; r < jacobian.num_rows; ++r) {
+                //for (Eigen::Index r = 0; r < 1000; ++r) {
+                    int lm_id = pro.lm_id(r/2);
+                    int cam_id = pro.cam_id(r/2);
+                    //std::cout << r << ":";
+                    Eigen::Index idx = jacobian.rows[r];
+                    const Eigen::Index c = jacobian.cols[idx]; // index of variable.
+                    for (int i = 0; i < 9 && idx < jacobian.rows[r + static_cast<Eigen::Index>(1)];++idx,++i) {
+                        // if (9 * cam_id + i != jacobian.cols[idx])
+                        //     std::cout << 9 * cam_id + i << " = " << jacobian.cols[idx] << " | ";
+                        Jp.insert(r, 9 * cam_id + i) = jacobian.values[idx];
+                    }
+                    for (int i = 0; i < 3 && idx < jacobian.rows[r + static_cast<Eigen::Index>(1)];++idx, ++i) {
+                        // if (cameras.size() + 3 * lm_id + i != jacobian.cols[idx])
+                        //     std::cout << 3 * lm_id + i << " = " << jacobian.cols[idx];
+                        Jl.insert(r, 3 * lm_id + i) = jacobian.values[idx];
+                    }
+                }
+                Jp.makeCompressed();
+                Jl.makeCompressed();
 
+                SparseMatrix<double, Eigen::RowMajor> JpJ(9 * numCameras, 9 * numCameras);
+                SparseMatrix<double, Eigen::RowMajor> JlJ(3 * numLandmarks, 3 * numLandmarks);
+                JpJ.reserve(VectorXi::Constant(9 * numCameras, 9));
+                JlJ.reserve(VectorXi::Constant(3 * numLandmarks, 3));
+
+                JpJ = Jp.transpose() * Jp;
+                JlJ = Jl.transpose() * Jl;
+                auto JpJ_diag = JpJ.diagonal().array();
+                // maybe block diag as well.
+                double be = 1e-4;
+                JpJ.diagonal().array() += be * JpJ.diagonal().array();
+
+                BlockSqrt<9>(JpJ);// need templated fct.
+
+            }
                 /////////////////////////////////////////////////////                                
 
                 // Solve
@@ -373,9 +476,10 @@ int main() {
                 //*pro.mutable_cameras() = {cameras.begin(), cameras.end()}; // float vs double.           
                 // Send Jacobian! back -- lookup how.
 
-//#define __write__
+#define __write__
     #ifdef __write__
             {
+                std::cout << "Write Jac\n";
                 ceres::Problem::EvaluateOptions evalOptions;
                 evalOptions.apply_loss_function = true;
                 evalOptions.num_threads = 1;
