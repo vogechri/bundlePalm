@@ -9,6 +9,7 @@
 #include <google/protobuf/message_lite.h>
 
 #include <Eigen/Core>
+#include <Eigen/Sparse>
 
 #include "ceres/ceres.h"
 #include "ceres/rotation.h"
@@ -111,6 +112,9 @@ int main() {
 
     // Those are permanent, variables can change.
     std::vector<double> cameras;
+    std::vector<int> cameras_to_ceres; // need to map ceres id to camera id and back
+    std::vector<int> landmark_to_ceres;
+    std::vector<int> ceres_to_camera_and_landmark; // to both.
     std::vector<double> landmarks;
     ceres::Problem problem;
     ceres::Solver::Options options;
@@ -183,7 +187,7 @@ int main() {
 
             // if we get program we setup new program. if we get cam & prox we update cams (?) and prox term only! do one more it, etc.
             case request_proto::OptionsCase::kProgram : {
-            //std::cout << "request_proto::OptionsCase::kProgram" << std::endl;
+            std::cout << "request_proto::OptionsCase::kProgram" << std::endl;
             program_proto pro = request_p.program(); 
             {
                 // pro make & run program
@@ -204,9 +208,16 @@ int main() {
                 for(const float& v : pro.landmarks()) {
                     landmarks.push_back(v);
                 }
-                problem = ceres::Problem(); // overwrite ..?
-
+                cameras_to_ceres.clear();
+                cameras_to_ceres.resize(pro.cameras_size() /9, -1);
+                landmark_to_ceres.clear();
+                landmark_to_ceres.resize(pro.landmarks_size() / 3, -1);
+                ceres_to_camera_and_landmark.clear();
+                ceres_to_camera_and_landmark.resize(pro.cameras_size() + pro.landmarks_size(), -1);
+       
                 // setup problem again.
+                problem = ceres::Problem(); // overwrite ..?
+                int ceres_id = 0;
                 for (int i = 0; i < pro.observations_size() / 2; ++i) {
                     // Each Residual block takes a point and a camera as input and outputs a 2
                     // dimensional residual. Internally, the cost function stores the observed
@@ -223,7 +234,86 @@ int main() {
                                             nullptr /* squared loss */,
                                             &(cameras[9 * pro.cam_id(i)]),
                                             &(landmarks[3 * pro.lm_id(i)]));
+                    // Likely the map is by 1st occurence. if not present yet, 
+                    // std::cout << "ceresId " << ceres_id << " of " << ceres_to_camera_and_landmark.size() 
+                    //           << " -> " << pro.cam_id(i) << " of " << cameras_to_ceres.size() << "=" << cameras_to_ceres[pro.cam_id(i)] 
+                    //           << " | " << pro.lm_id(i) << " of " << landmark_to_ceres.size() << "="  << landmark_to_ceres[pro.lm_id(i)] << "\n";
+                    if (cameras_to_ceres[pro.cam_id(i)] == -1) {
+                        ceres_to_camera_and_landmark[ceres_id] = pro.cam_id(i);
+                        cameras_to_ceres[pro.cam_id(i)] = ceres_id;
+                        ceres_id += 9;
+                    }
+                    if (landmark_to_ceres[pro.lm_id(i)] == -1) {
+                        // ceres_to_landmark[ceres_id] = pro.cam_id(i);
+                        ceres_to_camera_and_landmark[ceres_id] = pro.lm_id(i);
+                        landmark_to_ceres[pro.lm_id(i)] = ceres_id;
+                        ceres_id += 3;
+                    }
                 }
+                std::cout << "Finished " << ceres_id << "\n";
+
+                // 1st get Jacobian(s):
+                ceres::Problem::EvaluateOptions evalOptions;
+                evalOptions.apply_loss_function = true;
+                evalOptions.num_threads = 1;
+                ceres::CRSMatrix jacobian;
+                std::vector<double> residuals;
+                double cost;
+                problem.Evaluate(evalOptions, &cost, &residuals, nullptr, &jacobian);
+                const size_t numUnknowns = jacobian.num_cols;
+                std::cout << "Finished eval problem \n";
+                // Now. I need JpTJp, hence.
+
+                //for (Eigen::Index r = 0; r < jacobian.num_rows; ++r) {
+                for (Eigen::Index r = 0; r < 1000; ++r) {
+                    int lm_id = pro.lm_id(r/2);
+                    int cam_id = pro.cam_id(r/2);
+                    int ceres_cam_id = cameras_to_ceres[cam_id];
+                    int ceres_lm_id = landmark_to_ceres[lm_id];
+                    std::cout << r << ":";
+                    Eigen::Index idx = jacobian.rows[r];
+
+                    while (idx < jacobian.rows[r + static_cast<Eigen::Index>(1)]) {
+                        const Eigen::Index c = jacobian.cols[idx]; // index of var.
+
+                        // std::cout << "ceres 2 cam/lm " << ceres_to_camera_and_landmark [c] << " = " << cam_id << " / " << lm_id << "\n";
+                        // std::cout << "ceres id " << c << " camC:" << ceres_cam_id << " lmC:" << ceres_lm_id << "\n";
+
+                        if (ceres_cam_id == c) { // cam, read 9 values
+                            for (int i = 0; i < 9 && idx < jacobian.rows[r + static_cast<Eigen::Index>(1)];++idx,++i) {
+                                // read cam values.
+                                //denseJacobian(r, c) = jacobian.values[idx];
+                                std::cout << "c" << jacobian.cols[idx] << " ";
+                            }
+                        }
+                        if (ceres_lm_id == c) { // lm, read 3 values
+                            for (int i = 0; i < 3 && idx < jacobian.rows[r + static_cast<Eigen::Index>(1)];++idx, ++i) {
+                                // read lm values.
+                                std::cout << "l" << jacobian.cols[idx] << " ";
+                            }
+                        }
+                    }
+                    std::cout << "\n";
+                }
+                std::cout << std::endl;
+
+                using SparseMatrix = Eigen::SparseMatrix<double, Eigen::RowMajor>;
+                Eigen::Map<SparseMatrix> mapped_jacobian(jacobian.num_rows,
+                                                         jacobian.num_cols,
+                                                         jacobian.values.size(),
+                                                         jacobian.rows.data(),
+                                                         jacobian.cols.data(),
+                                                         jacobian.values.data());
+
+
+                // const Eigen::JacobiSVD<ceres::Matrix> svd(denseJacobian,
+                // Eigen::ComputeThinU | Eigen::ComputeThinV);
+                // const ceres::Vector singularValues = svd.singularValues();
+
+                // problem Jp we do not know the var-indices of the cameras :( in ceres.
+
+                /////////////////////////////////////////////////////                                
+
                 // Solve
                 // Make Ceres automatically detect the bundle structure. Note that the
                 // standard solver, SPARSE_NORMAL_CHOLESKY, also works fine but it is slower
@@ -235,7 +325,7 @@ int main() {
                 //options.max_linear_solver_iterations = 0;
                 options.num_threads = 8; // ok maybe it is this what makes it slow. Problem: single cpu -> still slow / bottleneck.
                 options.minimizer_progress_to_stdout = true;
-                options.max_num_iterations = std::max(0,std::min(10,pro.iterations()));
+                options.max_num_iterations = std::max(0,std::min(10, pro.iterations()));
                 // options.preconditioner_type = ceres::IDENTITY; // Sucks if CGNR of course.
                 //options.preconditioner_type = ceres::JACOBI; // CGNR -> jacobi anyway.
 
@@ -259,7 +349,9 @@ int main() {
                 //*pro.mutable_cameras() = {cameras.begin(), cameras.end()}; // float vs double.           
                 // Send Jacobian! back -- lookup how.
 
+#define __write__
     #ifdef __write__
+            {
                 ceres::Problem::EvaluateOptions evalOptions;
                 evalOptions.apply_loss_function = true;
                 evalOptions.num_threads = 1;
@@ -272,15 +364,17 @@ int main() {
                 // J_pose is given by going over jac and id. 
                 // J_pose is n_res x 9 * # cams
                 // J_land is n_res x 3 * # land
-                for (Eigen::Index r = 0; r < jacobian.num_rows; ++r) {
+                for (Eigen::Index r = 0; r < 1000; ++ r) { //jacobian.num_rows; ++r) {
+                    std::cout << r << ": ";
                     for (Eigen::Index idx = jacobian.rows[r]; idx < jacobian.rows[r + static_cast<Eigen::Index>(1)];
                         ++idx) {
                     const Eigen::Index c = jacobian.cols[idx];
-                    std::cout << r << " " << c << ", ";// << " = " << jacobian.values[idx] << " | ";
+                    std::cout << c << ", ";// << " = " << jacobian.values[idx] << " | ";
                     }
                     std::cout << std::endl;
                 }
                 std::cout << std::endl;
+            }
     #endif
 
                 // // Insert the gradient per residual into the dense jacobian matrix.
@@ -293,6 +387,12 @@ int main() {
                 //     denseJacobian(r, c) = jacobian.values[idx];
                 //     }
                 // }
+
+
+                // Todo: version setup program, compute Jacobians with 0 step.
+                // Extend program with additional cost / modify ceres code?
+                // Maybe solve by hand / solve by ceres. compare both.
+                // Add 
 
     #ifdef _send_string_
                 std::string reply_message = "C++ Server received program";

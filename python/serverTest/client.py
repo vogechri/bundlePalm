@@ -9,6 +9,13 @@ context = zmq.Context()
 
 import bz2
 
+# in /proto:
+# cd proto; protoc --python_out=. test.proto; cd -
+# protoc --cpp_out=./output_directory your_file.proto
+
+
+# python client.py
+
 ###########################################
 
 def invert_focal_distance(camera_params_, camera_indices_, points_2d_):
@@ -52,8 +59,8 @@ def read_bal_data(file_name):
 
 BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/ladybug/"
 FILE_NAME = "../problem-49-7776-pre.txt.bz2"
-FILE_NAME = "../problem-52-64053-pre.txt.bz2"
-FILE_NAME = "../problem-173-111908-pre.txt.bz2" # check if compute not only in jacobian
+#FILE_NAME = "../problem-52-64053-pre.txt.bz2"
+# FILE_NAME = "../problem-173-111908-pre.txt.bz2" # check if compute not only in jacobian
 
 cameras, points_3d, camera_indices, point_indices, points_2d = read_bal_data(FILE_NAME)
 
@@ -92,8 +99,8 @@ request.program.landmarks[:] = points_3d.ravel()
 request.program.observations[:] = points_2d.ravel()
 request.program.cam_id[:] = camera_indices.ravel()
 request.program.lm_id[:] = point_indices.ravel()
-request.program.iterations = 10
-
+request.program.iterations = 0
+global_iterations = 1
 request_serialized = request.SerializeToString()
 socket.send(request_serialized) # ? HOW THE FUCK DOES IT KNOW WHAT MESSAGE TYPE IT IS?
 
@@ -112,7 +119,7 @@ print(0, " cameras " , program_deserialized.cameras[0:9])
 request = test_pb2.request_proto()
 #cameras = test_pb2.camera_proto()
 request.cameras.cameras[:] = program_deserialized.cameras[:] #?
-for i in range(5):
+for i in range(global_iterations):
     request_serialized = request.SerializeToString()
     socket.send(request_serialized) # ? HOW THE FUCK DOES IT KNOW WHAT MESSAGE TYPE IT IS?
 
