@@ -14,6 +14,9 @@
 #include "ceres/ceres.h"
 #include "ceres/rotation.h"
 
+using Eigen::SparseMatrix;
+using Eigen::VectorXi;
+
 #ifdef _WIN32
 #include<Windows.h>
 #elif defined __unix__
@@ -264,13 +267,18 @@ int main() {
                 std::cout << "Finished eval problem \n";
                 // Now. I need JpTJp, hence.
 
-                //for (Eigen::Index r = 0; r < jacobian.num_rows; ++r) {
-                for (Eigen::Index r = 0; r < 1000; ++r) {
+                SparseMatrix<double, Eigen::RowMajor> Jp(jacobian.num_rows, 9 * cameras_to_ceres.size());
+                SparseMatrix<double, Eigen::RowMajor> Jl(jacobian.num_rows, 3 * landmark_to_ceres.size());
+                Jp.reserve(VectorXi::Constant(2 * jacobian.num_rows,9));
+                Jl.reserve(VectorXi::Constant(2 * jacobian.num_rows,3));
+                // JP.setFromTriplets(coefficients.begin(), coefficients.end());
+                for (Eigen::Index r = 0; r < jacobian.num_rows; ++r) {
+                //for (Eigen::Index r = 0; r < 1000; ++r) {
                     int lm_id = pro.lm_id(r/2);
                     int cam_id = pro.cam_id(r/2);
                     int ceres_cam_id = cameras_to_ceres[cam_id];
                     int ceres_lm_id = landmark_to_ceres[lm_id];
-                    std::cout << r << ":";
+                    //std::cout << r << ":";
                     Eigen::Index idx = jacobian.rows[r];
 
                     while (idx < jacobian.rows[r + static_cast<Eigen::Index>(1)]) {
@@ -283,19 +291,35 @@ int main() {
                             for (int i = 0; i < 9 && idx < jacobian.rows[r + static_cast<Eigen::Index>(1)];++idx,++i) {
                                 // read cam values.
                                 //denseJacobian(r, c) = jacobian.values[idx];
-                                std::cout << "c" << jacobian.cols[idx] << " ";
+                                //std::cout << "c" << jacobian.cols[idx] << " ";
+                                Jp.insert(r, 9 * cam_id + i) = jacobian.values[idx];
                             }
                         }
                         if (ceres_lm_id == c) { // lm, read 3 values
                             for (int i = 0; i < 3 && idx < jacobian.rows[r + static_cast<Eigen::Index>(1)];++idx, ++i) {
                                 // read lm values.
-                                std::cout << "l" << jacobian.cols[idx] << " ";
+                                //std::cout << "l" << jacobian.cols[idx] << " ";
+                                Jl.insert(r, 3 * lm_id + i) = jacobian.values[idx];
                             }
                         }
                     }
-                    std::cout << "\n";
+                    //std::cout << "\n";
                 }
                 std::cout << std::endl;
+                Jp.makeCompressed();
+                Jl.makeCompressed();
+
+                SparseMatrix<double, Eigen::RowMajor> JpJ(9 * cameras_to_ceres.size(), 9 * cameras_to_ceres.size());
+                SparseMatrix<double, Eigen::RowMajor> JlJ(3 * landmark_to_ceres.size(), 3 * landmark_to_ceres.size());
+                JpJ.reserve(VectorXi::Constant(9 * cameras_to_ceres.size(),9));
+                JlJ.reserve(VectorXi::Constant(3 * landmark_to_ceres.size(),3));
+
+                JpJ = Jp.transpose() * Jp;
+                JlJ = Jl.transpose() * Jl;
+                auto JpJ_diag = JpJ.diagonal().array();
+                // maybe block diag as well.
+                double be = 1e-4;
+                JpJ.diagonal().array() += be * JpJ.diagonal().array(); 
 
                 using SparseMatrix = Eigen::SparseMatrix<double, Eigen::RowMajor>;
                 Eigen::Map<SparseMatrix> mapped_jacobian(jacobian.num_rows,
@@ -349,7 +373,7 @@ int main() {
                 //*pro.mutable_cameras() = {cameras.begin(), cameras.end()}; // float vs double.           
                 // Send Jacobian! back -- lookup how.
 
-#define __write__
+//#define __write__
     #ifdef __write__
             {
                 ceres::Problem::EvaluateOptions evalOptions;
