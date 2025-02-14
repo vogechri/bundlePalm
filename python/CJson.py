@@ -49,21 +49,35 @@ def readData(data):
 # with open('A.json', 'r') as file:
 #     data = json.load(file)
 # plotName = "allInOneA.png"
-with open('C.json', 'r') as file:
-    data = json.load(file)
-plotName = "allInOneCluster.png"
+
+#with open('E.json', 'r') as file:
+#    data = json.load(file)
+#plotName = "CompressAgainE.png"
+#plotName = "allInOneCluster.png"
 
 # with open('All.json', 'r') as file:
 #     data = json.load(file)
 # plotName = "allInOneAll.png"
 
+# with open('CompCompare.json', 'r') as file:
+#    data = json.load(file)
+# plotName = "CompCompare.png"
+
 # with open('Compress.json', 'r') as file:
-#     data = json.load(file)
-# plotName = "allInOneCompress.png"
+#    data = json.load(file)
+# plotName = "allInOneCompressX.png"
+
+with open('C.json', 'r') as file:
+   data = json.load(file)
+plotName = "JtJStep.png"
+
+with open('cl30.json', 'r') as file:
+   data = json.load(file)
+plotName = "cl30.png"
 
 
 A = readData(data)
-print("A", A)
+#print("A", A)
 #print("B", B)
 #exit()
 
@@ -117,6 +131,7 @@ idx = 0
 capVal = 100
 for dataset in datasets:
     id = 0
+    maxValue = 1.
     for method, data in A.items():
         if not dataset in data:
             v = minValues[dataset] * capVal / 100 #* 1.01
@@ -125,7 +140,7 @@ for dataset in datasets:
         values = v / minValues[dataset] * 100 - capVal #- 1.
         #print("div", v[1:4], " by ", minValues[dataset],  " = ", values)
         #print(minValues[name])
-
+    
         index = range(len(values))
         bar_width = 1. / numBars - 0.02
 
@@ -138,6 +153,9 @@ for dataset in datasets:
         # Add labels and title
         ax.set_xlabel('Iterations')
         ax.set_ylabel('Cost')
+
+        maxValue = np.maximum(maxValue, np.max(values))
+        ax.set_ylim(0, maxValue)
         ax.set_title(dataset)
         if id == 0:
             ax.set_xticks([i + (numBars-1)/2 * bar_width for i in index])

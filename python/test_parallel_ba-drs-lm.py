@@ -75,6 +75,11 @@ FILE_NAME = "problem-173-111908-pre.txt.bz2"
 
 URL = BASE_URL + FILE_NAME
 
+# now it stalls early. haeh? check pcg again.
+F_SCALE = 1e0 # idea: scale focal distance and 2d points by this factor -> better numerics. 1e-1 ok, 1e-2 not
+# Note all cost computation must be adjusted. |fs * res|^2 = fs^2 * |res|^2, so divide cost by fs^2.
+# still easy to do :)
+
 if not os.path.isfile(FILE_NAME):
     urllib.request.urlretrieve(URL, FILE_NAME)
 
@@ -109,6 +114,17 @@ def invert_focal_distance(camera_params_, camera_indices_, points_2d_):
     camera_params_[flipCamIds,6] *= -1
     flip_point_ids = np.isin(camera_indices_, flipCamIds)
     points_2d_[flip_point_ids] *= -1
+    return camera_params_, points_2d_
+
+# adjust also residual computation. Gain should be numbers more even, f large, k's small.
+def combine_focal_distance_and_kappas(camera_params_):
+    camera_params_[:,7] *= camera_params_[:,6]
+    camera_params_[:,8] *= camera_params_[:,6]
+    return camera_params_
+
+def adjust_focal_scale(camera_params_, points_2d_):
+    camera_params_[:,6] *= F_SCALE
+    points_2d_[:] *= F_SCALE
     return camera_params_, points_2d_
 
 def scale_adjust_focal_distance(camera_params_, camera_indices_, points_2d_, maxF = 2000):
@@ -168,6 +184,12 @@ def read_bal_data(file_name):
     # invert points_2d_ and focal distance if needed
     (camera_params, points_2d_) = \
         invert_focal_distance(camera_params, camera_indices_, points_2d_)
+
+    (camera_params, points_2d_) = \
+        adjust_focal_scale(camera_params, points_2d_)
+
+    # why is this so bad?
+    # camera_params = combine_focal_distance_and_kappas(camera_params)
     # avoid super large focal distance values for numerical sanity.
     if False: # changes the cost apparently.
         (camera_params, points_2d_) = \
@@ -580,6 +602,9 @@ def torchSingleResiduum(camera_params_, point_params_, p2d):
     distortion = 1.0 + r2 * (k1 + k2 * r2)
     points_reprojX = points_projX * distortion * f
     points_reprojY = points_projY * distortion * f
+    # distortion = f + r2 * (k1 + k2 * r2)
+    # points_reprojX = points_projX * distortion
+    # points_reprojY = points_projY * distortion
     resX = (points_reprojX - p2d[:, 0]).reshape((p2d.shape[0], 1))
     resY = (points_reprojY - p2d[:, 1]).reshape((p2d.shape[0], 1))
     residual = torch.cat([resX[:,], resY[:,]], dim=1)
@@ -598,6 +623,8 @@ def torchSingleResiduumX(camera_params, point_params, p2d) :
     r2 = points_projX*points_projX + points_projY*points_projY
     distortion = 1. + r2 * (k1 + k2 * r2)
     points_reprojX = points_projX * distortion * f # if f is negative, points_reprojX is as well. -> negate p2d and f.
+    # distortion = f + r2 * (k1 + k2 * r2)
+    # points_reprojX = points_projX * distortion
     resX = (points_reprojX-p2d[:,0])
     return resX
 
@@ -612,8 +639,10 @@ def torchSingleResiduumY(camera_params, point_params, p2d) :
     k1 = camera_params[:, 7] * c7_mult
     k2 = camera_params[:, 8] * c8_mult
     r2 = points_projX*points_projX + points_projY*points_projY
-    distortion = 1. + r2 * (k1 + k2 * r2)
+    distortion = 1 + r2 * (k1 + k2 * r2)
     points_reprojY = points_projY * distortion * f
+    # distortion = f + r2 * (k1 + k2 * r2)
+    # points_reprojY = points_projY * distortion
     resY = (points_reprojY-p2d[:,1])
     return resY
 
@@ -634,6 +663,9 @@ def torchSingleResiduumScaled(camera_params_, point_params_, p2d, scaling, scali
     distortion = 1.0 + r2 * (k1 + k2 * r2)
     points_reprojX = points_projX * distortion * f
     points_reprojY = points_projY * distortion * f
+    # distortion = f + r2 * (k1 + k2 * r2)
+    # points_reprojX = points_projX * distortion
+    # points_reprojY = points_projY * distortion
     resX = (points_reprojX - p2d[:, 0]).reshape((p2d.shape[0], 1))
     resY = (points_reprojY - p2d[:, 1]).reshape((p2d.shape[0], 1))
     residual = torch.cat([resX[:,], resY[:,]], dim=1)
@@ -651,9 +683,11 @@ def torchSingleResiduumXScaled(camera_params, point_params, p2d, scaling, scalin
     k1 = camera_params[:, 7] * scaling[:, 7]
     k2 = camera_params[:, 8] * scaling[:, 8]
     r2 = points_projX*points_projX + points_projY*points_projY
+    # distortion = f + r2 * (k1 + k2 * r2)
+    # points_reprojX = points_projX * distortion
     distortion = 1. + r2 * (k1 + k2 * r2)
     points_reprojX = points_projX * distortion * f
-    resX = (points_reprojX-p2d[:,0])
+    resX = points_reprojX-p2d[:,0]
     return resX
 
 def torchSingleResiduumYScaled(camera_params, point_params, p2d, scaling, scalingP) :
@@ -668,9 +702,11 @@ def torchSingleResiduumYScaled(camera_params, point_params, p2d, scaling, scalin
     k1 = camera_params[:, 7] * scaling[:, 7]
     k2 = camera_params[:, 8] * scaling[:, 8]
     r2 = points_projX*points_projX + points_projY*points_projY
+    # distortion = f + r2 * (k1 + k2 * r2)
+    # points_reprojY = points_projY * distortion
     distortion = 1. + r2 * (k1 + k2 * r2)
     points_reprojY = points_projY * distortion * f
-    resY = (points_reprojY-p2d[:,1])
+    resY = points_reprojY-p2d[:,1]
     return resY
 
 def ComputeDerivativeMatrixInit(x0_c_, x0_l_, points_2d, camera_indices, point_indices):
@@ -830,140 +866,12 @@ def check_symmetric(a, tol=1e-8):
 # we send max s as float and 8 bits per entry. since mat is symmetric -> 45 * 8 bit + 4 byte float ~ 4x less data.
 # 1. find max in block 9x9 block. divide block by max.
 # 2. convert block to 255 values: mult by 127, round to int, divide by 127 must by max.
-def CompressBlockMatrix_fail(M, bs):
-    #Ei = np.zeros(M.shape[0])
-    Mi = M.copy()
-    diag = M.diagonal()
-    # could be random effects also. not clear that larger is much better.
-    val = 127. # 255 is better ? or lower is same ? 255: 12 floats for 45. 511: 14 floats for 45 1/3rd. 127: 11.25 floats for 45: 10 floats
-    values = []
-    if bs > 1:
-        bs2 = bs * bs
-
-        symmetric = True
-        mat = M.data[0 : bs2].reshape(bs, bs)
-        if not check_symmetric(mat):
-            symmetric = False
-
-        for i_ in range(int(M.data.shape[0] / bs2)):
-            mat = Mi.data[bs2 * i_ : bs2 * i_ + bs2].reshape(bs, bs)
-
-            d = diag[bs * i_ : bs * i_ + bs] # > 0 by definition.
-            scale = np.max(np.abs(d)) / np.min(np.abs(d)) # diagonal .. or hmm. overestimate wrt diag is ok.
-            # maxrow = np.sum(np.abs(mat), axis=0)
-            # scale = np.max(maxrow) / np.min(maxrow) # ?
-
-            adaptive = False #True # maye not even needed adaptively then we might use more bits?
-            logScale = np.round(np.log2(scale))
-            adaptive_limit = 128. # if < 128: 1723 fails.
-            if adaptive:
-                val = np.maximum(adaptive_limit, np.power(2., 4 + logScale)) - 1 # 6: ok, 4: ok for s * val * 1e-2 ?
-                if val > adaptive_limit:
-                    values.append(val)
-
-            s = np.max(np.abs(mat)) / val # maybe even 63/ 31? save bit2
-
-            temp = mat.copy()
-            mat = s * np.round(mat / s) # float?
-            # see quantization: can learn given data: H*x ~ H^*x for data distribution x. |Hx - H^x + V(x)|, V in [0,1]
-            # diffRow = np.sum(np.abs(mat-temp), axis=0) # add diff to diag?
-            diffRow = np.sum(np.fmax(np.abs(mat)-np.abs(temp), 0), axis=0) # those were rounded up.
-
-            #print(np.sum(np.abs(mat - temp) * val)) # small diff: ok
-            # diff = np.abs(mat - temp) / s
-            # if np.max(diff) > 1.01: # or logScale > 11:
-            #     print(logScale, "--------", s)
-            #     print(diff) # small diff: ok
-            #     print(Mi.data[bs2 * i_ : bs2 * i_ + bs2].reshape(bs, bs))
-            #     print(mat)
-            #     print(Mi.data[bs2 * i_ : bs2 * i_ + bs2].reshape(bs, bs) / s)
-            #     print(np.round(mat / s))
-            #     print("--------", logScale )
-
-                # as in max is > 127 times larger than smallest diag value. This DEFINES the scale we need.
-                # problem is that last 3x3 part is so small not interacting with rest.
-                # hence compression all entries leasd to issues there. would need to compress each block separately.
-                # [[ 2.96  0.87 -2.96 -0.03  2.96  2.01  0.01  0.00  0.00]
-                # [ 0.87  2.91 -0.92 -2.81  0.85 -1.33 -0.00  0.00  0.00]
-                # [-2.96 -0.92  2.96  0.07 -2.96 -1.98 -0.01 -0.00 -0.00]
-                # [-0.03 -2.81  0.07  2.96 -0.00  2.02  0.01  0.00 -0.00]
-                # [ 2.96  0.85 -2.96 -0.00  2.96  2.03  0.01  0.00  0.00]
-                # [ 2.01 -1.33 -1.98  2.02  2.03  2.76  0.02  0.01  0.01]
-                # [ 0.01 -0.00 -0.01  0.01  0.01  0.02  0.03  0.03  0.02]
-                # [ 0.00  0.00 -0.00  0.00  0.00  0.01  0.03  0.03  0.03]
-                # [ 0.00  0.00 -0.00 -0.00  0.00  0.01  0.02  0.03  0.03]]
-
-            # compress can lead to singular. add to diagonal!
-            if True:
-                nev = True
-                while nev: # very often.
-                    if not symmetric:
-                        #evs, evv = eigh(np.fliplr(mat))
-                        evs = eigvalsh(np.fliplr(mat))
-                    else:
-                        #evs, evv = eigh(mat)
-                        evs = eigvalsh(mat)
-                    nev = False
-                    if np.min(evs) <= 0: # hope it is rare. we round up?
-                        nev = True
-                        #print("negative eigenvalue in compression ", evs)
-                        for i__ in range(bs):
-                            mat[i__, i__] += s # miss 3068, 646, 1266
-
-                for i__ in range(bs): # speed?
-                    # mat[i__, i__] += np.max(np.abs(d)) * 1e-2 # works well -- not clear this makes more sense.
-                    # mat[i__, i__] += s * val * 1e-2 # more stable perf. cmp 52, 1723: this is really bad
-                    # would make most sense: idea pos definiteness is lost by rounding. add a bit to diag could be sufficient.
-                    # below went through. not really sure makes sense. but it works.
-
-                    # BEST SO FAR. 4 best so far.
-                    mat[i__, i__] = np.maximum(np.abs(mat[i__, i__]) * (1. + 2. / val), 1e-8) # assumption need to add a bit to ensure it stays positive definite. Here on value on diag -- not any value.
-
-                    # mat[i__, i__] += np.maximum(diffRow[i__], 1e-8) + np.maximum(0, np.abs(temp[i__,i__])-np.abs(mat[i__,i__]))
-                    # mat[i__, i__] += np.maximum(np.max(diffRow[i__]), 1e-8)
-                    # mat[i__, i__] += np.maximum(diffRow[i__], 1e-8) + 2 * np.maximum(0, np.abs(temp[i__,i__]) - np.abs(mat[i__,i__]))
-
-                    # aehm. we could inc off diag by 1/2 * quant error * 8 (elements)
-                    # = + 4 / s = 4 * val / maxs no 1 / 2 * max / val is quant error.
-                    # + 4 * s . maybe just + s, or a bit more.
-                    # mat[i__, i__] += 1.25 * s # shoulld've added to beg with.
-
-                    # sum abs row on diff. add diff to diag?
-
-            else:
-                if not symmetric:
-                    mat = np.fliplr(mat)
-                evs, evv = eigh(mat)
-                evs = np.fmax(1.0 * evs, np.abs(evs[bs-1]) * 1e-3) # SO WEIRD 1e-4 is HUGE and fails? 1e-3 - 5e-4?
-                #evs = np.fmax(evs, 1e-6) # ?
-                #print("evs ", evs[bs-1] / evs)
-                #print("evv ", evv[bs-1])
-                #print("evv ", evv)
-                mat = evv.dot(diag_sparse(evs) * evv.transpose())
-                if not symmetric:
-                    mat = np.fliplr(mat)
-
-            mat += np.minimum(1e-2, s) * 1e-16 * np.ones([bs, bs]) # some 0's problem. adding temp 'worked'. failing 245
-            Mi.data[bs2 * i_ : bs2 * i_ + bs2] = mat.flatten()
-            #Ei[bs * i_ : bs * i_ + bs] = s * 127. * 1e-6
-        #print("Mi ", Mi)
-        #print("Ei ", diag_sparse(Ei))
-        #Mi = Mi + diag_sparse(Ei) # 0 becomes 0 by this must add in data
-        #print("Mi ", Mi)
-        # add diag mat.
-        #print(len(values))
-    return Mi
-
-# idea is to simulate compression here only. in: 9x9 block matrix, out: 9x9 block matrix compressed. to 255 values and scale.
-# we send max s as float and 8 bits per entry. since mat is symmetric -> 45 * 8 bit + 4 byte float ~ 4x less data.
-# 1. find max in block 9x9 block. divide block by max.
-# 2. convert block to 255 values: mult by 127, round to int, divide by 127 must by max.
 def CompressBlockMatrix(M, bs):
     #Ei = np.zeros(M.shape[0])
     Mi = M.copy()
     diag = M.diagonal()
     # could be random effects also. not clear that larger is much better.
-    val = 127. # 255 is better ? or lower is same ? 255: 12 floats for 45. 511: 14 floats for 45 1/3rd. 127: 11.25 floats for 45: 10 floats
+    val = 1023.#127. # 255 is better ? or lower is same ? 255: 12 floats for 45. 511: 14 floats for 45 1/3rd. 127: 11.25 floats for 45: 10 floats
     values = []
     if bs > 1:
         bs2 = bs * bs
@@ -1022,25 +930,25 @@ def CompressBlockMatrix(M, bs):
             # [ 0.00  0.00 -0.00 -0.00  0.00  0.01  0.02  0.03  0.03]]
 
             # compress can lead to singular. add to diagonal!
-            if True:
-                for i__ in range(bs): # speed?
-                    # mat[i_, i_] += np.max(np.abs(d)) * 1e-2 # works well -- not clear this makes more sense.
-                    # mat[i_, i_] += s * val * 1e-2 # more stable perf. cmp 52, 1723: this is really bad
+            if False:
+                for j_ in range(bs): # speed?
+                    # mat[j_, j_] += np.max(np.abs(d)) * 1e-2 # works well -- not clear this makes more sense.
+                    # mat[j_, j_] += s * val * 1e-2 # more stable perf. cmp 52, 1723: this is really bad
                     # would make most sense: idea pos definiteness is lost by rounding. add a bit to diag could be sufficient.
                     # below went through. not really sure makes sense. but it works.
 
-                    # BEST SO FAR. 4 best so far. better than 3 & 5. 3 sucks : 1723. 5: 
+                    # BEST SO FAR. 4 best so far. better than 3 & 5. 3 sucks : 1723. 5:
                     # assumption need to add a bit to ensure it stays positive definite. Here on value on diag -- not any value.
-                    mat[i__, i__] = np.maximum((mat[i__, i__]) * (1. + 4. / val), 1e-8)
+                    mat[j_, j_] = np.maximum((mat[j_, j_]) * (1. + 3. / val), 1e-8)
 
-                    # mat[i__, i__] += np.maximum(diffRow[i__], 1e-8) + np.maximum(0, np.abs(temp[i__,i__])-np.abs(mat[i__,i__]))
-                    # mat[i___, i___] += np.maximum(np.max(diffRow[i__]), 1e-8)
-                    # mat[i___, i___] += np.maximum(diffRow[i__], 1e-8) + 2 * np.maximum(0, np.abs(temp[i__,i__]) - np.abs(mat[i__,i__]))
+                    # mat[j_, j_] += np.maximum(diffRow[j_], 1e-8) + np.maximum(0, np.abs(temp[j_,j_])-np.abs(mat[j_,j_]))
+                    # mat[j_, j_] += np.maximum(np.max(diffRow[j_]), 1e-8)
+                    # mat[j_, j_] += np.maximum(diffRow[j_], 1e-8) + 2 * np.maximum(0, np.abs(temp[j_,j_]) - np.abs(mat[j_,j_]))
 
                     # aehm. we could inc off diag by 1/2 * quant error * 8 (elements)
                     # = + 4 / s = 4 * val / maxs no 1 / 2 * max / val is quant error.
                     # + 4 * s . maybe just + s, or a bit more.
-                    # mat[i__, i__] += 1.25 * s # shoulld've added to beg with.
+                    #mat[j_, j_] += 1. * s # shoulld've added to beg with.
 
                     # sum abs row on diff. add diff to diag?
 
@@ -1056,8 +964,8 @@ def CompressBlockMatrix(M, bs):
                         if np.min(evs) < 0: # hope it is rare. we round up?
                             nev = True
                             #print("negative eigenvalue in compression ", evs)
-                            for i__ in range(bs):
-                                mat[i__, i__] += s # miss 3068, 646, 1266 .. could also mult by (1+1/val) ? in general could mult by 1+be compared add be .. or alawys add s here.
+                            for j_ in range(bs):
+                                mat[j_, j_] += s # miss 3068, 646, 1266 .. could also mult by (1+1/val) ? in general could mult by 1+be compared add be .. or alawys add s here.
                     else: # advantage just do once, disadvatage comute evs as well.
                         evs, evv = eigh(mat)
                         evs = np.fmax(evs, np.abs(evs[bs-1]) * 1e-4) # SO WEIRD 1e-4 is HUGE and fails? 1e-3 - 5e-4?
@@ -1070,7 +978,7 @@ def CompressBlockMatrix(M, bs):
                 if not symmetric:
                     mat = np.fliplr(mat)
                 evs, evv = eigh(mat)
-                evs = np.fmax(1.0 * evs, np.abs(evs[bs-1]) * 1e-3) # SO WEIRD 1e-4 is HUGE and fails? 1e-3 - 5e-4?
+                evs = np.fmax(1.0 * evs, np.abs(evs[bs-1]) * 3e-4) # SO WEIRD 1e-4 is HUGE and fails? 1e-3 - 5e-4?
                 #evs = np.fmax(evs, 1e-6) # ?
                 #print("evs ", evs[bs-1] / evs)
                 #print("evv ", evv[bs-1])
@@ -1082,6 +990,8 @@ def CompressBlockMatrix(M, bs):
             mat += np.minimum(1e-2, s) * 1e-16 * np.ones([bs, bs]) # some 0's problem. adding temp 'worked'. failing 245
             #print(i_, " ", mat.shape, " ", Mi.data[bs2 * i_ : bs2 * i_ + bs2].shape)
             Mi.data[bs2 * i_ : bs2 * i_ + bs2] = mat.flatten()
+            #print(i_, " \n", mat, " \n", Mi.data[bs2 * i_ : bs2 * i_ + bs2].reshape(bs, bs))
+
             #Ei[bs * i_ : bs * i_ + bs] = s * 127. * 1e-6
         #print("Mi ", Mi)
         #print("Ei ", diag_sparse(Ei))
@@ -1096,7 +1006,94 @@ def PreCompressBlockMatrix(M, bs):
     Mi = M.copy()
     diag = M.diagonal()
     # could be random effects also. not clear that larger is much better.
-    val = 127. # 255 is better ? or lower is same ? 255: 12 floats for 45. 511: 14 floats for 45 1/3rd. 127: 11.25 floats for 45: 10 floats
+    # 1023: 10 bits for 32 bits (float) + 1 = 10/32 * 45 + 1 = 15. add/reduce 45 bits per +- 1 bit
+    val = 1023. # 255 is better ? or lower is same ? 255: 12 floats for 45. 511: 13.6 floats for 45 1/3rd. 127: 11.25 floats for 45: 10 floats, 1023: 15 floats for 45
+    values = []
+    if bs > 1:
+        bs2 = bs * bs
+
+        symmetric = True
+        mat = M.data[0 : bs2].reshape(bs, bs)
+        if not check_symmetric(mat):
+            symmetric = False
+
+        for i_ in range(int(M.data.shape[0] / bs2)):
+            mat = Mi.data[bs2 * i_ : bs2 * i_ + bs2].reshape(bs, bs)
+
+            d = diag[bs * i_ : bs * i_ + bs] # > 0 by definition.
+            scale = np.max(np.abs(d)) / np.min(np.abs(d)) # diagonal .. log appears All between 1 and 2. (at end maybe not)
+            #maxrow = np.sum(np.abs(mat), axis=0) # some become HUGE.
+            #scale = np.max(maxrow) / np.min(maxrow) # ?
+            #scale = np.max(np.abs(mat))
+
+            adaptive = False # maye not even needed adaptively then we might use more bits?
+            logScale = np.round(np.log2(scale))
+            adaptive_limit = 128. # if < 128: 1723 fails.
+            if adaptive:
+                val = np.maximum(adaptive_limit, np.power(2., 8 + logScale)) - 1 # 6: ok, 4: ok for s * val * 1e-2 ?
+                if True or val > adaptive_limit:
+                    values.append(val)
+
+            s = np.max(np.abs(mat)) / val # maybe even 63/ 31? save bit2
+
+            #temp = mat.copy()
+            mat = s * np.round(mat / s) # float?
+            #print(np.sum(np.abs(mat - temp) * val)) # small diff: ok
+            # diff = np.abs(mat - temp) / s
+            # if np.max(diff) > 1.01: # or logScale > 11:
+            #     print(logScale, "--------", s)
+            #     print(diff) # small diff: ok
+            #     print(Mi.data[bs2 * i_ : bs2 * i_ + bs2].reshape(bs, bs))
+            #     print(mat)
+            #     print(Mi.data[bs2 * i_ : bs2 * i_ + bs2].reshape(bs, bs) / s)
+            #     print(np.round(mat / s))
+            #     print("--------", logScale )
+
+            # compress can lead to singular. add to diagonal!
+            if False:
+                for j_ in range(bs): # speed?
+                    # mat[j_, j_] += np.max(np.abs(d)) * 1e-2 # works well -- not clear this makes more sense.
+                    # mat[j_, j_] += s * val * 1e-2 # more stable perf. cmp 52, 1723: this is really bad
+                    # would make most sense: idea pos definiteness is lost by rounding. add a bit to diag could be sufficient.
+                    # below went through. not really sure makes sense. but it works.
+                    mat[j_, j_] = np.abs(mat[j_, j_]) * (1. + 4. / val) # assumption need to add a bit to ensure it stays positive definite. Here on value on diag -- not any value.
+                    # aehm. we could inc off diag by 1/2 * quant error * 8 (elements)
+                    # = + 4 / s = 4 * val / maxs no 1 / 2 * max / val is quant error.
+                    # + 4 * s . maybe just + s, or a bit more.
+                    # mat[j_, j_] += 1.0 * s # shoulld've added to beg with.
+            else:
+                if not symmetric:
+                    mat = np.fliplr(mat)
+                evs, evv = eigh(mat)
+                # 127 -> 1e-3
+                # 255, 511 -> 5e-4
+                # 1023-> 2e-4 / 3e-4 .. use globalIt, small at first biger late?
+                evs = np.fmax(evs, np.abs(evs[bs-1]) * 3e-4) # SO WEIRD 1e-4 is HUGE and fails? 1e-3 - 5e-4? Test on 52.
+                # evs = np.fmax(evs, 1e-4) # i do not get it.
+                #print("evs ", evs[bs-1] / evs)
+                #print("evv ", evv[bs-1])
+                #print("evv ", evv)
+                mat = evv.dot(diag_sparse(evs) * evv.transpose())
+                if not symmetric:
+                    mat = np.fliplr(mat)
+
+            mat += np.minimum(1e-4, s) * 1e-16 * np.ones([bs, bs]) # some 0's problem. adding temp 'worked'. failing 245
+            Mi.data[bs2 * i_ : bs2 * i_ + bs2] = mat.flatten()
+            #Ei[bs * i_ : bs * i_ + bs] = s * 127. * 1e-6
+        #print("Mi ", Mi)
+        #print("Ei ", diag_sparse(Ei))
+        #Mi = Mi + diag_sparse(Ei) # 0 becomes 0 by this must add in data
+        #print("Mi ", Mi)
+        # add diag mat.
+        #print((values))
+    return Mi
+
+def PostCompressBlockMatrix(M, bs):
+    #Ei = np.zeros(M.shape[0])
+    Mi = M.copy()
+    diag = M.diagonal()
+    # could be random effects also. not clear that larger is much better.
+    val = 1023.#127. # 255 is better ? or lower is same ? 255: 12 floats for 45. 511: 14 floats for 45 1/3rd. 127: 11.25 floats for 45: 10 floats
     values = []
     if bs > 1:
         bs2 = bs * bs
@@ -1124,8 +1121,12 @@ def PreCompressBlockMatrix(M, bs):
 
             s = np.max(np.abs(mat)) / val # maybe even 63/ 31? save bit2
 
-            #temp = mat.copy()
+            # temp = mat.copy()
             mat = s * np.round(mat / s) # float?
+            # see quantization: can learn given data: H*x ~ H^*x for data distribution x. |Hx - H^x + V(x)|, V in [0,1]
+            # diffRow = np.sum(np.abs(mat-temp), axis=0) # add diff to diag?
+            # diffRow = np.sum(np.fmax(np.abs(mat)-np.abs(temp), 0), axis=0) # off diag  rounded up.
+
             #print(np.sum(np.abs(mat - temp) * val)) # small diff: ok
             # diff = np.abs(mat - temp) / s
             # if np.max(diff) > 1.01: # or logScale > 11:
@@ -1137,24 +1138,70 @@ def PreCompressBlockMatrix(M, bs):
             #     print(np.round(mat / s))
             #     print("--------", logScale )
 
+            # as in max is > 127 times larger than smallest diag value. This DEFINES the scale we need.
+            # problem is that last 3x3 part is so small not interacting with rest.
+            # hence compression all entries leasd to issues there. would need to compress each block separately.
+            # [[ 2.96  0.87 -2.96 -0.03  2.96  2.01  0.01  0.00  0.00]
+            # [ 0.87  2.91 -0.92 -2.81  0.85 -1.33 -0.00  0.00  0.00]
+            # [-2.96 -0.92  2.96  0.07 -2.96 -1.98 -0.01 -0.00 -0.00]
+            # [-0.03 -2.81  0.07  2.96 -0.00  2.02  0.01  0.00 -0.00]
+            # [ 2.96  0.85 -2.96 -0.00  2.96  2.03  0.01  0.00  0.00]
+            # [ 2.01 -1.33 -1.98  2.02  2.03  2.76  0.02  0.01  0.01]
+            # [ 0.01 -0.00 -0.01  0.01  0.01  0.02  0.03  0.03  0.02]
+            # [ 0.00  0.00 -0.00  0.00  0.00  0.01  0.03  0.03  0.03]
+            # [ 0.00  0.00 -0.00 -0.00  0.00  0.01  0.02  0.03  0.03]]
+
             # compress can lead to singular. add to diagonal!
             if False:
-                for i__ in range(bs): # speed?
-                    # mat[i_, i_] += np.max(np.abs(d)) * 1e-2 # works well -- not clear this makes more sense.
-                    # mat[i_, i_] += s * val * 1e-2 # more stable perf. cmp 52, 1723: this is really bad
+                for j_ in range(bs): # speed?
+                    # mat[j_, j_] += np.max(np.abs(d)) * 1e-2 # works well -- not clear this makes more sense.
+                    # mat[j_, j_] += s * val * 1e-2 # more stable perf. cmp 52, 1723: this is really bad
                     # would make most sense: idea pos definiteness is lost by rounding. add a bit to diag could be sufficient.
                     # below went through. not really sure makes sense. but it works.
-                    mat[i__, i__] = np.abs(mat[i__, i__]) * (1. + 4. / val) # assumption need to add a bit to ensure it stays positive definite. Here on value on diag -- not any value.
+
+                    # BEST SO FAR. 4 best so far. better than 3 & 5. 3 sucks : 1723. 5:
+                    # assumption need to add a bit to ensure it stays positive definite. Here on value on diag -- not any value.
+                    mat[j_, j_] = np.maximum((mat[j_, j_]) * (1. + 3. / val), 1e-8)
+
+                    # mat[j_, j_] += np.maximum(diffRow[j_], 1e-8) + np.maximum(0, np.abs(temp[j_,j_])-np.abs(mat[j_,j_]))
+                    # mat[j_, j_] += np.maximum(np.max(diffRow[j_]), 1e-8)
+                    # mat[j_, j_] += np.maximum(diffRow[j_], 1e-8) + 2 * np.maximum(0, np.abs(temp[j_,j_]) - np.abs(mat[j_,j_]))
+
                     # aehm. we could inc off diag by 1/2 * quant error * 8 (elements)
                     # = + 4 / s = 4 * val / maxs no 1 / 2 * max / val is quant error.
                     # + 4 * s . maybe just + s, or a bit more.
-                    # mat[i__, i__] += 1.0 * s # shoulld've added to beg with.
+                    #mat[j_, j_] += 1. * s # shoulld've added to beg with.
+
+                    # sum abs row on diff. add diff to diag?
+
+                    # might still be non positive? What to do? check - if not add more?
+                nev = True
+                if not symmetric:
+                    mat = np.fliplr(mat)
+                while nev: # usually 1 iteration.
+                    nev = False
+                    if False: # TODO test true/false
+                        #evs, evv = eigh(mat)
+                        evs = eigvalsh(mat)
+                        if np.min(evs) < 0: # hope it is rare. we round up?
+                            nev = True
+                            #print("negative eigenvalue in compression ", evs)
+                            for j_ in range(bs):
+                                mat[j_, j_] += s # miss 3068, 646, 1266 .. could also mult by (1+1/val) ? in general could mult by 1+be compared add be .. or alawys add s here.
+                    else: # advantage just do once, disadvatage comute evs as well.
+                        evs, evv = eigh(mat)
+                        evs = np.fmax(evs, np.abs(evs[bs-1]) * 1e-4) # SO WEIRD 1e-4 is HUGE and fails? 1e-3 - 5e-4?
+                        #evs = np.fmax(evs, 1e-6) # ?
+                        mat = evv.dot(diag_sparse(evs) * evv.transpose())
+                if not symmetric:
+                    mat = np.fliplr(mat)
+
             else:
                 if not symmetric:
                     mat = np.fliplr(mat)
                 evs, evv = eigh(mat)
-                evs = np.fmax(evs, np.abs(evs[bs-1]) * 8e-4) # SO WEIRD 1e-4 is HUGE and fails? 1e-3 - 5e-4? Test on 52.
-                # evs = np.fmax(evs, 1e-4) # i do not get it.
+                evs = np.fmax(evs, np.abs(evs[bs-1]) * 1e-4) # 3e-4 is base. 1e-6 too small. 1e-5? - 1e-3?
+                #evs = np.fmax(evs, 1e-6) # ?
                 #print("evs ", evs[bs-1] / evs)
                 #print("evv ", evv[bs-1])
                 #print("evv ", evv)
@@ -1162,8 +1209,11 @@ def PreCompressBlockMatrix(M, bs):
                 if not symmetric:
                     mat = np.fliplr(mat)
 
-            mat += np.minimum(1e-4, s) * 1e-16 * np.ones([bs, bs]) # some 0's problem. adding temp 'worked'. failing 245
+            mat += np.minimum(1e-2, s) * 1e-16 * np.ones([bs, bs]) # some 0's problem. adding temp 'worked'. failing 245
+            #print(i_, " ", mat.shape, " ", Mi.data[bs2 * i_ : bs2 * i_ + bs2].shape)
             Mi.data[bs2 * i_ : bs2 * i_ + bs2] = mat.flatten()
+            #print(i_, " \n", mat, " \n", Mi.data[bs2 * i_ : bs2 * i_ + bs2].reshape(bs, bs))
+
             #Ei[bs * i_ : bs * i_ + bs] = s * 127. * 1e-6
         #print("Mi ", Mi)
         #print("Ei ", diag_sparse(Ei))
@@ -1437,6 +1487,20 @@ def copy_selected_blocks(M, block_selection_, bs):
         for i in range(int(M.data.shape[0])):
             if block_selection_[i] == True:
                 Mi.data[i : i + 1] = 1e-12
+    return Mi
+
+def mult_selected_blocks(M, block_selection_, v, bs):
+    Mi = M.copy()
+    if bs > 1:
+        bs2 = bs * bs
+        for i in range(int(M.data.shape[0] / bs2)):
+            if block_selection_[i] == True:
+                Mi.data[bs2 * i : bs2 * i + bs2] *= v
+    else:
+        Mi = M.copy()
+        for i in range(int(M.data.shape[0])):
+            if block_selection_[i] == True:
+                Mi.data[i : i + 1] *= v
     return Mi
 
 def stop_criterion(delta, delta_i, i):
@@ -1761,10 +1825,10 @@ def average_cameras_new(
     UL_zeros_in_cluster_ = []
 
     # Here or per part.
-    compressedData = False #True # idea we would send a compressed version of the stepsize.
+    compressedData = False # idea we would send a compressed version of the stepsize.
     if compressedData:
         for i in range(len(UL_in_cluster_)):
-            UL_in_cluster_[i] = CompressBlockMatrix(UL_in_cluster_[i], 9)
+            UL_in_cluster_[i] = PostCompressBlockMatrix(UL_in_cluster_[i], 9) # this would be send in quantized form. We would need ensure its spd.
 
     for i in range(len(UL_in_cluster_)):
         # Lc = L_in_cluster_[i]
@@ -2056,7 +2120,7 @@ def primal_cost(
         x0_t_cam[local_camera_indices_in_cluster_[:]],
         x0_t_land[local_landmark_indices_in_cluster_[:]],
         torch_points_2d_in_c)
-    costEnd = np.sum(fx1.numpy() ** 2)
+    costEnd = np.sum(fx1.numpy() ** 2) / (F_SCALE* F_SCALE)
     return costEnd
 
 # there are cams with < 5 -- even 1 landmark only.
@@ -2077,7 +2141,7 @@ def primal_cost(
 def bundle_adjust(
     point_indices_,
     camera_indices_,
-    poses_only_in_cluster_,
+    poses_only_in_cluster_, # those cameras should be excluded from prox part. But those cams do not exist.
     torch_points_2d,
     points_3d_in,
     cameras_in,
@@ -2097,7 +2161,7 @@ def bundle_adjust(
     # 1e-8 fluctuates but faster 1e-6. increase JJ_mult?
     # problem dies at 173 example. 1e-5 ok more not.
     #J_eps = 1e-4
-    minimumL = 1e-6 # 1e-8 also ok
+    minimumL = 1e-6 #1e-6 # 1e-6 # 1e-8 also ok, maybe 1e-5
     #minDiag = 1e-5
     L = max(minimumL, L_in_cluster_)
     JJ_mult = 4 # TODO 4 / 2. 4 should suffice everywhere?
@@ -2221,7 +2285,7 @@ def bundle_adjust(
                 print("minmax ev JltJlD ", np.max(maxE), " ", np.max(minE), " ", np.min(maxE), " ",  np.min(minE), " spec ", JltJlSpec, " -> ", JltJlDiagSpec, file=sys.stderr )
 
             prox_rhs = x0_p_ - s_p_
-            costStart = np.sum(fx0**2)
+            costStart = np.sum(fx0**2) #/ (F_SCALE* F_SCALE)
             W = J_pose.transpose() * J_land
             bp = J_pose.transpose() * fx0
             bl = J_land.transpose() * fx0
@@ -2263,15 +2327,21 @@ def bundle_adjust(
                     blockEigenvalueJtJ = 1e1 * maxDiagA(JtJ, 9) # almost ..? maybe just random
                     # blockEigenvalueJtJ = 1e1 * maxRow(JtJ, 9) # ? does it matter?
 
-                    preCompress = False
-                    if not preCompress:
-                        stepSize = LipJ_ * JtJ.copy() + blockEigMult * blockEigenvalueJtJ # 12 already does not jump, but some results are not good: 52
-                        stepSize = CompressBlockMatrix(stepSize, 9) # can i bring + blockEigMult * blockEigenvalueJtJ inside compress?
-                        # blockEigenvalueJtJ = 1e1 * maxDiagA(stepSize, 9) # Trust region cannot catch up, unclear. this here is same?
-                    else: # compress first adjust later? Issue is stll negative definite mat?
-                        stepSize = PreCompressBlockMatrix( JtJ.copy(), 9 ) # add max( 0, neg min ev) on diagonal? + blockEigMult * maxDiag(JtJ, 9)
-                        # blockEigenvalueJtJ = 1e1 * maxDiagA(stepSize, 9)
-                        stepSize = LipJ_ * stepSize + blockEigMult * blockEigenvalueJtJ
+                    CompressHere = False
+                    if CompressHere:
+                        preCompress = True
+                        if not preCompress:
+                            stepSize = LipJ_ * JtJ.copy() + blockEigMult * blockEigenvalueJtJ # 12 already does not jump, but some results are not good: 52
+                            stepSize = CompressBlockMatrix(stepSize, 9) # can i bring + blockEigMult * blockEigenvalueJtJ inside compress?
+                            # blockEigenvalueJtJ = 1e1 * maxDiagA(stepSize, 9) # Trust region cannot catch up, unclear. this here is same?
+                        else: # compress first adjust later? Issue is stll negative definite mat?
+                            stepSize = PreCompressBlockMatrix( JtJ.copy(), 9 ) # add max( 0, neg min ev) on diagonal? + blockEigMult * maxDiag(JtJ, 9)
+                            blockEigenvalueJtJ = 1e1 * maxDiagA(stepSize, 9)
+                            stepSize = LipJ_ * stepSize + blockEigMult * blockEigenvalueJtJ
+                    else:
+                        stepSize = LipJ_ * 1e-1 * JtJ.copy() + blockEigMult * blockEigenvalueJtJ # 12 already does not jump, but some results are not good: 52
+    
+                stepSize = mult_selected_blocks(stepSize, poses_only_in_cluster_, 1e-6, 9) # those do not exist -- only if 1 cluster.
 
                 # best? or 8 for my single .. above is producing less jumps.
                 # try as new simple step 16 or .. ?
@@ -2282,6 +2352,7 @@ def bundle_adjust(
 
                 # Todo: eval. this might be very similar but simpler.
                 # JtJDiag = blockEigMultJtJ * 5e1 * maxDiag(JtJ, 9) # why adding jtj here? 3068
+                # JtJDiag = 1e-1 * maxDiag(JtJ, 9) # why adding jtj here? 3068
 
                 # how does diag value change over iterations? mean/max of last k iterations?
                 # stable? but i change a tiny bit only to get above argh.
@@ -2549,7 +2620,7 @@ def bundle_adjust(
         # print("Lm step took ", end - start, "s")
 
         fx0_new = fx0 + (J_pose * delta_p + J_land * delta_l)
-        costQuad = np.sum(fx0_new**2)
+        costQuad = np.sum(fx0_new**2) #/ (F_SCALE* F_SCALE)
         print(it_, "it. cost 0     ", round(costStart)," cost + penalty ", round(costStart + penaltyStart), " === using L = ", L, file=sys.stderr)
         print(it_, "it. cost 0/new ", round(costQuad), " cost + penalty ", round(costQuad + penaltyL + penaltyP), " Pits ", powerits_run, file=sys.stderr)
 
@@ -2566,7 +2637,7 @@ def bundle_adjust(
             x0_t_cam[camera_indices_[:]],
             x0_t_land[point_indices_[:]],
             torch_points_2d)
-        costEnd = np.sum(fx1.numpy() ** 2)
+        costEnd = np.sum(fx1.numpy() ** 2) #/ (F_SCALE* F_SCALE)
         print(it_, "it. cost 1     ", round(costEnd), "      + penalty ", round(costEnd + penaltyL + penaltyP), file=sys.stderr,)
 
         # v1: also must adjust below line 2013, same.
@@ -2824,7 +2895,9 @@ def bundle_adjust(
     #print("Output cluster_id ", cluster_id, " blockEigMult ", blockEigMult)
     #L_out = np.maximum(minimumL, np.minimum(L_in_cluster_ * 2, L)) # not clear if generally ok, or 2 or 4 should be used.
     L_out = np.maximum(minimumL, (L_in_cluster_ + L) / 2) # not clear if generally ok, or 2 or 4 should be used.
-    return costEnd, x0_p_, x0_l_, L_out, Rho, nabla_p, blockEigMult
+    # L_out = np.maximum(minimumL, L) # WHY THE MIXING ABOVE .. why is this worse LOL? 
+    #print(" L " , L_out, L_in_cluster_, L)
+    return costEnd / (F_SCALE* F_SCALE), x0_p_, x0_l_, L_out, Rho, nabla_p, blockEigMult
 
     # recall solution wo. splitting is
     # solve Vl x + bS + Vd ()
@@ -3211,7 +3284,8 @@ def GetPcgScalingDiag(JtJ, W):
             # [-0.03 -0.01 -0.02  0.00 -0.03  0.08  0.08  0.09  0.09]]
 
     print("min/max Unorm before ", np.min(temp_), np.max(temp_))
-    t = getScaling(np.min(np.trim_zeros(temp_)), np.max(temp_))
+    minTemp = np.percentile(temp_, 0.0001) # not sure..
+    t = getScaling(minTemp, np.max(temp_))
     temp_  = temp_ * t
     # temp_  = np.squeeze(np.asarray((np.abs(t * JtJ_)).sum(axis=0) ))
     # temp_W = np.squeeze(np.asarray((np.abs(t * W)).sum(axis=1) ))
@@ -3471,13 +3545,16 @@ x0_p = x0_p.reshape(n_cameras, 9)
 # s := landmark_s_in_cluster
 # v := output, temporary
 
+# todo: return mean reprojectionerror and combine f * k1, f * k2 replacing k1, k2.
+# needs adjusted preconditioner avoid too small rescale.
+
 # 1. take problem and split, sort indices by camera, define local global map and test it.
-startL = 1 # crazy idea: this lower -> stepsize can be lower as well (less jumps?). It is always worse to not start at 1.
+startL = 1e-1 # crazy idea: this lower -> stepsize can be lower as well (less jumps?). It is always worse to not start at 1.
 innerIts = 1  # change to get an update, not 1 iteration
 cost = np.zeros(kClusters)
-lastCost = np.sum(fx0**2)
-lastCostDRE = np.sum(fx0**2)
-bestCost = np.sum(fx0**2)
+lastCost = np.sum(fx0**2)/ (F_SCALE* F_SCALE)
+lastCostDRE = np.sum(fx0**2)/ (F_SCALE* F_SCALE)
+bestCost = np.sum(fx0**2)/ (F_SCALE* F_SCALE)
 bestIt = 0
 globalIt = 0
 resetIt = 0
@@ -3531,6 +3608,7 @@ print(". minimum camera observations in total ", np.min(counts), " cams with < 5
 # ) = cluster_by_landmark(
 #     camera_indices, points_2d, point_indices, kClusters, pre_merges)
 
+start = time.time() # this is not working at all. Slower then iteratively
 (
     camera_indices_in_cluster,
     point_indices_in_cluster,
@@ -3538,6 +3616,8 @@ print(". minimum camera observations in total ", np.min(counts), " cams with < 5
     kClusters,
 ) = cluster_deg_by_landmark(
     camera_indices, points_2d, point_indices, kClusters)
+end = time.time() # this is not working at all. Slower then iteratively
+print("========== clustering took ", end - start, " s ==========")
 
 # test, yes much faster if precompute:
 local_landmark_indices_in_cluster = []
@@ -3825,7 +3905,7 @@ else:
                 #lambdaScale *= 10.
                 #lambdaScale = np.mean(U_diag.diagonal()) # does this make any sense? scale by smth. done inside.
                 lambdaScale = 1 # inc if n times? success, dec if fail once -- does this even matter? NO any value not too large works here.
-                # h= -1 vs anything else does it matter? -0.1 is worse? -10 is better? Haeh?
+                # h= -1 vs anything else does it matter? -0.1 is worse? -10 is better? Haeh? 
                 Gs, Fs, Fes, dk = RNA(Gs, Fs, rna_s, bfgs_r, globalIt - restartIteration, rnaBufferSize, Fes, bfgs_r,
                                     lamda = 0.001 * lambdaScale, h = -5., res_pcg = U_diag) # has changed likely, 0.001 before
                 # dk = rna_s + bfgs_r
@@ -3877,7 +3957,7 @@ else:
                 beta_nesterov = (globalIt-resetIt-1) / (globalIt-resetIt+2) # 0.7
                 #beta_nesterov = 0.7
                 dk = s_new - s_cur + beta_nesterov * prev_dk
-                # dk = s_new - s_cur + beta_nesterov * (s_new - s_cur)
+                # dk = s_new - s_cur + beta_nesterov * (s_new - s_cur) 
                 #vk = s_new - s_cur + 0.7 * prev_vk
                 # other idea is 
                 if False:
@@ -3900,6 +3980,9 @@ else:
 
         #line_search_iterations = 1 # is pure DRS (forced, see below set tk == 1)
         line_search_iterations = 2 # 3 appears ok
+        if globalIt <= resetIt + 1:
+            line_search_iterations = 1
+
         print(" ..... step length ", steplength, " bfgs step ", dk_stepLength, " ratio ", multiplier, file=sys.stderr )
         Vnorm_safe = Vnorm.copy()
         for ls_it in range(line_search_iterations):
@@ -4002,7 +4085,7 @@ else:
             G2C = round(1000 * costGain / currentGap) / 1000
             print( globalIt, "/", ls_it, " ======== DRE BFGS ====== ", round(dre_bfgs) , " ========= gain " , \
                 round(costGain), "==== f(v)= ", round(primal_cost_v), " f(u)= ", round(primal_cost_u),
-                " G ", currentGap , " dG ", differentialGap, " ", differentialGap / np.maximum(costGain, 1.), #" D2G ", diffToGain, "G2G ", gapToGain,
+                " G ", currentGap , " dG ", differentialGap, " ", differentialGap / np.maximum(costGain, 1.), #" D2G ", diffToGain, "G2G ", gapToGain, 
                 " G2C ", G2C, " BE ", blockEigLastIt, " L ", L_in_cluster_bfgs) #blockEig_in_cluster_bfgs)
             print( globalIt, "/", ls_it, " f(v) = ", primal_cost_v_all, " f(u) = ", primal_cost_u_all)
             prevGap = currentGap.copy()
@@ -4073,8 +4156,7 @@ else:
                     print("Reset Nesterov acceleration after ", maxFailedNesterovAcceleration, " consecutive failures.")
 
             maxPctV = np.maximum(1.001, np.sqrt(maxPct)) # max 0.1 % AAA
-            if line_search_iterations==1:
-                maxPctV = np.sqrt(maxPct) # max 0.1 % AAA
+
             #if reject and (np.min(LipJ) < LipJMax) and (ls_it == line_search_iterations-1) and (maxPct * lastCostDRE_bfgs < dre_bfgs) and (primal_cost_v > maxPctV * primal_cost_v_before): # or primal_cost_v > maxPct * primal_cost_u):
             # if reject and (beMin < globalBlockEigUpperLimit) and (ls_it == line_search_iterations-1 and line_search_iterations > 1) and (maxPct * lastCostDRE_bfgs < dre_bfgs) and (primal_cost_v > maxPctV * primal_cost_v_before): # or primal_cost_v > maxPct * primal_cost_u):
             if reject and (beMin < globalBlockEigUpperLimit) and (ls_it == line_search_iterations-1) and (maxPct * lastCostDRE_bfgs < dre_bfgs) and (primal_cost_v > maxPctV * primal_cost_v_before): 
@@ -4113,9 +4195,27 @@ else:
                     for ci in range(kClusters):
                         if RNA_or_bfgs:
                             poses_in_cluster[ci][:,5] += 1e-6 # 1e-6 is enough to make it different.
-                        poses_s_in_cluster_pre[ci] = best_poses_v.copy() # s + u-v = s in this case.
+                        poses_s_in_cluster_pre[ci] = best_poses_v.copy() # s + u-v = s in this case, do we use the best s?
                         poses_s_in_cluster[ci] = best_poses_v.copy()
                     landmarks = best_landmarks.copy()
+                    # TODO: s-> best_v & u=v after reset ? landmark match best v? -- we can/could compute lms from v only: yes: VLi * Jl * res, poses fixed.
+
+                    # IDEA: verify cost here.
+                    CheckCost = True # temporal test. it appears odd that this is so bad. Maybe set be very strict for one iteration?
+                    if CheckCost:
+                        primal_cost_v_check = 0
+                        for ci in range(kClusters):
+                            primal_cost_v_check += primal_cost(
+                                poses_in_cluster[ci], # v not u
+                                camera_indices_in_cluster[ci],
+                                point_indices_in_cluster[ci],
+                                local_camera_indices_in_cluster[ci],
+                                local_landmark_indices_in_cluster[ci],
+                                points_2d_in_cluster[ci],
+                                landmarks)
+                        print("Checking cost after rest: ", round(primal_cost_v_check), " vs. ", round(primal_cost_v), " vs. ", round(primal_cost_u))
+
+
                     ############
                     # VERSION U is doing nothing actually. This is differetn if taking actula steps as below.
                     # poses_s_in_cluster = [elem.copy() for elem in poses_s_in_cluster_pre]

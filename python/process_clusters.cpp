@@ -3,11 +3,28 @@
 // Order landmark shift by 
 #define _select_by_even_cost_
 
+// Compltetely new idea:
+// define landmark weight li, lj as number of cams shared.
+// could also be relative? random walk idea?
+// problem: this is very slow.
+// again all res of lm go into cluster, also evenly distributed.
+// 
+// take cam w. fewest lms if e.g. < 10 lms. 
+// all lms merge into 1 cluster.
+// while cams with < 10 lms exist.
+
 // Should work .. but it does not. Different random seeds needed .. lol?
-// #define __clusteridentical_lms_early__
+// with    Cam observations started/finished: 1 : 312/107, 2 : 1017/74, 3 : 1411/45, 4 : 1478/39, 5 : 1271/25,  left 290
+//         Cam observations started/finished: 1 : 10/3, 2 : 7/3, 3 : 4/4, 4 : 2/7, 5 : 1/8, 6 : 24/27, 7 : 43/40, 8 : 68/72, 9 : 72/70, 10 : 92/91, 11 : 116/118, 12 : 133/126, 13 : 162/166, 14 : 213/207,  left 942
+// without Cam observations started/finished: 1 : 254/101, 2 : 867/68, 3 : 1275/37, 4 : 1446/27, 5 : 1084/29,  left 262
+//         Cam observations started/finished: 1 : 15/5, 2 : 9/7, 3 : 3/3, 4 : 2/7, 5 : 0/6, 6 : 16/21, 7 : 35/36, 8 : 68/68, 9 : 76/74, 10 : 87/88, 11 : 154/152, 12 : 155/154, 13 : 220/222, 14 : 290/281,  left 1124
+#define __clusteridentical_lms_early__ // with this 3068 is AWFUL? without also.
+
+#define __testThisNew__
 
 #include "process_clusters.h"
 
+#include <omp.h>
 #include <assert.h>
 #include <iostream>
 #include <vector>
@@ -1246,7 +1263,7 @@ void recluster_cameras(
 
 //#ifdef __disabled__for__testing__
 // temperature = 30;  // does something -- but, if not good start here not much gain.
-for(int runs = 0; runs < 2; ++runs) { // more uns do not change things WTF?
+for(int runs = 0; runs < 3; ++runs) { // more uns do not change things WTF?
 
     // new:
     maxLmPerCam = 6;
@@ -1648,11 +1665,22 @@ for(int runs = 0; runs < 2; ++runs) { // more uns do not change things WTF?
 double GetCost(const std::map<int, std::set<int>> &landmarkFromCameraOfPart, 
                int maxLmPerCam, double temperature, int res_in_cluster, int total_res, int kClusters) {
   double cost = 0;
+  temperature = 15; // 20
+  // 10 Cam observations started/finished: 1 : 403/135, 2 : 715/70, 3 : 1110/46, 4 : 1112/37, 5 : 1045/29,  left 317
+  // 15 Cam observations started/finished: 1 : 312/107, 2 : 1017/74, 3 : 1411/45, 4 : 1478/39, 5 : 1271/25,  left 290
+  // 20 Cam observations started/finished: 1 : 248/118, 2 : 1331/88, 3 : 1611/46, 4 : 1425/42, 5 : 1297/39,  left 333 
+  //    Cam observations started/finished: 1 : 352/150, 2 : 1033/92, 3 : 1426/70, 4 : 1361/55, 5 : 1293/24,  left 391
+  // maxLmPerCam = 12; // 10 ?
 
+  // Keep only worst 5/10/? to define cost
   // auto cmp = [](double left, double right) {
-  //   return left < right; // smallest first?
+  //   return left > right; // '<' :largest top,  '>' : smallest top. top one is exchanged.
   // };
   // std::priority_queue<double, std::vector<double>, decltype(cmp)> pq(cmp);
+
+  // Wasserstein distance to 0 for all 1 on > 10 lms in cam.
+  // How does this become a probl? transportation is from to.
+  // cost is 
 
   for (const auto& [cam, landmarksFromCam] : landmarkFromCameraOfPart) {
     // TODO: EVAL THE CHANGE.
@@ -1666,21 +1694,39 @@ double GetCost(const std::map<int, std::set<int>> &landmarkFromCameraOfPart,
     // new:
     cost += std::pow(static_cast<double>(maxLmPerCam-1) / static_cast<double>(numLandmarks-0.5) * temperature, 1.5); // gain is exp(-t) ->exp(-2t) etc.     
 #else
-    // const int numLandmarks = landmarksFromCam.size();
-    // if (numLandmarks > maxLmPerCam) {continue;}
+
+    //const int numLandmarks = landmarksFromCam.size();
+    // if (numLandmarks > maxLmPerCam) {continue;} // ? with: prefer cluster to overlap also for cams seeb by many lms.
+
+    // minor effetcwith below or not. without prefers many lms seen by cam: imbalance vs only < maxLmPerCam observed are considered
+    // numLandmarks = std::min(static_cast<int>(landmarksFromCam.size()), maxLmPerCam); // 3068, 30 cl. VERY sensitive to this.
+    // if (numLandmarks == 0) {continue;}  // no cost.
 
     const int numLandmarks = std::min(static_cast<int>(landmarksFromCam.size()), maxLmPerCam);
+    //if (numLandmarks > maxLmPerCam) {continue;} // Why not? todo: never happens? also above is wierdly needed for 3068 @ 30 cl. to work fix..
     if (numLandmarks == 0) {continue;}  // no cost.
 
     cost += std::exp(-numLandmarks / static_cast<double>(maxLmPerCam) * temperature); // should 0 be a cost? not correct to skip 0.. hmm. does not do anything.
 #endif
 
-
     // cost += std::exp(static_cast<double>(maxLmPerCam-numLandmarks) * temperature); // '-' -> ? same
 
-    // pq.push(std::exp(-numLandmarks / static_cast<double>(maxLmPerCam) * temperature));
-    // if (pq.size() > 20) {pq.pop();}
+    // const double v = std::exp(-numLandmarks / static_cast<double>(maxLmPerCam) * temperature);
+    // constexpr int maxK = 25;
+    // if (pq.size() < maxK) {
+    //   pq.push(v);
+    // } else if (pq.top() < v) {
+    //   pq.pop();
+    //   pq.push(v);
+    // }
   }
+
+  // cost / entries
+  // Cam observations started/finished: 1 : 2419/120, 2 : 2653/77, 3 : 2156/52, 4 : 1901/32, 5 : 1702/23,  left 304
+  // Cam observations started/finished: 1 : 11/2, 2 : 5/2, 3 : 3/2, 4 : 3/6, 5 : 0/11, 6 : 19/22, 7 : 44/47, 8 : 72/68, 9 : 88/89, 10 : 84/83, 11 : 89/91, 12 : 112/108, 13 : 125/125, 14 : 187/182,  left 838
+  // cost:
+  // Cam observations started/finished: 1 : 101/2, 2 : 89/6, 3 : 55/3, 4 : 48/14, 5 : 31/13, 6 : 683/27, 7 : 475/36, 8 : 552/57, 9 : 664/84, 10 : 659/80, 11 : 639/134, 12 : 663/164, 13 : 656/184, 14 : 680/233,  left 1037
+  // Cam observations started/finished: 1 : 2/9, 2 : 6/10, 3 : 3/5, 4 : 14/4, 5 : 13/3,  left 31
 
   // effective:
   // cost = 0;
@@ -1735,13 +1781,40 @@ double GetCost(const std::map<int, std::set<int>> &landmarkFromCameraOfPart,
   return cost + costKlDivEquality + 1e-0 / static_cast<double>(res_in_cluster); // could also return mean cost
   return cost + costKlDivEquality + 10 * 1e-0 / static_cast<double>(res_in_cluster); // could also return mean cost
 #else
+
+  // Hmm aim is to minimize this cost. So, 1/res -> prefers to combine 2 small cl. not 1 small one large.
+  // p: indifferent? vs log(q): prefer small to be merged.
+
+  // 1723: never ever any value times div. 
+  // double p = static_cast<double>(res_in_cluster) / static_cast<double>(total_res);
+  // Cam observations started/finished: 1 : 1124/156, 2 : 1446/91, 3 : 1603/61, 4 : 1507/40, 5 : 1474/28,  left 376
+  // return cost - 25. * p;
+  // //costKlDivEquality = - p * std::log(p * kClusters); // prefers growing large.
+  //costKlDivEquality = -std::log(p * static_cast<double>(kClusters)) / static_cast<double>(kClusters);
+  // // 3068: even res but bad -- haeh? run now ..
+  // Cam observations started/finished: 1 : 1037/129, 2 : 1494/88, 3 : 1616/64, 4 : 1539/42, 5 : 1393/42,  left 365
+  // return cost;// + 0.00001 * std::abs(costKlDivEquality) + 1e-0 / static_cast<double>(res_in_cluster); // 2nd 10. Part 24 with 302951 residuals
+
+  // return 1e-0 / static_cast<double>(res_in_cluster);
+  // Cam observations started/finished: 1 : 7985/183, 2 : 6359/87, 3 : 5161/71, 4 : 4594/49, 5 : 3917/32,  left 422
+  // Cam observations started/finished: 1 : 183/0, 2 : 87/2, 3 : 71/3, 4 : 49/9, 5 : 32/17, 6 : 783/48, 7 : 516/63, 8 : 668/78, 9 : 718/102, 10 : 726/89, 11 : 728/86, 12 : 710/112, 13 : 700/146, 14 : 691/217,  left 972
+  // Cam observations started/finished: 1 : 0/14, 2 : 2/9, 3 : 3/2, 4 : 9/1, 5 : 17/2,  left 28
+  // Cam observations started/finished: 1 : 14/0, 2 : 9/2, 3 : 2/3, 4 : 1/7, 5 : 2/14, 6 : 46/48, 7 : 59/63, 8 : 79/81, 9 : 102/101, 10 : 87/88, 11 : 84/85, 12 : 112/114, 13 : 151/146, 14 : 223/215,  left 967
+  // Cam observations started/finished: 1 : 0/12, 2 : 2/9, 3 : 3/2, 4 : 7/1, 5 : 14/2,  left 26
+  // Cam observations started/finished: 1 : 12/0, 2 : 9/2, 3 : 2/3, 4 : 1/7, 5 : 2/14, 6 : 44/48, 7 : 61/63, 8 : 81/81, 9 : 102/101, 10 : 89/88, 11 : 84/84, 12 : 113/116, 13 : 149/147, 14 : 214/204,  left 958
+
   // 1/ res -> get rid of small clusters first. e.g. merge small into 1 is better than merge 2 middle sized ones.
   return cost + costKlDivEquality + 1e-0 / static_cast<double>(res_in_cluster); // could also return mean cost
   //return cost + costKlDivEquality + 1e-0 / std::sqrt(static_cast<double>(res_in_cluster));
 #endif
 }
 
+// Cost Gain per landmark:
+// wij = exp(-sij/S), neg. similaity sij measures cams not in common, ie. let C(p): set of cams in part P?, pij = wij/wT, wT constant hmm.
+// or sij := 
+
 // prefers landmarks seen by few cameras with few observations in those cameras on average -- so not few observations first.
+// IDEA: highest cost first!
 double GetOrderCost(const std::map<int, std::set<int>> &landmarkFromCameraOfPart, 
                int maxLmPerCam, double temperature, int res_in_cluster, int total_res, int kClusters) {
   double cost = 0;
@@ -1771,8 +1844,16 @@ double GetOrderCost(const std::map<int, std::set<int>> &landmarkFromCameraOfPart
   //   pq.pop();
   // }
 
+  // 1. Kl-div(p,q) = sum p_i log(p_i / q_i) = - sum p_i log(q_i/p_i).
+  // 2. Kl-div(q,p) = sum q_i log(q_i / p_i) = - sum q_i log(p_i/q_i).
+  // q_i = 1 / static_cast<double>(kClusters)
+  // 2. - log (p * kClusters) / kClusters
+  // loves cl size res to equal to 1/kClusters, prefers even larger ones.
+  // what do i want to pick small clusters first? prefers large clusters first.
   double p = static_cast<double>(res_in_cluster) / static_cast<double>(total_res);
   double costKlDivEquality = - std::log(p * static_cast<double>(kClusters)) / static_cast<double>(kClusters); // quite strong yet impacts degeneracy
+  // for 3086 result is so bad. why not just 
+
   // mean 
   // TODO: 356 was 1e-3 one component remains. 1e-2: better, still 4 large 6 small cluster.
   // Could also use 1e-3, eval if not recompute with 1e-2, etc.
@@ -1782,17 +1863,46 @@ double GetOrderCost(const std::map<int, std::set<int>> &landmarkFromCameraOfPart
   //        (1e-0 / static_cast<double>(res_in_cluster) +
   //         _order_div_mult_ * costKlDivEquality);
 
+//#undef __testThisNew__
+#ifdef __testThisNew__
+  // Try this version for order
+  //std::cout << "Order cost " << cost + 1e-1 * _order_div_mult_ * costKlDivEquality << " = " << cost << " + " << 1e-0 / static_cast<double>(res_in_cluster) << " + " << _order_div_mult_ * costKlDivEquality << " " << res_in_cluster << " < " << total_res<< "\n";
+  //return cost + 1e-1 * _order_div_mult_ * costKlDivEquality2;
+  //return cost - 1e-0 / static_cast<double>(res_in_cluster);
+  // maybe should be distributed as log? same as kl div then.
+  // cost -  .1 * std::log(p): Cam observations started/finished: 1 : 1992/80, 2 : 2178/59, 3 : 1849/32, 4 : 1560/19, 5 : 1417/13,  left 203
+  // cost - .01 * std::log(p): Cam observations started/finished: 1 : 1513/95, 2 : 1855/56, 3 : 1699/42, 4 : 1562/26, 5 : 1306/29,  left 248 .. maybe its not this?
+  // return cost - .1 * std::log(p); // ? cost in [0,1]. at which p factor 100: p +- 0.01 -> prefer 100 times smaller res 
+  // 1. become independent of # clusters. R: all res, r: num res -> replace R/r by -r/R here. -p is linear in percent of res. vs 1/r is stronger on small r.
+  // p*p -> more smaller cost for larger parts.
+  // overindex
+  // 100 is fast enough. 10 also still ok. - X*p with idea: indifferent if within factor of X. if factor is larger (|T| > X * |S|) -> S comes before T.
+  // cost - 50. * p: Cam observations started/finished: 1 : 1866/105, 2 : 2101/66, 3 : 2042/52, 4 : 1757/31, 5 : 1505/21,  left 275
+  // cost - 10. * p: Cam observations started/finished: 1 : 1409/93,  2 : 1834/57, 3 : 2025/39, 4 : 1689/33, 5 : 1507/24,  left 246
+  // cost - 25. * p:Cam observations started/finished:  1 : 1745/83,  2 : 2258/51, 3 : 2173/40, 4 : 1809/20, 5 : 1646/19,  left 213
+  // maybe 10 is bad for small problems. must be smaller then?
+  // 10 is slow. why actually?
+  return cost - 25. * p;// + _order_div_mult_ * costKlDivEquality; // from 0 to 1 -- should be more general small vs large ba datasets?
+  // or even pure. if this does not work, the order cost is ok, the cost is not.
+  // return -p;//costKlDivEquality; // ok sorts both as desired.
+#endif
+
+  //    1, 1/2, 1/3, 1/4, 1/5, 1/6, 1/7, 1/8, 1/9, 1/10 .. twice an many res: 1/r vs 1/2r and r/R vs 2r/R. 
+  // vs 1/R, 2/R, 3/R, 4/R, 5/R, 6/R, 7/R, 8/R, 9/R, 10/R
+  // Highest cost first == biggest estimated cost gain possible => low cost if 
+  // So picks small guys first as cost is high 1/1 vs 1/ 10000 or so. costKlDivEquality is same idea. cost wants bad configs go first for merge.
   return cost + 1e-0 / static_cast<double>(res_in_cluster) + _order_div_mult_ * costKlDivEquality;
   // return cost / std::sqrt(static_cast<double>(std::max(1, entries))) + 1e-0 / static_cast<double>(res_in_cluster);
 }
 
-// return cams in part with fewest landmark observations.
+// return cams in part with fewest landmark observations. Foolows definition of GetCost. cma with 1 lm has high cost, picking cam seeing this can lead to good merge candidate.
 std::vector<int> GetLowestKCameras(const std::map<int, std::set<int>> &landmarkFromCameraOfPart, 
                                    int topK, const std::vector<std::vector<int>>& lms_from_cam) {
   std::vector<std::pair<int, int>> lmsInPartOfCam;
+  lmsInPartOfCam.reserve(topK);
   // map cost to partId ? update by set cost to inf / update cost = heap.
   auto cmp = [&lmsInPartOfCam](int left, int right) {
-    return lmsInPartOfCam[left].second > lmsInPartOfCam[right].second; // largest first
+    return lmsInPartOfCam[left].second < lmsInPartOfCam[right].second; // largest top
   };
   std::priority_queue<int, std::vector<int>, decltype(cmp)> pq(cmp);
 
@@ -1800,21 +1910,38 @@ std::vector<int> GetLowestKCameras(const std::map<int, std::set<int>> &landmarkF
     const int numLandmarks = landmarksFromCam.size(); // 0 cannot happen.
 
     // std::cout << "Cam  " << cam << " in part with " << numLandmarks << " landmarks\n";
-
     // TODO; could also be cam with most observations not in part.
     if(lms_from_cam[cam].size() <= numLandmarks) {continue;} // skip fully covered.
 
-    if(pq.size() < topK) { //always push if less than desired
-      lmsInPartOfCam.push_back({cam, numLandmarks});
+    // baseline Cam observations started/finished: 1 : 781/123, 2 : 1063/60, 3 : 1302/55, 4 : 1289/25, 5 : 1244/32,  left 295
+    // *5         m observations started/finished: 1 : 472/111, 2 : 718/60, 3 : 1074/56, 4 : 1102/42, 5 : 1078/35,  left 304
+    // *2       Cam observations started/finished: 1 :  528/88, 2 : 725/64, 3 : 1033/32, 4 : 1103/32, 5 : 1091/17,  left 233 -- still worse.
+    // /2       Cam observations started/finished: 1 : 507/128, 2 : 655/91, 3 : 1051/42, 4 : 1025/41, 5 : 1022/37,  left 339
+    // 1:1      Cam observations started/finished: 1 : 543/118, 2 : 784/58, 3 : 1008/43, 4 : 1158/34, 5 : 1076/24,  left 277
+
+    const int cost = lms_from_cam[cam].size() + 3 * numLandmarks; // prefer few lms in part and few lms in total.
+
+    if (pq.size() < topK) { // always push if less than desired
+      lmsInPartOfCam.push_back({cam, cost});
       pq.push(lmsInPartOfCam.size() - 1);
-    }
-    if(pq.top() > numLandmarks) { // new is better (== random pick?)
+      // std::cout << "Insert " << cam << " with " << numLandmarks
+      //           << " lms in part\n";
+    } else {
       const int id = pq.top();
-      pq.pop();
-      lmsInPartOfCam[id] = {cam, numLandmarks}; // overwrite
-      pq.push(id); // re enter in new place
+      // TODO: this is just crazy:
+      // if(  id > numLandmarks) { // new is better (== random pick?)
+      if (lmsInPartOfCam[id].second > cost) { // if new is smaller than largest of pq, replace.
+        pq.pop();
+        // std::cout << "Replacing " << lmsInPartOfCam[id].first << "/"
+        //           << lmsInPartOfCam[id].second << " with " << cam << " with "
+        //           << numLandmarks << " lms in part selected\n";
+        lmsInPartOfCam[id] = {cam, cost}; // overwrite
+        pq.push(id);                              // re enter in new place
+      }
     }
   }
+
+  // std::cout <<"----\n";
   // best cams are in pq.
   std::vector<int> ids;
   while (!pq.empty()) {
@@ -1832,11 +1959,60 @@ std::pair<int, double> FindbestMatchForPart(int partId, //const std::vector<std:
   const std::vector<int>& lmToPart, const std::vector<double>& costOfPart, 
   int maxLmPerCam, double temperature, int num_res, int kClusters, bool verbose = false) {
   // idea: find k cams with fewest landmarks in part.
-  constexpr int topK = 1; // 1 -> 3: 24 -> 38s, before used 1. maybe 3 is better 3068. not clear what defines better for 3068.
-  constexpr int topL = 30;  // change to 20 does 4s -> 5s .. + 25% likely trade off with below.
-  // test: 3000 replacing 1500. run on probem 52.
-  constexpr int topM = 1500;// 1500 -> 4500: 24s ->27s // we do not use all but 700 random landmarks for a cam -- there can be 30k.
-  // cam in part with fewest landamrk observations in part.
+  constexpr int topK = 3;//4; // 1 -> 3: 24 -> 38s, before used 1. maybe 3 is better 3068. not clear what defines better for 3068.
+  constexpr int topL = 30;//20;  // change to 20 does 4s -> 5s .. + 25% likely trade off with below.
+ 
+  // 1/ 30   Cam observations started/finished: 1 : 1445/101, 2 : 1595/89, 3 : 1684/55, 4 : 1521/48, 5 : 1456/31,  left 324
+  // 3 / 30  Cam observations started/finished: 1 :  776/83,  2 : 1057/56, 3 : 1212/38, 4 : 1249/29, 5 : 1164/19,  left 225
+  // 4 20 Cam observations started/finished: 1 : 827/110, 2 : 1121/50, 3 : 1338/49, 4 : 1292/32, 5 : 1188/23,  left 264
+
+  // 4/25      Cam observations started/finished: 1 : 985/128, 2 : 1214/80, 3 : 1544/55, 4 : 1486/47, 5 : 1383/32,  left 342
+  // 6/15/     Cam observations started/finished: 1 : 1028/96, 2 : 1367/82, 3 : 1540/68, 4 : 1522/31, 5 : 1358/27,  left 304
+  // 4/20/1000 Cam observations started/finished: 1 : 953/100, 2 : 1315/70, 3 : 1495/48, 4 : 1472/43, 5 : 1333/24,  left 285
+  // 2/30/1500 Cam observations started/finished: 1 : 1113/109, 2 : 1385/67, 3 : 1484/40, 4 : 1451/32, 5 : 1362/18,  left 266
+  // 15/5/1000 Cam observations started/finished: 1 : 1237/95, 2 : 1472/62, 3 : 1483/43, 4 : 1476/46, 5 : 1365/25,  left 271
+  // new Get Cost .. worse again Cam observations started/finished: 1 : 1017/154, 2 : 1412/88, 3 : 1503/50, 4 : 1450/47, 5 : 1416/21,  left 360
+
+  // could have 2 q's, could have n random + selected.
+  // otherPartCost[id].second > cost: 4/25: 
+
+  // 4 22 Cam observations started/finished: 1 : 1/5, 2 : 144/5, 3 : 438/5, 4 : 531/0, 5 : 500/0,  left 15
+  // 3 22
+  // Cam observations started/finished: 1 : 4/10, 2 : 176/5, 3 : 467/1, 4 : 548/1, 5 : 458/0,  left 17
+  // 7 7 
+  // Cam observations started/finished: 1 : 24/15, 2 : 399/1, 3 : 586/3, 4 : 670/1, 5 : 529/1,  left 21
+   // 3 17
+  //Cam observations started/finished: 1 : 23/13, 2 : 264/4, 3 : 548/1, 4 : 577/1, 5 : 484/4,  left 23
+  // 4 17
+  // Cam observations started/finished: 1 : 5/19, 2 : 197/2, 3 : 523/9, 4 : 594/1, 5 : 458/2,  left 33
+
+  // 4 10
+  // Cam observations started/finished: 1 : 17/22, 2 : 390/6, 3 : 581/5, 4 : 608/0, 5 : 517/2,  left 35
+  // 2 15
+  //  Cam observations started/finished: 1 : 27/17, 2 : 401/4, 3 : 623/10, 4 : 662/2, 5 : 595/2,  left 35
+  // 5 6
+  // Cam observations started/finished: 1 : 64/16, 2 : 472/6, 3 : 556/8, 4 : 684/2, 5 : 573/0,  left 32
+  // 3 10
+  // Cam observations started/finished: 1 : 40/10, 2 : 369/3, 3 : 549/6, 4 : 561/2, 5 : 496/1,  left 22
+  // 10, 3
+  // Cam observations started/finished: 1 : 110/12, 2 : 586/6, 3 : 560/2, 4 : 652/1, 5 : 526/0,  left 21
+  // 10 4
+  // Cam observations started/finished: 1 : 69/15, 2 : 497/5, 3 : 512/8, 4 : 614/2, 5 : 537/0,  left 30
+  // 10, 5, better but does not work still.
+  // Cam observations started/finished: 1 : 42/11, 2 : 425/4, 3 : 511/12, 4 : 588/4, 5 : 478/2,  left 33
+  // 12 3
+  //Cam observations started/finished: 1 : 92/13, 2 : 539/2, 3 : 560/4, 4 : 666/4, 5 : 517/0,  left 23
+  // 8 4
+  // Cam observations started/finished: 1 : 97/16, 2 : 579/4, 3 : 578/4, 4 : 741/0, 5 : 562/2,  left 26
+
+  //Cam observations started/finished: 1 : 1553/129, 2 : 2023/57, 3 : 2022/55, 4 : 1792/33, 5 : 1518/25,  left 299
+  //Cam observations started/finished: 1 : 1707/114, 2 : 2207/77, 3 : 2111/54, 4 : 1890/41, 5 : 1590/22,  left 308 # this is better yet?
+  // test: 3000 replacing 1500. run on probem 52. small value: slow since we do not find small cluster to merge.
+  constexpr int topM = 1000;//1000;// 1500 -> 4500: 24s ->27s // we do not use all but 700 random landmarks for a cam -- there can be 30k.
+  //Cam observations started/finished: 1 : 37/5, 2 : 22/2, 3 : 44/1, 4 : 252/0, 5 : 288/2,  left 10  - 1500, largest
+  //Cam observations started/finished: 1 : 96/2, 2 : 45/0, 3 : 132/0, 4 : 242/0, 5 : 294/0,  left 2 -- random 30
+  
+  // Cam in part with fewest landamrk observations in part.
   const std::map<int, std::set<int>> &landmarkFromCameraOfPart = landmarkFromCameraPerPart[partId];
   std::vector<int> camsToTryInPart = GetLowestKCameras(landmarkFromCameraOfPart, topK, lms_from_cam);
   // for each cam find a second different part also observing it, pick one with low costs
@@ -1855,41 +2031,86 @@ std::pair<int, double> FindbestMatchForPart(int partId, //const std::vector<std:
 
   std::set<int> partToTryMerge;
   // Again keep top k possibilities in Q ?
-  for(int camToTry : camsToTryInPart) { // this cam has these 
+// #pragma omp parallel for num_threads(4) // slower
+//    for (int i = 0; i < topK; ++i) { // this cam has these 
+//      const int camToTry = camsToTryInPart[i];
+  for (int camToTry : camsToTryInPart) { // this cam has these 
     //std::cout << "At camToTry " << camToTry << std::endl;
     // const std::set<int>& landmarksInPart = landmarkFromCameraOfPart.at(camToTry); // the landmarks observed by the cam, can be just 1
     //std::cout << "Ok\n";
     // for each lm here, find a potential partner.
     const std::vector<int>& otherLandmarksObservedByCam = lms_from_cam[camToTry]; // do part from cam
     const int numObservations = otherLandmarksObservedByCam.size();
-    std::uniform_int_distribution dist{ 0, numObservations-1 };
 
     std::vector<std::pair<int, double>> otherPartCost;
     otherPartCost.reserve(topL);
     // map cost to partId ? update by set cost to inf / update cost = heap.
     auto cmp = [&otherPartCost](int left, int right) {
-      return otherPartCost[left].second > otherPartCost[right].second; // smallest first
+      // This is not the best way. even 30 random was better than 1500 selected ones !! 
+      // Maybe use random 30, maybe ? 
+      return otherPartCost[left].second > otherPartCost[right].second; // smallest on top, note that 1500 os WORSE than 3000 for 3068. -- should pick based on cost gain. high cost + overlap ~ highest gain possible.
+      // for speed reasons we likely want small go first. Indeed '<' here is TOTALLY SUPER SLOW.
+      //return otherPartCost[left].second < otherPartCost[right].second; // TODO should it not be largest first here, since large ones are the trouble makers, since we use .. wait what? what should it be actually extra cost for this?
     };
     std::priority_queue<int, std::vector<int>, decltype(cmp)> pq(cmp);
-
-    std::set<int> checkedParts = {partId}; // TODO could keep outside! and / or even fill pq from all at once.
-
+   
     int num = 0;
+    // TODO: Paralel, smarter implementation.
+    // Preselect topL parts to try merge with.
+    #define _simpler_
+    #ifdef _simpler_
+    std::set<int> checkedParts = {partId}; // TODO could keep outside! and / or even fill pq from all at once.
+    std::vector<int> landmarkIds(numObservations, 0);
+    std::iota(landmarkIds.begin(), landmarkIds.end(), 0);
+    if (topM < numObservations) {
+      std::shuffle(landmarkIds.begin(), landmarkIds.end(), mt);
+    }
+    for (int lmIdd = 0; lmIdd < std::min(topM, numObservations); ++lmIdd ) {
+      const int lmId = otherLandmarksObservedByCam[landmarkIds[lmIdd]];
+      
+      const int otherPartId = lmToPart[lmId]; ///////////////////////////////////////////////////////////////////////////// FindRootInVtxToPartMap(const std::vector<int>& vtxsToPart, int start)
+      const auto& [it, inserted] = checkedParts.insert(otherPartId);
+      if (!inserted) {continue;}
+      
+      if (res_per_cluster[otherPartId] <= 0) {continue;}
+      
+      const double cost = costOfPart[otherPartId]; // The order cost, not the cost!
+      
+      //std::cout << "lm " << lmId << " " << cost << "\n";
+      if (pq.size() < topL) { // always push if less than desired
+        otherPartCost.push_back({otherPartId, cost});
+        //std::cout << "Pushing "  << otherPartId << " with " << cost << " for merge\n";
+        pq.push(otherPartCost.size() - 1);
+        continue;
+      }
+      
+      const int id = pq.top(); // if here is largest first, then check should lead to replace act if smaller. (queue holds smallest parts) and vice versa. CORRECT BUT SLOW -- why?
+      if (otherPartCost[id].second < cost) { // sign different than above is correct, also need many trials topM = 1500 is best -- any other number fails at 1068, also rng.
+        pq.pop();
+        //std::cout << "Considering "  << otherPartId << " with " << cost << " for merge replacing " << otherPartCost[id].first << " c: " << otherPartCost[id].second << "\n";
+        otherPartCost[id] = {otherPartId, cost}; // overwrite
+        pq.push(id); // re enter in a new place
+      }
+    }
+    //std::cout << "===\n";
+    #else
     auto landmarkIt = otherLandmarksObservedByCam.begin();
+    std::set<int> checkedParts = {partId}; // TODO could keep outside! and / or even fill pq from all at once.
+    std::uniform_int_distribution dist{ 0, numObservations-1 };
     while (num < std::min(topM, numObservations) ) { // 5k on average, uber-BOTTLENECK. have a map cam to part?
-      if (numObservations < topM){ 
+      if (numObservations < topM) {
         if (num>0) {std::advance(landmarkIt, 1);}
       }
-      else {
+      else { // pick at random if more than topM exist.
         landmarkIt = otherLandmarksObservedByCam.begin();
         std::advance(landmarkIt, dist(mt));
       }
       ++num;
-      int lmId = *landmarkIt;
-      int otherPartId = lmToPart[lmId]; ///////////////////////////////////////////////////////////////////////////// FindRootInVtxToPartMap(const std::vector<int>& vtxsToPart, int start)
-      if (checkedParts.find(otherPartId) != checkedParts.end()) {continue;}
+      const int lmId = *landmarkIt;
+      const int otherPartId = lmToPart[lmId]; ///////////////////////////////////////////////////////////////////////////// FindRootInVtxToPartMap(const std::vector<int>& vtxsToPart, int start)
 
-      checkedParts.insert(otherPartId);
+      const auto& [it, inserted] = checkedParts.insert(otherPartId);
+      if (!inserted) {continue;}
       if (res_per_cluster[otherPartId] <= 0) {continue;} 
 
       const double cost = costOfPart[otherPartId];
@@ -1901,20 +2122,23 @@ std::pair<int, double> FindbestMatchForPart(int partId, //const std::vector<std:
         continue;
       }
 
-      if (otherPartCost[pq.top()].second < cost) { // new is better (== random pick?)
-        const int id = pq.top();
+      const int id = pq.top();
+      if (otherPartCost[id].second < cost) { // new is better (== random pick?)
         pq.pop();
         //std::cout << "Considering "  << otherPartId << " with " << cost << " for merge replacing " << otherPartCost[id].first << " c: " << otherPartCost[id].second << "\n";
         otherPartCost[id] = {otherPartId, cost}; // overwrite
         pq.push(id); // re enter in a new place
       }
     }
+#endif
+
+//#pragma omp critical
     for (const auto [id, cost] : otherPartCost) {
       partToTryMerge.insert(id);
       //std::cout << "Using part "  << id << " with " << cost << " for possible merge top cost: " << otherPartCost[pq.top()].second << "\n";
       pq.pop();
     }
-  }
+  } // over different camsToTryInPart
   
   // compute merge gain
   int bestPartToMerge = -1;
@@ -1925,7 +2149,10 @@ std::pair<int, double> FindbestMatchForPart(int partId, //const std::vector<std:
 #else
   const double partCost = costOfPart[partId];
 #endif
-  for(int otherPartId : partToTryMerge) {
+
+// TODO: parallel? below set best part not parallel.
+#pragma omp parallel num_threads(10) // not for
+  for (int otherPartId : partToTryMerge) {
 #ifdef _select_by_even_cost_
     // cost GAIN be regular cost
     const double oldCost = partCost + GetCost(landmarkFromCameraPerPart[otherPartId], maxLmPerCam, temperature, res_per_cluster[otherPartId], num_res, kClusters);
@@ -1937,10 +2164,11 @@ std::pair<int, double> FindbestMatchForPart(int partId, //const std::vector<std:
     std::map<int, std::set<int>> landmarkFromCameraOfOtherPart = landmarkFromCameraPerPart[otherPartId];
     // merge landmarkFromCameraOfOtherPart and landmarkFromCameraOfPart and compute new cost.
     for(const auto&[cam, lms] : landmarkFromCameraOfPart) {
-      if (landmarkFromCameraOfOtherPart.find(cam) == landmarkFromCameraOfOtherPart.end() && lms.size() > maxLmPerCam) {continue;} // too large
-      if (landmarkFromCameraOfOtherPart.find(cam) != landmarkFromCameraOfOtherPart.end() && landmarkFromCameraOfOtherPart.at(cam).size() > maxLmPerCam) {continue;}
-      if (lms.size() > maxLmPerCam) {
-        landmarkFromCameraOfOtherPart.erase(cam);
+      auto it = landmarkFromCameraOfOtherPart.find(cam);
+      if (it != landmarkFromCameraOfOtherPart.end() && landmarkFromCameraOfOtherPart.at(cam).size() > maxLmPerCam) {continue;} // already maximized for cost compute.
+      if (lms.size() > maxLmPerCam) { // too large would not count in cost anyway.
+        if (it == landmarkFromCameraOfOtherPart.end()) {continue;} // just skip.
+        landmarkFromCameraOfOtherPart.erase(cam); // erase is faster then insert many?
       } else {
         landmarkFromCameraOfOtherPart[cam].insert(lms.begin(), lms.end()); // slow
       }
@@ -1956,13 +2184,15 @@ std::pair<int, double> FindbestMatchForPart(int partId, //const std::vector<std:
     // std::cout << "Own part "  << partId << " with cost " << costOfPart[partId] << " and merge  Part " << otherPartId 
     //           << " with cost " << costOfPart[otherPartId] << " for possible merge with new cost " << newCost << " = " << costGain << " vs " << bestCostGain << "\n";
 
-    if(oldCost - newCost > bestCostGain) {
-      bestCostGain = oldCost - newCost;
+#pragma omp critical
+    if(costGain > bestCostGain) {
+      bestCostGain = costGain;
       bestPartToMerge = otherPartId;
       //  std::cout << "Own part "  << partId << " with cost " << costOfPart[partId] << " and merge  Part " << otherPartId 
       //            << " with cost " << costOfPart[otherPartId] << " for possible merge with new cost " << newCost << " = " << costGain << " vs " << bestCostGain << "\n";
     }
   }
+
   if (verbose)
     std::cout << "Found Best part to " << partId << " cost " << costOfPart[partId] << " " << bestPartToMerge 
               << " cost " << costOfPart[bestPartToMerge] << " and cost gain " << bestCostGain << "\n";
@@ -1974,7 +2204,7 @@ double MergeParts(int partId, int otherPartId,
       std::vector<std::map<int, std::set<int>>>& landmarkFromCameraPerPart,
       std::vector<int>& res_per_cluster,
       std::vector<int>& lmToPart, 
-      std::vector<double>& costOfPart,
+      //std::vector<double>& costOfPart,
       int maxLmPerCam, double temperature, int num_res, int kClusters) {
     std::map<int, std::set<int>>& landmarkFromCameraOfPart = landmarkFromCameraPerPart[partId];
     std::map<int, std::set<int>>& landmarkFromCameraOfOtherPart = landmarkFromCameraPerPart[otherPartId];
@@ -2124,7 +2354,7 @@ std::vector<std::set<int>> find_identical_lms(const std::vector<std::vector<int>
         duplicate_lm_ids.push_back(identical_set);
         numDuplicateLms += identical_set.size() - 1;
         for(const int lm3 : identical_set)
-        dupe_set.erase(lm3);
+          dupe_set.erase(lm3);
       }
     }
   }
@@ -2186,14 +2416,47 @@ void cluster_cameras_degeneracy(
 
     // 3. cluster to cam involved and counts use landmarkFromCameraPerPart
     // 4. compute cost per part. init.
-    std::vector<double> costOfPart;
+    int num_parts = num_lands;
+    std::vector<double> costOfPart(num_parts, 0);
+
+    // TODO: Merge parts that are full subsets of another part.
+    // maybe hash all. take hash of one. find similar one. small to large would suffice. also can be ordered simply.
+    // n hashes. P(same ) hash subsets for all but smallest parts (those have no subsets?).
+    // problem 2 subsets are quadratic already in total size.
+    // per view this is not so bad. go over all parts that share a view (for smaller one). I.e. 2 elements -> 2 views.
+#ifdef __clusteridentical_lms_early__
+    // Would be faster to first remove identical lms. then build the queue. 
+    // Clamp landmarks with identical camera set into one part.
+    // Likely better to make code believe only single lm is in part (searches voer cams .. ?) Does it do anything?
+    std::vector<std::set<int>> list_of_identical_lms = find_identical_lms(cams_from_lm, num_cams, num_lands);
+    for (const auto& set_of_idential_lms : list_of_identical_lms) {
+      const int keptPartId = *(set_of_idential_lms.begin());
+      for (const int deletedPartId : set_of_idential_lms) {
+        if (keptPartId == deletedPartId) {continue;}
+        // Todo : ineffective to compute cost here.
+        const double newCost = MergeParts(keptPartId, deletedPartId,
+              landmarkFromCameraPerPart,
+              res_per_cluster,
+              lmToPart, 
+              //costOfPart, // if set to -1 blocks other parts to go up in q. must invalidate extra.
+              maxLmPerCam, 
+              temperature,
+              num_res, 
+              kClusters);
+        //costOfPart[keptPartId] = newCost; // should suffice. no pop needed as merging set num res to 0 of 
+        num_parts--;
+      }
+    }
+#endif
+
     // map cost to partId ? update by set cost to inf / update cost = heap.
     auto cmp = [&costOfPart](int left, int right) {
-    return costOfPart[left] < costOfPart[right]; // highest cost 1st best merge candidates
-    };
-    std::priority_queue<int, std::vector<int>, decltype(cmp)> pq(cmp);
-
-    for(int partId=0;partId < num_lands; partId++ ) {
+      return costOfPart[left] < costOfPart[right]; // highest cost 1st best merge candidates
+      };
+      std::priority_queue<int, std::vector<int>, decltype(cmp)> pq(cmp);
+  
+    for (int partId = 0;partId < num_lands; partId++ ) {
+      if (res_per_cluster[partId] <= 0) {continue;} // invalid / merged
       // This could be a different cost.
 #ifdef _select_by_even_cost_
       // order by order cost. prefer small parts.
@@ -2202,56 +2465,31 @@ void cluster_cameras_degeneracy(
       const double cost = GetCost(landmarkFromCameraPerPart[partId], maxLmPerCam, temperature, res_per_cluster[partId], num_res, kClusters); // also prefer small parts ?!
 #endif
       //std::cout << "Insert PartId  " << partId << " cost " << cost << " \n";
-      costOfPart.push_back(cost);
+      costOfPart[partId] = cost;
       pq.push(partId);
     }
+    //std::cout << "Parts " << num_parts << " #res " << num_res << " #lms " << num_lands << " #cams " << num_cams << " \n";
 
-    int num_parts = num_lands;
-#ifdef __clusteridentical_lms_early__
-    // Clamp landmarks with identical camera set into one part.
-    // Likely better to make code believe only single lm is in part (searches voer cams .. ?) Does it do anything?
-    std::vector<std::set<int>> list_of_identical_lms = find_identical_lms(cams_from_lm, num_cams, num_lands);
-    for (const auto& set_of_idential_lms : list_of_identical_lms) {
-      const int keptPartId = *(set_of_idential_lms.begin());
-      for (const int deletedPartId : set_of_idential_lms) {
-        if (keptPartId == deletedPartId) {continue;}
-        const double newCost = MergeParts(keptPartId, deletedPartId,
-              landmarkFromCameraPerPart,
-              res_per_cluster,
-              lmToPart, 
-              costOfPart, // if set to -1 blocks other parts to go up in q. must invalidate extra.
-              maxLmPerCam, 
-              temperature,
-              num_res, 
-              kClusters);
-        costOfPart[keptPartId] = newCost; // should suffice. no pop needed as merging set num res to 0 of 
-        num_parts--;
-      }
-    }
-#endif
-
-    // TODO: Merge parts that are full subsets of another part.
-    // maybe hash all. take hash of one. find similar one. small to large would suffice. also can be ordered simply.
-    // n hashes. P(same ) hash subsets for all but smallest parts (those have no subsets?).
-    // problem 2 subsets are quadratic already in total size.
-    // per view this is not so bad. go over all parts that share a view (for smaller one). I.e. 2 elements -> 2 views.
-        
-
+    // 5. merge parts until kClusters are left.
     while (!pq.empty() && num_parts > kClusters) {
       const int partId = pq.top();
-      if(res_per_cluster[partId] <= 0) {pq.pop();continue;} // invalid / merged
+      // std::cout << "PartId  " << partId << " cost " << costOfPart[partId] << " #parts " 
+      //           << num_parts << " #pq" << pq.size() << " " << res_per_cluster[partId] << " \n";
 
-      //std::cout << "PartId  " << partId << " cost " << costOfPart[partId] << " \n";
+      if (res_per_cluster[partId] <= 0) {pq.pop();continue;} // invalid / merged
 
       // 0. select part to try for a merge
       // 1. select parts to merge     
       // 2. merge & update costs
-      std::map<double, std::pair<int,int>> partsToTry;
-      for(int partToTryId = 0; partToTryId < std::min(nLowestPartsToTry, num_parts-1); partToTryId++) {
+      std::map<double, std::pair<int,int>> partsToTry; // nLowestPartsToTry is 1.
+      for (int partToTryId = 0; partToTryId < std::min(nLowestPartsToTry, num_parts-1); partToTryId++) {
         const int partId = pq.top();
         pq.pop();
         if (verbose)
-          std::cout << "Try PartId  " << partId << " cost " << costOfPart[partId] << " pq-size " << pq.size() << " \n";
+          std::cout << "#P:" << num_parts << " Try PartId  " << partId << " cost " << costOfPart[partId] 
+                  << " pq-size " << pq.size() << " #res:" << res_per_cluster[partId] << " \n";
+          // We try the same partId very often repeatedly. can i just skip it if it failed once?
+          // it failed if 
         std::pair<int, double> partAndGain = // 2nd part and CostGain
           FindbestMatchForPart(partId, lms_from_cam, landmarkFromCameraPerPart, res_per_cluster, 
                                lmToPart, costOfPart, maxLmPerCam,temperature, num_res, kClusters, verbose);
@@ -2277,15 +2515,18 @@ void cluster_cameras_degeneracy(
             landmarkFromCameraPerPart,
             res_per_cluster,
             lmToPart, 
-            costOfPart, // if set to -1 blocks other parts to go up in q. must invalidate extra.
+            //costOfPart, // if set to -1 blocks other parts to go up in q. must invalidate extra.
             maxLmPerCam, 
             temperature,
             num_res, 
             kClusters);
 
-      const int numCamsAfter = landmarkFromCameraPerPart[partId].size();
-      if (verbose)
+      // res_per_cluster[partsToMerge.second] == 0 after merge.
+
+      if (verbose) {
+        const int numCamsAfter = landmarkFromCameraPerPart[partId].size();
         std::cout << " parts " << num_parts-1 << " Merge num Cams " << numCamsBefore1 << " & " << numCamsBefore2 << " = " << numCamsAfter << " newCost " << newCost << " \n";
+      }
 
       assert(partsToMerge.first == partId);
 
