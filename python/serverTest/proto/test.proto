@@ -3,7 +3,7 @@ syntax = "proto3";
 
 // Complete program to call Ceres on: read in python, send to server that runs optimization.
 message program_proto {
-  repeated float cameras = 1; // 3d
+  repeated float cameras = 1; // 3d, cameras_s init is by cameras. later extra input.
   repeated float landmarks = 2; // 9d
   repeated float observations = 3; // 2d
   repeated int32 cam_id = 4; // per observation 1 cam
@@ -11,6 +11,7 @@ message program_proto {
   int32 iterations = 6;
   int32 cluster_id = 7;
   float initL = 8;
+  repeated int32 unique_cameras = 9; // should not be many -- if any ever. One could pack cams < 10 lms in one cluster == lms in cam are put in one cluster.
 }
 
 message solution_proto {
@@ -24,12 +25,19 @@ message camera_proto {
   repeated float cameras = 1; // 3d
 }
 
+// send from master to client
 message prox_cluster_proto {
-  repeated float cameras   = 1; // 3d
+  repeated float cameras   = 1; // 3d actually not needed
   repeated float cameras_s = 2; // 3d
   float be = 3;
-  repeated int32 unique_cameras = 4; // should not be many -- if any ever. One could pack cams < 10 lms in one cluster == lms in cam are put in one cluster.
+  int32 cluster_id = 4;
   // clustering: lms by cam. # lms that can fill up cam in cl.
+}
+
+// return message from client to master
+message return_cluster_proto {
+  repeated float cameras   = 1; // 3d
+  int32 cluster_id = 2;
 }
 
 // can be one of messages. so proto converts to correct message. client messages server messages
@@ -37,6 +45,7 @@ message request_proto {
     oneof options {
         program_proto program = 1;
         camera_proto cameras = 2;
+        prox_cluster_proto update = 3;
   }
 }
 

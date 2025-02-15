@@ -14,7 +14,6 @@
 #include <Eigen/Eigenvalues> 
 
 #include "ceres/ceres.h"
-#include "ceres/normal_prior.h"
 #include "ceres/rotation.h"
 
 using Eigen::SparseMatrix;
@@ -162,6 +161,10 @@ int main() {
     std::vector<double> cameras_s;
     std::vector<double> cameras;
     std::vector<double> landmarks;
+    // none of this is needed
+    std::vector<int> cameras_to_ceres; // need to map ceres id to camera id and back
+    std::vector<int> landmark_to_ceres;
+    std::vector<int> ceres_to_camera_and_landmark; // to both.
 
     ceres::Problem problem;
     ceres::Solver::Options options;
@@ -240,7 +243,7 @@ int main() {
                 {
                     THROW_IF(update.cameras_size() != cameras.size());
                     int id=0; // fill existing buffer
-                    for(const float& v : update.cameras()) {
+                    for(const float& v : cams.cameras()) {
                         cameras[id++] = v;
                     }
                     // solve once more
@@ -248,6 +251,12 @@ int main() {
                     ceres::Solve(options, &problem, &summary);
                     std::cout << summary.FullReport() << "\n";
                     std::cout << "\nMycost: " << summary.final_cost * 2 << "\n";
+
+                    // Send solution back!
+                    id = 0;
+                    for(const double& v : cameras) {
+                        update.set_cameras(id++, static_cast<float>(v));
+                    }
 
                     // // Send solution back!, actually cameras shoudl be ok?
                     // solution_proto sol;
@@ -258,13 +267,6 @@ int main() {
                     //     sol.add_landmarks(static_cast<float>(v));
                     // }
                     // sol.SerializeToString(&encoded_msg);
-
-                    // Send solution back!
-                    camera_proto cams;
-                    id = 0;
-                    for(const double& v : cameras) {
-                        cams.set_cameras(id++, static_cast<float>(v));
-                    }
 
                     std::string encoded_msg;
                     cams.SerializeToString(&encoded_msg);
@@ -282,8 +284,16 @@ int main() {
             std::cout << "request_proto::OptionsCase::kProgram" << std::endl;
             program_proto pro = request_p.program(); 
             {
+                // pro make & run program
+                // for (const auto cam : pro.cameras()) {
+                //     std::cout << "cam " << cam << " ";
+                // }
+                // std::cout << std::endl;
+                // execute run 
+
                 numCameras = pro.cameras_size() / 9;
                 numLandmarks = pro.landmarks_size() / 3;
+                // Copy
                 cameras.clear();
                 cameras.reserve(pro.cameras_size());
                 for(const float& v : pro.cameras()) {
@@ -295,10 +305,16 @@ int main() {
                     landmarks.push_back(v);
                 }
                 cameras_s.clear();
-                cameras_s.reserve(pro.cameras_size());
-                for(const float& v : pro.cameras()) {
+                cameras_s.reserve(pro.cameras_s_size());
+                for(const float& v : pro.cameras_s()) {
                     cameras_s.push_back(v);
                 }
+                cameras_to_ceres.clear();
+                cameras_to_ceres.resize(numCameras, -1);
+                landmark_to_ceres.clear();
+                landmark_to_ceres.resize(numLandmarks, -1);
+                ceres_to_camera_and_landmark.clear();
+                ceres_to_camera_and_landmark.resize(pro.cameras_size() + pro.landmarks_size(), -1);
        
                 // setup problem again.
                 problem = ceres::Problem(); // overwrite ..?
@@ -314,7 +330,7 @@ int main() {
                     problem.AddParameterBlock(&cameras_s[i], 9);
                     problem.SetParameterBlockConstant(&cameras_s[i]);
                 }
-                std::cout << "Parameter blocks added\n";
+                std::cout << "Parameter block added\n";
                 // SetParameterBlockVariable -> could set cameras constant, could use for 's'.
                 for (int i = 0; i < pro.observations_size() / 2; ++i) {
                     // Each Residual block takes a point and a camera as input and outputs a 2
@@ -332,7 +348,25 @@ int main() {
                                             nullptr /* squared loss */,
                                             &(cameras[9 * pro.cam_id(i)]),
                                             &(landmarks[3 * pro.lm_id(i)]));
+                    // Likely the map is by 1st occurence. if not present yet, 
+                    // std::cout << "ceresId " << ceres_id << " of " << ceres_to_camera_and_landmark.size() 
+                    //           << " -> " << pro.cam_id(i) << " of " << cameras_to_ceres.size() << "=" << cameras_to_ceres[pro.cam_id(i)] 
+                    //           << " | " << pro.lm_id(i) << " of " << landmark_to_ceres.size() << "="  << landmark_to_ceres[pro.lm_id(i)] << "\n";
+
+                    // Not needed any more.
+                    if (cameras_to_ceres[pro.cam_id(i)] == -1) {
+                        ceres_to_camera_and_landmark[ceres_id] = pro.cam_id(i);
+                        cameras_to_ceres[pro.cam_id(i)] = ceres_id;
+                        ceres_id += 9;
+                    }
+                    if (landmark_to_ceres[pro.lm_id(i)] == -1) {
+                        // ceres_to_landmark[ceres_id] = pro.cam_id(i);
+                        ceres_to_camera_and_landmark[ceres_id] = pro.lm_id(i);
+                        landmark_to_ceres[pro.lm_id(i)] = ceres_id;
+                        ceres_id += 3;
+                    }
                 }
+                std::cout << "Finished " << ceres_id << "\n";
 
                 // 1st get Jacobian(s):
                 ceres::Problem::EvaluateOptions evalOptions;
@@ -346,8 +380,81 @@ int main() {
                 std::cout << "Finished eval problem \n";
                 // Now. I need JpTJp, hence.
 
+                if(false) {
                 SparseMatrix<double, Eigen::RowMajor> Jp(jacobian.num_rows, 9 * numCameras);
                 SparseMatrix<double, Eigen::RowMajor> Jl(jacobian.num_rows, 3 * numLandmarks);
+                Jp.reserve(VectorXi::Constant(2 * jacobian.num_rows,9));
+                Jl.reserve(VectorXi::Constant(2 * jacobian.num_rows,3));
+                // JP.setFromTriplets(coefficients.begin(), coefficients.end());
+                for (Eigen::Index r = 0; r < jacobian.num_rows; ++r) {
+                //for (Eigen::Index r = 0; r < 1000; ++r) {
+                    int lm_id = pro.lm_id(r/2);
+                    int cam_id = pro.cam_id(r/2);
+                    int ceres_cam_id = cameras_to_ceres[cam_id];
+                    int ceres_lm_id = landmark_to_ceres[lm_id];
+                    //std::cout << r << ":";
+                    Eigen::Index idx = jacobian.rows[r];
+
+                    while (idx < jacobian.rows[r + static_cast<Eigen::Index>(1)]) {
+                        const Eigen::Index c = jacobian.cols[idx]; // index of var.
+
+                        // std::cout << "ceres 2 cam/lm " << ceres_to_camera_and_landmark [c] << " = " << cam_id << " / " << lm_id << "\n";
+                        // std::cout << "ceres id " << c << " camC:" << ceres_cam_id << " lmC:" << ceres_lm_id << "\n";
+
+                        if (ceres_cam_id == c) { // cam, read 9 values
+                            for (int i = 0; i < 9 && idx < jacobian.rows[r + static_cast<Eigen::Index>(1)];++idx,++i) {
+                                // read cam values.
+                                //denseJacobian(r, c) = jacobian.values[idx];
+                                //std::cout << "c" << jacobian.cols[idx] << " ";
+                                Jp.insert(r, 9 * cam_id + i) = jacobian.values[idx];
+                            }
+                        }
+                        if (ceres_lm_id == c) { // lm, read 3 values
+                            for (int i = 0; i < 3 && idx < jacobian.rows[r + static_cast<Eigen::Index>(1)];++idx, ++i) {
+                                // read lm values.
+                                //std::cout << "l" << jacobian.cols[idx] << " ";
+                                Jl.insert(r, 3 * lm_id + i) = jacobian.values[idx];
+                            }
+                        }
+                    }
+                    //std::cout << "\n";
+                }
+                std::cout << std::endl;
+                Jp.makeCompressed();
+                Jl.makeCompressed();
+
+                SparseMatrix<double, Eigen::RowMajor> JpJ(9 * numCameras, 9 * numCameras);
+                SparseMatrix<double, Eigen::RowMajor> JlJ(3 * numLandmarks, 3 * numLandmarks);
+                JpJ.reserve(VectorXi::Constant(9 * numCameras, 9));
+                JlJ.reserve(VectorXi::Constant(3 * numLandmarks, 3));
+
+                JpJ = Jp.transpose() * Jp;
+                JlJ = Jl.transpose() * Jl;
+                auto JpJ_diag = JpJ.diagonal().array();
+                // maybe block diag as well.
+                double be = 1e-4;
+                JpJ.diagonal().array() += be * JpJ.diagonal().array();
+                
+                // using SparseMatrix = Eigen::SparseMatrix<double, Eigen::RowMajor>;
+                // Eigen::Map<SparseMatrix> mapped_jacobian(jacobian.num_rows,
+                //                                          jacobian.num_cols,
+                //                                          jacobian.values.size(),
+                //                                          jacobian.rows.data(),
+                //                                          jacobian.cols.data(),
+                //                                          jacobian.values.data());
+
+                // 2. add to problem, [p-s]JpJ[p-s] for s fixed.
+                // Worst case. read 9x9 block compute eigendecomp, sqrt diagonal.
+
+                // const Eigen::JacobiSVD<ceres::Matrix> svd(denseJacobian,
+                // Eigen::ComputeThinU | Eigen::ComputeThinV);
+                // const ceres::Vector singularValues = svd.singularValues();
+
+                // problem Jp we do not know the var-indices of the cameras :( in ceres.
+            }
+            else {
+                SparseMatrix<double, Eigen::RowMajor> Jp(jacobian.num_rows, 9 * cameras_to_ceres.size());
+                SparseMatrix<double, Eigen::RowMajor> Jl(jacobian.num_rows, 3 * landmark_to_ceres.size());
                 Jp.reserve(VectorXi::Constant(2 * jacobian.num_rows,9));
                 Jl.reserve(VectorXi::Constant(2 * jacobian.num_rows,3));
                 // JP.setFromTriplets(coefficients.begin(), coefficients.end());
@@ -386,18 +493,8 @@ int main() {
 
                 BlockSqrt<9>(JpJ);// need templated fct.
 
+            }
                 /////////////////////////////////////////////////////                                
-                for (int cam_id =0 ; cam_id < numCameras; ++cam_id) {
-                    double* values = JpJ.valuePtr();
-                    ceres::Matrix block9x9 = Eigen::Map< Eigen::Matrix<double,9,9> > (&(values[cam_id * 9*9]));
-                    ceres::Vector block9 = Eigen::Map< Eigen::Matrix<double,9,1> > (&(cameras_s[cam_id * 9]));
-
-                    //ceres::CostFunction* cost_function = new ceres::AutoDiffCostFunction<ceres::NormalPrior, 9, 9>(new ceres::NormalPrior(block9x9, block9));
-                    ceres::CostFunction* cost_function = new ceres::NormalPrior(block9x9, block9);
-                    problem.AddResidualBlock(cost_function,
-                        nullptr /* squared loss */,
-                        &(cameras[9 * cam_id]));
-                }
 
                 // Solve
                 // Make Ceres automatically detect the bundle structure. Note that the

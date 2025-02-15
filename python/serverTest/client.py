@@ -95,6 +95,7 @@ request = test_pb2.request_proto()
 #request.program.SetInParent()
 #program = request.program
 request.program.cameras[:] = cameras.ravel()
+request.program.cameras_s[:] = cameras.ravel() # s
 request.program.landmarks[:] = points_3d.ravel()
 request.program.observations[:] = points_2d.ravel()
 request.program.cam_id[:] = camera_indices.ravel()
