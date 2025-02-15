@@ -52,6 +52,43 @@ void delay(int msec)
 #endif
 }
 
+struct ProxStepPrior {
+    ProxStepPrior() {}
+    // ProxStepPrior(int block_): block(block_) {}
+    // |sqrt(S) * (x-s) |^2 = (x-s)^T S (x-s)
+    template <typename T>
+    bool operator()(const T *const matBlock,
+                    const T *const camera,
+                    const T *const camera_s,
+                    T *residuals) const {
+        // camera[0,1,2] are the angle-axis rotation.
+        //   T d[9];
+        //   d[0] = camera[0] - camera_s[0];
+        //   d[1] = camera[1] - camera_s[1];
+        //   d[2] = camera[2] - camera_s[2];
+        //   d[3] = camera[3] - camera_s[3];
+        //   d[4] = camera[4] - camera_s[4];
+        //   d[5] = camera[5] - camera_s[5];
+        //   d[6] = camera[6] - camera_s[6];
+        //   d[7] = camera[7] - camera_s[7];
+        //   d[8] = camera[8] - camera_s[8];
+
+        Eigen::Matrix<T, 9, 1> d = Eigen::Map<const Eigen::Matrix<T, 9, 1>>(camera) - Eigen::Map<const Eigen::Matrix<T, 9, 1>>(camera_s);
+        Eigen::Map<Eigen::Matrix<T, 9, 1>> residualsVector(residuals);
+        residualsVector = Eigen::Map<const Eigen::Matrix<T, 9, 9>>(matBlock) * d;
+
+        // The error is the difference between the predicted and observed position.
+        //   residuals[0] = predicted_x - observed_x;
+        return true;
+    }
+
+    // Factory to hide the construction of the CostFunction object from
+    // the client code.
+    static ceres::CostFunction *Create() {
+        return (new ceres::AutoDiffCostFunction<ProxStepPrior, 9, 81, 9, 9>(new ProxStepPrior()));
+    }
+};
+
 struct SnavelyReprojectionError {
   SnavelyReprojectionError(double observed_x, double observed_y)
       : observed_x(observed_x), observed_y(observed_y) {}
@@ -162,6 +199,7 @@ int main() {
     std::vector<double> cameras_s;
     std::vector<double> cameras;
     std::vector<double> landmarks;
+    std::vector<double> stepSize;
 
     ceres::Problem problem;
     ceres::Solver::Options options;
@@ -299,7 +337,9 @@ int main() {
                 for(const float& v : pro.cameras()) {
                     cameras_s.push_back(v);
                 }
-       
+                stepSize.clear(); // all 0 to ensure jacobian is reasonable.
+                stepSize.resize(9 * pro.cameras_size(), 0);
+
                 // setup problem again.
                 problem = ceres::Problem(); // overwrite ..?
                 int ceres_id = 0;
@@ -314,7 +354,12 @@ int main() {
                     problem.AddParameterBlock(&cameras_s[i], 9);
                     problem.SetParameterBlockConstant(&cameras_s[i]);
                 }
-                std::cout << "Parameter blocks added\n";
+                std::cout << "Parameter blocks added ow step\n";
+                for (int i = 0; i < stepSize.size(); i += 81) {
+                    problem.AddParameterBlock(&stepSize[i], 81);
+                    problem.SetParameterBlockConstant(&stepSize[i]);
+                }
+                std::cout << "All Parameter blocks added\n";
                 // SetParameterBlockVariable -> could set cameras constant, could use for 's'.
                 for (int i = 0; i < pro.observations_size() / 2; ++i) {
                     // Each Residual block takes a point and a camera as input and outputs a 2
@@ -333,7 +378,117 @@ int main() {
                                             &(cameras[9 * pro.cam_id(i)]),
                                             &(landmarks[3 * pro.lm_id(i)]));
                 }
+                std::cout << "Added Residual blocks 1\n";
 
+                for (int cam_id = 0 ; cam_id < numCameras; ++cam_id) {
+                    //double* values = JpJ.valuePtr();
+                    // ceres::Matrix block9x9 = Eigen::Map< Eigen::Matrix<double,9,9> > (&(stepSize[cam_id * 9*9]));
+                    // ceres::Vector block9 = Eigen::Map< Eigen::Matrix<double,9,1> > (&(cameras_s[cam_id * 9]));
+
+                    //ceres::CostFunction* cost_function = new ceres::AutoDiffCostFunction<ceres::NormalPrior, 9, 9>(new ceres::NormalPrior(block9x9, block9));
+                    ceres::CostFunction* cost_function = ProxStepPrior::Create();
+                    //std::cout << "ptr " << &(stepSize [81 * cam_id]) << " " << &(cameras  [9 * cam_id]) << " " << &(cameras_s[9 * cam_id]) << "\n";
+                    problem.AddResidualBlock(cost_function,
+                        nullptr /* squared loss */,
+                        &(stepSize [81 * cam_id]), // it thinks this block size is 9, not 81.
+                        &(cameras  [9 * cam_id]),
+                        &(cameras_s[9 * cam_id]));
+                }
+                std::cout << "Added Residual blocks stepsize\n";
+
+            //     Received: Hi from Python ZeroMQ Client
+            //     send back
+            //    request_proto::OptionsCase::kProgram
+            //    Parameter blocks added
+            //    Finished eval problem
+            //    iter      cost      cost_change  |gradient|   |step|    tr_ratio  tr_radius  ls_iter  iter_time  total_time
+            //       0  8.509128e+05    0.00e+00    8.57e+06   0.00e+00   0.00e+00  1.00e+04        0    3.18e-01    3.48e-01
+            //       1  5.466895e+04    7.96e+05    1.58e+06   0.00e+00   9.81e-01  3.00e+04        1    3.54e-01    7.02e-01
+               
+            //    Solver Summary (v 2.2.0-eigen-(3.4.0)-lapack-suitesparse-(5.10.1)-eigensparse)
+               
+            //                                         Original                  Reduced
+            //    Parameter blocks                         7874                     7825
+            //    Parameters                              24210                    23769
+            //    Residual blocks                         31892                    31892
+            //    Residuals                               64127                    64127
+               
+            //    Minimizer                        TRUST_REGION
+               
+            //    Dense linear algebra library            EIGEN
+            //    Trust region strategy     LEVENBERG_MARQUARDT
+            //                                            Given                     Used
+            //    Linear solver                     DENSE_SCHUR              DENSE_SCHUR
+            //    Threads                                     8                        8
+            //    Linear solver ordering              AUTOMATIC                  7776,49
+            //    Schur structure                         2,3,9                    2,3,9
+               
+            //    Cost:
+            //    Initial                          8.509128e+05
+            //    Final                            5.466895e+04
+            //    Change                           7.962438e+05
+               
+            //    Minimizer iterations                        2
+            //    Successful steps                            2
+            //    Unsuccessful steps                          0
+               
+            //    Time (in seconds):
+            //    Preprocessor                         0.030355
+               
+            //      Residual only evaluation           0.001627 (1)
+            //      Jacobian & residual evaluation     0.648722 (2)
+            //      Linear solver                      0.016618 (1)
+            //    Minimizer                            0.671797
+               
+            //    Postprocessor                        0.001850
+            //    Total                                0.704002
+               
+            //    Termination:                   NO_CONVERGENCE (Maximum number of iterations reached. Number of iterations: 1.)
+               
+               
+            //    Mycost: 109338
+//                 iter      cost      cost_change  |gradient|   |step|    tr_ratio  tr_radius  ls_iter  iter_time  total_time
+//    0  5.466894e+04    0.00e+00    1.58e+06   0.00e+00   0.00e+00  1.00e+04        0    3.55e-01    3.98e-01
+//    1  4.031896e+04    1.43e+04    2.72e+05   0.00e+00   9.45e-01  3.00e+04        1    3.64e-01    7.63e-01
+
+// Solver Summary (v 2.2.0-eigen-(3.4.0)-lapack-suitesparse-(5.10.1)-eigensparse)
+
+//                                      Original                  Reduced
+// Parameter blocks                         7874                     7825
+// Parameters                              24210                    23769
+// Residual blocks                         31892                    31892
+// Residuals                               64127                    64127
+
+// Minimizer                        TRUST_REGION
+
+// Dense linear algebra library            EIGEN
+// Trust region strategy     LEVENBERG_MARQUARDT
+//                                         Given                     Used
+// Linear solver                     DENSE_SCHUR              DENSE_SCHUR
+// Threads                                     8                        8
+// Linear solver ordering              AUTOMATIC                  7776,49
+// Schur structure                         2,3,9                    2,3,9
+
+// Cost:
+// Initial                          5.466894e+04
+// Final                            4.031896e+04
+// Change                           1.434997e+04
+
+// Minimizer iterations                        2
+// Successful steps                            2
+// Unsuccessful steps                          0
+
+// Time (in seconds):
+// Preprocessor                         0.043743
+
+//   Residual only evaluation           0.001643 (1)
+//   Jacobian & residual evaluation     0.694730 (2)
+//   Linear solver                      0.017152 (1)
+// Minimizer                            0.719195
+
+// Postprocessor                        0.001677
+// Total                                0.764615
+// Mycost: 80637.9
                 // 1st get Jacobian(s):
                 ceres::Problem::EvaluateOptions evalOptions;
                 evalOptions.apply_loss_function = true;
@@ -346,12 +501,14 @@ int main() {
                 std::cout << "Finished eval problem \n";
                 // Now. I need JpTJp, hence.
 
-                SparseMatrix<double, Eigen::RowMajor> Jp(jacobian.num_rows, 9 * numCameras);
-                SparseMatrix<double, Eigen::RowMajor> Jl(jacobian.num_rows, 3 * numLandmarks);
-                Jp.reserve(VectorXi::Constant(2 * jacobian.num_rows,9));
-                Jl.reserve(VectorXi::Constant(2 * jacobian.num_rows,3));
+                const int relevantRows = jacobian.num_rows - 9 * numCameras;
+
+                SparseMatrix<double, Eigen::RowMajor> Jp(relevantRows, 9 * numCameras);
+                SparseMatrix<double, Eigen::RowMajor> Jl(relevantRows, 3 * numLandmarks);
+                Jp.reserve(VectorXi::Constant(2 * relevantRows, 9));
+                Jl.reserve(VectorXi::Constant(2 * relevantRows, 3));
                 // JP.setFromTriplets(coefficients.begin(), coefficients.end());
-                for (Eigen::Index r = 0; r < jacobian.num_rows; ++r) {
+                for (Eigen::Index r = 0; r < relevantRows; ++r) {
                 //for (Eigen::Index r = 0; r < 1000; ++r) {
                     int lm_id = pro.lm_id(r/2);
                     int cam_id = pro.cam_id(r/2);
@@ -381,23 +538,47 @@ int main() {
                 JlJ = Jl.transpose() * Jl;
                 auto JpJ_diag = JpJ.diagonal().array();
                 // maybe block diag as well.
-                double be = 1e-4;
+                double be = pro.be(); // 1e-4;
                 JpJ.diagonal().array() += be * JpJ.diagonal().array();
 
                 BlockSqrt<9>(JpJ);// need templated fct.
 
-                /////////////////////////////////////////////////////                                
+                // Todo: I might need to have the (x-s)Step(x-s) cost function in the program already.
+                // Update Step is an issue. I would need to remove residual blocks ..
+                // So better is:
+                // Own normalprior, add residualblocks for JpJ: as 9x9 blocks instead of here.
+                // At each step. set S == 0. Compute J. update S, do a step. 
+
+                /////////////////////////////////////////////////////
+                // This cannot work at all. The problem: 
+                // JpJ and s change at each step.
+                // Both MUST be variable blocks and stored in memory.
+#ifdef __notHere
                 for (int cam_id =0 ; cam_id < numCameras; ++cam_id) {
                     double* values = JpJ.valuePtr();
                     ceres::Matrix block9x9 = Eigen::Map< Eigen::Matrix<double,9,9> > (&(values[cam_id * 9*9]));
                     ceres::Vector block9 = Eigen::Map< Eigen::Matrix<double,9,1> > (&(cameras_s[cam_id * 9]));
 
                     //ceres::CostFunction* cost_function = new ceres::AutoDiffCostFunction<ceres::NormalPrior, 9, 9>(new ceres::NormalPrior(block9x9, block9));
-                    ceres::CostFunction* cost_function = new ceres::NormalPrior(block9x9, block9);
+                    ceres::CostFunction* cost_function = new ceres::ProxStepPrior();
                     problem.AddResidualBlock(cost_function,
                         nullptr /* squared loss */,
-                        &(cameras[9 * cam_id]));
+                        &(JpJblock [81 * cam_id]),
+                        &(cameras  [9 * cam_id]),
+                        &(cameras_s[9 * cam_id]));
+                    
+                    // ceres::CostFunction* cost_function = new ceres::NormalPrior(block9x9, block9);
+                    // problem.AddResidualBlock(cost_function,
+                    //     nullptr /* squared loss */,
+                    //     &(cameras[9 * cam_id]));
                 }
+#else
+// instead reset variable block(s) JpJ and s to sqrt(Stepsize)
+                double* values = JpJ.valuePtr();
+                for (int id = 0; id < 81 * numCameras; ++id) {
+                    stepSize[id] = values[id]; // = 1000 -> diufferent cost: so ok
+                }
+#endif
 
                 // Solve
                 // Make Ceres automatically detect the bundle structure. Note that the
@@ -410,7 +591,7 @@ int main() {
                 //options.max_linear_solver_iterations = 0;
                 options.num_threads = 8; // ok maybe it is this what makes it slow. Problem: single cpu -> still slow / bottleneck.
                 options.minimizer_progress_to_stdout = true;
-                options.max_num_iterations = std::max(0,std::min(10, pro.iterations()));
+                options.max_num_iterations = std::max(0, std::min(10, pro.iterations()));
                 // options.preconditioner_type = ceres::IDENTITY; // Sucks if CGNR of course.
                 //options.preconditioner_type = ceres::JACOBI; // CGNR -> jacobi anyway.
 
@@ -425,7 +606,7 @@ int main() {
                 for(const double& v : cameras) {
                     pro.set_cameras(id++, static_cast<float>(v));
                 }
-                id=0;
+                id = 0;
                 //std::cout << pro.landmarks_size() << " == " << landmarks.size() << std::endl;
                 for(const float& v : landmarks) {
                     pro.set_landmarks(id++, v);
@@ -450,7 +631,7 @@ int main() {
                 // J_pose is given by going over jac and id. 
                 // J_pose is n_res x 9 * # cams
                 // J_land is n_res x 3 * # land
-                for (Eigen::Index r = 0; r < 1000; ++ r) { //jacobian.num_rows; ++r) {
+                for (Eigen::Index r = 0; r < 100; ++ r) { //jacobian.num_rows; ++r) {
                     std::cout << r << ": ";
                     for (Eigen::Index idx = jacobian.rows[r]; idx < jacobian.rows[r + static_cast<Eigen::Index>(1)];
                         ++idx) {

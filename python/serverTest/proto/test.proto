@@ -11,12 +11,20 @@ message program_proto {
   int32 iterations = 6;
   int32 cluster_id = 7;
   float initL = 8;
-  repeated int32 unique_cameras = 9; // should not be many -- if any ever. One could pack cams < 10 lms in one cluster == lms in cam are put in one cluster.
+  float be = 9;
+  repeated float unorm = 10;
+  repeated float vnorm = 11;
+  repeated int32 unique_cameras = 12; // should not be many -- if any ever. One could pack cams < 10 lms in one cluster == lms in cam are put in one cluster.
 }
 
 message solution_proto {
   repeated float cameras = 1; // 3d
   repeated float landmarks = 2; // 9d
+}
+
+// send to get cost
+message cost_proto {
+  repeated float cameras = 1; // 3d
 }
 
 // we only return new solution for cameras -- later stepsize as well.
@@ -46,6 +54,7 @@ message request_proto {
         program_proto program = 1;
         camera_proto cameras = 2;
         prox_cluster_proto update = 3;
+        cost_proto get_cost = 4;
   }
 }
 

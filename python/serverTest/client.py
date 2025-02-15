@@ -95,12 +95,13 @@ request = test_pb2.request_proto()
 #request.program.SetInParent()
 #program = request.program
 request.program.cameras[:] = cameras.ravel()
-request.program.cameras_s[:] = cameras.ravel() # s
+#request.program.cameras_s[:] = cameras.ravel() # set later in prox_cluster_proto
 request.program.landmarks[:] = points_3d.ravel()
 request.program.observations[:] = points_2d.ravel()
 request.program.cam_id[:] = camera_indices.ravel()
 request.program.lm_id[:] = point_indices.ravel()
-request.program.iterations = 0
+request.program.iterations = 1
+request.program.be = 1e-5
 global_iterations = 1
 request_serialized = request.SerializeToString()
 socket.send(request_serialized) # ? HOW THE FUCK DOES IT KNOW WHAT MESSAGE TYPE IT IS?
@@ -119,7 +120,10 @@ print(0, " cameras " , program_deserialized.cameras[0:9])
 # next iteration. send cameras again, receive update, etc.
 request = test_pb2.request_proto()
 #cameras = test_pb2.camera_proto()
-request.cameras.cameras[:] = program_deserialized.cameras[:] #?
+#temp = program_deserialized.cameras[:]
+#temp = [i * 10 for i in temp]
+#request.cameras.cameras[:] = temp # ok, program works with changed data.
+request.cameras.cameras[:] = program_deserialized.cameras[:]
 for i in range(global_iterations):
     request_serialized = request.SerializeToString()
     socket.send(request_serialized) # ? HOW THE FUCK DOES IT KNOW WHAT MESSAGE TYPE IT IS?
