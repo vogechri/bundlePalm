@@ -45,7 +45,8 @@ message prox_cluster_proto {
 // return message from client to master
 message return_cluster_proto {
   repeated float cameras   = 1; // 3d
-  int32 cluster_id = 2;
+  repeated float landmarks = 2; // temporary
+  int32 cluster_id = 3;
 }
 
 // can be one of messages. so proto converts to correct message. client messages server messages

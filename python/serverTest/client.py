@@ -119,12 +119,15 @@ global_iterations = 1
 request_serialized = request.SerializeToString()
 socket.send(request_serialized) # ? HOW THE FUCK DOES IT KNOW WHAT MESSAGE TYPE IT IS?
 
-# get program back.
+# get program back. right now we also need landmarks. Likely not needed in smart implementation.
+# We need to eval cost / send back cost. problem f(v) also needed now. DRE as well.
+# master: compute fv, send s = 2u-v -> send v to slaves, they send cost back (need anyway to do step).
+# can send both f(v) and f(u)! can do acceleration locally i guess or with minimal information.
 message_in_bytes = socket.recv()
 program_deserialized = test_pb2.program_proto()
 program_deserialized.ParseFromString(message_in_bytes)
 
-print(0, " cameras " , program_deserialized.cameras[0:9])
+print(-1, " cameras " , program_deserialized.cameras[0:9])
 # how to defuse oneof return:
 # field = config.WhichOneof('config')
 # if field = 'name_of_message?': ..
@@ -139,10 +142,14 @@ request = test_pb2.request_proto()
 request.cameras.cameras[:] = program_deserialized.cameras[:]
 for i in range(global_iterations):
     request_serialized = request.SerializeToString()
-    socket.send(request_serialized) # ? HOW THE FUCK DOES IT KNOW WHAT MESSAGE TYPE IT IS?
+    socket.send(request_serialized) # ? HOW THE FUCK DOES IT KNOW WHAT MESSAGE TYPE IT IS? -> oneof, case
 
     message_in_bytes = socket.recv()
-    request.cameras.ParseFromString(message_in_bytes)
+    return_proto = test_pb2.return_cluster_proto()
+    return_proto.ParseFromString(message_in_bytes) # parse all data ?!
+    #request.cameras.ParseFromString(message_in_bytes)
+    del request.cameras.cameras[:]
+    request.cameras.cameras.extend(return_proto.cameras)
     print(i, " cameras = " , request.cameras.cameras[0:9])
     #request.cameras.cameras[:] = cameras[:]
 
