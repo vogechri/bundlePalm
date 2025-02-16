@@ -3,16 +3,29 @@ Original code from https://zeromq.org/languages/python/
 """
 
 import zmq
-from proto import test_pb2 #import ImageVector #, Image 
+#from proto import test_pb2 #import ImageVector #, Image
+import sys
+sys.path.insert(0, './generated/proto/')
+#from test import test_pb2
+import test_pb2
+
 import numpy as np
 context = zmq.Context()
 
 import bz2
 
+# download ceres, edit CMakeList EXPORT_dir : On, cmake ../ceres-solver-2.2.0
+
+# sudo apt-get install libeigen3-dev
+# sudo apt install libzmq3-dev
+# sudo apt install protobuf-compiler
+# pip3 install zmq
+
+# pip install protobuf==3.20.3
 # in /proto:
 # cd proto; protoc --python_out=. test.proto; cd -
 # protoc --cpp_out=./output_directory your_file.proto
-
+# cd build; CC=clang-15 CXX=clang++-15 cmake .. ; cd -
 
 # python client.py
 
