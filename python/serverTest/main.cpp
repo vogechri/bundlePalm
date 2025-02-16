@@ -341,6 +341,37 @@ void SetStepSize(const SparseMatrix<double, Eigen::RowMajor> &Jp,
   }
 }
 
+return_cluster_proto FillProto(const std::vector<double> &cameras,
+                               const std::vector<double> &landmarks,
+                               const std::vector<double> &stepSize,
+                               double cost,
+                               int clusterId = 0) {
+
+  return_cluster_proto return_proto = return_cluster_proto();
+  for (const double &v : cameras) {
+    //return_proto.set_cameras(id++, static_cast<float>(v));
+    return_proto.add_cameras(static_cast<float>(v));
+  }
+  for (const double &v : landmarks) {
+    return_proto.add_landmarks(static_cast<float>(v));
+  }
+  for (const double &v : stepSize) {
+    return_proto.add_step_size(static_cast<float>(v));
+  }
+  return_proto.set_cluster_id(clusterId);
+  return_proto.set_cost(cost);
+  // // Send solution back!, actually cameras shoudl be ok?
+  // solution_proto sol;
+  // for(const double& v : cameras) {
+  //     sol.add_cameras(static_cast<float>(v));
+  // }
+  // for(const double& v : landmarks) {
+  //     sol.add_landmarks(static_cast<float>(v));
+  // }
+  // sol.SerializeToString(&encoded_msg);
+  return return_proto;
+}
+
 void WriteJacobian(ceres::Problem& problem, int numCameras, int numLandmarks) {
     std::cout << "Write Jac\n";
     ceres::Problem::EvaluateOptions evalOptions;
@@ -392,6 +423,20 @@ int main() {
     std::vector<int> lm_obs;
     ceres::Problem problem;
     ceres::Solver::Options options;
+    // Solve
+    // Make Ceres automatically detect the bundle structure. Note that the
+    // standard solver, SPARSE_NORMAL_CHOLESKY, also works fine but it is slower
+    // for standard bundle adjustment problems.
+    options.linear_solver_type = ceres::DENSE_SCHUR; // SPARSE_SCHUR;// same
+    // options.linear_solver_type = ITERATIVE_SCHUR; // same ceres::CGNR;//
+    // options.linear_solver_type = ceres::CGNR;
+    // options.linear_solver_type = ceres::DENSE_QR; // SHIT
+    // options.max_linear_solver_iterations = 0;
+    options.num_threads = 6; // ok maybe it is this what makes it slow. Problem:
+                             // single cpu -> still slow / bottleneck.
+    options.minimizer_progress_to_stdout = true;
+    // options.preconditioner_type = ceres::IDENTITY; // Sucks if CGNR of course.
+    // options.preconditioner_type = ceres::JACOBI; // CGNR -> jacobi anyway.
 
     while (true) {
         zmq::message_t request;
@@ -455,172 +500,108 @@ int main() {
                     memcpy ((void *) reply.data(), encoded_msg.c_str(), encoded_msg.size());
                     // publisher.send(zmq_msg);
                     socket.send(reply, zmq::send_flags::none);
+                    std::cout << "Cameras send" << std::endl;
                 }
-            break;
+                break;
             }
 
 
-            case request_proto::OptionsCase::kUpdate :
-            {
-                //std::cout << "request_proto::OptionsCase::kCameras" << std::endl;
+            case request_proto::OptionsCase::kUpdate: {
+                std::cout << "request_proto::OptionsCase::kUpdate" << std::endl;
                 prox_cluster_proto update = request_p.update(); // we get an update for the cameras only -- update buffer, run its iterations.
-                //if (cams.ParseFromString(received_message)) 
-                {
-                    THROW_IF(update.cameras_size() != cameras.size());
-                    THROW_IF(update.cameras_s_size() != cameras_s.size());
-                    int id = 0; // fill existing buffer
-                    for(const float& v : update.cameras()) {
-                        cameras[id++] = v;
-                    }
-                    for(const float& v : update.cameras_s()) {
-                        cameras_s[id++] = v;
-                    }
-                    be = update.be();
-
-                    // recompute 
-
-                    stepSize.clear(); // all 0 to ensure jacobian is reasonable.
-                    stepSize.resize(81 * numCameras, 0);
-                    const auto [Jp, Jl] = GetJacobian( problem, cam_obs, lm_obs, numCameras, numLandmarks );
-                    SetStepSize(Jp, stepSize, be, numCameras);
-
-                    // solve once more
-                    ceres::Solver::Summary summary;
-                    ceres::Solve(options, &problem, &summary);
-                    std::cout << summary.FullReport() << "\n";
-                    std::cout << "\nMycost: " << summary.final_cost * 2 << "\n";
-
-                    // Send solution back!
-                    auto return_proto = return_cluster_proto();
-                    id = 0;
-                    for(const double& v : cameras) {
-                        return_proto.set_cameras(id++, static_cast<float>(v));
-                    }
-                    id = 0;
-                    for(const double& v : landmarks) {
-                        return_proto.set_landmarks(id++, static_cast<float>(v));
-                    }
-                    return_proto.set_cluster_id(0);
-
-                    // // Send solution back!, actually cameras shoudl be ok?
-                    // solution_proto sol;
-                    // for(const double& v : cameras) {
-                    //     sol.add_cameras(static_cast<float>(v));
-                    // }
-                    // for(const double& v : landmarks) {
-                    //     sol.add_landmarks(static_cast<float>(v));
-                    // }
-                    // sol.SerializeToString(&encoded_msg);
-
-                    std::string encoded_msg;
-                    return_proto.SerializeToString(&encoded_msg);
-                    zmq::message_t reply(encoded_msg.size());
-                    // Cast? this is WASTEful
-                    memcpy ((void *) reply.data(), encoded_msg.c_str(), encoded_msg.size());
-                    // publisher.send(zmq_msg);
-                    socket.send(reply, zmq::send_flags::none);
+                THROW_IF(update.cameras_size() != cameras.size());
+                THROW_IF(update.cameras_s_size() != cameras_s.size());
+                int id = 0; // fill existing buffer
+                for(const float& v : update.cameras()) {
+                    cameras[id++] = v;
                 }
-            break;
+                id = 0;
+                for(const float& v : update.cameras_s()) {
+                    cameras_s[id++] = v;
+                }
+                be = update.be();
+
+                // recompute 
+                stepSize.clear(); // all 0 to ensure jacobian is reasonable.
+                stepSize.resize(81 * numCameras, 0);
+                const auto [Jp, Jl] = GetJacobian( problem, cam_obs, lm_obs, numCameras, numLandmarks );
+                SetStepSize(Jp, stepSize, be, numCameras);
+
+                // solve once more
+                ceres::Solver::Summary summary;
+                ceres::Solve(options, &problem, &summary);
+                std::cout << summary.FullReport() << "\n";
+                std::cout << "\nUpdate Mycost: " << summary.final_cost * 2 << "\n";
+
+                // Send solution back!
+                return_cluster_proto return_proto = 
+                    FillProto(cameras, landmarks, stepSize, summary.final_cost * 2);
+                return_proto.set_cost(summary.final_cost * 2);
+                std::cout << "\nUpdate Mycost: " << summary.final_cost * 2 << "\n";
+                std::string encoded_msg;
+                return_proto.SerializeToString(&encoded_msg);
+                zmq::message_t reply(encoded_msg.size());
+                // Cast? this is WASTEful
+                memcpy ((void *) reply.data(), encoded_msg.c_str(), encoded_msg.size());
+                // publisher.send(zmq_msg);
+                socket.send(reply, zmq::send_flags::none);
+                std::cout << "Update send" << std::endl;
+                break;
             }
     
-            // case request_proto::OptionsCase::kUpdate :
-            // {
-            //     //std::cout << "request_proto::OptionsCase::kUpdate" << std::endl;
-            //     prox_cluster_proto update = request_p.update(); // we get an update for the cameras only -- update buffer, run its iterations.
-            //     //if (cams.ParseFromString(received_message)) 
-            //     {
-            //         THROW_IF(update.cameras_size() != cameras.size());
-            //         int id=0; // fill existing buffer
-            //         for(const float& v : update.cameras()) {
-            //             cameras[id++] = v;
-            //         }
-            //         // solve once more
-            //         ceres::Solver::Summary summary;
-            //         ceres::Solve(options, &problem, &summary);
-            //         std::cout << summary.FullReport() << "\n";
-            //         std::cout << "\nMycost: " << summary.final_cost * 2 << "\n";
-
-            //         // Send solution back!
-            //         camera_proto cams;
-            //         id = 0;
-            //         for(const double& v : cameras) {
-            //             cams.set_cameras(id++, static_cast<float>(v));
-            //         }
-
-            //         std::string encoded_msg;
-            //         cams.SerializeToString(&encoded_msg);
-            //         zmq::message_t reply(encoded_msg.size());
-            //         // Cast? this is WASTEful
-            //         memcpy ((void *) reply.data(), encoded_msg.c_str(), encoded_msg.size());
-            //         // publisher.send(zmq_msg);
-            //         socket.send(reply, zmq::send_flags::none);
-            //     }
-            // break;
-            // }
-
             // if we get program we setup new program. if we get cam & prox we update cams (?) and prox term only! do one more it, etc.
             case request_proto::OptionsCase::kProgram : {
-            std::cout << "request_proto::OptionsCase::kProgram" << std::endl;            
-            program_proto pro = request_p.program(); 
-            std::tie(numCameras, numLandmarks) = ResetProgram(pro, problem, cameras, landmarks, cameras_s, stepSize, cam_obs, lm_obs);
-            double be = pro.be();
-            const auto [Jp, Jl] = GetJacobian( problem, cam_obs, lm_obs, numCameras, numLandmarks );
-            SetStepSize(Jp, stepSize, be, numCameras);
+                std::cout << "request_proto::OptionsCase::kProgram" << std::endl;            
+                program_proto pro = request_p.program(); 
+                options.max_num_iterations = std::max(0, std::min(10, pro.iterations()));
+                std::tie(numCameras, numLandmarks) = ResetProgram(pro, problem, cameras, landmarks, cameras_s, stepSize, cam_obs, lm_obs);
+                double be = pro.be();
+                const auto [Jp, Jl] = GetJacobian( problem, cam_obs, lm_obs, numCameras, numLandmarks );
+                SetStepSize(Jp, stepSize, be, numCameras);
+                ceres::Solver::Summary summary;
+                ceres::Solve(options, &problem, &summary);
+                std::cout << summary.FullReport() << "\n";
+                std::cout << "\nMycost: " << summary.final_cost * 2 << "\n";
 
-            // Solve
-            // Make Ceres automatically detect the bundle structure. Note that the
-            // standard solver, SPARSE_NORMAL_CHOLESKY, also works fine but it is slower
-            // for standard bundle adjustment problems.
-            options.linear_solver_type = ceres::DENSE_SCHUR; // SPARSE_SCHUR;// same
-            //options.linear_solver_type = ITERATIVE_SCHUR; // same ceres::CGNR;//
-            //options.linear_solver_type = ceres::CGNR;
-            //options.linear_solver_type = ceres::DENSE_QR; // SHIT
-            //options.max_linear_solver_iterations = 0;
-            options.num_threads = 8; // ok maybe it is this what makes it slow. Problem: single cpu -> still slow / bottleneck.
-            options.minimizer_progress_to_stdout = true;
-            options.max_num_iterations = std::max(0, std::min(10, pro.iterations()));
-            // options.preconditioner_type = ceres::IDENTITY; // Sucks if CGNR of course.
-            //options.preconditioner_type = ceres::JACOBI; // CGNR -> jacobi anyway.
+                return_cluster_proto return_proto = 
+                FillProto(cameras, landmarks, stepSize, summary.final_cost * 2);                
 
-            ceres::Solver::Summary summary;
-            ceres::Solve(options, &problem, &summary);
-            std::cout << summary.FullReport() << "\n";
-            std::cout << "\nMycost: " << summary.final_cost * 2 << "\n";
+                // // Send solution back!
+                // int id = 0;
+                // //std::cout << pro.cameras_size() << " == " << cameras.size() << std::endl;
+                // for(const double& v : cameras) {
+                //     pro.set_cameras(id++, static_cast<float>(v));
+                // }
+                // id = 0;
+                // //std::cout << pro.landmarks_size() << " == " << landmarks.size() << std::endl;
+                // for(const float& v : landmarks) {
+                //     pro.set_landmarks(id++, v);
+                // }
 
-            // Send solution back!
-            int id = 0;
-            //std::cout << pro.cameras_size() << " == " << cameras.size() << std::endl;
-            for(const double& v : cameras) {
-                pro.set_cameras(id++, static_cast<float>(v));
-            }
-            id = 0;
-            //std::cout << pro.landmarks_size() << " == " << landmarks.size() << std::endl;
-            for(const float& v : landmarks) {
-                pro.set_landmarks(id++, v);
-            }
+                //*pro.mutable_cameras() = {cameras.begin(), cameras.end()}; // float vs double.           
+                // Send Jacobian! back -- lookup how.
 
-            //*pro.mutable_cameras() = {cameras.begin(), cameras.end()}; // float vs double.           
-            // Send Jacobian! back -- lookup how.
+    //#define __write__
+    #ifdef __write__
+                WriteJacobian(problem, numCameras, numLandmarks);
+    #endif
 
-//#define __write__
-#ifdef __write__
-            WriteJacobian(problem, numCameras, numLandmarks);
-#endif
-
-            // Instead send the result back as programm again.
-            std::string encoded_msg;
-            pro.SerializeToString(&encoded_msg);
-            zmq::message_t reply(encoded_msg.size());
-            // Cast? this is WASTEful
-            memcpy ((void *) reply.data(), encoded_msg.c_str(), encoded_msg.size());
-            // publisher.send(zmq_msg);
-            socket.send(reply, zmq::send_flags::none);
-
-            break;
+                // Instead send the result back as programm again.
+                std::string encoded_msg;
+                return_proto.SerializeToString(&encoded_msg);
+                zmq::message_t reply(encoded_msg.size());
+                // Cast? this is WASTEful
+                memcpy ((void *) reply.data(), encoded_msg.c_str(), encoded_msg.size());
+                // publisher.send(zmq_msg);
+                socket.send(reply, zmq::send_flags::none);
+                
+                std::cout << "0. Program Update send\n";
+                break;
             }
 
             default: {
-            break;}
+            break;
+            }
         }
 
     } // end while 

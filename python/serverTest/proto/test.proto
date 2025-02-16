@@ -1,6 +1,8 @@
 // pip install protobuf==3.20.3 --upgrade, else does not work with later versions. protoc is too old? but it is the latest version.
 syntax = "proto3";
 
+//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
+
 // Complete program to call Ceres on: read in python, send to server that runs optimization.
 message program_proto {
   repeated float cameras = 1; // 3d, cameras_s init is by cameras. later extra input.
@@ -10,7 +12,7 @@ message program_proto {
   repeated int32 lm_id = 5;  // per observation 1 landmark
   int32 iterations = 6;
   int32 cluster_id = 7;
-  float initL = 8;
+  float init_l = 8;
   float be = 9;
   repeated float unorm = 10;
   repeated float vnorm = 11;
@@ -46,7 +48,9 @@ message prox_cluster_proto {
 message return_cluster_proto {
   repeated float cameras   = 1; // 3d
   repeated float landmarks = 2; // temporary
-  int32 cluster_id = 3;
+  repeated float step_size = 3; 
+  int32 cluster_id = 4;
+  float cost = 5;
 }
 
 // can be one of messages. so proto converts to correct message. client messages server messages
