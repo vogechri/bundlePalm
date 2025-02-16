@@ -1,7 +1,7 @@
 // pip install protobuf==3.20.3 --upgrade, else does not work with later versions. protoc is too old? but it is the latest version.
 syntax = "proto3";
 
-//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
+//
 
 // Complete program to call Ceres on: read in python, send to server that runs optimization.
 message program_proto {
