@@ -689,9 +689,14 @@ int main() {
     // Create a socket of type REP (reply)
     zmq::socket_t socket(context, ZMQ_REP);
 
+    zmq::socket_t push_socket(context, ZMQ_PUSH);
+    zmq::socket_t pull_socket(context, ZMQ_PULL);
+
     // Bind the socket to a TCP address
     std::cout << "Starting the server on port 5555..." << std::endl;
     socket.bind("tcp://*:5555");
+    pull_socket.bind("tcp://*:5556");
+    push_socket.bind("tcp://*:5557");
 
     std::map<int, CeresProgram> cluster_to_program;
     // Those are permanent, variables can change.
@@ -733,67 +738,10 @@ int main() {
         // ParseFromString(value) is the same as ParseFromArray(value.data(), value.size()). 
 
         request_proto request_p;
-        if (!request_p.ParseFromString(received_message)) {
-            std::cout << "Received: " << received_message << std::endl;
-            // Simulate some work
-            // delay(1);
-            // Send a reply back to the client
-            std::cout << " send back \n";
-            std::string reply_message = "Hi from ZeroMQ C++ Server";
-            zmq::message_t reply(reply_message.size());
-            memcpy(reply.data(), reply_message.data(), reply_message.size());
-            socket.send(reply, zmq::send_flags::none);
-            continue;
-        }
+        //request_p.ParseFromString(received_message);
+        request_p.ParseFromArray(request.data(), request.size());
 
         switch(request_p.options_case()) {
-            case request_proto::OptionsCase::kCameras :
-            {
-                //std::cout << "request_proto::OptionsCase::kCameras" << std::endl;
-                camera_proto cams = request_p.cameras(); // we get an update for the cameras only -- update buffer, run its iterations.
-                THROW_IF(cams.cameras_size() != cameras.size());
-                int id=0; // fill existing buffer
-                for(const float& v : cams.cameras()) {
-                    cameras[id++] = v;
-                }
-                // solve once more
-                ceres::Solver::Summary summary;
-                ceres::Solve(options, &problem, &summary);
-                std::cout << summary.FullReport() << "\n";
-                std::cout << "\nMycost: " << summary.final_cost * 2 << "\n";
-
-                // Send solution back!
-                id = 0;
-                for(const double& v : cameras) {
-                    cams.set_cameras(id++, static_cast<float>(v));
-                }
-
-                // // Send solution back!, actually cameras shoudl be ok?
-                // solution_proto sol;
-                // for(const double& v : cameras) {
-                //     sol.add_cameras(static_cast<float>(v));
-                // }
-                // for(const double& v : landmarks) {
-                //     sol.add_landmarks(static_cast<float>(v));
-                // }
-                // sol.SerializeToString(&encoded_msg);
-
-                // SerializeToArray saves memory and time?
-                // size_t bytes = cams.ByteSizeLong();
-                // zmq::message_t reply(bytes);
-                // cams.SerializeToArray(reply.data(), bytes);
-                // socket.send(reply, zmq::send_flags::none);
-
-                std::string encoded_msg;
-                cams.SerializeToString(&encoded_msg);
-                zmq::message_t reply(encoded_msg.size());
-                // Cast? this is WASTEful
-                memcpy ((void *) reply.data(), encoded_msg.c_str(), encoded_msg.size());
-                // publisher.send(zmq_msg);
-                socket.send(reply, zmq::send_flags::none);
-                std::cout << "Cameras send" << std::endl;
-                break;
-            }
 
             case request_proto::OptionsCase::kUpdate: {
                 std::cout << "request_proto::OptionsCase::kUpdate" << std::endl;
@@ -807,37 +755,35 @@ int main() {
                 // program.SetStepSize(Jp);
                 program.Solve();
                 return_cluster_proto return_proto = program.FillReturnProto();
-#ifdef __not here__
-                // solve once more
-                ceres::Solver::Summary summary;
-                ceres::Solve(options, &problem, &summary);
-                std::cout << summary.FullReport() << "\n";
-                std::cout << "\nUpdate Mycost: " << summary.final_cost * 2 << "\n";
 
-                // Send solution back!
-                return_cluster_proto return_proto = 
-                    FillProto(cameras, landmarks, stepSize, summary.final_cost * 2);
-#endif
                 // SerializeToArray saves memory and time?
-                // size_t bytes = return_proto.ByteSizeLong();
-                // zmq::message_t reply(bytes);
-                // return_proto.SerializeToArray(reply.data(), bytes);
+                size_t bytes = return_proto.ByteSizeLong();
+                zmq::message_t reply(bytes);
+                return_proto.SerializeToArray(reply.data(), bytes);
+                socket.send(reply, zmq::send_flags::none);
+
+                // std::string encoded_msg;
+                // return_proto.SerializeToString(&encoded_msg);
+                // zmq::message_t reply(encoded_msg.size());
+                // memcpy ((void *) reply.data(), encoded_msg.c_str(), encoded_msg.size());
                 // socket.send(reply, zmq::send_flags::none);
 
-                std::string encoded_msg;
-                return_proto.SerializeToString(&encoded_msg);
-                zmq::message_t reply(encoded_msg.size());
-                // Cast? this is WASTEful
-                memcpy ((void *) reply.data(), encoded_msg.c_str(), encoded_msg.size());
-                // publisher.send(zmq_msg);
-                socket.send(reply, zmq::send_flags::none);
                 std::cout << "Update send" << std::endl;
                 break;
             }
     
+            // one idea would be to receive, start a thread to compute result, send the result.
+            // Problem: ZMQ_REP is blocking -- zmq.REQ is alos blocking in python.
+            // Dealer is like an assync Req socket. Router is like an assync Rep Socket.
+            // Request (REQ) / reply (REP).
+            // If we replace REP with ROUTER. This gives us an asynchronous server that can talk to multiple REQ clients
+            //Push/Pull Pattern. 
+            // client pushes to port A, server listens/pull to port A in loop
+            // server does threaded work and sends/pushes result to port B, client listens/pulls to port B 
+
             // if we get program we setup new program. if we get cam & prox we update cams (?) and prox term only! do one more it, etc.
             case request_proto::OptionsCase::kProgram : {
-                std::cout << "request_proto::OptionsCase::kProgram" << std::endl;            
+                std::cout << "request_proto::OptionsCase::kProgram" << std::endl;
                 program_proto pro = request_p.program();
 
                 //if(cluster_to_program.find(cluster_id) == cluster_to_program.end())
@@ -846,34 +792,7 @@ int main() {
                 const auto [Jp, Jl] = program.GetJacobian();
                 program.SetStepSize(Jp);
                 program.Solve();
-                return_cluster_proto return_proto = program.FillReturnProto();                
-#ifdef __old__
-                options.max_num_iterations = std::max(0, std::min(10, pro.iterations()));
-                std::tie(numCameras, numLandmarks) = ResetProgram(pro, problem, cameras, landmarks, cameras_s, stepSize, cam_obs, lm_obs);
-                double be = pro.be();
-                const auto [Jp, Jl] = GetJacobian( problem, cam_obs, lm_obs, numCameras, numLandmarks );
-                SetStepSize(Jp, stepSize, be, numCameras);
-                ceres::Solver::Summary summary;
-                ceres::Solve(options, &problem, &summary);
-                std::cout << summary.FullReport() << "\n";
-                std::cout << "\nMycost: " << summary.final_cost * 2 << "\n";
-
-                return_cluster_proto return_proto = FillProto(cameras, landmarks, stepSize, summary.final_cost * 2);
-#endif
-                // // Send solution back!
-                // int id = 0;
-                // //std::cout << pro.cameras_size() << " == " << cameras.size() << std::endl;
-                // for(const double& v : cameras) {
-                //     pro.set_cameras(id++, static_cast<float>(v));
-                // }
-                // id = 0;
-                // //std::cout << pro.landmarks_size() << " == " << landmarks.size() << std::endl;
-                // for(const float& v : landmarks) {
-                //     pro.set_landmarks(id++, v);
-                // }
-
-                //*pro.mutable_cameras() = {cameras.begin(), cameras.end()}; // float vs double.           
-                // Send Jacobian! back -- lookup how.
+                return_cluster_proto return_proto = program.FillReturnProto();
 
     //#define __write__
     #ifdef __write__
@@ -881,19 +800,17 @@ int main() {
     #endif
 
                 // SerializeToArray saves memory and time?
-                // size_t bytes = return_proto.ByteSizeLong();
-                // zmq::message_t reply(bytes);
-                // return_proto.SerializeToArray(reply.data(), bytes);
-                // socket.send(reply, zmq::send_flags::none);
+                size_t bytes = return_proto.ByteSizeLong();
+                zmq::message_t reply(bytes);
+                return_proto.SerializeToArray(reply.data(), bytes);
+                socket.send(reply, zmq::send_flags::none);
 
                 // Instead send the result back as programm again.
-                std::string encoded_msg;
-                return_proto.SerializeToString(&encoded_msg);
-                zmq::message_t reply(encoded_msg.size());
-                // Cast? this is WASTEful
-                memcpy ((void *) reply.data(), encoded_msg.c_str(), encoded_msg.size());
-                // publisher.send(zmq_msg);
-                socket.send(reply, zmq::send_flags::none);
+                // std::string encoded_msg;
+                // return_proto.SerializeToString(&encoded_msg);
+                // zmq::message_t reply(encoded_msg.size());
+                // memcpy ((void *) reply.data(), encoded_msg.c_str(), encoded_msg.size());
+                // socket.send(reply, zmq::send_flags::none);
                 
                 std::cout << "0. Program Update send\n";
                 break;

@@ -341,14 +341,87 @@ def prox_f(camera_indices_in_cluster_, point_indices_in_cluster_, local_camera_i
             request.update.cluster_id = ci
 
         request_serialized_ = request.SerializeToString()
-        # request_serialized = request.SerializeToArray() #?
+        # request_serialized_ = request.SerializeToArray() #?
         socket.send(request_serialized_) # ? HOW THE FUCK DOES IT KNOW WHAT MESSAGE TYPE IT IS?
 
         message_in_bytes_ = socket.recv()
         return_proto_ = test_pb2.return_cluster_proto()
         return_proto_.ParseFromString(message_in_bytes_)
+        # return_proto_.ParseFromArray(message_in_bytes_)
 
         # output should be:
+        cost_[ci] = return_proto_.cost
+        # L_in_cluster_[ci] = LipJ_ # unsused anyway
+        Vl_in_cluster_[ci] = np.array(return_proto_.step_size[:]) # stepsize
+        poses_in_cluster_[ci][unique_poses_in_c_, :] = np.array(return_proto_.cameras[:]).reshape((-1, 9))
+        landmarks_[unique_points_in_c_,:] = np.array(return_proto_.landmarks[:]).reshape((-1, 3))
+        #blockEig_in_cluster_[ci] = blockEig_in_c_ # not done
+
+    global_iteration = global_iteration + 1
+    return (cost_, L_in_cluster_, Vl_in_cluster_, poses_in_cluster_, landmarks_, nabla_p_in_cluster_, blockEig_in_cluster_)
+
+# Operates sequentially.
+def prox_f_push_pull(camera_indices_in_cluster_, point_indices_in_cluster_, local_camera_indices_in_cluster_,
+           local_landmark_indices_in_cluster_, points_2d_in_cluster_, poses_in_cluster_, landmarks_,
+           poses_s_in_cluster_, L_in_cluster_, Vl_in_cluster_, blockEig_in_cluster_, kClusters_,
+           LipJ_, innerIts_=1, sequential_=True) :
+    cost_ = np.zeros(kClusters_)
+    nabla_p_in_cluster_ = [0 for _ in range(kClusters_)]
+
+    # ignore for now:
+    # num_poses = poses_in_cluster_[0].shape[0]
+    # pose_occurences = np.zeros(num_poses)
+    # for ci_ in range(kClusters):
+    #     unique_poses_in_c_ = np.unique(camera_indices_in_cluster_[ci_])
+    #     pose_occurences[unique_poses_in_c_] +=1
+
+    global global_iteration
+    global push_socket
+    global pull_socket
+
+    for ci in range(kClusters):
+        unique_points_in_c_ = np.unique(point_indices_in_cluster_[ci])
+        unique_poses_in_c_ = np.unique(camera_indices_in_cluster_[ci])
+        if global_iteration == 0:
+            print("Sending program …", ci)
+            request = test_pb2.request_proto()
+            #request.program.SetInParent()
+            #program = request.program
+            request.program.cameras[:] = poses_in_cluster_[ci].ravel()
+            #request.program.cameras_s[:] = cameras.ravel() # set later in prox_cluster_proto
+            request.program.landmarks[:] = landmarks_[unique_points_in_c_].ravel()
+            request.program.observations[:] = points_2d_in_cluster_[ci].ravel()
+            request.program.cam_id[:] = local_camera_indices_in_cluster_[ci].ravel()
+            request.program.lm_id[:] = local_landmark_indices_in_cluster_[ci].ravel()
+            request.program.iterations = innerIts_
+            request.program.be = blockEig_in_cluster_[ci]
+            request.program.cluster_id = ci
+            request.program.init_l = LipJ_
+            #request.unorm
+            #request.vnorm
+        else: # just update
+            print("Sending request …", ci)
+            request = test_pb2.request_proto()
+            #cameras = test_pb2.camera_proto()
+            #temp = program_deserialized.cameras[:]
+            #temp = [i * 10 for i in temp]
+            #request.cameras.cameras[:] = temp # ok, program works with changed data.
+            request.update.cameras[:] = poses_in_cluster_[ci].ravel()
+            request.update.cameras_s[:] = poses_s_in_cluster_[ci].ravel()
+            request.update.be = blockEig_in_cluster_[ci]
+            request.update.cluster_id = ci
+
+        request_serialized_ = request.SerializeToString() # SerializeToArray() does not exist
+        push_socket.send(request_serialized_)
+
+    for k in range(kClusters):
+        message_in_bytes_ = pull_socket.recv()
+        return_proto_ = test_pb2.return_cluster_proto()
+        return_proto_.ParseFromString(message_in_bytes_)# ParseFromArray(message_in_bytes_)
+        ci = return_proto_.cluster_id
+
+        unique_points_in_c_ = np.unique(point_indices_in_cluster_[ci])
+        unique_poses_in_c_ = np.unique(camera_indices_in_cluster_[ci])
         cost_[ci] = return_proto_.cost
         # L_in_cluster_[ci] = LipJ_ # unsused anyway
         Vl_in_cluster_[ci] = np.array(return_proto_.step_size[:]) # stepsize
@@ -381,6 +454,12 @@ global_iterations = 5
 print("Connecting to cpp server…")
 socket = context.socket(zmq.REQ)
 socket.connect("tcp://localhost:5555")
+
+# new idea.
+push_socket = context.socket(zmq.PUSH)
+push_socket.connect("tcp://localhost:5556")
+pull_socket = context.socket(zmq.PULL)
+pull_socket.connect("tcp://localhost:5557")
 
 #lib = ctypes.CDLL("./libprocess_clusters.so")
 init_lib()
@@ -451,10 +530,11 @@ for global_iteration in range(global_iterations):
         )
 
     currentCost = np.sum(cost)
-    print(global_iteration, " ", round(currentCost), " gain ", round(lastCost - currentCost), ". ============= sum fk update takes ", end - start," s",)
+    print(global_iteration, " ", round(currentCost), " gain ", round(lastCost - currentCost),
+          ". ============= sum fk update takes ", end - start," s",)
 
-    poses_v, _, Up_cluster = average_cameras_new(
-        camera_indices_in_cluster, poses_in_cluster, poses_s_in_cluster, L_in_cluster, Ul_in_cluster, nabla_p_in_cluster) # old_poses for costs?
+    poses_v, _, Up_cluster = average_cameras_new(camera_indices_in_cluster, poses_in_cluster, 
+                                                 poses_s_in_cluster, L_in_cluster, Ul_in_cluster, nabla_p_in_cluster)
 
     #DRE cost BEFORE s update, always lower than AFTER update.
     dre, dre_per_part = cost_DRE(camera_indices_in_cluster, poses_in_cluster, poses_s_in_cluster, \
@@ -504,7 +584,6 @@ for global_iteration in range(global_iterations):
 
     lastCost = currentCost
     lastCostDRE = dre
-
 
 ###########################################
 # updateCluster(
@@ -623,82 +702,3 @@ if False:
 #message_in_bytes = socket.recv() # MUST receive something -- handshake? i do not understand.
 
 #################################
-print("Sending program …")
-request = test_pb2.request_proto()
-#request.program.SetInParent()
-#program = request.program
-request.program.cameras[:] = cameras.ravel()
-#request.program.cameras_s[:] = cameras.ravel() # set later in prox_cluster_proto
-request.program.landmarks[:] = points_3d.ravel()
-request.program.observations[:] = points_2d.ravel()
-request.program.cam_id[:] = camera_indices.ravel()
-request.program.lm_id[:] = point_indices.ravel()
-request.program.iterations = 1
-request.program.be = 1e-5
-global_iterations = 1
-request_serialized = request.SerializeToString()
-# request_serialized = request.SerializeToArray() #?
-socket.send(request_serialized) # ? HOW THE FUCK DOES IT KNOW WHAT MESSAGE TYPE IT IS?
-
-# pollin: blocking receive for parellel message receiving. low cpu
-
-# get program back. right now we also need landmarks. Likely not needed in smart implementation.
-# We need to eval cost / send back cost. problem f(v) also needed now. DRE as well.
-# master: compute fv, send s = 2u-v -> send v to slaves, they send cost back (need anyway to do step).
-# can send both f(v) and f(u)! can do acceleration locally i guess or with minimal information.
-message_in_bytes = socket.recv()
-
-return_proto = test_pb2.return_cluster_proto()
-return_proto.ParseFromString(message_in_bytes)
-print(-1, " cameras " , return_proto.cameras[0:9], " cost ", return_proto.cost)
-
-#program_deserialized = test_pb2.program_proto()
-#program_deserialized.ParseFromString(message_in_bytes)
-#print(-1, " cameras " , program_deserialized.cameras[0:9])
-
-# how to defuse oneof return:
-# field = config.WhichOneof('config')
-# if field = 'name_of_message?': ..
-
-#################################
-# next iteration. send cameras again, receive update, etc.
-request = test_pb2.request_proto()
-#cameras = test_pb2.camera_proto()
-#temp = program_deserialized.cameras[:]
-#temp = [i * 10 for i in temp]
-#request.cameras.cameras[:] = temp # ok, program works with changed data.
-
-request.update.cameras[:] = return_proto.cameras[:]
-request.update.cameras_s[:] = return_proto.cameras[:]
-request.update.be = 1e-5
-request.update.cluster_id = 0
-#request.cameras.cameras[:] = program_deserialized.cameras[:]
-for i in range(global_iterations):
-    request_serialized = request.SerializeToString()
-    socket.send(request_serialized) # ? HOW THE FUCK DOES IT KNOW WHAT MESSAGE TYPE IT IS? -> oneof, case
-
-    message_in_bytes = socket.recv()
-    #return_proto = test_pb2.return_cluster_proto()
-    return_proto.ParseFromString(message_in_bytes) # parse all data ?!
-    #request.cameras.ParseFromString(message_in_bytes)
-    print(i, " cameras = " , return_proto.cameras[0:9], " cost ", return_proto.cost)
-    del request.update.cameras[:]
-    request.update.cameras.extend(return_proto.cameras)
-    #request.cameras.cameras[:] = cameras[:]
-
-# Serialize the message to a string
-#image_serialized = image.SerializeToString()
-#print("Serialized message ", image_serialized)
-# Deserialize the message from a string
-#image_deserialized = test_pb2.Image()
-#image_deserialized.ParseFromString(image_serialized)
-
-# image_vector.images.ids.extend([1, 32, 43432])
-# message.values.extend(numpy_array) ?
-# image_vector.images.data
-
-#Get the server response
-# message_in_bytes = socket.recv()
-# Convert message bytes to string
-#message_in_str = message_in_bytes.decode("utf-8")
-#print("Received [ %s ]" % message_in_str)
