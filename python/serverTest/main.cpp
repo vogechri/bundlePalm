@@ -230,7 +230,9 @@ std::pair<int,int> ResetProgram(const program_proto& pro, ceres::Problem& proble
             problem.AddParameterBlock(&cameras_s[i], 9);
             problem.SetParameterBlockConstant(&cameras_s[i]);
         }
-        std::cout << "Parameter blocks added ow step\n";
+        std::cout << "Parameter blocks added wo step c:" << cameras.size()
+                  << " s:" << cameras_s.size() << " l: " << landmarks.size()
+                  << " | " << numCameras << " " << numLandmarks << "\n";
         for (int i = 0; i < stepSize.size(); i += 81) {
             problem.AddParameterBlock(&stepSize[i], 81);
             problem.SetParameterBlockConstant(&stepSize[i]);
@@ -254,7 +256,7 @@ std::pair<int,int> ResetProgram(const program_proto& pro, ceres::Problem& proble
                                     &(cameras[9 * pro.cam_id(i)]),
                                     &(landmarks[3 * pro.lm_id(i)]));
         }
-        std::cout << "Added Residual blocks 1\n";
+        std::cout << "Added " << pro.observations_size() / 2 << " Residual blocks\n";
 
         for (int cam_id = 0 ; cam_id < numCameras; ++cam_id) {
             //double* values = JpJ.valuePtr();
@@ -270,7 +272,7 @@ std::pair<int,int> ResetProgram(const program_proto& pro, ceres::Problem& proble
                 &(cameras  [9 * cam_id]),
                 &(cameras_s[9 * cam_id]));
         }
-        std::cout << "Added Residual blocks stepsize\n";
+        std::cout << "Added " << numCameras << " stepsized Residual blocks\n";
 
         return {numCameras, numLandmarks};
 }
@@ -287,11 +289,10 @@ GetJacobian( ceres::Problem& problem, const std::vector<int>& cam_obs, const std
     double cost;
     problem.Evaluate(evalOptions, &cost, &residuals, nullptr, &jacobian);
     const size_t numUnknowns = jacobian.num_cols;
-    std::cout << "Finished eval problem \n";
+    std::cout << "GetJacobian: Finished eval problem " << jacobian.num_rows << "-" << 9 * numCameras << "\n";
     // Now. I need JpTJp, hence.
 
     const int relevantRows = jacobian.num_rows - 9 * numCameras;
-
     SparseMatrix<double, Eigen::RowMajor> Jp(relevantRows, 9 * numCameras);
     SparseMatrix<double, Eigen::RowMajor> Jl(relevantRows, 3 * numLandmarks);
     Jp.reserve(VectorXi::Constant(2 * relevantRows, 9));
@@ -398,6 +399,28 @@ void WriteJacobian(ceres::Problem& problem, int numCameras, int numLandmarks) {
     std::cout << std::endl;
 }
 
+// not sure? send 8 programs to 8 sockets.
+// then receive. if yes. 
+// process message (by id) no socket.receive -- which is connected to port X
+// this again is sequential.
+// each thread would, by id, spawn new programm (store data, ..) or overwrite old one.
+// if receive cluster id is blocked, after send released -- so no data crash.
+// in other words, socket A -> id B: thread A starts with program B -- no other thread can access it.
+//
+// 
+
+// per cluster 1 program.
+// per thread 1 socket.
+// problem does not match, how to python? send bunch to k sockets. wait receive.
+// ok. main could take an argument, #clusters = K.
+// init K sockets. that wait in 
+// #pragma omp parallel for numthreads(10)
+// int numthreads = 8;
+// int i;
+// #pragma omp parallel for default(none) num_threads(numthreads) private(i)
+// for (i = 0; i < 100; i++)
+// {
+// int tid = omp_get_thread_num();
 
 int main() {
     // Initialize the context
@@ -445,6 +468,10 @@ int main() {
         socket.recv(&request);
         const std::string received_message(static_cast<char*>(request.data()), request.size());
 
+        // ParseFromString expects a byte string.
+        // ParseFromArray expects a byte array and the size of the array.
+        // ParseFromString(value) is the same as ParseFromArray(value.data(), value.size()). 
+
         request_proto request_p;
         if (!request_p.ParseFromString(received_message)) {
             std::cout << "Received: " << received_message << std::endl;
@@ -464,44 +491,47 @@ int main() {
             {
                 //std::cout << "request_proto::OptionsCase::kCameras" << std::endl;
                 camera_proto cams = request_p.cameras(); // we get an update for the cameras only -- update buffer, run its iterations.
-                //if (cams.ParseFromString(received_message)) 
-                {
-                    THROW_IF(cams.cameras_size() != cameras.size());
-                    int id=0; // fill existing buffer
-                    for(const float& v : cams.cameras()) {
-                        cameras[id++] = v;
-                    }
-                    // solve once more
-                    ceres::Solver::Summary summary;
-                    ceres::Solve(options, &problem, &summary);
-                    std::cout << summary.FullReport() << "\n";
-                    std::cout << "\nMycost: " << summary.final_cost * 2 << "\n";
-
-                    // Send solution back!
-                    id = 0;
-                    for(const double& v : cameras) {
-                        cams.set_cameras(id++, static_cast<float>(v));
-                    }
-
-                    // // Send solution back!, actually cameras shoudl be ok?
-                    // solution_proto sol;
-                    // for(const double& v : cameras) {
-                    //     sol.add_cameras(static_cast<float>(v));
-                    // }
-                    // for(const double& v : landmarks) {
-                    //     sol.add_landmarks(static_cast<float>(v));
-                    // }
-                    // sol.SerializeToString(&encoded_msg);
-
-                    std::string encoded_msg;
-                    cams.SerializeToString(&encoded_msg);
-                    zmq::message_t reply(encoded_msg.size());
-                    // Cast? this is WASTEful
-                    memcpy ((void *) reply.data(), encoded_msg.c_str(), encoded_msg.size());
-                    // publisher.send(zmq_msg);
-                    socket.send(reply, zmq::send_flags::none);
-                    std::cout << "Cameras send" << std::endl;
+                THROW_IF(cams.cameras_size() != cameras.size());
+                int id=0; // fill existing buffer
+                for(const float& v : cams.cameras()) {
+                    cameras[id++] = v;
                 }
+                // solve once more
+                ceres::Solver::Summary summary;
+                ceres::Solve(options, &problem, &summary);
+                std::cout << summary.FullReport() << "\n";
+                std::cout << "\nMycost: " << summary.final_cost * 2 << "\n";
+
+                // Send solution back!
+                id = 0;
+                for(const double& v : cameras) {
+                    cams.set_cameras(id++, static_cast<float>(v));
+                }
+
+                // // Send solution back!, actually cameras shoudl be ok?
+                // solution_proto sol;
+                // for(const double& v : cameras) {
+                //     sol.add_cameras(static_cast<float>(v));
+                // }
+                // for(const double& v : landmarks) {
+                //     sol.add_landmarks(static_cast<float>(v));
+                // }
+                // sol.SerializeToString(&encoded_msg);
+
+                // SerializeToArray saves memory and time?
+                // size_t bytes = cams.ByteSizeLong();
+                // zmq::message_t reply(bytes);
+                // cams.SerializeToArray(reply.data(), bytes);
+                // socket.send(reply, zmq::send_flags::none);
+
+                std::string encoded_msg;
+                cams.SerializeToString(&encoded_msg);
+                zmq::message_t reply(encoded_msg.size());
+                // Cast? this is WASTEful
+                memcpy ((void *) reply.data(), encoded_msg.c_str(), encoded_msg.size());
+                // publisher.send(zmq_msg);
+                socket.send(reply, zmq::send_flags::none);
+                std::cout << "Cameras send" << std::endl;
                 break;
             }
 
@@ -536,8 +566,13 @@ int main() {
                 // Send solution back!
                 return_cluster_proto return_proto = 
                     FillProto(cameras, landmarks, stepSize, summary.final_cost * 2);
-                return_proto.set_cost(summary.final_cost * 2);
-                std::cout << "\nUpdate Mycost: " << summary.final_cost * 2 << "\n";
+
+                // SerializeToArray saves memory and time?
+                // size_t bytes = return_proto.ByteSizeLong();
+                // zmq::message_t reply(bytes);
+                // return_proto.SerializeToArray(reply.data(), bytes);
+                // socket.send(reply, zmq::send_flags::none);
+
                 std::string encoded_msg;
                 return_proto.SerializeToString(&encoded_msg);
                 zmq::message_t reply(encoded_msg.size());
@@ -585,6 +620,12 @@ int main() {
     #ifdef __write__
                 WriteJacobian(problem, numCameras, numLandmarks);
     #endif
+
+                // SerializeToArray saves memory and time?
+                // size_t bytes = return_proto.ByteSizeLong();
+                // zmq::message_t reply(bytes);
+                // return_proto.SerializeToArray(reply.data(), bytes);
+                // socket.send(reply, zmq::send_flags::none);
 
                 // Instead send the result back as programm again.
                 std::string encoded_msg;
