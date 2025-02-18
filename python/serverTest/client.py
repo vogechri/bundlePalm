@@ -308,11 +308,11 @@ def prox_f(camera_indices_in_cluster_, point_indices_in_cluster_, local_camera_i
 
     global global_iteration
     global socket
-    for ci_ in range(kClusters):
+    for ci in range(kClusters):
         unique_points_in_c_ = np.unique(point_indices_in_cluster_[ci])
         unique_poses_in_c_ = np.unique(camera_indices_in_cluster_[ci])
         if global_iteration == 0:
-            print("Sending program …", ci_)
+            print("Sending program …", ci)
             request = test_pb2.request_proto()
             #request.program.SetInParent()
             #program = request.program
@@ -329,7 +329,7 @@ def prox_f(camera_indices_in_cluster_, point_indices_in_cluster_, local_camera_i
             #request.unorm
             #request.vnorm
         else: # just update
-            print("Sending request …", ci_)
+            print("Sending request …", ci)
             request = test_pb2.request_proto()
             #cameras = test_pb2.camera_proto()
             #temp = program_deserialized.cameras[:]
@@ -349,12 +349,12 @@ def prox_f(camera_indices_in_cluster_, point_indices_in_cluster_, local_camera_i
         return_proto_.ParseFromString(message_in_bytes_)
 
         # output should be:
-        cost_[ci_] = return_proto_.cost
-        # L_in_cluster_[ci_] = LipJ_ # unsused anyway
-        Vl_in_cluster_[ci_] = np.array(return_proto_.step_size[:]) # stepsize
-        poses_in_cluster_[ci_][unique_poses_in_c_, :] = np.array(return_proto_.cameras[:]).reshape((-1, 9))
+        cost_[ci] = return_proto_.cost
+        # L_in_cluster_[ci] = LipJ_ # unsused anyway
+        Vl_in_cluster_[ci] = np.array(return_proto_.step_size[:]) # stepsize
+        poses_in_cluster_[ci][unique_poses_in_c_, :] = np.array(return_proto_.cameras[:]).reshape((-1, 9))
         landmarks_[unique_points_in_c_,:] = np.array(return_proto_.landmarks[:]).reshape((-1, 3))
-        #blockEig_in_cluster_[ci_] = blockEig_in_c_ # not done
+        #blockEig_in_cluster_[ci] = blockEig_in_c_ # not done
 
     global_iteration = global_iteration + 1
     return (cost_, L_in_cluster_, Vl_in_cluster_, poses_in_cluster_, landmarks_, nabla_p_in_cluster_, blockEig_in_cluster_)
