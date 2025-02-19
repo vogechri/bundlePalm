@@ -1,10 +1,13 @@
 // Original Code from http://kr.zeromq.org/cpp:hwserver
 // kongineer.com
 
+#define _ceres_num_threads_ 1
 
 #include <zmq.hpp>
 #include <string>
 #include <iostream>
+#include <thread>
+#include <chrono>
 #include "generated/proto/test.pb.h"
 #include <google/protobuf/message_lite.h>
 
@@ -145,8 +148,11 @@ struct SnavelyReprojectionError {
 template<int N>
 void BlockSqrt(SparseMatrix<double, Eigen::RowMajor>& mat) {
     int numrows = mat.rows();
+    int numNonZeros = mat.nonZeros();
+    if(numNonZeros != mat.rows() * N)
+        std::cout << "BlockSqrt " << mat.nonZeros() << " ?= " << mat.rows() * N << "\n";
     THROW_IF(mat.rows() != mat.cols());
-    //THROW_IF(mat.);
+    THROW_IF(mat.nonZeros() != mat.rows() * N);
     double* values = mat.valuePtr();
     //std::cout << "before  "<< values[0]<< " " << values[1]<< " " << values[2]<< " " << values[3] << "\n";
     for (int i = 0; i < numrows / N; i++) {
@@ -174,13 +180,14 @@ void BlockInverse(SparseMatrix<double, Eigen::RowMajor>& mat) {
     //std::cout << "before  "<< values[0]<< " " << values[1]<< " " << values[2]<< " " << values[3] << "\n";
     for (int i = 0; i < numrows / N; i++) {
         auto mat9x9 = Eigen::Map< Eigen::Matrix<double,N,N> > (&(values[i * N*N]));//,  Eigen::Stride<0, 0>);
-        std::cout << "before "<< mat9x9 << " \n";
+        //std::cout << "before "<< mat9x9 << " \n";
         mat9x9 = mat9x9.inverse();
-        std::cout << "after "<< mat9x9 << " \n";        
+        //std::cout << "after "<< mat9x9 << " \n";        
     }
     //std::cout << "after  "<< values[0]<< " " << values[1]<< " " << values[2]<< " " << values[3] << "\n";
 }
 
+#ifdef __old__
 std::pair<int,int> ResetProgram(const program_proto& pro, ceres::Problem& problem, 
     std::vector<double>& cameras, std::vector<double>& landmarks, std::vector<double>& cameras_s,
     std::vector<double>&stepSize, std::vector<int>& cam_obs, std::vector<int>& lm_obs) {
@@ -289,7 +296,6 @@ GetJacobian( ceres::Problem& problem, const std::vector<int>& cam_obs, const std
     double cost;
     problem.Evaluate(evalOptions, &cost, &residuals, nullptr, &jacobian);
     const size_t numUnknowns = jacobian.num_cols;
-    std::cout << "GetJacobian: Finished eval problem " << jacobian.num_rows << "-" << 9 * numCameras << "\n";
     // Now. I need JpTJp, hence.
 
     const int relevantRows = jacobian.num_rows - 9 * numCameras;
@@ -372,6 +378,7 @@ return_cluster_proto FillProto(const std::vector<double> &cameras,
   // sol.SerializeToString(&encoded_msg);
   return return_proto;
 }
+#endif
 
 void WriteJacobian(ceres::Problem& problem, int numCameras, int numLandmarks) {
     std::cout << "Write Jac\n";
@@ -404,41 +411,34 @@ void WriteJacobian(ceres::Problem& problem, int numCameras, int numLandmarks) {
 class CeresProgram {
 public:
     CeresProgram() {
-      cluster_id = -1;
-      // Solve
-      // Make Ceres automatically detect the bundle structure. Note that the
-      // standard solver, SPARSE_NORMAL_CHOLESKY, also works fine but it is
-      // slower for standard bundle adjustment problems.
-      options.linear_solver_type = ceres::DENSE_SCHUR; // SPARSE_SCHUR;// same
-      // options.linear_solver_type = ITERATIVE_SCHUR; // same ceres::CGNR;//
-      // options.linear_solver_type = ceres::CGNR;
-      // options.linear_solver_type = ceres::DENSE_QR; // SHIT
-      // options.max_linear_solver_iterations = 100;
-      options.num_threads = 6; // single cpu -> still slow / bottleneck.
-      options.minimizer_progress_to_stdout = true;
-      // options.preconditioner_type = ceres::IDENTITY; // Sucks if CGNR of course. 
-      // options.preconditioner_type = ceres::JACOBI; // CGNR -> jacobi anyway.
-      options.max_num_iterations = 1;
+      Init();
     }
 
+    int ClusterId() { return cluster_id; }
+
     void ResetProgram(const program_proto &pro) {
+      Init();
       numCameras = pro.cameras_size() / 9;
       numLandmarks = pro.landmarks_size() / 3;
+      //std::cout << numCameras << " " << numLandmarks << "\n";
       cameras.clear();
       cameras.reserve(9 * numCameras);
       for (const float &v : pro.cameras()) {
         cameras.push_back(v);
       }
+      //std::cout << "cameras.push_back\n";
       landmarks.clear();
       landmarks.reserve(3 * numLandmarks);
       for (const float &v : pro.landmarks()) {
         landmarks.push_back(v);
       }
+      //std::cout << "landmarks.push_back\n";
       cameras_s.clear();
       cameras_s.reserve(9 * numCameras);
       for (const float &v : pro.cameras()) {
         cameras_s.push_back(v);
       }
+      //std::cout << "cameras_s.push_back\n";
       stepSize.clear(); // all 0 to ensure jacobian is reasonable.
       stepSize.resize(81 * numCameras, 0);
 
@@ -447,17 +447,21 @@ public:
       for (const int &id : pro.lm_id()) {
         lm_obs.push_back(id);
       }
+      //std::cout << "lm_obs.push_back\n";
       cam_obs.clear();
       cam_obs.reserve(pro.cam_id_size());
       for (const int &id : pro.cam_id()) {
         cam_obs.push_back(id);
       }
+      //std::cout << "data updated\n";
 
       // setup problem again. need to delete old?
       options.max_num_iterations = std::max(0, std::min(10, pro.iterations()));
+      options.initial_trust_region_radius = tr_radius;
       problem = ceres::Problem();
       cluster_id = pro.cluster_id();
       int ceres_id = 0;
+      //std::cout << "problem.AddParameterBlock\n";
       for (int i = 0; i < cameras.size(); i += 9) {
         problem.AddParameterBlock(&cameras[i], 9);
       }
@@ -468,14 +472,14 @@ public:
         problem.AddParameterBlock(&cameras_s[i], 9);
         problem.SetParameterBlockConstant(&cameras_s[i]);
       }
-      std::cout << "Parameter blocks added wo step c:" << cameras.size()
+      std::cout << cluster_id << ". Parameter blocks added wo step c:" << cameras.size()
                 << " s:" << cameras_s.size() << " l: " << landmarks.size()
                 << " | " << numCameras << " " << numLandmarks << "\n";
       for (int i = 0; i < stepSize.size(); i += 81) {
         problem.AddParameterBlock(&stepSize[i], 81);
         problem.SetParameterBlockConstant(&stepSize[i]);
       }
-      std::cout << "All Parameter blocks added\n";
+      //std::cout << "All Parameter blocks added\n";
       // SetParameterBlockVariable. optional set cameras constant, use for 's'.
       for (int i = 0; i < pro.observations_size() / 2; ++i) {
         // Each Residual block takes a point and a camera as input and outputs a
@@ -495,6 +499,8 @@ public:
                                  &(landmarks[3 * pro.lm_id(i)]));
       }
       std::cout << "Added " << pro.observations_size() / 2 << " Residual blocks\n";
+      function_residual_blocks.clear();
+      problem.GetResidualBlocks(&function_residual_blocks);
 
       for (int cam_id = 0; cam_id < numCameras; ++cam_id) {
         // double* values = JpJ.valuePtr();
@@ -513,7 +519,7 @@ public:
             &(stepSize[81 * cam_id]), // it thinks this block size is 9, not 81.
             &(cameras[9 * cam_id]), &(cameras_s[9 * cam_id]));
       }
-      std::cout << "Added " << numCameras << " stepsized Residual blocks\n";
+      std::cout << "Added " << numCameras << " Stepsize Residual blocks\n";
     }
 
     // Also delivers residuals and gradient.
@@ -523,17 +529,19 @@ public:
       // 1st get Jacobian(s):
       ceres::Problem::EvaluateOptions evalOptions;
       evalOptions.apply_loss_function = true;
+      // evalOpt.parameter_blocks = {}; // TODO only poses.
+      evalOptions.residual_blocks = function_residual_blocks;
       evalOptions.num_threads = 1;
       ceres::CRSMatrix jacobian;
       std::vector<double> residuals;
-      double cost;
-      problem.Evaluate(evalOptions, &cost, &residuals, nullptr, &jacobian);
+      // std::cout << "GetJacobian: Evaluate " << cluster_id << "\n"; 
+      problem.Evaluate(evalOptions, &startCost, &residuals, nullptr, &jacobian);
       const size_t numUnknowns = jacobian.num_cols;
-      std::cout << "GetJacobian: Finished eval problem " << jacobian.num_rows
-                << "-" << 9 * numCameras << "\n";
-      // Now. I need JpTJp, hence.
+      //   std::cout << "GetJacobian: " << cluster_id << " Finished eval problem "
+      //             << jacobian.num_rows << "-" << 9 * numCameras << "\n";
 
-      const int relevantRows = jacobian.num_rows - 9 * numCameras;
+      // Now. I need JpTJp, hence.
+      const int relevantRows = jacobian.num_rows;// - 9 * numCameras; // since I use residual_blocks
       SparseMatrix<double, Eigen::RowMajor> Jp(relevantRows, 9 * numCameras);
       SparseMatrix<double, Eigen::RowMajor> Jl(relevantRows, 3 * numLandmarks);
       Jp.reserve(VectorXi::Constant(2 * relevantRows, 9));
@@ -541,11 +549,11 @@ public:
       // JP.setFromTriplets(coefficients.begin(), coefficients.end());
       for (Eigen::Index r = 0; r < relevantRows; ++r) {
         //for (Eigen::Index r = 0; r < 1000; ++r) {
-            int lm_id = lm_obs[r/2];
-            int cam_id = cam_obs[r/2];
+            const int lm_id = lm_obs[r/2];
+            const int cam_id = cam_obs[r/2];
             //std::cout << r << ":";
             Eigen::Index idx = jacobian.rows[r];
-            const Eigen::Index c = jacobian.cols[idx]; // index of variable.
+            // const Eigen::Index c = jacobian.cols[idx]; // index of variable.
             for (int i = 0; i < 9 && idx < jacobian.rows[r + static_cast<Eigen::Index>(1)];++idx,++i) {
                 // if (9 * cam_id + i != jacobian.cols[idx])
                 //     std::cout << 9 * cam_id + i << " = " << jacobian.cols[idx] << " | ";
@@ -562,23 +570,45 @@ public:
         return {Jp,Jl};
     }
 
-    void SetBe(double be) {be = be;}
+    double GetCost() {
+      // 1st get Jacobian(s):
+      ceres::Problem::EvaluateOptions evalOptions;
+      evalOptions.apply_loss_function = true;
+      // evalOpt.parameter_blocks = {};
+      evalOptions.residual_blocks = function_residual_blocks;
+      evalOptions.num_threads = 1;
+      std::vector<double> residuals;
+      double cost;
+      problem.Evaluate(evalOptions, &cost, &residuals, nullptr, nullptr);
+      return cost;
+    }
+
+    void SetBe(double be) { be = be; }
 
     // Currently this is set 'stepsize' from Jp only.
     void SetStepSize(const SparseMatrix<double, Eigen::RowMajor> &Jp) {
+      // std::cout << "Set step size " << cluster_id << "\n";
+      if(Jp.nonZeros() != 9 * Jp.rows())
+          std::cout << "Jp " << cluster_id << " | " << Jp.nonZeros() << " =? " << Jp.rows() * 9 << "\n";
+      THROW_IF(Jp.nonZeros() != 9 * Jp.rows());
       SparseMatrix<double, Eigen::RowMajor> JpJ(9 * numCameras, 9 * numCameras);
       // SparseMatrix<double, Eigen::RowMajor> JlJ(3 * numLandmarks, 3 * numLandmarks);
       JpJ.reserve(VectorXi::Constant(9 * numCameras, 9));
       // JlJ.reserve(VectorXi::Constant(3 * numLandmarks, 3));
       JpJ = Jp.transpose() * Jp;
       // JlJ = Jl.transpose() * Jl;
-      auto JpJ_diag = JpJ.diagonal().array();
+      // auto JpJ_diag = JpJ.diagonal().array();
       // maybe block diag as well.
       //double be = pro.be(); // 1e-4;
-      JpJ.diagonal().array() += be * JpJ.diagonal().array();
+      if(JpJ.nonZeros() != stepSize.size() || JpJ.rows() * 9 != numCameras * 81)
+        std::cout << "JpJ " << cluster_id << " | " << JpJ.nonZeros() << " =? " << JpJ.rows() * 9
+                  << " " << stepSize.size() << " " << numCameras * 81 << "\n";
+      THROW_IF(JpJ.nonZeros() !=numCameras * 81);
+      //JpJ.diagonal().array() *= (1. + be); //+= be * JpJ.diagonal().array();
+      // std::cout << "BlockSqrt " << cluster_id << "\n";
       BlockSqrt<9>(JpJ); // need templated fct.
       // instead reset variable block(s) JpJ and s to sqrt(Stepsize)
-      double *values = JpJ.valuePtr();
+      const double *values = JpJ.valuePtr();
       for (int id = 0; id < 81 * numCameras; ++id) {
         stepSize[id] = values[id]; // = 1000 -> different cost: so ok
       }
@@ -613,14 +643,19 @@ public:
     double Solve() {
       ceres::Solver::Summary summary; // return?
       ceres::Solve(options, &problem, &summary);
-      std::cout << summary.FullReport() << "\n";
+      std::cout << summary.BriefReport() << "\n"; // .FullReport()
+      // TODO: use this trust region size : store and reuse later.
+      //std::vector<IterationSummary> Solver::Summary::iterations
+      tr_radius = summary.iterations.back().trust_region_radius;
+      //tr_radius = summary.trust_region_radius();
+      // TODO: -ordering=user for schur (maybe cameras 1st then landmarks)
       cost = summary.final_cost * 2;
-      std::cout << "\nUpdate Mycost: " << summary.final_cost * 2 << "\n";
+      // std::cout << "\nUpdate Mycost: " << summary.final_cost * 2 << "\n";
       return cost;
     }
 
-    void Update(prox_cluster_proto &update) {
-        std::cout << "Update cluster " << cluster_id << " update proto id:" << update.cluster_id() << "\n";
+    void UpdateData(const prox_cluster_proto &update) {
+        // std::cout << "Update cluster " << cluster_id << " update proto id:" << update.cluster_id() << "\n";
       THROW_IF(update.cameras_size() != cameras.size());
       THROW_IF(update.cameras_s_size() != cameras_s.size());
       THROW_IF(update.cluster_id() != cluster_id);
@@ -634,7 +669,10 @@ public:
         cameras_s[id++] = v;
       }
       be = update.be();
+      options.initial_trust_region_radius = tr_radius; // use from last solve.
+    }
 
+    void UpdateStepSize() {
       // Recompute.
       stepSize.clear(); // all 0 to ensure jacobian is reasonable.
       stepSize.resize(81 * numCameras, 0);
@@ -643,11 +681,42 @@ public:
     }
 
 private:
+
+    void Init() {
+        numCameras = 0;
+        numLandmarks = 0;
+        be = 1e-4;
+        tr_radius = 1e4;
+        startCost = 1e12;
+        cost = 1e12;
+        cluster_id = -1;
+        function_residual_blocks.clear();
+        // Solve
+        // Make Ceres automatically detect the bundle structure. Note that the
+        // standard solver, SPARSE_NORMAL_CHOLESKY, also works fine but it is
+        // slower for standard bundle adjustment problems.
+        options.linear_solver_type = ceres::DENSE_SCHUR; // SPARSE_SCHUR;// same
+        // options.linear_solver_type = ITERATIVE_SCHUR; // same ceres::CGNR;//
+        // options.linear_solver_type = ceres::CGNR;
+        // options.linear_solver_type = ceres::DENSE_QR; // SHIT
+        // options.max_linear_solver_iterations = 100;
+        options.num_threads = _ceres_num_threads_; // single cpu -> still slow / bottleneck.
+        // options.preconditioner_type = ceres::IDENTITY; // Sucks if CGNR of course. 
+        // options.preconditioner_type = ceres::JACOBI; // CGNR -> jacobi anyway.
+        options.max_num_iterations = 1;
+        // options.minimizer_progress_to_stdout = true;
+        options.minimizer_progress_to_stdout = false;
+        // options.logging_type = ceres::SILENT;  
+    }
+
     int cluster_id;
     int numCameras = 0;
     int numLandmarks = 0;
     double be = 1e-4;
+    double tr_radius = 1e4;
+    double startCost;
     double cost;
+    std::vector<ceres::ResidualBlockId> function_residual_blocks;
     std::vector<double> cameras_s;
     std::vector<double> cameras;
     std::vector<double> landmarks;
@@ -689,8 +758,9 @@ int main() {
     // Create a socket of type REP (reply)
     zmq::socket_t socket(context, ZMQ_REP);
 
+    //zmq::socket_t push_socket(context, ZMQ_REQ);// ZMQ_PUSH);
     zmq::socket_t push_socket(context, ZMQ_PUSH);
-    zmq::socket_t pull_socket(context, ZMQ_PULL);
+    zmq::socket_t pull_socket(context, ZMQ_REP);// ZMQ_PULL);
 
     // Bind the socket to a TCP address
     std::cout << "Starting the server on port 5555..." << std::endl;
@@ -720,7 +790,7 @@ int main() {
     // options.linear_solver_type = ceres::CGNR;
     // options.linear_solver_type = ceres::DENSE_QR; // SHIT
     // options.max_linear_solver_iterations = 0;
-    options.num_threads = 6; // ok maybe it is this what makes it slow. Problem:
+    options.num_threads = _ceres_num_threads_; // ok maybe it is this what makes it slow. Problem:
                              // single cpu -> still slow / bottleneck.
     options.minimizer_progress_to_stdout = true;
     // options.preconditioner_type = ceres::IDENTITY; // Sucks if CGNR of course.
@@ -730,26 +800,57 @@ int main() {
         zmq::message_t request;
 
         // Wait for the next request from a client
-        socket.recv(&request);
-        const std::string received_message(static_cast<char*>(request.data()), request.size());
-
+        // socket.recv(&request);
+        pull_socket.recv(&request);
+        // std::cout << "Received pull request \n";
+        
         // ParseFromString expects a byte string.
         // ParseFromArray expects a byte array and the size of the array.
         // ParseFromString(value) is the same as ParseFromArray(value.data(), value.size()). 
-
+        
+        // const std::string received_message(static_cast<char*>(request.data()), request.size());
         request_proto request_p;
-        //request_p.ParseFromString(received_message);
+        // request_p.ParseFromString(received_message);
         request_p.ParseFromArray(request.data(), request.size());
+        // std::cout << "Request ParseFromArray\n";
 
         switch(request_p.options_case()) {
 
             case request_proto::OptionsCase::kUpdate: {
-                std::cout << "request_proto::OptionsCase::kUpdate" << std::endl;
-                prox_cluster_proto update = request_p.update(); // we get an update for the cameras only -- update buffer, run its iterations.
-
-                int cluster_id = update.cluster_id();
+                //std::cout << "request_proto::OptionsCase::kUpdate" << std::endl;
+                const prox_cluster_proto update = request_p.update(); // we get an update for the cameras only -- update buffer, run its iterations.
+                const int cluster_id = update.cluster_id();
                 THROW_IF(cluster_to_program.find(cluster_id) == cluster_to_program.end());
                 CeresProgram& program = cluster_to_program[cluster_id];
+                program.UpdateData(update); // update is local, we nned to fill data in main thread.
+
+#define __threaded__
+#ifdef __threaded__
+                // Define a Lambda Expression
+                auto update_lambda = [&push_socket, &cluster_to_program](int cluster_id) {
+                    CeresProgram& program = cluster_to_program[cluster_id];
+                    // std::cout << cluster_id << " Update "<< "\n";
+                    program.UpdateStepSize();
+                    // const auto [Jp, Jl] = program.GetJacobian();
+                    // program.SetStepSize(Jp);
+                    program.Solve();
+                    return_cluster_proto return_proto = program.FillReturnProto();
+    
+                    // SerializeToArray saves memory and time?
+                    size_t bytes = return_proto.ByteSizeLong();
+                    zmq::message_t reply(bytes);
+                    return_proto.SerializeToArray(reply.data(), bytes);
+                    push_socket.send(reply, zmq::send_flags::none);
+                    // std::cout << cluster_id << ". Update send" << std::endl;
+                };
+
+                // This thread is launched by using lambda expression as callable
+                // Unclear if memory is valid long enough?
+                //std::thread update_thread(update_lambda, std::ref(program), std::cref(update));
+                std::thread update_thread(update_lambda, cluster_id);
+                update_thread.detach();
+                //update_thread.join();
+#else
                 program.Update(update);
                 // const auto [Jp, Jl] = program.GetJacobian();
                 // program.SetStepSize(Jp);
@@ -761,14 +862,14 @@ int main() {
                 zmq::message_t reply(bytes);
                 return_proto.SerializeToArray(reply.data(), bytes);
                 socket.send(reply, zmq::send_flags::none);
-
+                std::cout << update.cluster_id() << ". Update send" << std::endl;
+#endif
                 // std::string encoded_msg;
                 // return_proto.SerializeToString(&encoded_msg);
                 // zmq::message_t reply(encoded_msg.size());
                 // memcpy ((void *) reply.data(), encoded_msg.c_str(), encoded_msg.size());
                 // socket.send(reply, zmq::send_flags::none);
 
-                std::cout << "Update send" << std::endl;
                 break;
             }
     
@@ -783,11 +884,45 @@ int main() {
 
             // if we get program we setup new program. if we get cam & prox we update cams (?) and prox term only! do one more it, etc.
             case request_proto::OptionsCase::kProgram : {
-                std::cout << "request_proto::OptionsCase::kProgram" << std::endl;
-                program_proto pro = request_p.program();
+                //std::cout << "request_proto::OptionsCase::kProgram" << std::endl;
+                const program_proto pro = request_p.program();
 
                 //if(cluster_to_program.find(cluster_id) == cluster_to_program.end())
+                //CeresProgram& program = cluster_to_program[pro.cluster_id()];
+
+#define __threaded__
+#ifdef __threaded__
+                // Define a Lambda Expression
                 CeresProgram& program = cluster_to_program[pro.cluster_id()];
+                //std::cout << pro.cluster_id() << " Program "<< "\n";
+                program.ResetProgram(pro);
+
+                auto program_lambda = [&cluster_to_program, &push_socket](int cluster_id) {
+                    CeresProgram& program = cluster_to_program[cluster_id];
+                    // std::cout << program.ClusterId() << " ResetProgram "<< "\n";
+                    //std::cout << program.ClusterId() << " GetJacobian "<< "\n";
+                    const auto [Jp, Jl] = program.GetJacobian();
+                    //std::cout << program.ClusterId() << " SetStepSize "<< "\n";
+                    program.SetStepSize(Jp);
+                    //std::cout << program.ClusterId() << " Solve .. sleep 5s"<< "\n";
+                    program.Solve();
+                    //std::this_thread::sleep_for(std::chrono::seconds(5)); // sleep here, pollin / block pull/push, no send? dies before sleep ends.
+                    return_cluster_proto return_proto = program.FillReturnProto();
+                    // SerializeToArray saves memory and time?
+                    size_t bytes = return_proto.ByteSizeLong();
+                    zmq::message_t reply(bytes);
+                    return_proto.SerializeToArray(reply.data(), bytes);
+                    push_socket.send(reply, zmq::send_flags::none);
+                    // std::cout << program.ClusterId() << ". Program Update send\n";
+                };
+                // This thread is launched by using lambda expression as callable
+                // Unclear if memory is valid long enough?
+                //std::thread program_thread(program_lambda, std::ref(program), std::cref(pro));
+                std::thread program_thread(program_lambda, pro.cluster_id());
+                program_thread.detach();
+                //program_thread.join();// ok, so proto pro runs out of scope / gets deleted.
+                //std::this_thread::sleep_for(std::chrono::seconds(0)); // >5 s ok, so .. haeh?
+#else
                 program.ResetProgram(pro);
                 const auto [Jp, Jl] = program.GetJacobian();
                 program.SetStepSize(Jp);
@@ -813,6 +948,7 @@ int main() {
                 // socket.send(reply, zmq::send_flags::none);
                 
                 std::cout << "0. Program Update send\n";
+#endif
                 break;
             }
 
@@ -821,6 +957,12 @@ int main() {
             }
         }
 
+        // Here one would send back 'ack' / 'ok'. Unclear if necessary, blocks on sender -- maybe good idea.
+        // std::cout << "Sending message acknowledged to pull_socket\n";
+        std::string reply_message = "Ok";
+        zmq::message_t reply(reply_message.size());
+        memcpy(reply.data(), reply_message.data(), reply_message.size());
+        pull_socket.send(reply, zmq::send_flags::none);
     } // end while 
 
     return 0;

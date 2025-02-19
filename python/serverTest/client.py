@@ -312,7 +312,7 @@ def prox_f(camera_indices_in_cluster_, point_indices_in_cluster_, local_camera_i
         unique_points_in_c_ = np.unique(point_indices_in_cluster_[ci])
         unique_poses_in_c_ = np.unique(camera_indices_in_cluster_[ci])
         if global_iteration == 0:
-            print("Sending program …", ci)
+            # print("Sending program …", ci)
             request = test_pb2.request_proto()
             #request.program.SetInParent()
             #program = request.program
@@ -329,7 +329,7 @@ def prox_f(camera_indices_in_cluster_, point_indices_in_cluster_, local_camera_i
             #request.unorm
             #request.vnorm
         else: # just update
-            print("Sending request …", ci)
+            # print("Sending request …", ci)
             request = test_pb2.request_proto()
             #cameras = test_pb2.camera_proto()
             #temp = program_deserialized.cameras[:]
@@ -383,11 +383,11 @@ def prox_f_push_pull(camera_indices_in_cluster_, point_indices_in_cluster_, loca
         unique_points_in_c_ = np.unique(point_indices_in_cluster_[ci])
         unique_poses_in_c_ = np.unique(camera_indices_in_cluster_[ci])
         if global_iteration == 0:
-            print("Sending program …", ci)
+            # print("Sending program …", ci)
             request = test_pb2.request_proto()
             #request.program.SetInParent()
             #program = request.program
-            request.program.cameras[:] = poses_in_cluster_[ci].ravel()
+            request.program.cameras[:] = poses_in_cluster_[ci][unique_poses_in_c_].ravel()
             #request.program.cameras_s[:] = cameras.ravel() # set later in prox_cluster_proto
             request.program.landmarks[:] = landmarks_[unique_points_in_c_].ravel()
             request.program.observations[:] = points_2d_in_cluster_[ci].ravel()
@@ -400,25 +400,34 @@ def prox_f_push_pull(camera_indices_in_cluster_, point_indices_in_cluster_, loca
             #request.unorm
             #request.vnorm
         else: # just update
-            print("Sending request …", ci)
+            #print("Sending request …", ci)
             request = test_pb2.request_proto()
             #cameras = test_pb2.camera_proto()
             #temp = program_deserialized.cameras[:]
             #temp = [i * 10 for i in temp]
             #request.cameras.cameras[:] = temp # ok, program works with changed data.
-            request.update.cameras[:] = poses_in_cluster_[ci].ravel()
-            request.update.cameras_s[:] = poses_s_in_cluster_[ci].ravel()
+            request.update.cameras[:] = poses_in_cluster_[ci][unique_poses_in_c_].ravel()
+            request.update.cameras_s[:] = poses_s_in_cluster_[ci][unique_poses_in_c_].ravel()
             request.update.be = blockEig_in_cluster_[ci]
             request.update.cluster_id = ci
 
         request_serialized_ = request.SerializeToString() # SerializeToArray() does not exist
         push_socket.send(request_serialized_)
+        temp = push_socket.recv() # ok back, blocking to wait for thread start.
+        # do i need to send back a 'yes'?/ack?
 
     for k in range(kClusters):
+        #print("Receiving return …", k)
         message_in_bytes_ = pull_socket.recv()
         return_proto_ = test_pb2.return_cluster_proto()
+
+        #message_out_str = "Ok" # this might not be needed if this socket is pull not REC
+        #message_out_bytes = message_out_str.encode("utf-8")
+        #pull_socket.send(message_out_bytes)
+
         return_proto_.ParseFromString(message_in_bytes_)# ParseFromArray(message_in_bytes_)
         ci = return_proto_.cluster_id
+        #print("Return for cluster …", ci)
 
         unique_points_in_c_ = np.unique(point_indices_in_cluster_[ci])
         unique_poses_in_c_ = np.unique(camera_indices_in_cluster_[ci])
@@ -430,8 +439,34 @@ def prox_f_push_pull(camera_indices_in_cluster_, point_indices_in_cluster_, loca
         #blockEig_in_cluster_[ci] = blockEig_in_c_ # not done
 
     global_iteration = global_iteration + 1
+    # print("exit prox_f")
     return (cost_, L_in_cluster_, Vl_in_cluster_, poses_in_cluster_, landmarks_, nabla_p_in_cluster_, blockEig_in_cluster_)
 
+def GetLocalIndices(point_indices_in_cluster, camera_indices_in_cluster):
+    # test, yes much faster if precompute:
+    local_landmark_indices_in_cluster = [] # for residuals in cluster. local indices for landmark data send to cluster.
+    for ci in range(kClusters):
+        # can be used to index out global to local data. local/cluster = global[landmark_indices_in_c_]
+        landmark_indices_in_c_ = np.unique(point_indices_in_cluster[ci])
+        # print("local landmarks in ", ci, " " ,landmark_indices_in_c_.shape[0])
+        #landmarks_in_c = landmarks_[landmark_indices_in_c_]
+        # or global[landmark_indices_in_c_]  = local
+        local_landmark_indices_in_cluster.append(np.zeros(point_indices_in_cluster[ci].shape[0], dtype=int))
+        for i in range(landmark_indices_in_c_.shape[0]): # TODO: precompute THESE: slow!
+            local_landmark_indices_in_cluster[ci][point_indices_in_cluster[ci] == landmark_indices_in_c_[i]] = i
+
+    local_camera_indices_in_cluster = [] # for residuals in cluster. local indices for pose data send to cluster.
+    for ci in range(kClusters):
+        # can be used to index out global to local data. local/cluster = global[landmark_indices_in_c_]
+        # or global[landmark_indices_in_c_]  = local
+        cameras_indices_in_c_ = np.unique(camera_indices_in_cluster[ci])
+        # print("local cameras in ", ci, " " ,cameras_indices_in_c_.shape[0])
+        local_camera_indices_in_cluster.append( np.zeros(camera_indices_in_cluster[ci].shape[0], dtype=int) )
+        for i in range(cameras_indices_in_c_.shape[0]): # TODO: precompute these, now if many cams this is slow ?!
+            local_camera_indices_in_cluster[ci][camera_indices_in_cluster[ci] == cameras_indices_in_c_[i]] = i
+        # print(local_camera_indices_in_cluster[ci])
+
+    return (local_landmark_indices_in_cluster, local_camera_indices_in_cluster)
 
 BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/ladybug/"
 FILE_NAME = "../problem-49-7776-pre.txt.bz2"
@@ -443,12 +478,12 @@ n_cameras = cameras.shape[0]
 n_points = points_3d.shape[0]
 
 # simple! clustering
-kClusters = 2
+kClusters = 10 # todo: will still die if too many (0 in jac?)
 startL = 1
 innerIts = 1
 LipJ = 1 # unused
 global_iteration = 0
-global_iterations = 5
+global_iterations = 10
 
 #  Connect to the server
 print("Connecting to cpp server…")
@@ -456,8 +491,9 @@ socket = context.socket(zmq.REQ)
 socket.connect("tcp://localhost:5555")
 
 # new idea.
-push_socket = context.socket(zmq.PUSH)
+push_socket = context.socket(zmq.REQ)#PUSH)
 push_socket.connect("tcp://localhost:5556")
+#pull_socket = context.socket(zmq.REP)#.PULL)
 pull_socket = context.socket(zmq.PULL)
 pull_socket.connect("tcp://localhost:5557")
 
@@ -474,25 +510,8 @@ start = time.time() # this is not working at all. Slower then iteratively
 end = time.time() # this is not working at all. Slower then iteratively
 print("========== clustering took ", end - start, " s ==========")
 
-# test, yes much faster if precompute:
-local_landmark_indices_in_cluster = [] # for residuals in cluster. local indices for landmark data send to cluster.
-for ci in range(kClusters):
-    # can be used to index out global to local data. local/cluster = global[landmark_indices_in_c_]
-    landmark_indices_in_c_ = np.unique(point_indices_in_cluster[ci])
-    #landmarks_in_c = landmarks_[landmark_indices_in_c_]
-    # or global[landmark_indices_in_c_]  = local
-    local_landmark_indices_in_cluster.append(np.zeros(point_indices_in_cluster[ci].shape[0], dtype=int))
-    for i in range(landmark_indices_in_c_.shape[0]): # TODO: precompute THESE: slow!
-        local_landmark_indices_in_cluster[ci][point_indices_in_cluster[ci] == landmark_indices_in_c_[i]] = i
-
-local_camera_indices_in_cluster = [] # for residuals in cluster. local indices for pose data send to cluster.
-for ci in range(kClusters):
-    # can be used to index out global to local data. local/cluster = global[landmark_indices_in_c_]
-    # or global[landmark_indices_in_c_]  = local
-    cameras_indices_in_c_ = np.unique(camera_indices_in_cluster[ci])
-    local_camera_indices_in_cluster.append( np.zeros(camera_indices_in_cluster[ci].shape[0], dtype=int) )
-    for i in range(cameras_indices_in_c_.shape[0]): # TODO: precompute these, now if many cams this is slow ?!
-        local_camera_indices_in_cluster[ci][camera_indices_in_cluster[ci] == cameras_indices_in_c_[i]] = i
+(local_landmark_indices_in_cluster, local_camera_indices_in_cluster) = \
+    GetLocalIndices(point_indices_in_cluster, camera_indices_in_cluster)
 
 for ci in range(kClusters):
     values, counts = np.unique(camera_indices_in_cluster[ci], return_counts=True)
@@ -514,6 +533,7 @@ lastCostDRE = lastCost
 
 for global_iteration in range(global_iterations):
 
+    start = time.time() # this is not working at all. Slower then iteratively
     (
         cost,
         L_in_cluster,
@@ -522,18 +542,23 @@ for global_iteration in range(global_iterations):
         landmarks,
         nabla_p_in_cluster,
         blockEig_in_cluster
-    ) = prox_f(
+    ) = prox_f_push_pull( #prox_f(
         camera_indices_in_cluster, point_indices_in_cluster, local_camera_indices_in_cluster,
         local_landmark_indices_in_cluster, points_2d_in_cluster, poses_in_cluster, landmarks,
         poses_s_in_cluster, L_in_cluster, Ul_in_cluster, blockEig_in_cluster, kClusters,
         LipJ, innerIts_=innerIts, sequential_=True,
         )
+    end = time.time() # this is not working at all. Slower then iteratively
+
+    if global_iteration == 1:
+        print("landmarks ", landmarks)
+        for ci in range(kClusters):
+            print("poses_in_cluster ", ci, " : ", poses_in_cluster[ci])
 
     currentCost = np.sum(cost)
     print(global_iteration, " ", round(currentCost), " gain ", round(lastCost - currentCost),
           ". ============= sum fk update takes ", end - start," s",)
-
-    poses_v, _, Up_cluster = average_cameras_new(camera_indices_in_cluster, poses_in_cluster, 
+    poses_v, _, Up_cluster = average_cameras_new(camera_indices_in_cluster, poses_in_cluster,
                                                  poses_s_in_cluster, L_in_cluster, Ul_in_cluster, nabla_p_in_cluster)
 
     #DRE cost BEFORE s update, always lower than AFTER update.
