@@ -22,11 +22,6 @@ message solution_proto {
   repeated float landmarks = 2; // 9d
 }
 
-// send to get cost
-message cost_proto {
-  repeated float cameras = 1; // 3d
-}
-
 // we only return new solution for cameras -- later stepsize as well.
 // Test: if we send cameras, we use current program , update cam buffer only and repeat.
 message camera_proto {
@@ -51,13 +46,24 @@ message return_cluster_proto {
   float cost = 5;
 }
 
+// send to get cost
+message cost_proto {
+  repeated float cameras = 1; // 3d
+  int32 cluster_id = 2;
+}
+
+message return_cost_proto {
+  float cost = 1;
+  int32 cluster_id = 2;
+}
+
 // can be one of messages. so proto converts to correct message. client messages server messages
 message request_proto {
     oneof options {
         program_proto program = 1;
         camera_proto cameras = 2;
         prox_cluster_proto update = 3;
-        cost_proto get_cost = 4;
+        cost_proto cost_update = 4;
   }
 }
 

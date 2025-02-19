@@ -4,7 +4,7 @@ Original code from https://zeromq.org/languages/python/
 
 import zmq
 #from proto import test_pb2 #import ImageVector #, Image
-import sys
+import sys, os
 sys.path.insert(0, './generated/proto/')
 #from test import test_pb2
 import test_pb2
@@ -14,6 +14,7 @@ context = zmq.Context()
 
 import bz2
 import time
+import urllib
 
 from clustering import init_lib, cluster_deg_by_landmark
 from scipy.sparse import csr_array, csr_matrix, issparse
@@ -185,21 +186,6 @@ def cost_DRE(
 
         cost_dre  += local_cost
         dre_per_part.append(round(local_cost.copy()))
-
-        # if i == 0:
-        #     Ul_all = U_pose
-        # else:
-        #     Ul_all += U_pose
-
-    # analyis 646 small and large mixed.
-    #     EV.append(blockEigenvalueSet(U_pose, 9))
-    # EV.append(blockEigenvalueSet(Ul_all, 9))
-    # print("-----------")
-    # for c in range(num_cams):
-    #     #evs = np.zeros(len(EV))
-    #     for ci in range(len(EV)):
-    #         print(EV[ci][:,c])
-    #     print("-----------")
 
     # TODO: I use a different Vl to compute the cost here than in the update of prox u.
     #       Since I want to work with a new Vl already. Problem.
@@ -379,7 +365,7 @@ def prox_f_push_pull(camera_indices_in_cluster_, point_indices_in_cluster_, loca
     global push_socket
     global pull_socket
 
-    for ci in range(kClusters):
+    for ci in range(kClusters_):
         unique_points_in_c_ = np.unique(point_indices_in_cluster_[ci])
         unique_poses_in_c_ = np.unique(camera_indices_in_cluster_[ci])
         if global_iteration == 0:
@@ -416,7 +402,7 @@ def prox_f_push_pull(camera_indices_in_cluster_, point_indices_in_cluster_, loca
         temp = push_socket.recv() # ok back, blocking to wait for thread start.
         # do i need to send back a 'yes'?/ack?
 
-    for k in range(kClusters):
+    for k in range(kClusters_):
         #print("Receiving return …", k)
         message_in_bytes_ = pull_socket.recv()
         return_proto_ = test_pb2.return_cluster_proto()
@@ -438,9 +424,46 @@ def prox_f_push_pull(camera_indices_in_cluster_, point_indices_in_cluster_, loca
         landmarks_[unique_points_in_c_,:] = np.array(return_proto_.landmarks[:]).reshape((-1, 3))
         #blockEig_in_cluster_[ci] = blockEig_in_c_ # not done
 
-    global_iteration = global_iteration + 1
+    # global_iteration = global_iteration + 1
     # print("exit prox_f")
     return (cost_, L_in_cluster_, Vl_in_cluster_, poses_in_cluster_, landmarks_, nabla_p_in_cluster_, blockEig_in_cluster_)
+
+# Operates sequentially.
+def primal_cost_push_pull(camera_indices_in_cluster_, poses_in_cluster_, kClusters_, singlePose = False) :
+    cost_ = np.zeros(kClusters_)
+
+    global push_socket
+    global pull_socket
+
+    for ci in range(kClusters_):
+        unique_poses_in_c_ = np.unique(camera_indices_in_cluster_[ci])
+        #print("Sending cost query …", ci)
+        request = test_pb2.request_proto()
+        #request.program.SetInParent()
+        #program = request.program
+        if singlePose:
+            request.cost_update.cameras[:] = poses_in_cluster_[unique_poses_in_c_].ravel()
+        else:
+            request.cost_update.cameras[:] = poses_in_cluster_[ci][unique_poses_in_c_].ravel()
+        request.cost_update.cluster_id = ci
+
+        request_serialized_ = request.SerializeToString() # SerializeToArray() does not exist
+        push_socket.send(request_serialized_)
+        temp = push_socket.recv() # ok back, blocking to wait for thread start.
+
+    for k in range(kClusters_):
+        #print("Receiving return …", k)
+        message_in_bytes_ = pull_socket.recv()
+        return_proto_ = test_pb2.return_cost_proto()
+
+        return_proto_.ParseFromString(message_in_bytes_)
+        ci = return_proto_.cluster_id
+        #print("Return for cluster …", ci)
+        unique_poses_in_c_ = np.unique(camera_indices_in_cluster_[ci])
+        cost_[ci] = return_proto_.cost
+
+    # print("exit primal_cost_push_pull")
+    return cost_
 
 def GetLocalIndices(point_indices_in_cluster, camera_indices_in_cluster):
     # test, yes much faster if precompute:
@@ -469,11 +492,16 @@ def GetLocalIndices(point_indices_in_cluster, camera_indices_in_cluster):
     return (local_landmark_indices_in_cluster, local_camera_indices_in_cluster)
 
 BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/ladybug/"
-FILE_NAME = "../problem-49-7776-pre.txt.bz2"
-#FILE_NAME = "../problem-52-64053-pre.txt.bz2"
+# FILE_NAME = "problem-49-7776-pre.txt.bz2"
+BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/venice/"
+FILE_NAME = "problem-52-64053-pre.txt.bz2"
 # FILE_NAME = "../problem-173-111908-pre.txt.bz2" # check if compute not only in jacobian
 
-cameras, points_3d, camera_indices, point_indices, points_2d = read_bal_data(FILE_NAME)
+URL = BASE_URL + FILE_NAME
+if not os.path.isfile("../" + FILE_NAME):
+    urllib.request.urlretrieve(URL, "../" + FILE_NAME)
+
+cameras, points_3d, camera_indices, point_indices, points_2d = read_bal_data("../" + FILE_NAME)
 n_cameras = cameras.shape[0]
 n_points = points_3d.shape[0]
 
@@ -483,7 +511,7 @@ startL = 1
 innerIts = 1
 LipJ = 1 # unused
 global_iteration = 0
-global_iterations = 10
+global_iterations = 100
 
 #  Connect to the server
 print("Connecting to cpp server…")
@@ -550,10 +578,10 @@ for global_iteration in range(global_iterations):
         )
     end = time.time() # this is not working at all. Slower then iteratively
 
-    if global_iteration == 1:
-        print("landmarks ", landmarks)
-        for ci in range(kClusters):
-            print("poses_in_cluster ", ci, " : ", poses_in_cluster[ci])
+    # if global_iteration == 1:
+    #     print("landmarks ", landmarks)
+    #     for ci in range(kClusters):
+    #         print("poses_in_cluster ", ci, " : ", poses_in_cluster[ci])
 
     currentCost = np.sum(cost)
     print(global_iteration, " ", round(currentCost), " gain ", round(lastCost - currentCost),
@@ -564,7 +592,6 @@ for global_iteration in range(global_iterations):
     #DRE cost BEFORE s update, always lower than AFTER update.
     dre, dre_per_part = cost_DRE(camera_indices_in_cluster, poses_in_cluster, poses_s_in_cluster, \
                                 L_in_cluster, Ul_in_cluster, poses_v, nabla_p_in_cluster)
-    dre += currentCost
 
     tau = 1 # 2 is best ? does not generalize!
     for ci in range(kClusters):
@@ -572,6 +599,19 @@ for global_iteration in range(global_iterations):
         temp[temp != 0] = 1
         poses_s_in_cluster[ci] = poses_s_in_cluster[ci] + tau * (poses_v - poses_in_cluster[ci]) # update s = s + v - u.
         poses_s_in_cluster[ci] = temp.reshape(-1,9) * poses_s_in_cluster[ci] # set to zero if not in cluster.
+
+    primal_costs_u = cost
+    primal_cost_u = currentCost
+    # primal_costs_u = primal_cost_push_pull(camera_indices_in_cluster, poses_in_cluster, kClusters)
+    # primal_cost_u = 0
+    # for ci in range(kClusters):
+    #     primal_cost_u += primal_costs_u[ci]
+    dre += primal_cost_u
+
+    primal_costs_v = primal_cost_push_pull(camera_indices_in_cluster, poses_v, kClusters, True)
+    primal_cost_v = 0
+    for ci in range(kClusters):
+        primal_cost_v += primal_costs_v[ci]
 
     # primal_cost_v = 0
     # for ci in range(kClusters):
@@ -593,8 +633,9 @@ for global_iteration in range(global_iterations):
     #         local_landmark_indices_in_cluster[ci],
     #         points_2d_in_cluster[ci],
     #         landmarks)
-    primal_cost_u = currentCost
-    primal_cost_v = primal_cost_u # must send.
+
+    #primal_cost_u = currentCost
+    #primal_cost_v = primal_cost_u # must send.
 
     dre = max( primal_cost_v, dre ) # sandwich lemma, prevent maybe chaos
     print( global_iteration, " ======== DRE ====== ", round(dre) , " ========= gain " , \
