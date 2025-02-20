@@ -1,3 +1,4 @@
+from __future__ import print_function
 import zmq
 #from proto import test_pb2 #import ImageVector #, Image
 import sys, os
@@ -10,7 +11,8 @@ context = zmq.Context()
 
 import bz2
 import time
-import urllib
+import urllib.request
+#import urllib
 import json
 
 from clustering import init_lib, cluster_deg_by_landmark
@@ -525,7 +527,7 @@ def preconditioning_push(poses_v_, poses_in_cluster_, poses_s_in_cluster_, camer
     for ci in range(kClusters_):
         unique_poses_in_c_ = np.unique(camera_indices_in_cluster_[ci])
         unique_landmarks_in_c_ = np.unique(point_indices_in_cluster_[ci])
-        print("Sending preconditioning query …", ci)
+        #print("Sending preconditioning query …", ci)
         request = test_pb2.request_proto()
 
         poses_in_cluster_[ci] = (unorm_ * poses_in_cluster_[ci].ravel()).reshape(-1,9)
@@ -568,15 +570,18 @@ def GetLocalIndices(point_indices_in_cluster, camera_indices_in_cluster):
 
 # todo: median + scale, unorm, acceleration + adjust.
 
-BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/ladybug/"
-FILE_NAME = "problem-49-7776-pre.txt.bz2"
-# BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/venice/"
-# FILE_NAME = "problem-52-64053-pre.txt.bz2"
+# BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/ladybug/"
+# FILE_NAME = "problem-49-7776-pre.txt.bz2"
+BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/venice/"
+FILE_NAME = "problem-52-64053-pre.txt.bz2"
 # FILE_NAME = "../problem-173-111908-pre.txt.bz2" # check if compute not only in jacobian
 
 URL = BASE_URL + FILE_NAME
 if not os.path.isfile("../" + FILE_NAME):
     urllib.request.urlretrieve(URL, "../" + FILE_NAME)
+
+kClusters = 10 # todo: will still die if too many (0 in jac?)
+global_iterations = 100
 
 num_args = len(sys.argv)
 if num_args > 2:
@@ -587,7 +592,7 @@ if num_args > 2:
     FILE_NAME = sys.argv[2]
 
     if num_args > 3:
-        its = int(sys.argv[3])
+        global_iterations = int(sys.argv[3])
     if num_args > 4:
         kClusters = int(sys.argv[4])
 
@@ -600,22 +605,19 @@ n_cameras = cameras.shape[0]
 n_points = points_3d.shape[0]
 
 # simple! clustering
-kClusters = 10 # todo: will still die if too many (0 in jac?)
 startL = 1
 innerIts = 1 # does shit, keep at 1
 LipJ = 1 # unused
 global_init = True
-global_iteration = 0
-global_iterations = 100
 resetIt = 0
 globalBlockEigUpperLimit = 5e-1 # 1e-1, 1e-3?
-blockEig_in_cluster = 1e-5 * np.ones(kClusters) # 1e-4 or 1e-5
+blockEig_in_cluster = 1e-4 * np.ones(kClusters) # 1e-4 or 1e-5
 memory_be = 4 # here can shrink, below this only grow.
 failedNesterovAcceleration = 0
 maxFailedNesterovAcceleration = 3
 print("input blockEig_in_cluster[ci] ", blockEig_in_cluster[0])
 
-#  Connect to the server
+# Connect to the server
 print("Connecting to cpp server…")
 #socket = context.socket(zmq.REQ)
 #socket.connect("tcp://localhost:5555")
@@ -684,7 +686,7 @@ start = time.time() # this is not working at all. Slower then iteratively
 end = time.time() # this is not working at all. Slower then iteratively
 
 currentCost = np.sum(cost)
-print(global_iteration, " ", round(currentCost), " gain ", round(lastCost - currentCost),
+print(-1, " ", round(currentCost), " gain ", round(lastCost - currentCost),
     ". ============= sum fk update takes ", end - start," s",)
 print(Ul_in_cluster)
 #print(Ul_in_cluster[0])
@@ -718,7 +720,7 @@ primal_costs_v = primal_cost_push_pull(camera_indices_in_cluster, poses_v, kClus
 primal_cost_v = np.sum(primal_costs_v)
 
 dre = max( primal_cost_v, dre ) # sandwich lemma, prevent maybe chaos
-print( global_iteration, " ======== DRE ====== ", round(dre) , " ========= gain " , \
+print( -1, " ======== DRE ====== ", round(dre) , " ========= gain " , \
     round(lastCostDRE - dre), "==== f(v)= ", round(primal_cost_v), " f(u)= ",
     round(primal_cost_u), " BE ", blockEig_in_cluster)
 
@@ -961,7 +963,7 @@ for global_iteration in range(global_iterations):
 
                 break # next full iteration
 
-result_dict = {"base_url": BASE_URL, "file_name": FILE_NAME, "iterations" : its, \
+result_dict = {"base_url": BASE_URL, "file_name": FILE_NAME, "iterations" : global_iterations, \
             "bestCost" : round(bestCost), "bestIt": bestIt, "kClusters" : kClusters, \
             "bestCost60" : round(bestCost60), "bestCost30" : round(bestCost30) }
 with open('results_server.json', 'a') as json_file:

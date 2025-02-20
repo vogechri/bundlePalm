@@ -245,7 +245,7 @@ void BlockSqrt(SparseMatrix<double, Eigen::RowMajor>& mat) {
 
 template<int N>
 void BlockInverse(SparseMatrix<double, Eigen::RowMajor>& mat) {
-    int numrows = mat.rows();
+    const int numrows = mat.rows();
     THROW_IF(mat.rows() != mat.cols());
     //THROW_IF(mat.);
     double* values = mat.valuePtr();
@@ -351,7 +351,6 @@ public:
       problem = ceres::Problem();
       cluster_id = pro.cluster_id();
       be = pro.be();
-      int ceres_id = 0;
       //std::cout << "problem.AddParameterBlock\n";
       for (int i = 0; i < cameras.size(); i += 9) {
         problem.AddParameterBlock(&cameras[i], 9);
@@ -722,32 +721,6 @@ int main() {
     push_socket.bind("tcp://*:5557");
 
     std::map<int, CeresProgram> cluster_to_program;
-    // Those are permanent, variables can change.
-    int numCameras = 0;
-    int numLandmarks = 0;
-    double be = 1e-4;
-    std::vector<double> cameras_s;
-    std::vector<double> cameras;
-    std::vector<double> landmarks;
-    std::vector<double> stepSize;
-    std::vector<int> cam_obs;
-    std::vector<int> lm_obs;
-    ceres::Problem problem;
-    ceres::Solver::Options options;
-    // Solve
-    // Make Ceres automatically detect the bundle structure. Note that the
-    // standard solver, SPARSE_NORMAL_CHOLESKY, also works fine but it is slower
-    // for standard bundle adjustment problems.
-    options.linear_solver_type = ceres::DENSE_SCHUR; // SPARSE_SCHUR;// same
-    // options.linear_solver_type = ITERATIVE_SCHUR; // same ceres::CGNR;//
-    // options.linear_solver_type = ceres::CGNR;
-    // options.linear_solver_type = ceres::DENSE_QR; // SHIT
-    // options.max_linear_solver_iterations = 0;
-    options.num_threads = _ceres_num_threads_; // ok maybe it is this what makes it slow. Problem:
-                             // single cpu -> still slow / bottleneck.
-    options.minimizer_progress_to_stdout = true;
-    // options.preconditioner_type = ceres::IDENTITY; // Sucks if CGNR of course.
-    // options.preconditioner_type = ceres::JACOBI; // CGNR -> jacobi anyway.
 
     while (true) {
         zmq::message_t request;
@@ -828,8 +801,6 @@ int main() {
                 const program_proto pro = request_p.program();
 
                 //if(cluster_to_program.find(cluster_id) == cluster_to_program.end())
-                //CeresProgram& program = cluster_to_program[pro.cluster_id()];
-
                 // Define a Lambda Expression
                 CeresProgram& program = cluster_to_program[pro.cluster_id()];
                 //std::cout << pro.cluster_id() << " Program "<< "\n";
@@ -837,27 +808,19 @@ int main() {
 
                 auto program_lambda = [&cluster_to_program, &push_socket](int cluster_id) {
                     CeresProgram& program = cluster_to_program[cluster_id];
-                    // std::cout << program.ClusterId() << " ResetProgram "<< "\n";
-                    //std::cout << program.ClusterId() << " GetJacobian "<< "\n";
                     const auto [Jp, Jl] = program.GetJacobian();
-                    //std::cout << program.ClusterId() << " SetStepSize "<< "\n";
                     program.SetStepSize(Jp);
-                    //std::cout << program.ClusterId() << " Solve .. sleep 5s"<< "\n";
                     program.Solve();
                     //std::this_thread::sleep_for(std::chrono::seconds(5)); // sleep here, pollin / block pull/push, no send? dies before sleep ends.
                     return_cluster_proto return_proto = program.FillReturnProto();
                     const double cost = 2 * program.GetCost();
                     return_proto.set_cost(cost);
-                    //std::cout << "Cost from program " << cost <<"\n";
                     // SerializeToArray saves memory and time?
                     const size_t bytes = return_proto.ByteSizeLong();
                     zmq::message_t reply(bytes);
                     return_proto.SerializeToArray(reply.data(), bytes);
                     push_socket.send(reply, zmq::send_flags::none);
-                    // std::cout << program.ClusterId() << ". Program Update send\n";
                 };
-                // This thread is launched by using lambda expression as callable
-                // Unclear if memory is valid long enough?
                 //std::thread program_thread(program_lambda, std::ref(program), std::cref(pro));
                 std::thread program_thread(program_lambda, pro.cluster_id());
                 program_thread.detach();
@@ -877,11 +840,9 @@ int main() {
                 // Define a Lambda Expression
                 auto cost_lambda = [&push_socket, &cluster_to_program](int cluster_id) {
                     CeresProgram& program = cluster_to_program[cluster_id];
-                    // std::cout << cluster_id << " Update "<< "\n";
                     const double cost = 2 * program.GetCost();
                     return_cost_proto return_proto;
                     return_proto.set_cost(cost);
-                    //std::cout << "Cost from get cost " << cost <<"\n";
 
                     return_proto.set_cluster_id(cluster_id);
                     // SerializeToArray saves memory and time?
@@ -889,7 +850,6 @@ int main() {
                     zmq::message_t reply(bytes);
                     return_proto.SerializeToArray(reply.data(), bytes);
                     push_socket.send(reply, zmq::send_flags::none);
-                    // std::cout << cluster_id << ". Update send" << std::endl;
                 };
                 std::thread cost_thread(cost_lambda, cluster_id);
                 cost_thread.detach();
@@ -901,7 +861,6 @@ int main() {
                 const preconditioning_proto ppro = request_p.preconditioning_update();
                 // Define a Lambda Expression
                 CeresProgram& program = cluster_to_program[ppro.cluster_id()];
-                //std::cout << pro.cluster_id() << " Program "<< "\n";
                 program.UpdatePreconditioning(ppro);
             }
 
