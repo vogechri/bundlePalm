@@ -517,6 +517,13 @@ public:
         std::cout << "JpJ " << cluster_id << " | " << JpJ.nonZeros() << " =? " << JpJ.rows() * 9
                   << " " << stepSize.size() << " " << numCameras * 81 << "\n";
       THROW_IF(JpJ.nonZeros() != numCameras * 81);
+
+      full_stepSize.resize(stepSize.size(), 0);
+      const double *values = JpJ.valuePtr();
+      for (int id = 0; id < 81 * numCameras; ++id) {
+        full_stepSize[id] = values[id]; // this is returned, the other is just used in the eq.
+      }
+
       JpJ.diagonal().array() *= (1. + be); //+= be * JpJ.diagonal().array();
     //   const auto JpJDiagonal = JpJ.diagonal();//.array();
     //   JpJ = JpJ * 0.5 * 1e-12;
@@ -525,7 +532,7 @@ public:
       // std::cout << "BlockSqrt " << cluster_id << "\n";
       BlockSqrt<9>(JpJ); // need templated fct.
       // instead reset variable block(s) JpJ and s to sqrt(Stepsize)
-      const double *values = JpJ.valuePtr();
+      values = JpJ.valuePtr();
       for (int id = 0; id < 81 * numCameras; ++id) {
         stepSize[id] = values[id]; // = 1000 -> different cost: so ok
       }
@@ -540,7 +547,7 @@ public:
       for (const double &v : landmarks) {
         return_proto.add_landmarks(static_cast<float>(v));
       }
-      for (const double &v : stepSize) {
+      for (const double &v : full_stepSize) {
         return_proto.add_step_size(static_cast<float>(v));
       }
       return_proto.set_cluster_id(cluster_id);
@@ -664,6 +671,7 @@ private:
     std::vector<double> cameras;
     std::vector<double> landmarks;
     std::vector<double> stepSize;
+    std::vector<double> full_stepSize;
     std::vector<double> unorm;
     std::vector<double> vnorm;
     std::vector<int> cam_obs;

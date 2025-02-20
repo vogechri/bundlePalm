@@ -17,6 +17,12 @@ message program_proto {
   repeated int32 unique_cameras = 12; // should not be many -- if any ever. One could pack cams < 10 lms in one cluster == lms in cam are put in one cluster.
 }
 
+message preconditioning_proto {
+  int32 cluster_id = 1;
+  repeated float unorm = 2;
+  repeated float vnorm = 3;
+}
+
 message solution_proto {
   repeated float cameras = 1; // 3d
   repeated float landmarks = 2; // 9d
@@ -64,6 +70,7 @@ message request_proto {
         camera_proto cameras = 2;
         prox_cluster_proto update = 3;
         cost_proto cost_update = 4;
+        preconditioning_proto preconditioning_update = 5;
   }
 }
 
