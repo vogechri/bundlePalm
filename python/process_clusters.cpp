@@ -2151,7 +2151,7 @@ std::pair<int, double> FindbestMatchForPart(int partId, //const std::vector<std:
 #endif
 
 // TODO: parallel? below set best part not parallel.
-#pragma omp parallel num_threads(10) // not for
+#pragma omp parallel num_threads(6) // not for
   for (int otherPartId : partToTryMerge) {
 #ifdef _select_by_even_cost_
     // cost GAIN be regular cost

@@ -2,6 +2,7 @@
 // kongineer.com
 
 #define _ceres_num_threads_ 1
+// #define __unweighted_system__
 
 #include <zmq.hpp>
 #include <string>
@@ -91,7 +92,7 @@ struct ProxStepPrior {
         return (new ceres::AutoDiffCostFunction<ProxStepPrior, 9, 81, 9, 9>(new ProxStepPrior()));
     }
 };
-
+#ifdef __unweighted_system__
 struct SnavelyReprojectionError {
   SnavelyReprojectionError(double observed_x, double observed_y)
       : observed_x(observed_x), observed_y(observed_y) {}
@@ -144,6 +145,77 @@ struct SnavelyReprojectionError {
   double observed_x;
   double observed_y;
 };
+#else
+struct SnavelyReprojectionErrorWeighted {
+    SnavelyReprojectionErrorWeighted(double observed_x, double observed_y)
+        : observed_x(observed_x), observed_y(observed_y) {}
+
+    template <typename T>
+    bool operator()(const T* const camera,
+                    const T* const point,
+                    const T* const cameraWeight,
+                    const T* const pointWeight,
+                    T* residuals) const {
+
+      T cameraW[9];
+      cameraW[0] = camera[0] * cameraWeight[0];
+      cameraW[1] = camera[1] * cameraWeight[1];
+      cameraW[2] = camera[2] * cameraWeight[2];
+      cameraW[3] = camera[3] * cameraWeight[3];
+      cameraW[4] = camera[4] * cameraWeight[4];
+      cameraW[5] = camera[5] * cameraWeight[5];
+      cameraW[6] = camera[6] * cameraWeight[6];
+      cameraW[7] = camera[7] * cameraWeight[7];
+      cameraW[8] = camera[8] * cameraWeight[8];
+      T pointW[3];
+      pointW[0] = point[0] * pointWeight[0];
+      pointW[1] = point[1] * pointWeight[1];
+      pointW[2] = point[2] * pointWeight[2];
+      // camera[0,1,2] are the angle-axis rotation.
+      T p[3];
+      ceres::AngleAxisRotatePoint(cameraW, pointW, p);
+
+      // camera[3,4,5] are the translation.
+      p[0] += cameraW[3];
+      p[1] += cameraW[4];
+      p[2] += cameraW[5];
+
+      // Compute the center of distortion. The sign change comes from
+      // the camera model that Noah Snavely's Bundler assumes, whereby
+      // the camera coordinate system has a negative z axis.
+      T xp = -p[0] / p[2]; // that means focal length is flipped.
+      T yp = -p[1] / p[2];
+
+      // Apply second and fourth order radial distortion.
+      const T& l1 = cameraW[7];
+      const T& l2 = cameraW[8];
+      T r2 = xp * xp + yp * yp;
+      T distortion = 1.0 + r2 * (l1 + l2 * r2);
+
+      // Compute final projected point position.
+      const T& focal = cameraW[6];
+      T predicted_x = focal * distortion * xp;
+      T predicted_y = focal * distortion * yp;
+
+      // The error is the difference between the predicted and observed position.
+      residuals[0] = predicted_x - observed_x;
+      residuals[1] = predicted_y - observed_y;
+
+      return true;
+    }
+
+    // Factory to hide the construction of the CostFunction object from
+    // the client code.
+    static ceres::CostFunction* Create(const double observed_x,
+                                       const double observed_y) {
+      return (new ceres::AutoDiffCostFunction<SnavelyReprojectionErrorWeighted, 2, 9, 3, 9, 3>(
+          new SnavelyReprojectionErrorWeighted(observed_x, observed_y)));
+    }
+
+    double observed_x;
+    double observed_y;
+  };
+#endif
 
 template<int N>
 void BlockSqrt(SparseMatrix<double, Eigen::RowMajor>& mat) {
@@ -162,7 +234,7 @@ void BlockSqrt(SparseMatrix<double, Eigen::RowMajor>& mat) {
         Eigen::SelfAdjointEigenSolver<Eigen::Matrix<double,N,N> > eigensolver;
         eigensolver.computeDirect(mat9x9, Eigen::DecompositionOptions::ComputeEigenvectors);
         //VPQ_EXPECT_EQ(eigensolver.info(), Eigen::Success);
-  
+
         // SqrtCovEigenValues are sorted in decreasing order.
         Eigen::Vector<double, N> sqrtEigenValues = eigensolver.eigenvalues().cwiseSqrt();//.cwiseMax(lowerBoundSquared).cwiseSqrt().cwiseInverse();
         mat9x9 = eigensolver.eigenvectors() * sqrtEigenValues.asDiagonal() * eigensolver.eigenvectors().transpose();
@@ -260,6 +332,17 @@ public:
       for (const int &id : pro.cam_id()) {
         cam_obs.push_back(id);
       }
+      unorm.clear();
+      unorm.reserve(9 * numCameras);
+      for (const float &v : pro.unorm()) {
+        unorm.push_back(v);
+      }
+      //std::cout << "cameras.push_back\n";
+      vnorm.clear();
+      vnorm.reserve(3 * numLandmarks);
+      for (const float &v : pro.vnorm()) {
+        vnorm.push_back(v);
+      }
       //std::cout << "data updated\n";
 
       // setup problem again. need to delete old?
@@ -267,6 +350,7 @@ public:
       options.initial_trust_region_radius = tr_radius;
       problem = ceres::Problem();
       cluster_id = pro.cluster_id();
+      be = pro.be();
       int ceres_id = 0;
       //std::cout << "problem.AddParameterBlock\n";
       for (int i = 0; i < cameras.size(); i += 9) {
@@ -286,7 +370,18 @@ public:
         problem.AddParameterBlock(&stepSize[i], 81);
         problem.SetParameterBlockConstant(&stepSize[i]);
       }
+
+      for (int i = 0; i < unorm.size(); i += 9) {
+        problem.AddParameterBlock(&unorm[i], 9);
+        problem.SetParameterBlockConstant(&unorm[i]);
+      }
+      for (int i = 0; i < vnorm.size(); i += 3) {
+        problem.AddParameterBlock(&vnorm[i], 3);
+        problem.SetParameterBlockConstant(&vnorm[i]);
+      }
       //std::cout << "All Parameter blocks added\n";
+
+#ifdef __unweighted_system__
       // SetParameterBlockVariable. optional set cameras constant, use for 's'.
       for (int i = 0; i < pro.observations_size() / 2; ++i) {
         // Each Residual block takes a point and a camera as input and outputs a
@@ -305,6 +400,17 @@ public:
                                  &(cameras[9 * pro.cam_id(i)]),
                                  &(landmarks[3 * pro.lm_id(i)]));
       }
+#else
+      for (int i = 0; i < pro.observations_size() / 2; ++i) {
+        ceres::CostFunction *cost_function = SnavelyReprojectionErrorWeighted::Create(
+            pro.observations(2 * i + 0), pro.observations(2 * i + 1));
+        problem.AddResidualBlock(cost_function, nullptr /* squared loss */,
+                                 &(cameras[9 * pro.cam_id(i)]),
+                                 &(landmarks[3 * pro.lm_id(i)]),
+                                 &(unorm[9 * pro.cam_id(i)]),
+                                 &(vnorm[3 * pro.lm_id(i)]));
+      }
+#endif
       std::cout << "Added " << pro.observations_size() / 2 << " Residual blocks\n";
       function_residual_blocks.clear();
       problem.GetResidualBlocks(&function_residual_blocks);
@@ -410,8 +516,12 @@ public:
       if(JpJ.nonZeros() != stepSize.size() || JpJ.rows() * 9 != numCameras * 81)
         std::cout << "JpJ " << cluster_id << " | " << JpJ.nonZeros() << " =? " << JpJ.rows() * 9
                   << " " << stepSize.size() << " " << numCameras * 81 << "\n";
-      THROW_IF(JpJ.nonZeros() !=numCameras * 81);
-      //JpJ.diagonal().array() *= (1. + be); //+= be * JpJ.diagonal().array();
+      THROW_IF(JpJ.nonZeros() != numCameras * 81);
+      JpJ.diagonal().array() *= (1. + be); //+= be * JpJ.diagonal().array();
+    //   const auto JpJDiagonal = JpJ.diagonal();//.array();
+    //   JpJ = JpJ * 0.5 * 1e-12;
+    //   //JpJ.diagonal() = JpJ.diagonal() + be * JpJDiagonal;
+    //   JpJ.diagonal() = JpJDiagonal * (1. + be);
       // std::cout << "BlockSqrt " << cluster_id << "\n";
       BlockSqrt<9>(JpJ); // need templated fct.
       // instead reset variable block(s) JpJ and s to sqrt(Stepsize)
@@ -498,6 +608,21 @@ public:
       SetStepSize(Jp);
     }
 
+    void UpdatePreconditioning(const preconditioning_proto& preconditioningProto) {
+        // std::cout << "Update cluster " << cluster_id << " update proto id:" << update.cluster_id() << "\n";
+        THROW_IF(preconditioningProto.unorm_size() != unorm.size());
+        THROW_IF(preconditioningProto.vnorm_size() != vnorm.size());
+
+        int id = 0; // fill existing buffer
+        for (const float &v : preconditioningProto.unorm()) {
+            unorm[id++] = v;
+        }
+        id = 0; // fill existing buffer
+        for (const float &v : preconditioningProto.vnorm()) {
+            vnorm[id++] = v;
+        }
+    }
+
 private:
 
     void Init() {
@@ -539,6 +664,8 @@ private:
     std::vector<double> cameras;
     std::vector<double> landmarks;
     std::vector<double> stepSize;
+    std::vector<double> unorm;
+    std::vector<double> vnorm;
     std::vector<int> cam_obs;
     std::vector<int> lm_obs;
     ceres::Problem problem;
@@ -635,15 +762,13 @@ int main() {
         switch(request_p.options_case()) {
 
             case request_proto::OptionsCase::kUpdate: {
-                std::cout << "request_proto::OptionsCase::kUpdate" << std::endl;
+                //std::cout << "request_proto::OptionsCase::kUpdate" << std::endl;
                 const prox_cluster_proto update = request_p.update(); // we get an update for the cameras only -- update buffer, run its iterations.
                 const int cluster_id = update.cluster_id();
                 THROW_IF(cluster_to_program.find(cluster_id) == cluster_to_program.end());
                 CeresProgram& program = cluster_to_program[cluster_id];
                 program.UpdateData(update); // update is local, we nned to fill data in main thread.
 
-#define __threaded__
-#ifdef __threaded__
                 // Define a Lambda Expression
                 auto update_lambda = [&push_socket, &cluster_to_program](int cluster_id) {
                     CeresProgram& program = cluster_to_program[cluster_id];
@@ -653,11 +778,9 @@ int main() {
                     // program.SetStepSize(Jp);
                     program.Solve();
                     return_cluster_proto return_proto = program.FillReturnProto();
-
                     const double cost = 2 * program.GetCost();
                     return_proto.set_cost(cost);
                     //std::cout << "Cost from update " << cost <<"\n";
-
                     // SerializeToArray saves memory and time?
                     size_t bytes = return_proto.ByteSizeLong();
                     zmq::message_t reply(bytes);
@@ -672,20 +795,7 @@ int main() {
                 std::thread update_thread(update_lambda, cluster_id);
                 update_thread.detach();
                 //update_thread.join();
-#else
-                program.Update(update);
-                // const auto [Jp, Jl] = program.GetJacobian();
-                // program.SetStepSize(Jp);
-                program.Solve();
-                return_cluster_proto return_proto = program.FillReturnProto();
 
-                // SerializeToArray saves memory and time?
-                size_t bytes = return_proto.ByteSizeLong();
-                zmq::message_t reply(bytes);
-                return_proto.SerializeToArray(reply.data(), bytes);
-                socket.send(reply, zmq::send_flags::none);
-                std::cout << update.cluster_id() << ". Update send" << std::endl;
-#endif
                 // std::string encoded_msg;
                 // return_proto.SerializeToString(&encoded_msg);
                 // zmq::message_t reply(encoded_msg.size());
@@ -706,14 +816,12 @@ int main() {
 
             // if we get program we setup new program. if we get cam & prox we update cams (?) and prox term only! do one more it, etc.
             case request_proto::OptionsCase::kProgram : {
-                std::cout << "request_proto::OptionsCase::kProgram" << std::endl;
+                //std::cout << "request_proto::OptionsCase::kProgram" << std::endl;
                 const program_proto pro = request_p.program();
 
                 //if(cluster_to_program.find(cluster_id) == cluster_to_program.end())
                 //CeresProgram& program = cluster_to_program[pro.cluster_id()];
 
-#define __threaded__
-#ifdef __threaded__
                 // Define a Lambda Expression
                 CeresProgram& program = cluster_to_program[pro.cluster_id()];
                 //std::cout << pro.cluster_id() << " Program "<< "\n";
@@ -747,38 +855,11 @@ int main() {
                 program_thread.detach();
                 //program_thread.join();// ok, so proto pro runs out of scope / gets deleted.
                 //std::this_thread::sleep_for(std::chrono::seconds(0)); // >5 s ok, so .. haeh?
-#else
-                program.ResetProgram(pro);
-                const auto [Jp, Jl] = program.GetJacobian();
-                program.SetStepSize(Jp);
-                program.Solve();
-                return_cluster_proto return_proto = program.FillReturnProto();
-
-    //#define __write__
-    #ifdef __write__
-                WriteJacobian(problem, numCameras, numLandmarks);
-    #endif
-
-                // SerializeToArray saves memory and time?
-                size_t bytes = return_proto.ByteSizeLong();
-                zmq::message_t reply(bytes);
-                return_proto.SerializeToArray(reply.data(), bytes);
-                socket.send(reply, zmq::send_flags::none);
-
-                // Instead send the result back as programm again.
-                // std::string encoded_msg;
-                // return_proto.SerializeToString(&encoded_msg);
-                // zmq::message_t reply(encoded_msg.size());
-                // memcpy ((void *) reply.data(), encoded_msg.c_str(), encoded_msg.size());
-                // socket.send(reply, zmq::send_flags::none);
-                
-                std::cout << "0. Program Update send\n";
-#endif
                 break;
             }
 
             case request_proto::OptionsCase::kCostUpdate: {
-                std::cout << "request_proto::OptionsCase::kCostUpdate" << std::endl;
+                //std::cout << "request_proto::OptionsCase::kCostUpdate" << std::endl;
                 const cost_proto costUpdate = request_p.cost_update();
                 const int cluster_id = costUpdate.cluster_id();
                 THROW_IF(cluster_to_program.find(cluster_id) == cluster_to_program.end());
@@ -805,6 +886,15 @@ int main() {
                 std::thread cost_thread(cost_lambda, cluster_id);
                 cost_thread.detach();
                 break;
+            }
+
+            case request_proto::OptionsCase::kPreconditioningUpdate : {
+                std::cout << "request_proto::OptionsCase::kPreconditioningUpdate" << std::endl;
+                const preconditioning_proto ppro = request_p.preconditioning_update();
+                // Define a Lambda Expression
+                CeresProgram& program = cluster_to_program[ppro.cluster_id()];
+                //std::cout << pro.cluster_id() << " Program "<< "\n";
+                program.UpdatePreconditioning(ppro);
             }
 
             default: {

@@ -424,7 +424,6 @@ def prox_f_push_pull(camera_indices_in_cluster_, point_indices_in_cluster_, loca
         landmarks_[unique_points_in_c_,:] = np.array(return_proto_.landmarks[:]).reshape((-1, 3))
         #blockEig_in_cluster_[ci] = blockEig_in_c_ # not done
 
-    # global_iteration = global_iteration + 1
     # print("exit prox_f")
     return (cost_, L_in_cluster_, Vl_in_cluster_, poses_in_cluster_, landmarks_, nabla_p_in_cluster_, blockEig_in_cluster_)
 
@@ -491,10 +490,12 @@ def GetLocalIndices(point_indices_in_cluster, camera_indices_in_cluster):
 
     return (local_landmark_indices_in_cluster, local_camera_indices_in_cluster)
 
+# todo: median + scale, unorm, acceleration + adjust.
+
 BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/ladybug/"
-# FILE_NAME = "problem-49-7776-pre.txt.bz2"
-BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/venice/"
-FILE_NAME = "problem-52-64053-pre.txt.bz2"
+FILE_NAME = "problem-49-7776-pre.txt.bz2"
+#BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/venice/"
+#FILE_NAME = "problem-52-64053-pre.txt.bz2"
 # FILE_NAME = "../problem-173-111908-pre.txt.bz2" # check if compute not only in jacobian
 
 URL = BASE_URL + FILE_NAME
