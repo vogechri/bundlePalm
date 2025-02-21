@@ -5,6 +5,7 @@
 #include <string>
 #include <iostream>
 #include <thread>
+#include <mutex>
 #include <chrono>
 #include "generated/proto/test.pb.h"
 #include <google/protobuf/message_lite.h>
@@ -673,9 +674,11 @@ int main() {
     // Create a socket of type REP (reply)
     zmq::socket_t socket(context, ZMQ_REP);
 
-    zmq::socket_t push_socket(context, ZMQ_REQ);// ZMQ_PUSH);
-    //zmq::socket_t push_socket(context, ZMQ_PUSH);
+    //zmq::socket_t push_socket(context, ZMQ_REQ);// ZMQ_PUSH);
+    zmq::socket_t push_socket(context, ZMQ_PUSH);
     zmq::socket_t pull_socket(context, ZMQ_REP);// ZMQ_PULL);
+
+    std::mutex mtx; // Mutex for critical section.
 
     // Bind the socket to a TCP address
     std::cout << "Starting the server on port 5555..." << std::endl;
@@ -729,10 +732,8 @@ int main() {
                     size_t bytes = return_proto.ByteSizeLong();
                     zmq::message_t reply(bytes);
                     return_proto.SerializeToArray(reply.data(), bytes);
+                    std::lock_guard<std::mutex> lock(mtx);
                     push_socket.send(reply, zmq::send_flags::none);
-                    // Wait for the next request from a client
-                    zmq::message_t receipt;
-                    push_socket.recv(&receipt);
                     // std::cout << cluster_id << ". Update send" << std::endl;
                 };
 
@@ -777,10 +778,8 @@ int main() {
                     const size_t bytes = return_proto.ByteSizeLong();
                     zmq::message_t reply(bytes);
                     return_proto.SerializeToArray(reply.data(), bytes);
+                    std::lock_guard<std::mutex> lock(mtx);
                     push_socket.send(reply, zmq::send_flags::none);
-                    // Wait for the next request from a client
-                    zmq::message_t receipt;
-                    push_socket.recv(&receipt);
                 };
                 //std::thread program_thread(program_lambda, std::ref(program), std::cref(pro));
                 std::thread program_thread(program_lambda, pro.cluster_id());
@@ -810,10 +809,8 @@ int main() {
                     const size_t bytes = return_proto.ByteSizeLong();
                     zmq::message_t reply(bytes);
                     return_proto.SerializeToArray(reply.data(), bytes);
+                    std::lock_guard<std::mutex> lock(mtx);
                     push_socket.send(reply, zmq::send_flags::none);
-                    // Wait for the next request from a client
-                    zmq::message_t receipt;
-                    push_socket.recv(&receipt);
                 };
                 std::thread cost_thread(cost_lambda, cluster_id);
                 cost_thread.detach();
