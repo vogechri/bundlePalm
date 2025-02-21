@@ -1,6 +1,3 @@
-// Original Code from http://kr.zeromq.org/cpp:hwserver
-// kongineer.com
-
 #define _ceres_num_threads_ 1
 // #define __unweighted_system__
 
@@ -65,29 +62,13 @@ struct ProxStepPrior {
                     const T *const camera,
                     const T *const camera_s,
                     T *residuals) const {
-        // camera[0,1,2] are the angle-axis rotation.
-        //   T d[9];
-        //   d[0] = camera[0] - camera_s[0];
-        //   d[1] = camera[1] - camera_s[1];
-        //   d[2] = camera[2] - camera_s[2];
-        //   d[3] = camera[3] - camera_s[3];
-        //   d[4] = camera[4] - camera_s[4];
-        //   d[5] = camera[5] - camera_s[5];
-        //   d[6] = camera[6] - camera_s[6];
-        //   d[7] = camera[7] - camera_s[7];
-        //   d[8] = camera[8] - camera_s[8];
-
-        Eigen::Matrix<T, 9, 1> d = Eigen::Map<const Eigen::Matrix<T, 9, 1>>(camera) - Eigen::Map<const Eigen::Matrix<T, 9, 1>>(camera_s);
+         Eigen::Matrix<T, 9, 1> d = Eigen::Map<const Eigen::Matrix<T, 9, 1>>(camera) - Eigen::Map<const Eigen::Matrix<T, 9, 1>>(camera_s);
         Eigen::Map<Eigen::Matrix<T, 9, 1>> residualsVector(residuals);
         residualsVector = Eigen::Map<const Eigen::Matrix<T, 9, 9>>(matBlock) * d;
-
-        // The error is the difference between the predicted and observed position.
-        //   residuals[0] = predicted_x - observed_x;
         return true;
     }
 
-    // Factory to hide the construction of the CostFunction object from
-    // the client code.
+    // Factory to hide the construction of the CostFunction object from the client code.
     static ceres::CostFunction *Create() {
         return (new ceres::AutoDiffCostFunction<ProxStepPrior, 9, 81, 9, 9>(new ProxStepPrior()));
     }
@@ -238,7 +219,9 @@ void BlockSqrt(SparseMatrix<double, Eigen::RowMajor>& mat) {
         // SqrtCovEigenValues are sorted in decreasing order.
         Eigen::Vector<double, N> sqrtEigenValues = eigensolver.eigenvalues().cwiseSqrt();//.cwiseMax(lowerBoundSquared).cwiseSqrt().cwiseInverse();
         mat9x9 = eigensolver.eigenvectors() * sqrtEigenValues.asDiagonal() * eigensolver.eigenvectors().transpose();
-        //std::cout << "after  "<< mat9x9.transpose() * mat9x9 << " \n";
+        
+        //auto mat9x9_out = Eigen::Map< Eigen::Matrix<double,N,N> > (&(values[i * N*N]));//,  Eigen::Stride<0, 0>);
+        //std::cout << "after  "<< mat9x9_out.transpose() * mat9x9_out << " \n";
     }
     //std::cout << "after  "<< values[0]<< " " << values[1]<< " " << values[2]<< " " << values[3] << "\n";
 }
@@ -495,7 +478,7 @@ public:
       return cost;
     }
 
-    void SetBe(double be) { be = be; }
+    //void SetBe(double be) { be = be; }
 
     // Currently this is set 'stepsize' from Jp only.
     void SetStepSize(const SparseMatrix<double, Eigen::RowMajor> &Jp) {
@@ -616,6 +599,7 @@ public:
 
     void UpdatePreconditioning(const preconditioning_proto& preconditioningProto) {
         // std::cout << "Update cluster " << cluster_id << " update proto id:" << update.cluster_id() << "\n";
+        THROW_IF(preconditioningProto.cluster_id() != cluster_id);
         THROW_IF(preconditioningProto.unorm_size() != unorm.size());
         THROW_IF(preconditioningProto.vnorm_size() != vnorm.size());
 
@@ -808,8 +792,9 @@ int main() {
 
                 auto program_lambda = [&cluster_to_program, &push_socket](int cluster_id) {
                     CeresProgram& program = cluster_to_program[cluster_id];
-                    const auto [Jp, Jl] = program.GetJacobian();
-                    program.SetStepSize(Jp);
+                    program.UpdateStepSize();
+                    //const auto [Jp, Jl] = program.GetJacobian();
+                    //program.SetStepSize(Jp);
                     program.Solve();
                     //std::this_thread::sleep_for(std::chrono::seconds(5)); // sleep here, pollin / block pull/push, no send? dies before sleep ends.
                     return_cluster_proto return_proto = program.FillReturnProto();
@@ -879,19 +864,3 @@ int main() {
 
     return 0;
 }
-
-// Example: send c++ proto.
-        // std::string encoded_msg;
-        // RL::DataSet msg;
-        // msg.set_count(i);
-        // msg.add_joint_position(1.1);
-        // msg.add_joint_position(2.1);
-        // msg.add_joint_velocity(-1.1);
-        // msg.add_joint_velocity(-2.1);
-
-        // msg.SerializeToString(&encoded_msg);
-
-        // zmq::message_t zmq_msg(encoded_msg.size());
-        // memcpy ((void *) zmq_msg.data(), encoded_msg.c_str(),
-        //         encoded_msg.size());
-        // publisher.send(zmq_msg);

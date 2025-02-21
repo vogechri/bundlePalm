@@ -570,15 +570,11 @@ def GetLocalIndices(point_indices_in_cluster, camera_indices_in_cluster):
 
 # todo: median + scale, unorm, acceleration + adjust.
 
-# BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/ladybug/"
-# FILE_NAME = "problem-49-7776-pre.txt.bz2"
-BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/venice/"
-FILE_NAME = "problem-52-64053-pre.txt.bz2"
+BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/ladybug/"
+FILE_NAME = "problem-49-7776-pre.txt.bz2"
+# BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/venice/"
+# FILE_NAME = "problem-52-64053-pre.txt.bz2"
 # FILE_NAME = "../problem-173-111908-pre.txt.bz2" # check if compute not only in jacobian
-
-URL = BASE_URL + FILE_NAME
-if not os.path.isfile("../" + FILE_NAME):
-    urllib.request.urlretrieve(URL, "../" + FILE_NAME)
 
 kClusters = 10 # todo: will still die if too many (0 in jac?)
 global_iterations = 100
@@ -599,6 +595,10 @@ if num_args > 2:
     URL = BASE_URL + FILE_NAME
     if not os.path.isfile(FILE_NAME):
         urllib.request.urlretrieve(URL, FILE_NAME)
+
+URL = BASE_URL + FILE_NAME
+if not os.path.isfile("../" + FILE_NAME):
+    urllib.request.urlretrieve(URL, "../" + FILE_NAME)
 
 cameras, points_3d, camera_indices, point_indices, points_2d = read_bal_data("../" + FILE_NAME)
 n_cameras = cameras.shape[0]
