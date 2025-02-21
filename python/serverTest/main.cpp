@@ -673,8 +673,8 @@ int main() {
     // Create a socket of type REP (reply)
     zmq::socket_t socket(context, ZMQ_REP);
 
-    //zmq::socket_t push_socket(context, ZMQ_REQ);// ZMQ_PUSH);
-    zmq::socket_t push_socket(context, ZMQ_PUSH);
+    zmq::socket_t push_socket(context, ZMQ_REQ);// ZMQ_PUSH);
+    //zmq::socket_t push_socket(context, ZMQ_PUSH);
     zmq::socket_t pull_socket(context, ZMQ_REP);// ZMQ_PULL);
 
     // Bind the socket to a TCP address
@@ -730,6 +730,9 @@ int main() {
                     zmq::message_t reply(bytes);
                     return_proto.SerializeToArray(reply.data(), bytes);
                     push_socket.send(reply, zmq::send_flags::none);
+                    // Wait for the next request from a client
+                    zmq::message_t receipt;
+                    push_socket.recv(&receipt);
                     // std::cout << cluster_id << ". Update send" << std::endl;
                 };
 
@@ -775,6 +778,9 @@ int main() {
                     zmq::message_t reply(bytes);
                     return_proto.SerializeToArray(reply.data(), bytes);
                     push_socket.send(reply, zmq::send_flags::none);
+                    // Wait for the next request from a client
+                    zmq::message_t receipt;
+                    push_socket.recv(&receipt);
                 };
                 //std::thread program_thread(program_lambda, std::ref(program), std::cref(pro));
                 std::thread program_thread(program_lambda, pro.cluster_id());
@@ -805,6 +811,9 @@ int main() {
                     zmq::message_t reply(bytes);
                     return_proto.SerializeToArray(reply.data(), bytes);
                     push_socket.send(reply, zmq::send_flags::none);
+                    // Wait for the next request from a client
+                    zmq::message_t receipt;
+                    push_socket.recv(&receipt);
                 };
                 std::thread cost_thread(cost_lambda, cluster_id);
                 cost_thread.detach();

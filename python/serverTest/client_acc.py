@@ -408,9 +408,9 @@ def prox_f_push_pull(camera_indices_in_cluster_, point_indices_in_cluster_, loca
         message_in_bytes_ = pull_socket.recv()
         return_proto_ = test_pb2.return_cluster_proto()
 
-        #message_out_str = "Ok" # this might not be needed if this socket is pull not REC
-        #message_out_bytes = message_out_str.encode("utf-8")
-        #pull_socket.send(message_out_bytes)
+        message_out_str = "Ok" # this might not be needed if this socket is pull not REC
+        message_out_bytes = message_out_str.encode("utf-8")
+        pull_socket.send(message_out_bytes)
 
         return_proto_.ParseFromString(message_in_bytes_)# ParseFromArray(message_in_bytes_)
         ci = return_proto_.cluster_id
@@ -459,6 +459,11 @@ def primal_cost_push_pull(camera_indices_in_cluster_, poses_in_cluster_, kCluste
         return_proto_ = test_pb2.return_cost_proto()
         message_in_bytes_ = pull_socket.recv()
         return_proto_.ParseFromString(message_in_bytes_)
+
+        message_out_str = "Ok" # this might not be needed if this socket is pull not REC
+        message_out_bytes = message_out_str.encode("utf-8")
+        pull_socket.send(message_out_bytes)
+
         ci = return_proto_.cluster_id
         # print("Receiving cost for cluster …", ci, " = ", return_proto_.cost)
         cost_[ci] = return_proto_.cost
@@ -625,8 +630,8 @@ print("Connecting to cpp server…")
 # new idea.
 push_socket = context.socket(zmq.REQ)#PUSH)
 push_socket.connect("tcp://localhost:5556")
-#pull_socket = context.socket(zmq.REP)#.PULL)
-pull_socket = context.socket(zmq.PULL)
+pull_socket = context.socket(zmq.REP)#.PULL)
+#pull_socket = context.socket(zmq.PULL)
 pull_socket.connect("tcp://localhost:5557")
 
 #lib = ctypes.CDLL("./libprocess_clusters.so")
