@@ -345,7 +345,6 @@ public:
       }
       //std::cout << "data updated\n";
 
-      // setup problem again. need to delete old?
       options.max_num_iterations = std::max(0, std::min(10, pro.iterations()));
       options.initial_trust_region_radius = tr_radius;
       problem = ceres::Problem();
@@ -460,7 +459,6 @@ public:
       Jl.reserve(VectorXi::Constant(2 * relevantRows, 3));
       // JP.setFromTriplets(coefficients.begin(), coefficients.end());
       for (Eigen::Index r = 0; r < relevantRows; ++r) {
-        //for (Eigen::Index r = 0; r < 1000; ++r) {
             const int lm_id = lm_obs[r/2];
             const int cam_id = cam_obs[r/2];
             //std::cout << r << ":";
@@ -504,14 +502,12 @@ public:
           std::cout << "Jp " << cluster_id << " | " << Jp.nonZeros() << " =? " << Jp.rows() * 9 << "\n";
       THROW_IF(Jp.nonZeros() != 9 * Jp.rows());
       SparseMatrix<double, Eigen::RowMajor> JpJ(9 * numCameras, 9 * numCameras);
-      // SparseMatrix<double, Eigen::RowMajor> JlJ(3 * numLandmarks, 3 * numLandmarks);
       JpJ.reserve(VectorXi::Constant(9 * numCameras, 9));
-      // JlJ.reserve(VectorXi::Constant(3 * numLandmarks, 3));
       JpJ = Jp.transpose() * Jp;
+      // SparseMatrix<double, Eigen::RowMajor> JlJ(3 * numLandmarks, 3 * numLandmarks);
+      // JlJ.reserve(VectorXi::Constant(3 * numLandmarks, 3));
       // JlJ = Jl.transpose() * Jl;
       // auto JpJ_diag = JpJ.diagonal().array();
-      // maybe block diag as well.
-      //double be = pro.be(); // 1e-4;
       if(JpJ.nonZeros() != stepSize.size() || JpJ.rows() * 9 != numCameras * 81)
         std::cout << "JpJ " << cluster_id << " | " << JpJ.nonZeros() << " =? " << JpJ.rows() * 9
                   << " " << stepSize.size() << " " << numCameras * 81 << "\n";
@@ -523,11 +519,26 @@ public:
         full_stepSize[id] = values[id]; // this is returned, the other is just used in the eq.
       }
 
-      JpJ.diagonal().array() *= (1. + be); //+= be * JpJ.diagonal().array();
+      auto diag = JpJ.diagonal().array();
+      for (int b = 0; b < numCameras; ++b) { // block
+        double mv = diag(9*b);
+        for (int id = 1; id < 9; ++id) {
+          mv = std::max(mv, diag(9*b + id));
+        }
+        for (int id = 0; id < 9; ++id) {
+          diag(9*b + id) = mv;
+        }
+      }
+      JpJ.diagonal().array() += be * diag;
+
+      //JpJ.diagonal().array() *= (1. + be); //+= be * JpJ.diagonal().array();
+      // JpJ = JpJ * 3; // optional to test. in theory should almost always suffice.
     //   const auto JpJDiagonal = JpJ.diagonal();//.array();
     //   JpJ = JpJ * 0.5 * 1e-12;
     //   //JpJ.diagonal() = JpJ.diagonal() + be * JpJDiagonal;
     //   JpJ.diagonal() = JpJDiagonal * (1. + be);
+    //JpJ.diagonal() += be * JpJ.diagonal();
+    //JpJ.diagonal().array().cwise
       // std::cout << "BlockSqrt " << cluster_id << "\n";
       BlockSqrt<9>(JpJ); // need templated fct.
       // instead reset variable block(s) JpJ and s to sqrt(Stepsize)
@@ -551,15 +562,6 @@ public:
       }
       return_proto.set_cluster_id(cluster_id);
       return_proto.set_cost(cost);
-      // // Send solution back!, actually cameras shoudl be ok?
-      // solution_proto sol;
-      // for(const double& v : cameras) {
-      //     sol.add_cameras(static_cast<float>(v));
-      // }
-      // for(const double& v : landmarks) {
-      //     sol.add_landmarks(static_cast<float>(v));
-      // }
-      // sol.SerializeToString(&encoded_msg);
       return return_proto;
     }
 
@@ -668,7 +670,7 @@ private:
     std::vector<ceres::ResidualBlockId> function_residual_blocks;
     std::vector<double> cameras_s;
     std::vector<double> cameras;
-    std::vector<double> landmarks;
+    std::vector<double> landmarks;// todo: either revert or send landmarkss all the time.
     std::vector<double> stepSize;
     std::vector<double> full_stepSize;
     std::vector<double> unorm;
@@ -679,29 +681,6 @@ private:
     ceres::Solver::Options options;
 };
 ///////////////////////////////////////////////////////
-
-// not sure? send 8 programs to 8 sockets.
-// then receive. if yes. 
-// process message (by id) no socket.receive -- which is connected to port X
-// this again is sequential.
-// each thread would, by id, spawn new programm (store data, ..) or overwrite old one.
-// if receive cluster id is blocked, after send released -- so no data crash.
-// in other words, socket A -> id B: thread A starts with program B -- no other thread can access it.
-//
-// 
-
-// per cluster 1 program.
-// per thread 1 socket.
-// problem does not match, how to python? send bunch to k sockets. wait receive.
-// ok. main could take an argument, #clusters = K.
-// init K sockets. that wait in 
-// #pragma omp parallel for numthreads(10)
-// int numthreads = 8;
-// int i;
-// #pragma omp parallel for default(none) num_threads(numthreads) private(i)
-// for (i = 0; i < 100; i++)
-// {
-// int tid = omp_get_thread_num();
 
 int main() {
     // Initialize the context
@@ -770,18 +749,10 @@ int main() {
                     // std::cout << cluster_id << ". Update send" << std::endl;
                 };
 
-                // This thread is launched by using lambda expression as callable
-                // Unclear if memory is valid long enough?
                 //std::thread update_thread(update_lambda, std::ref(program), std::cref(update));
                 std::thread update_thread(update_lambda, cluster_id);
                 update_thread.detach();
                 //update_thread.join();
-
-                // std::string encoded_msg;
-                // return_proto.SerializeToString(&encoded_msg);
-                // zmq::message_t reply(encoded_msg.size());
-                // memcpy ((void *) reply.data(), encoded_msg.c_str(), encoded_msg.size());
-                // socket.send(reply, zmq::send_flags::none);
 
                 break;
             }
@@ -801,7 +772,6 @@ int main() {
                 const program_proto pro = request_p.program();
 
                 //if(cluster_to_program.find(cluster_id) == cluster_to_program.end())
-                // Define a Lambda Expression
                 CeresProgram& program = cluster_to_program[pro.cluster_id()];
                 //std::cout << pro.cluster_id() << " Program "<< "\n";
                 program.ResetProgram(pro);
@@ -879,19 +849,3 @@ int main() {
 
     return 0;
 }
-
-// Example: send c++ proto.
-        // std::string encoded_msg;
-        // RL::DataSet msg;
-        // msg.set_count(i);
-        // msg.add_joint_position(1.1);
-        // msg.add_joint_position(2.1);
-        // msg.add_joint_velocity(-1.1);
-        // msg.add_joint_velocity(-2.1);
-
-        // msg.SerializeToString(&encoded_msg);
-
-        // zmq::message_t zmq_msg(encoded_msg.size());
-        // memcpy ((void *) zmq_msg.data(), encoded_msg.c_str(),
-        //         encoded_msg.size());
-        // publisher.send(zmq_msg);
