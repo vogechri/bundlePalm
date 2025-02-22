@@ -219,7 +219,7 @@ void BlockSqrt(SparseMatrix<double, Eigen::RowMajor>& mat) {
         //VPQ_EXPECT_EQ(eigensolver.info(), Eigen::Success);
 
         // SqrtCovEigenValues are sorted in decreasing order.
-        Eigen::Vector<double, N> sqrtEigenValues = eigensolver.eigenvalues().cwiseSqrt();//.cwiseMax(lowerBoundSquared).cwiseSqrt().cwiseInverse();
+        const Eigen::Vector<double, N> sqrtEigenValues = eigensolver.eigenvalues().cwiseAbs().cwiseSqrt().cwiseMax(1e-16);//.cwiseMax(lowerBoundSquared).cwiseSqrt().cwiseInverse();
         mat9x9 = eigensolver.eigenvectors() * sqrtEigenValues.asDiagonal() * eigensolver.eigenvectors().transpose();
         
         //auto mat9x9_out = Eigen::Map< Eigen::Matrix<double,N,N> > (&(values[i * N*N]));//,  Eigen::Stride<0, 0>);
