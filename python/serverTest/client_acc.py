@@ -45,6 +45,19 @@ def invert_focal_distance(camera_params_, camera_indices_, points_2d_):
     points_2d_[flip_point_ids] *= -1
     return camera_params_, points_2d_
 
+# idea: median ste to 0, scale set to 100: let 95% fall into < 100 distance to center.
+def normalize_by_points(points_3d_, cameras_):
+    # 1. get median in each direction.
+    median = np.median(points_3d_, axis=0)
+    points_3d_ = points_3d_ - median
+    cameras_[:,3:6] = cameras_[:,3:6] - median
+    norm = np.linalg.norm(points_3d_, axis=1)
+    sceneScale = np.percentile(norm, 95)
+    scale = 100 / sceneScale
+    points_3d_ = points_3d * scale
+    cameras_[:,3:6] = cameras_[:,3:6] * scale
+    return points_3d_, cameras_
+
 def read_bal_data(file_name):
     with bz2.open(file_name, "rt") as file:
         n_cameras_, n_points_, n_observations = map(int, file.readline().split())
@@ -72,6 +85,7 @@ def read_bal_data(file_name):
     # invert points_2d_ and focal distance if needed
     (camera_params, points_2d_) = \
         invert_focal_distance(camera_params, camera_indices_, points_2d_)
+    (points_3d_ ,camera_params) = normalize_by_points(points_3d_ ,camera_params)
 
     return camera_params, points_3d_, camera_indices_, point_indices_, points_2d_
 
