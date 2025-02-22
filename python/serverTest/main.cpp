@@ -1,22 +1,23 @@
 #define _ceres_num_threads_ 1
 // #define __unweighted_system__
+#define _num_threads_machine_ 31
 
 #include <zmq.hpp>
 #include <string>
 #include <iostream>
 #include <thread>
 #include <mutex>
-#include <chrono>
+//#include <chrono>
 #include "generated/proto/test.pb.h"
 #include <google/protobuf/message_lite.h>
 
 #include <Eigen/Core>
 #include <Eigen/Sparse>
-#include<Eigen/Dense>
+#include <Eigen/Dense>
 #include <Eigen/Eigenvalues> 
 
 #include "ceres/ceres.h"
-#include "ceres/normal_prior.h"
+//#include "ceres/normal_prior.h"
 #include "ceres/rotation.h"
 
 using Eigen::SparseMatrix;
@@ -274,13 +275,13 @@ void WriteJacobian(ceres::Problem& problem, int numCameras, int numLandmarks) {
 class CeresProgram {
 public:
     CeresProgram() {
-      Init();
+      Init(1);
     }
 
     int ClusterId() { return cluster_id; }
 
     void ResetProgram(const program_proto &pro) {
-      Init();
+      Init(pro.num_clusters());
       numCameras = pro.cameras_size() / 9;
       numLandmarks = pro.landmarks_size() / 3;
       //std::cout << numCameras << " " << numLandmarks << "\n";
@@ -295,6 +296,7 @@ public:
       for (const float &v : pro.landmarks()) {
         landmarks.push_back(v);
       }
+      last_landmarks = landmarks;
       //std::cout << "landmarks.push_back\n";
       cameras_s.clear();
       cameras_s.reserve(9 * numCameras);
@@ -497,23 +499,33 @@ public:
                   << " " << stepSize.size() << " " << numCameras * 81 << "\n";
       THROW_IF(JpJ.nonZeros() != numCameras * 81);
 
-      full_stepSize.resize(stepSize.size(), 0);
-      const double *values = JpJ.valuePtr();
-      for (int id = 0; id < 81 * numCameras; ++id) {
-        full_stepSize[id] = values[id]; // this is returned, the other is just used in the eq.
+      if (firstIteration) { // also handled setting be = 0 in 1st step.
+        full_stepSize.resize(stepSize.size(), 0);
+        const double *values = JpJ.valuePtr();
+        for (int id = 0; id < 81 * numCameras; ++id) {
+          full_stepSize[id] = values[id]; // this is returned, the other is used in the eq-system.
+        }
       }
 
+      const double scale = 1e0; // 1e0: @29: 576844, no jump. 1e1 many jumps. 573k
+      JpJ = JpJ * (1./scale); // optional to test. in theory should almost always suffice.
+//#define _const_diag_
+#ifdef _const_diag_
       auto diag = JpJ.diagonal().array();
       for (int b = 0; b < numCameras; ++b) { // block
         double mv = diag(9*b);
         for (int id = 1; id < 9; ++id) {
           mv = std::max(mv, diag(9*b + id));
         }
+        mv *= scale;
         for (int id = 0; id < 9; ++id) {
-          diag(9*b + id) = mv;
+          diag(9*b + id) += be * mv;
         }
       }
-      JpJ.diagonal().array() += be * diag;
+#else
+      JpJ.diagonal().array() *= (1. + be * scale);
+#endif
+      JpJ.diagonal().array() += 1e-12; // ?
 
       //JpJ.diagonal().array() *= (1. + be); //+= be * JpJ.diagonal().array();
       // JpJ = JpJ * 3; // optional to test. in theory should almost always suffice.
@@ -523,10 +535,19 @@ public:
     //   JpJ.diagonal() = JpJDiagonal * (1. + be);
     //JpJ.diagonal() += be * JpJ.diagonal();
     //JpJ.diagonal().array().cwise
+
+      if (!firstIteration) {
+        full_stepSize.resize(stepSize.size(), 0);
+        const double *values = JpJ.valuePtr();
+        for (int id = 0; id < 81 * numCameras; ++id) {
+          full_stepSize[id] = values[id]; // this is returned, the other is just used in the eq.
+        }
+      }
+
       // std::cout << "BlockSqrt " << cluster_id << "\n";
       BlockSqrt<9>(JpJ); // need templated fct.
       // instead reset variable block(s) JpJ and s to sqrt(Stepsize)
-      values = JpJ.valuePtr();
+      const double* values = JpJ.valuePtr();
       for (int id = 0; id < 81 * numCameras; ++id) {
         stepSize[id] = values[id]; // = 1000 -> different cost: so ok
       }
@@ -555,11 +576,11 @@ public:
       std::cout << summary.BriefReport() << "\n"; // .FullReport()
       // TODO: use this trust region size : store and reuse later.
       //std::vector<IterationSummary> Solver::Summary::iterations
-      tr_radius = summary.iterations.back().trust_region_radius;
-      //tr_radius = summary.trust_region_radius();
+      tr_radius = std::min(max_trust_region_radius, summary.iterations.back().trust_region_radius);
       // TODO: -ordering=user for schur (maybe cameras 1st then landmarks)
       cost = summary.final_cost * 2;
-      // std::cout << "\nUpdate Mycost: " << summary.final_cost * 2 << "\n";
+      std::cout << cluster_id << ". Update TR: " << tr_radius << ". be: " << be
+                << ". Mycost: " << summary.final_cost * 2 << "\n";
       return cost;
     }
 
@@ -590,13 +611,32 @@ public:
       }
       be = update.be();
       options.initial_trust_region_radius = tr_radius; // use from last solve.
+      firstIteration = false;
+
+      if (update.revert_lm() == 1) {
+        std::cout << cluster_id << ". Revert landmarks\n";
+        landmarks = last_landmarks;
+      } else {
+        last_landmarks = landmarks;
+      }
     }
 
-    void UpdateStepSize() {
-      // Recompute.
+    void UpdateStepSize() { // Recompute.
+      const auto [Jp, Jl] = GetJacobian();
+      if (firstIteration) {
+        SparseMatrix<double, Eigen::RowMajor> JlJ(3 * numLandmarks, 3 * numLandmarks);
+        JlJ.reserve(VectorXi::Constant(3 * numLandmarks, 3));
+        JlJ = Jl.transpose() * Jl;
+        const auto diag = JlJ.diagonal().array().cwiseAbs().cwiseSqrt().cwiseMax(1e-10);
+        std::cout << " Update vnorm " << cluster_id << " " << diag.size() << " == " << vnorm.size() << "\n";
+        THROW_IF(diag.size() != vnorm.size());
+        for (int id = 0; id < vnorm.size(); ++id) {
+          landmarks[id] *= diag[id];
+          vnorm[id] = 1. / diag(id);
+        }
+      }
       stepSize.clear(); // all 0 to ensure jacobian is reasonable.
       stepSize.resize(81 * numCameras, 0);
-      const auto [Jp, Jl] = GetJacobian();
       SetStepSize(Jp);
     }
 
@@ -610,17 +650,18 @@ public:
         for (const float &v : preconditioningProto.unorm()) {
             unorm[id++] = v;
         }
-        id = 0; // fill existing buffer
-        for (const float &v : preconditioningProto.vnorm()) {
-            vnorm[id++] = v;
-        }
+        // id = 0; // fill existing buffer
+        // for (const float &v : preconditioningProto.vnorm()) {
+        //     vnorm[id++] = v;
+        // }
     }
 
 private:
 
-    void Init() {
+    void Init(int numClusters = 1) {
         numCameras = 0;
         numLandmarks = 0;
+        firstIteration = true;
         be = 1e-4;
         tr_radius = 1e4;
         startCost = 1e12;
@@ -636,7 +677,8 @@ private:
         // options.linear_solver_type = ceres::CGNR;
         // options.linear_solver_type = ceres::DENSE_QR; // SHIT
         // options.max_linear_solver_iterations = 100;
-        options.num_threads = _ceres_num_threads_; // single cpu -> still slow / bottleneck.
+        const int threads_per_cluster = std::max(1, _num_threads_machine_ / numClusters);
+        options.num_threads = threads_per_cluster; // _ceres_num_threads_; // single cpu -> still slow / bottleneck.
         // options.preconditioner_type = ceres::IDENTITY; // Sucks if CGNR of course. 
         // options.preconditioner_type = ceres::JACOBI; // CGNR -> jacobi anyway.
         options.max_num_iterations = 1;
@@ -649,15 +691,18 @@ private:
     int numCameras = 0;
     int numLandmarks = 0;
     double be = 1e-4;
-    double tr_radius = 1e4;
+    double tr_radius = 1e4; // 1e4 is ceres standard. -> Init()
+    const double max_trust_region_radius = 1e6;
     double startCost;
     double cost;
+    bool firstIteration = true; // full step is wo. diag part to acc.
     std::vector<ceres::ResidualBlockId> function_residual_blocks;
-    std::vector<double> cameras_s;
     std::vector<double> cameras;
+    std::vector<double> cameras_s;
     std::vector<double> landmarks;// todo: either revert or send landmarkss all the time.
-    std::vector<double> stepSize;
-    std::vector<double> full_stepSize;
+    std::vector<double> last_landmarks;
+    std::vector<double> stepSize; // internally modelling prox term. 'sqrt' of full_stepSize 
+    std::vector<double> full_stepSize; // returned to compute s update in DRS.
     std::vector<double> unorm;
     std::vector<double> vnorm;
     std::vector<int> cam_obs;
@@ -717,12 +762,10 @@ int main() {
                 program.UpdateData(update); // update is local, we nned to fill data in main thread.
 
                 // Define a Lambda Expression
-                auto update_lambda = [&push_socket, &cluster_to_program](int cluster_id) {
+                auto update_lambda = [&push_socket, &cluster_to_program, &mtx](int cluster_id) {
                     CeresProgram& program = cluster_to_program[cluster_id];
                     // std::cout << cluster_id << " Update "<< "\n";
                     program.UpdateStepSize();
-                    // const auto [Jp, Jl] = program.GetJacobian();
-                    // program.SetStepSize(Jp);
                     program.Solve();
                     return_cluster_proto return_proto = program.FillReturnProto();
                     const double cost = 2 * program.GetCost();
@@ -764,11 +807,9 @@ int main() {
                 //std::cout << pro.cluster_id() << " Program "<< "\n";
                 program.ResetProgram(pro);
 
-                auto program_lambda = [&cluster_to_program, &push_socket](int cluster_id) {
+                auto program_lambda = [&cluster_to_program, &push_socket, &mtx](int cluster_id) {
                     CeresProgram& program = cluster_to_program[cluster_id];
                     program.UpdateStepSize();
-                    //const auto [Jp, Jl] = program.GetJacobian();
-                    //program.SetStepSize(Jp);
                     program.Solve();
                     //std::this_thread::sleep_for(std::chrono::seconds(5)); // sleep here, pollin / block pull/push, no send? dies before sleep ends.
                     return_cluster_proto return_proto = program.FillReturnProto();
@@ -798,7 +839,7 @@ int main() {
                 program.UpdateCameras(costUpdate); // update is local, we need to fill data in main thread.
 
                 // Define a Lambda Expression
-                auto cost_lambda = [&push_socket, &cluster_to_program](int cluster_id) {
+                auto cost_lambda = [&push_socket, &cluster_to_program, &mtx](int cluster_id) {
                     CeresProgram& program = cluster_to_program[cluster_id];
                     const double cost = 2 * program.GetCost();
                     return_cost_proto return_proto;

@@ -295,7 +295,7 @@ def prox_f(camera_indices_in_cluster_, point_indices_in_cluster_, local_camera_i
 
     global global_iteration
     global socket
-    for ci in range(kClusters):
+    for ci in range(kClusters_):
         unique_points_in_c_ = np.unique(point_indices_in_cluster_[ci])
         unique_poses_in_c_ = np.unique(camera_indices_in_cluster_[ci])
         if global_iteration == 0:
@@ -309,6 +309,7 @@ def prox_f(camera_indices_in_cluster_, point_indices_in_cluster_, local_camera_i
             request.program.observations[:] = points_2d_in_cluster_[ci].ravel()
             request.program.cam_id[:] = local_camera_indices_in_cluster_[ci].ravel()
             request.program.lm_id[:] = local_landmark_indices_in_cluster_[ci].ravel()
+            request.program.num_clusters = kClusters_
             request.program.iterations = innerIts_
             request.program.be = blockEig_in_cluster_[ci]
             request.program.cluster_id = ci
@@ -350,7 +351,7 @@ def prox_f(camera_indices_in_cluster_, point_indices_in_cluster_, local_camera_i
 def prox_f_push_pull(camera_indices_in_cluster_, point_indices_in_cluster_, local_camera_indices_in_cluster_,
            local_landmark_indices_in_cluster_, points_2d_in_cluster_, poses_in_cluster_, landmarks_,
            poses_s_in_cluster_, L_in_cluster_, Vl_in_cluster_, blockEig_in_cluster_, kClusters_,
-           LipJ_, innerIts_=1) :
+           LipJ_, innerIts_=1, revert_lm = False) :
     cost_ = np.zeros(kClusters_)
     nabla_p_in_cluster_ = [0 for _ in range(kClusters_)]
 
@@ -382,6 +383,7 @@ def prox_f_push_pull(camera_indices_in_cluster_, point_indices_in_cluster_, loca
             request.program.lm_id[:] = local_landmark_indices_in_cluster_[ci].ravel()
             request.program.iterations = innerIts_
             request.program.be = 0 #blockEig_in_cluster_[ci]
+            request.program.num_clusters = kClusters_
             request.program.cluster_id = ci
             request.program.init_l = LipJ_
             request.program.unorm[:] = np.ones(9 * unique_poses_in_c_.shape[0])
@@ -397,6 +399,10 @@ def prox_f_push_pull(camera_indices_in_cluster_, point_indices_in_cluster_, loca
             request.update.cameras_s[:] = poses_s_in_cluster_[ci][unique_poses_in_c_].ravel()
             request.update.be = blockEig_in_cluster_[ci]
             request.update.cluster_id = ci
+            if revert_lm:
+                request.update.revert_lm = 1
+            else:
+                request.update.revert_lm = 0
 
         request_serialized_ = request.SerializeToString() # SerializeToArray() does not exist
         push_socket.send(request_serialized_)
@@ -433,7 +439,6 @@ def prox_f_push_pull(camera_indices_in_cluster_, point_indices_in_cluster_, loca
 
 # Operates sequentially.
 def primal_cost_push_pull(camera_indices_in_cluster_, poses_in_cluster_, kClusters_, singlePose = False) :
-    cost_ = np.zeros(kClusters_)
 
     global push_socket
     global pull_socket
@@ -454,6 +459,7 @@ def primal_cost_push_pull(camera_indices_in_cluster_, poses_in_cluster_, kCluste
         push_socket.send(request_serialized_)
         temp = push_socket.recv() # ok back, blocking to wait for thread start.
 
+    cost_ = np.zeros(kClusters_)
     for k in range(kClusters_):
         #print("Receiving return …", k)
         return_proto_ = test_pb2.return_cost_proto()
@@ -611,8 +617,7 @@ LipJ = 1 # unused
 global_init = True
 resetIt = 0
 globalBlockEigUpperLimit = 5e-1 # 1e-1, 1e-3?
-blockEig_in_cluster = 1e-4 * np.ones(kClusters) # 1e-4 or 1e-5
-memory_be = 4 # here can shrink, below this only grow.
+blockEig_in_cluster = 5e-5 * np.ones(kClusters) # 1e-4 or 1e-5
 failedNesterovAcceleration = 0
 maxFailedNesterovAcceleration = 3
 print("input blockEig_in_cluster[ci] ", blockEig_in_cluster[0])
@@ -630,7 +635,7 @@ pull_socket = context.socket(zmq.PULL)
 pull_socket.connect("tcp://localhost:5557")
 
 #lib = ctypes.CDLL("./libprocess_clusters.so")
-init_lib()
+# init_lib() # ?
 start = time.time() # this is not working at all. Slower then iteratively
 (
     camera_indices_in_cluster,
@@ -688,17 +693,18 @@ end = time.time() # this is not working at all. Slower then iteratively
 currentCost = np.sum(cost)
 print(-1, " ", round(currentCost), " gain ", round(lastCost - currentCost),
     ". ============= sum fk update takes ", end - start," s",)
-print(Ul_in_cluster)
+#print(Ul_in_cluster)
 #print(Ul_in_cluster[0])
 poses_v, U_all, Up_cluster = average_cameras_new(camera_indices_in_cluster, poses_in_cluster,
                                                  poses_s_in_cluster, L_in_cluster, Ul_in_cluster, nabla_p_in_cluster)
 
-unorm = GetPcgScalingDiag(U_all, 0)
-poses_v, poses_in_cluster, poses_s_in_cluster = preconditioning_push(poses_v, poses_in_cluster, poses_s_in_cluster, camera_indices_in_cluster, point_indices_in_cluster, unorm, 0, kClusters)
-
 #DRE cost BEFORE s update, always lower than AFTER update.
 dre, dre_per_part = cost_DRE(camera_indices_in_cluster, poses_in_cluster, poses_s_in_cluster, \
                             L_in_cluster, Ul_in_cluster, poses_v, nabla_p_in_cluster)
+
+unorm = GetPcgScalingDiag(U_all, 0)
+poses_v, poses_in_cluster, poses_s_in_cluster = preconditioning_push(poses_v, poses_in_cluster, poses_s_in_cluster,
+                                                                     camera_indices_in_cluster, point_indices_in_cluster, unorm, 0, kClusters)
 
 poses_s_in_cluster_pre = [0 for x in range(kClusters)] # dummy fill list
 for ci in range(kClusters):
@@ -756,6 +762,7 @@ for global_iteration in range(global_iterations):
     if global_iteration <= 0: # s_prev is known
         dk = s_new - s_cur #+ delta_s
         lambda_0 = 1.0
+        lambda_1 = 1.0
     else:
         delta_s_ = s_new - s_prev
         dk = s_new - s_cur + delta_s_
@@ -767,6 +774,11 @@ for global_iteration in range(global_iterations):
         # momentum simple, same for v? about same
         beta_nesterov = (global_iteration-resetIt-1) / (global_iteration-resetIt+2) # 0.7
         dk = s_new - s_cur + beta_nesterov * prev_dk
+        if True:
+            lambda_1 = (1. + np.sqrt(1. + 4. * lambda_0**2)) / 2.
+            gamma = (lambda_0 - 1.) / lambda_1
+            dk = s_new - s_cur + gamma * (s_new - s_cur)
+            lambda_0 = lambda_1
 
     prev_dk = dk.copy()
     dk_stepLength = np.linalg.norm(dk, 2)
@@ -804,11 +816,11 @@ for global_iteration in range(global_iterations):
             landmarks_bfgs,
             nabla_p_in_cluster_bfgs,
             blockEig_in_cluster_bfgs
-        ) = prox_f_push_pull( #prox_f(
+        ) = prox_f_push_pull( # revert_lm
             camera_indices_in_cluster, point_indices_in_cluster, local_camera_indices_in_cluster,
             local_landmark_indices_in_cluster, points_2d_in_cluster, poses_in_cluster_bfgs, landmarks.copy(),
             poses_s_in_cluster_bfgs, L_in_cluster_bfgs, Ul_in_cluster_bfgs, blockEig_in_cluster_bfgs, kClusters,
-            LipJ, innerIts_=innerIts)
+            LipJ, innerIts_=innerIts, revert_lm = ls_it != 0)
 
         #print("2. x0_p", "points_3d_in_cluster", points_3d_in_cluster)
         currentCost_bfgs = np.sum(cost_bfgs)
@@ -816,8 +828,8 @@ for global_iteration in range(global_iterations):
             camera_indices_in_cluster, poses_in_cluster_bfgs, poses_s_in_cluster_bfgs, L_in_cluster_bfgs, Ul_in_cluster_bfgs, nabla_p_in_cluster_bfgs)
 
         # eval cost
-        dre_bfgs, dre_per_part = cost_DRE(camera_indices_in_cluster, poses_in_cluster_bfgs, poses_s_in_cluster_bfgs,
-                            L_in_cluster_bfgs, Ul_in_cluster_bfgs, poses_v_bfgs, nabla_p_in_cluster_bfgs)
+        dre_bfgs, dre_per_part = cost_DRE(camera_indices_in_cluster, poses_in_cluster_bfgs,
+            poses_s_in_cluster_bfgs, L_in_cluster_bfgs, Ul_in_cluster_bfgs, poses_v_bfgs, nabla_p_in_cluster_bfgs)
         dre_bfgs += currentCost_bfgs
 
         # debugging cost block ################
@@ -883,6 +895,12 @@ for global_iteration in range(global_iterations):
         # Reset acceleration if fails 6 times in a row
         if ls_it == line_search_iterations - 1 and line_search_iterations > 1:
             failedNesterovAcceleration += 1
+            lambda_0 = np.maximum(1., lambda_1 / 2.) # reset acceleration
+            if False:
+                #lambda_0 = np.maximum(1., lambda_1 / np.sqrt(5)) # reset acceleration, less flickering can be worse results.
+                prev_dk = s_new - s_cur
+                print('lambda_0 reset ', lambda_0)
+
             if failedNesterovAcceleration >= maxFailedNesterovAcceleration:
                 prev_dk = 0 * prev_dk
                 resetIt = global_iteration
@@ -920,7 +938,7 @@ for global_iteration in range(global_iterations):
             print("Be *= ", be_mult, " -> Be= ", blockEig_in_cluster, " LipJ " , np.mean(LipJ))
 
             # TODO: equalize / reset nesterov(acceleration) here.
-            AlsoResetNesterovAcceleration = False #True # test on 646, 1266, 1064, 961, 427, 1778 -> no conclusion.
+            AlsoResetNesterovAcceleration = True # test on 646, 1266, 1064, 961, 427, 1778 -> no conclusion.
             if AlsoResetNesterovAcceleration:
                 prev_dk = 0 * prev_dk
                 resetIt = global_iteration

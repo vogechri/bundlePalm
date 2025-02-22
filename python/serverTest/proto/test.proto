@@ -15,6 +15,7 @@ message program_proto {
   repeated float unorm = 10;
   repeated float vnorm = 11;
   repeated int32 unique_cameras = 12; // should not be many -- if any ever. One could pack cams < 10 lms in one cluster == lms in cam are put in one cluster.
+  int32 num_clusters = 13;
 }
 
 message preconditioning_proto {
@@ -40,6 +41,7 @@ message prox_cluster_proto {
   repeated float cameras_s = 2; // 3d
   float be = 3;
   int32 cluster_id = 4;
+  int32 revert_lm = 5; // if acc. stepsize is reverted, revert lm as well: 1. Also revert to best solution: 2.
   // clustering: lms by cam. # lms that can fill up cam in cl.
 }
 
