@@ -445,25 +445,25 @@ public:
       Jl.reserve(VectorXi::Constant(2 * relevantRows, 3));
       // JP.setFromTriplets(coefficients.begin(), coefficients.end());
       for (Eigen::Index r = 0; r < relevantRows; ++r) {
-            const int lm_id = lm_obs[r/2];
-            const int cam_id = cam_obs[r/2];
-            //std::cout << r << ":";
-            Eigen::Index idx = jacobian.rows[r];
-            // const Eigen::Index c = jacobian.cols[idx]; // index of variable.
-            for (int i = 0; i < 9 && idx < jacobian.rows[r + static_cast<Eigen::Index>(1)];++idx,++i) {
-                // if (9 * cam_id + i != jacobian.cols[idx])
-                //     std::cout << 9 * cam_id + i << " = " << jacobian.cols[idx] << " | ";
-                Jp.insert(r, 9 * cam_id + i) = jacobian.values[idx];
-            }
-            for (int i = 0; i < 3 && idx < jacobian.rows[r + static_cast<Eigen::Index>(1)];++idx, ++i) {
-                // if (cameras.size() + 3 * lm_id + i != jacobian.cols[idx])
-                //     std::cout << 3 * lm_id + i << " = " << jacobian.cols[idx];
-                Jl.insert(r, 3 * lm_id + i) = jacobian.values[idx];
-            }
+        const int lm_id = lm_obs[r/2];
+        const int cam_id = cam_obs[r/2];
+        //std::cout << r << ":";
+        Eigen::Index idx = jacobian.rows[r];
+        // const Eigen::Index c = jacobian.cols[idx]; // index of variable.
+        for (int i = 0; i < 9 && idx < jacobian.rows[r + static_cast<Eigen::Index>(1)];++idx,++i) {
+            // if (9 * cam_id + i != jacobian.cols[idx])
+            //     std::cout << cluster_id << " jacobian cam/idx do not match " << 9 * cam_id + i << " = " << jacobian.cols[idx] << " | ";
+            Jp.insert(r, 9 * cam_id + i) = jacobian.values[idx];
         }
-        Jp.makeCompressed();
-        Jl.makeCompressed();
-        return {Jp,Jl};
+        for (int i = 0; i < 3 && idx < jacobian.rows[r + static_cast<Eigen::Index>(1)];++idx, ++i) {
+            // if (cameras.size() + 3 * lm_id + i != jacobian.cols[idx])
+            //     std::cout << 3 * lm_id + i << " = " << jacobian.cols[idx];
+            Jl.insert(r, 3 * lm_id + i) = jacobian.values[idx];
+        }
+      }
+      Jp.makeCompressed();
+      Jl.makeCompressed();
+      return {Jp,Jl};
     }
 
     double GetCost() {
@@ -525,7 +525,7 @@ public:
 #else
       JpJ.diagonal().array() *= (1. + be * scale);
 #endif
-      JpJ.diagonal().array() += 1e-12; // ?
+      JpJ.diagonal().array() += 1e-12; // TODO: this is not good.
 
       //JpJ.diagonal().array() *= (1. + be); //+= be * JpJ.diagonal().array();
       // JpJ = JpJ * 3; // optional to test. in theory should almost always suffice.
@@ -692,7 +692,7 @@ private:
     int numLandmarks = 0;
     const double init_be = 1e-4;
     double be = init_be;
-    const double init_trust_region_radius = 1e4; // Todo: set to 1?
+    const double init_trust_region_radius = 1e1; // Todo: set to 1?
     double tr_radius = init_trust_region_radius; // 1e4 is ceres standard. -> Init()
     const double max_trust_region_radius = 1e6;
     double startCost;

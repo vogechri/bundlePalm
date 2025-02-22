@@ -113,7 +113,7 @@ def normalize_by_points(points_3d_, cameras_):
     points_3d_ = points_3d_ * scale
     #cameras_[:,3:6] = cameras_[:,3:6] * scale
     cam_loc = cam_loc * scale
-    cameras_[:,3:6] = AngleAxisRotatePoint(cameras_[:,0:3], cam_loc)
+    cameras_[:,3:6] = -AngleAxisRotatePoint(cameras_[:,0:3], cam_loc)
     return points_3d_, cameras_
 
 def read_bal_data(file_name):
@@ -846,7 +846,7 @@ for global_iteration in range(global_iterations):
         # momentum simple, same for v? about same
         beta_nesterov = (global_iteration-resetIt-1) / (global_iteration-resetIt+2) # 0.7
         dk = s_new - s_cur + beta_nesterov * prev_dk
-        if True:
+        if False: # conventional nesterov
             lambda_1 = (1. + np.sqrt(1. + 4. * lambda_0**2)) / 2.
             gamma = (lambda_0 - 1.) / lambda_1
             dk = s_new - s_cur + gamma * (s_new - s_cur)
