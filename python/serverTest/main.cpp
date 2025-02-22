@@ -662,8 +662,8 @@ private:
         numCameras = 0;
         numLandmarks = 0;
         firstIteration = true;
-        be = 1e-4;
-        tr_radius = 1e4;
+        be = init_be;
+        tr_radius = std::min(max_trust_region_radius, init_trust_region_radius);
         startCost = 1e12;
         cost = 1e12;
         cluster_id = -1;
@@ -690,8 +690,10 @@ private:
     int cluster_id;
     int numCameras = 0;
     int numLandmarks = 0;
-    double be = 1e-4;
-    double tr_radius = 1e4; // 1e4 is ceres standard. -> Init()
+    const double init_be = 1e-4;
+    double be = init_be;
+    const double init_trust_region_radius = 1e4; // Todo: set to 1?
+    double tr_radius = init_trust_region_radius; // 1e4 is ceres standard. -> Init()
     const double max_trust_region_radius = 1e6;
     double startCost;
     double cost;
