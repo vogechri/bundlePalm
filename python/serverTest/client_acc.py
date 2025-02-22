@@ -45,17 +45,75 @@ def invert_focal_distance(camera_params_, camera_indices_, points_2d_):
     points_2d_[flip_point_ids] *= -1
     return camera_params_, points_2d_
 
+def AngleAxisRotatePoint(angleAxis, pt):
+    theta2 = np.sum(angleAxis * angleAxis, axis=1)
+
+    mask = (theta2 > 0).astype(float)
+
+    theta = np.sqrt(theta2 + (1 - mask))
+
+    mask = np.hstack([mask[:, np.newaxis], mask[:, np.newaxis], mask[:, np.newaxis]])
+    #mask = np.repeat(mask[:,np.newaxis], 3, axis=1)
+    #mask = np.reshape((mask.shape[0], 1))
+    #mask = np.cat([mask, mask, mask], dim=1)
+
+    costheta = np.cos(theta)
+    sintheta = np.sin(theta)
+    thetaInverse = 1.0 / theta
+
+    w0 = angleAxis[:, 0] * thetaInverse
+    w1 = angleAxis[:, 1] * thetaInverse
+    w2 = angleAxis[:, 2] * thetaInverse
+
+    wCrossPt0 = w1 * pt[:, 2] - w2 * pt[:, 1]
+    wCrossPt1 = w2 * pt[:, 0] - w0 * pt[:, 2]
+    wCrossPt2 = w0 * pt[:, 1] - w1 * pt[:, 0]
+
+    tmp_ = (w0 * pt[:, 0] + w1 * pt[:, 1] + w2 * pt[:, 2]) * (1.0 - costheta)
+
+    r0 = pt[:, 0] * costheta + wCrossPt0 * sintheta + w0 * tmp_
+    r1 = pt[:, 1] * costheta + wCrossPt1 * sintheta + w1 * tmp_
+    r2 = pt[:, 2] * costheta + wCrossPt2 * sintheta + w2 * tmp_
+
+    #r0 = r0.reshape((r0.shape[0], 1))
+    #r1 = r1.reshape((r1.shape[0], 1))
+    #r2 = r2.reshape((r2.shape[0], 1))
+
+    res1 = np.vstack([r0, r1, r2]).transpose()
+
+    wCrossPt0 = angleAxis[:, 1] * pt[:, 2] - angleAxis[:, 2] * pt[:, 1]
+    wCrossPt1 = angleAxis[:, 2] * pt[:, 0] - angleAxis[:, 0] * pt[:, 2]
+    wCrossPt2 = angleAxis[:, 0] * pt[:, 1] - angleAxis[:, 1] * pt[:, 0]
+
+    r00 = pt[:, 0] + wCrossPt0
+    r01 = pt[:, 1] + wCrossPt1
+    r02 = pt[:, 2] + wCrossPt2
+
+    #r00 = r00.reshape((r00.shape[0], 1))
+    #r01 = r01.reshape((r01.shape[0], 1))
+    #r02 = r02.reshape((r02.shape[0], 1))
+
+    res2 = np.vstack([r00, r01, r02]).transpose()
+
+    return res1 * mask + res2 * (1 - mask)
+
 # idea: median ste to 0, scale set to 100: let 95% fall into < 100 distance to center.
 def normalize_by_points(points_3d_, cameras_):
     # 1. get median in each direction.
     median = np.median(points_3d_, axis=0)
     points_3d_ = points_3d_ - median
-    cameras_[:,3:6] = cameras_[:,3:6] - median
+    # simpler: rot median (still per camera)
+    cam_loc = -AngleAxisRotatePoint(-cameras_[:,0:3], cameras_[:,3:6])
+    cam_loc = cam_loc - median
+    #cam_tra = AngleAxisRotatePoint(cameras[:,0:3], cam_loc)
+    #cameras_[:,3:6] = cameras_[:,3:6] - median
     norm = np.linalg.norm(points_3d_, axis=1)
     sceneScale = np.percentile(norm, 95)
     scale = 100 / sceneScale
-    points_3d_ = points_3d * scale
-    cameras_[:,3:6] = cameras_[:,3:6] * scale
+    points_3d_ = points_3d_ * scale
+    #cameras_[:,3:6] = cameras_[:,3:6] * scale
+    cam_loc = cam_loc * scale
+    cameras_[:,3:6] = AngleAxisRotatePoint(cameras_[:,0:3], cam_loc)
     return points_3d_, cameras_
 
 def read_bal_data(file_name):
