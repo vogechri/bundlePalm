@@ -502,12 +502,16 @@ public:
       if (firstIteration) { // also handled setting be = 0 in 1st step.
         full_stepSize.resize(stepSize.size(), 0);
         const double *values = JpJ.valuePtr();
-        for (int id = 0; id < 81 * numCameras; ++id) {
-          full_stepSize[id] = values[id]; // this is returned, the other is used in the eq-system.
+        std::copy(values, values + full_stepSize.size(), full_stepSize.data());
+        // ToDo: Is this ok or an issue to be resolved differently?
+        for (int b = 0; b < numCameras; ++b) {
+          for(int id = 0; id < 81; id += 10) { // diagonal entries !?
+            full_stepSize[81*b + id] = std::max(1e-36, full_stepSize[81*b + id]);
+          }
         }
       }
 
-      const double scale = 1e0; // 1e0: @29: 576844, no jump. 1e1 many jumps. 573k
+      const double scale = 1e1; // 1e0: @29: 501k, no jump. 1e1 many jumps. 473k
       JpJ = JpJ * (1./scale); // optional to test. in theory should almost always suffice.
 //#define _const_diag_
 #ifdef _const_diag_
@@ -525,32 +529,28 @@ public:
 #else
       JpJ.diagonal().array() *= (1. + be * scale);
 #endif
-      JpJ.diagonal().array() += 1e-12; // TODO: this is not good.
+      JpJ.diagonal().array() += 1e-18; // TODO: this is not good.
 
       //JpJ.diagonal().array() *= (1. + be); //+= be * JpJ.diagonal().array();
       // JpJ = JpJ * 3; // optional to test. in theory should almost always suffice.
-    //   const auto JpJDiagonal = JpJ.diagonal();//.array();
-    //   JpJ = JpJ * 0.5 * 1e-12;
-    //   //JpJ.diagonal() = JpJ.diagonal() + be * JpJDiagonal;
-    //   JpJ.diagonal() = JpJDiagonal * (1. + be);
-    //JpJ.diagonal() += be * JpJ.diagonal();
-    //JpJ.diagonal().array().cwise
+      //   const auto JpJDiagonal = JpJ.diagonal();//.array();
+      //   JpJ = JpJ * 0.5 * 1e-12;
+      //   //JpJ.diagonal() = JpJ.diagonal() + be * JpJDiagonal;
+      //   JpJ.diagonal() = JpJDiagonal * (1. + be);
+      //JpJ.diagonal() += be * JpJ.diagonal();
+      //JpJ.diagonal().array().cwise
 
       if (!firstIteration) {
         full_stepSize.resize(stepSize.size(), 0);
         const double *values = JpJ.valuePtr();
-        for (int id = 0; id < 81 * numCameras; ++id) {
-          full_stepSize[id] = values[id]; // this is returned, the other is just used in the eq.
-        }
+        std::copy(values, values + full_stepSize.size(), full_stepSize.data());
       }
 
       // std::cout << "BlockSqrt " << cluster_id << "\n";
       BlockSqrt<9>(JpJ); // need templated fct.
       // instead reset variable block(s) JpJ and s to sqrt(Stepsize)
       const double* values = JpJ.valuePtr();
-      for (int id = 0; id < 81 * numCameras; ++id) {
-        stepSize[id] = values[id]; // = 1000 -> different cost: so ok
-      }
+      std::copy(values, values + stepSize.size(), stepSize.data());
     }
     
     return_cluster_proto FillReturnProto() {
@@ -558,12 +558,15 @@ public:
       for (const double &v : cameras) {
         //return_proto.set_cameras(id++, static_cast<float>(v));
         return_proto.add_cameras(static_cast<float>(v));
+        //return_proto.add_cameras(v);
       }
       for (const double &v : landmarks) {
         return_proto.add_landmarks(static_cast<float>(v));
+        //return_proto.add_landmarks(v);
       }
       for (const double &v : full_stepSize) {
         return_proto.add_step_size(static_cast<float>(v));
+        //return_proto.add_step_size(v);
       }
       return_proto.set_cluster_id(cluster_id);
       return_proto.set_cost(cost);
@@ -596,7 +599,7 @@ public:
     }
 
     void UpdateData(const prox_cluster_proto &update) {
-        // std::cout << "Update cluster " << cluster_id << " update proto id:" << update.cluster_id() << "\n";
+      // std::cout << "Update cluster " << cluster_id << " update proto id:" << update.cluster_id() << "\n";
       THROW_IF(update.cameras_size() != cameras.size());
       THROW_IF(update.cameras_s_size() != cameras_s.size());
       THROW_IF(update.cluster_id() != cluster_id);

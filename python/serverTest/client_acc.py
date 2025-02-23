@@ -570,7 +570,7 @@ def GetPcgScalingDiag(JtJ, W):
             temp_ = np.sqrt(temp_) # works on Jacobi, not on rest ?
 
     print("min/max Unorm before ", np.min(temp_), np.max(temp_))
-    minTemp = np.percentile(temp_, 0.0001) # not sure..
+    minTemp = np.percentile(temp_[np.nonzero(temp_)], 0.0001) # not sure..
     t = getScaling(minTemp, np.max(temp_))
     temp_  = temp_ * t
     print("min/max Unorm after ", np.min(temp_), np.max(temp_), " t ", t, " min*max= ", np.min(temp_) * np.max(temp_))
