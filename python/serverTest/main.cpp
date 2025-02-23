@@ -1,4 +1,4 @@
-#define _ceres_num_threads_ 1
+// #define _ceres_num_threads_ 1
 // #define __unweighted_system__
 #define _num_threads_machine_ 31
 
@@ -428,7 +428,7 @@ public:
       evalOptions.apply_loss_function = true;
       // evalOpt.parameter_blocks = {}; // TODO only poses.
       evalOptions.residual_blocks = function_residual_blocks;
-      evalOptions.num_threads = 1;
+      evalOptions.num_threads = options.num_threads;
       ceres::CRSMatrix jacobian;
       std::vector<double> residuals;
       // std::cout << "GetJacobian: Evaluate " << cluster_id << "\n"; 
@@ -472,7 +472,7 @@ public:
       evalOptions.apply_loss_function = true;
       // evalOpt.parameter_blocks = {};
       evalOptions.residual_blocks = function_residual_blocks;
-      evalOptions.num_threads = 1;
+      evalOptions.num_threads = options.num_threads;
       std::vector<double> residuals;
       double cost;
       problem.Evaluate(evalOptions, &cost, &residuals, nullptr, nullptr);
