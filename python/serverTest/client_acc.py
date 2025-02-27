@@ -15,6 +15,8 @@ import urllib.request
 #import urllib
 import json
 
+import torch
+
 from clustering import init_lib, cluster_deg_by_landmark
 from scipy.sparse import csr_array, csr_matrix, issparse
 from scipy.sparse import diags as diag_sparse
@@ -423,7 +425,7 @@ def prox_f(camera_indices_in_cluster_, point_indices_in_cluster_, local_camera_i
 def prox_f_push_pull(camera_indices_in_cluster_, point_indices_in_cluster_, local_camera_indices_in_cluster_,
            local_landmark_indices_in_cluster_, points_2d_in_cluster_, poses_in_cluster_, landmarks_,
            poses_s_in_cluster_, L_in_cluster_, Vl_in_cluster_, blockEig_in_cluster_, kClusters_,
-           LipJ_, innerIts_=1, revert_lm = False) :
+           LipJ_, innerIts_ = 1, revert_lm = 0) :
     cost_ = np.zeros(kClusters_)
     nabla_p_in_cluster_ = [0 for _ in range(kClusters_)]
 
@@ -454,7 +456,7 @@ def prox_f_push_pull(camera_indices_in_cluster_, point_indices_in_cluster_, loca
             request.program.cam_id[:] = local_camera_indices_in_cluster_[ci].ravel()
             request.program.lm_id[:] = local_landmark_indices_in_cluster_[ci].ravel()
             request.program.iterations = innerIts_
-            request.program.be = 0 #blockEig_in_cluster_[ci]
+            request.program.be = blockEig_in_cluster_[ci]
             request.program.num_clusters = kClusters_
             request.program.cluster_id = ci
             request.program.init_l = LipJ_
@@ -471,10 +473,12 @@ def prox_f_push_pull(camera_indices_in_cluster_, point_indices_in_cluster_, loca
             request.update.cameras_s[:] = poses_s_in_cluster_[ci][unique_poses_in_c_].ravel()
             request.update.be = blockEig_in_cluster_[ci]
             request.update.cluster_id = ci
-            if revert_lm:
-                request.update.revert_lm = 1
+            if revert_lm == 1:
+                request.update.revert_lm = 1 # line search rejected step
+            elif revert_lm == 2:
+                request.update.revert_lm = 2
             else:
-                request.update.revert_lm = 0
+                request.update.revert_lm = 0 # next step
 
         request_serialized_ = request.SerializeToString() # SerializeToArray() does not exist
         push_socket.send(request_serialized_)
@@ -498,10 +502,11 @@ def prox_f_push_pull(camera_indices_in_cluster_, point_indices_in_cluster_, loca
         unique_poses_in_c_ = np.unique(camera_indices_in_cluster_[ci])
         cost_[ci] = return_proto_.cost
         # L_in_cluster_[ci] = LipJ_ # unsused anyway
-        Vl_in_cluster_[ci] = np.array(return_proto_.step_size[:]).copy() # stepsize
+        Vl_in_cluster_[ci] = np.array(return_proto_.step_size[:]) #.copy() # stepsize
         # print(ci, " UL_in_cluster_[i].shape", (Vl_in_cluster_[ci]).shape)
         # print(ci , " Vl_in_cluster_[ci].data " , (Vl_in_cluster_[ci]).data)
-        poses_in_cluster_[ci][unique_poses_in_c_, :] = np.asarray(return_proto_.cameras[:], dtype = 'float').reshape((-1, 9))
+        poses_in_cluster_[ci][unique_poses_in_c_, :] = np.asarray(return_proto_.cameras[:]).reshape((-1, 9))
+        #poses_in_cluster_[ci][unique_poses_in_c_, :] = np.asarray(return_proto_.cameras[:], dtype = 'float').reshape((-1, 9))
         landmarks_[unique_points_in_c_,:] = np.array(return_proto_.landmarks[:]).reshape((-1, 3))
         #blockEig_in_cluster_[ci] = blockEig_in_c_ # not done
 
@@ -640,11 +645,164 @@ def GetLocalIndices(point_indices_in_cluster, camera_indices_in_cluster):
         cameras_indices_in_c_ = np.unique(camera_indices_in_cluster[ci])
         # print("local cameras in ", ci, " " ,cameras_indices_in_c_.shape[0])
         local_camera_indices_in_cluster.append( np.zeros(camera_indices_in_cluster[ci].shape[0], dtype=int) )
+        #print(local_camera_indices_in_cluster[ci].shape , " " , local_camera_indices_in_cluster[ci])
         for i in range(cameras_indices_in_c_.shape[0]):
             local_camera_indices_in_cluster[ci][camera_indices_in_cluster[ci] == cameras_indices_in_c_[i]] = i
-        # print(local_camera_indices_in_cluster[ci])
+        #print(local_camera_indices_in_cluster[ci].shape , " " , local_camera_indices_in_cluster[ci])
 
     return (local_landmark_indices_in_cluster, local_camera_indices_in_cluster)
+
+#################
+def AngleAxisRotatePointT(angleAxis, pt):
+    theta2 = (angleAxis * angleAxis).sum(dim=1)
+
+    mask = (theta2 > 0).float()  # ? == 0 is alternative? check other repo
+
+    theta = torch.sqrt(theta2 + (1 - mask))
+
+    mask = mask.reshape((mask.shape[0], 1))
+    mask = torch.cat([mask, mask, mask], dim=1)
+
+    costheta = torch.cos(theta)
+    sintheta = torch.sin(theta)
+    thetaInverse = 1.0 / theta
+
+    w0 = angleAxis[:, 0] * thetaInverse
+    w1 = angleAxis[:, 1] * thetaInverse
+    w2 = angleAxis[:, 2] * thetaInverse
+
+    wCrossPt0 = w1 * pt[:, 2] - w2 * pt[:, 1]
+    wCrossPt1 = w2 * pt[:, 0] - w0 * pt[:, 2]
+    wCrossPt2 = w0 * pt[:, 1] - w1 * pt[:, 0]
+
+    tmp_ = (w0 * pt[:, 0] + w1 * pt[:, 1] + w2 * pt[:, 2]) * (1.0 - costheta)
+
+    r0 = pt[:, 0] * costheta + wCrossPt0 * sintheta + w0 * tmp_
+    r1 = pt[:, 1] * costheta + wCrossPt1 * sintheta + w1 * tmp_
+    r2 = pt[:, 2] * costheta + wCrossPt2 * sintheta + w2 * tmp_
+
+    r0 = r0.reshape((r0.shape[0], 1))
+    r1 = r1.reshape((r1.shape[0], 1))
+    r2 = r2.reshape((r2.shape[0], 1))
+
+    res1 = torch.cat([r0, r1, r2], dim=1)
+
+    wCrossPt0 = angleAxis[:, 1] * pt[:, 2] - angleAxis[:, 2] * pt[:, 1]
+    wCrossPt1 = angleAxis[:, 2] * pt[:, 0] - angleAxis[:, 0] * pt[:, 2]
+    wCrossPt2 = angleAxis[:, 0] * pt[:, 1] - angleAxis[:, 1] * pt[:, 0]
+
+    r00 = pt[:, 0] + wCrossPt0
+    r01 = pt[:, 1] + wCrossPt1
+    r02 = pt[:, 2] + wCrossPt2
+
+    r00 = r00.reshape((r00.shape[0], 1))
+    r01 = r01.reshape((r01.shape[0], 1))
+    r02 = r02.reshape((r02.shape[0], 1))
+
+    res2 = torch.cat([r00, r01, r02], dim=1)
+
+    return res1 * mask + res2 * (1 - mask)
+
+def buildMatrixNew(dx, dy, v_indices, sz=9) :
+    data = []
+    indptr = []
+    indices = []
+
+    start = 0
+    end = v_indices.shape[0]
+
+    data.append(dx.flatten())
+    data.append(dy.flatten())
+    # print("dx datavals ", dx)
+    # print("dy datavals ", dy)
+    indptr.append(np.arange(2*start*sz, 2*end*sz, sz).flatten())
+    indices.append(np.array([sz * v_indices[start:end] + j for j in range(sz)]).transpose().flatten())
+    indices.append(np.array([sz * v_indices[start:end] + j for j in range(sz)]).transpose().flatten())
+    indptr.append(np.array([sz+ indptr[-1][-1]])) # closing
+
+    datavals = np.concatenate(data)
+    crs_pose = csr_array((datavals, np.concatenate(indices), np.concatenate(indptr)))
+
+    J_pose = csr_matrix(crs_pose)
+    return J_pose
+
+def buildResiduumNew(resX, resY) :
+    data = []
+    data.append(resX.flatten().numpy())
+    data.append(resY.flatten().numpy())
+    res = np.concatenate(data)
+    return res
+
+def torchSingleResiduumX(camera_params, point_params, p2d) :
+    angle_axis = camera_params[:,:3]
+    points_cam = AngleAxisRotatePointT(angle_axis, point_params)
+    points_cam[:,0:2] = points_cam[:,0:2] + camera_params[:, 3:5]
+    points_cam[:,2] = points_cam[:,2] + camera_params[:, 5]
+    points_projX = -points_cam[:, 0] / points_cam[:, 2]
+    points_projY = -points_cam[:, 1] / points_cam[:, 2]
+    f  = camera_params[:, 6]
+    k1 = camera_params[:, 7]
+    k2 = camera_params[:, 8]
+    r2 = points_projX*points_projX + points_projY*points_projY
+    distortion = 1. + r2 * (k1 + k2 * r2)
+    points_reprojX = points_projX * distortion * f # if f is negative, points_reprojX is as well. -> negate p2d and f.
+    # distortion = f + r2 * (k1 + k2 * r2)
+    # points_reprojX = points_projX * distortion
+    resX = (points_reprojX-p2d[:,0])
+    return resX
+
+def torchSingleResiduumY(camera_params, point_params, p2d) :
+    angle_axis = camera_params[:,:3]
+    points_cam = AngleAxisRotatePointT(angle_axis, point_params)
+    points_cam[:,0:2] = points_cam[:,0:2] + camera_params[:, 3:5]
+    points_cam[:,2] = points_cam[:,2] + camera_params[:, 5]
+    points_projX = -points_cam[:, 0] / points_cam[:, 2]
+    points_projY = -points_cam[:, 1] / points_cam[:, 2]
+    f  = camera_params[:, 6]
+    k1 = camera_params[:, 7]
+    k2 = camera_params[:, 8]
+    r2 = points_projX*points_projX + points_projY*points_projY
+    distortion = 1 + r2 * (k1 + k2 * r2)
+    points_reprojY = points_projY * distortion * f
+    # distortion = f + r2 * (k1 + k2 * r2)
+    # points_reprojY = points_projY * distortion
+    resY = (points_reprojY-p2d[:,1])
+    return resY
+
+def ComputeDerivativeMatrixInit(x0_c_, x0_l_, points_2d, camera_indices, point_indices):
+    funx0_st1 = lambda X0, X1, X2: torchSingleResiduumX(X0.view(-1,9), X1.view(-1,3), X2.view(-1,2)) # 1d fucntion -> grad possible
+    funy0_st1 = lambda X0, X1, X2: torchSingleResiduumY(X0.view(-1,9), X1.view(-1,3), X2.view(-1,2)) # 1d fucntion -> grad possible
+
+    torch_cams = torch.from_numpy(x0_c_.reshape(-1,9)[camera_indices[:],:])
+    torch_lands = torch.from_numpy(x0_l_.reshape(-1,3)[point_indices[:],:])
+    torch_lands.requires_grad_()
+    torch_cams.requires_grad_()
+    torch_cams.retain_grad()
+    torch_lands.retain_grad()
+
+    torch_points_2d = torch.from_numpy(points_2d)
+    torch_points_2d.requires_grad_(False)
+
+    resX = funx0_st1(torch_cams, torch_lands, torch_points_2d[:,:]).flatten()
+    lossX = torch.sum(resX)
+    lossX.backward()
+
+    cam_grad_x = torch_cams.grad.detach().numpy().copy()
+    land_grad_x = torch_lands.grad.detach().numpy().copy()
+
+    torch_cams.grad.zero_()
+    torch_lands.grad.zero_()
+    resY = funy0_st1(torch_cams, torch_lands, torch_points_2d[:,:]).flatten()
+    lossY = torch.sum(resY)
+    lossY.backward()
+    cam_grad_y = torch_cams.grad.detach().numpy().copy()
+    land_grad_y = torch_lands.grad.detach().numpy().copy()
+
+    J_pose = buildMatrixNew(cam_grad_x, cam_grad_y, camera_indices, sz=9)
+    J_land = buildMatrixNew(land_grad_x, land_grad_y, point_indices, sz=3)
+    fx0 = buildResiduumNew(resX.detach(), resY.detach())
+
+    return (J_pose, J_land, fx0)
 
 # todo: median + scale, unorm, acceleration + adjust.
 
@@ -654,8 +812,13 @@ FILE_NAME = "problem-49-7776-pre.txt.bz2"
 # FILE_NAME = "problem-52-64053-pre.txt.bz2"
 # FILE_NAME = "../problem-173-111908-pre.txt.bz2" # check if compute not only in jacobian
 
-kClusters = 10 # todo: will still die if too many (0 in jac?)
-global_iterations = 100
+# bug checking
+BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/ladybug/"
+FILE_NAME = "problem-646-73584-pre.txt.bz2"
+FILE_NAME = "problem-1064-113655-pre.txt.bz2"
+
+kClusters = 1 # todo: will still die if too many (0 in jac?)
+global_iterations = 10
 
 num_args = len(sys.argv)
 if num_args > 2:
@@ -744,6 +907,10 @@ best_poses_v = cameras.copy()
 best_landmarks = points_3d.copy()
 bestCost = lastCost
 tau = 1 # 2 is best ? does not generalize!
+revert_lm = 0
+
+J_pose, _, __ = ComputeDerivativeMatrixInit(cameras, points_3d, points_2d, camera_indices, point_indices)
+unorm_t = GetPcgScalingDiag(J_pose.transpose() * J_pose, 0)
 
 start = time.time() # this is not working at all. Slower then iteratively
 (
@@ -775,6 +942,35 @@ dre, dre_per_part = cost_DRE(camera_indices_in_cluster, poses_in_cluster, poses_
                             L_in_cluster, Ul_in_cluster, poses_v, nabla_p_in_cluster)
 
 unorm = GetPcgScalingDiag(U_all, 0)
+Unorm_ = diag_sparse(unorm.flatten())
+relative_diff  = np.abs(Unorm_.data.flatten() - unorm_t.flatten()) / unorm_t.flatten()
+relative_diff2 = np.abs(Unorm_.data.flatten()) / np.fmin(unorm_t.flatten(),Unorm_.data.flatten())
+print("All badly pcg cams ", np.arange(relative_diff.shape[0]) [relative_diff > 1e1] // 9)
+print("All badly pcg cams2 ", np.arange(relative_diff2.shape[0]) [relative_diff2 > 1e1] // 9)
+print(relative_diff.reshape((-1,9)))
+print(np.max(relative_diff))
+print(np.max( (Unorm_.data.flatten() - unorm_t.flatten()) / Unorm_.data.flatten()) )
+amax  = np.argmax(relative_diff)
+amax2 = np.argmax( (Unorm_.data.flatten() - unorm_t.flatten()) / Unorm_.data.flatten())
+print(amax)
+print(amax2)
+print( (Unorm_.data.flatten())[amax], " - ", (unorm_t.flatten())[amax] )
+print( (Unorm_.data.flatten())[amax2], " - ", (unorm_t.flatten())[amax2] )
+print("cam1 ", amax//9, " :" , (Unorm_.data.flatten().reshape((-1,9)))[amax // 9, :]) # smaller
+print("cam2 ", amax//9, " :" , (unorm_t.flatten().reshape((-1,9)))[amax // 9, :]) # larger
+# print("cam1 ", 1+amax//9, " :" , (Unorm_.data.flatten().reshape((-1,9)))[1+amax // 9, :])
+# print("cam2 ", 1+amax//9, " :" , (unorm_t.flatten().reshape((-1,9)))[1+amax // 9, :])
+# print("cam1 ", amax//9 - 1, " :" , (Unorm_.data.flatten().reshape((-1,9)))[amax // 9 -1, :])
+# print("cam2 ", amax//9 -1, " :" , (unorm_t.flatten().reshape((-1,9)))[amax // 9 -1, :])
+
+# camMax = 645; print("cam1 ", amax//9, " :" , (Unorm_.data.flatten().reshape((-1,9)))[camMax, :]); print("cam2 ", amax//9, " :" , (unorm_t.flatten().reshape((-1,9)))[camMax, :])
+
+#print(Unorm_.data)
+#print(unorm_t)
+# exit()
+# use pcg from python. Differs from ceres in few? cameras
+# unorm = Unorm_.data.flatten()
+
 poses_v, poses_in_cluster, poses_s_in_cluster = preconditioning_push(poses_v, poses_in_cluster, poses_s_in_cluster,
                                                                      camera_indices_in_cluster, point_indices_in_cluster, unorm, 0, kClusters)
 
@@ -877,6 +1073,10 @@ for global_iteration in range(global_iterations):
         else: # does not work well here.
             poses_in_cluster_bfgs = [poses_v.copy() for _ in range(kClusters)]
 
+        if ls_it > 0:
+            revert_lm = 1 # revert landmark to last step (as the pose as well)
+            print("-------------------- revert_lm ", revert_lm, "--------------------")
+
         L_in_cluster_bfgs = L_in_cluster.copy()
         Ul_in_cluster_bfgs = [elem.copy() for elem in Ul_in_cluster]
         blockEig_in_cluster_bfgs = [elem for elem in blockEig_in_cluster]
@@ -892,7 +1092,7 @@ for global_iteration in range(global_iterations):
             camera_indices_in_cluster, point_indices_in_cluster, local_camera_indices_in_cluster,
             local_landmark_indices_in_cluster, points_2d_in_cluster, poses_in_cluster_bfgs, landmarks.copy(),
             poses_s_in_cluster_bfgs, L_in_cluster_bfgs, Ul_in_cluster_bfgs, blockEig_in_cluster_bfgs, kClusters,
-            LipJ, innerIts_=innerIts, revert_lm = ls_it != 0)
+            LipJ, innerIts_=innerIts, revert_lm = revert_lm)
 
         #print("2. x0_p", "points_3d_in_cluster", points_3d_in_cluster)
         currentCost_bfgs = np.sum(cost_bfgs)
@@ -905,13 +1105,13 @@ for global_iteration in range(global_iterations):
         dre_bfgs += currentCost_bfgs
 
         # debugging cost block ################
-        primal_cost_u_all = []
-
         primal_cost_v_all = primal_cost_push_pull(camera_indices_in_cluster, poses_v_bfgs, kClusters, True)
         primal_cost_v = np.sum(primal_cost_v_all)
         primal_cost_v_all = [round(cost) for cost in primal_cost_v_all]
 
-        primal_cost_u_all = primal_cost_push_pull(camera_indices_in_cluster, poses_in_cluster_bfgs, kClusters)
+        #primal_cost_u_all = []
+        #primal_cost_u_all = primal_cost_push_pull(camera_indices_in_cluster, poses_in_cluster_bfgs, kClusters)
+        primal_cost_u_all = cost_bfgs
         primal_cost_u = np.sum(primal_cost_u_all)
         if currentCost_bfgs != primal_cost_u:
             print("Costs do not match line 740 ", currentCost_bfgs, " u:" , primal_cost_u, " v:", primal_cost_v)
@@ -930,7 +1130,7 @@ for global_iteration in range(global_iterations):
         print( global_iteration, "/", ls_it, " ======== DRE BFGS ====== ", round(dre_bfgs) , " ========= gain " , \
             round(costGain), "==== f(v)= ", round(primal_cost_v), " f(u)= ", round(primal_cost_u),
             " G ", currentGap , " dG ", differentialGap, " ", differentialGap / np.maximum(costGain, 1.), #" D2G ", diffToGain, "G2G ", gapToGain, 
-            " G2C ", G2C, " BE ", blockEigLastIt, " L ", L_in_cluster_bfgs) #blockEig_in_cluster_bfgs)
+            " G2C ", G2C, " BE ", blockEigLastIt[0]) #, " L ", L_in_cluster_bfgs) #blockEig_in_cluster_bfgs)
         print( global_iteration, "/", ls_it, " f(v) = ", primal_cost_v_all, " f(u) = ", primal_cost_u_all)
         prevGap = currentGap.copy()
 
@@ -981,7 +1181,8 @@ for global_iteration in range(global_iterations):
                 print("Reset Nesterov acceleration after ", maxFailedNesterovAcceleration, " consecutive failures.")
 
         maxPctV = np.maximum(1.001, np.sqrt(maxPct)) # max 0.1 % AAA
-        if (beMin < globalBlockEigUpperLimit) and (ls_it == line_search_iterations-1) and (maxPct * lastCostDRE_bfgs < dre_bfgs) and (primal_cost_v > maxPctV * primal_cost_v_before): 
+        if (beMin < globalBlockEigUpperLimit) and (ls_it == line_search_iterations-1) and \
+            (dre_bfgs > maxPct * lastCostDRE_bfgs) and (primal_cost_v > maxPctV * primal_cost_v_before):
             print("Why enter is primal cost (v) bad or what", primal_cost_v, " > ", maxPctV * primal_cost_v_before, " > ", primal_cost_v_before, " * ", maxPctV)
 
             poses_in_cluster = [best_poses_v.copy() for _ in poses_in_cluster]
@@ -989,6 +1190,8 @@ for global_iteration in range(global_iterations):
                 poses_s_in_cluster_pre[ci] = best_poses_v.copy() # s + u-v = s in this case, do we use the best s?
                 poses_s_in_cluster[ci] = best_poses_v.copy()
             landmarks = best_landmarks.copy()
+            revert_lm = 2 # revert to best landmark / pose.
+            print("-------------------- revert_lm ", revert_lm, "--------------------")
             # TODO: s-> best_v & u=v after reset ? landmark match best v? -- we can/could compute lms from v only: yes: VLi * Jl * res, poses fixed.
 
             # IDEA: verify cost here.
@@ -996,7 +1199,7 @@ for global_iteration in range(global_iterations):
             if CheckCost:
                 primal_cost_v_check = primal_cost_push_pull(camera_indices_in_cluster, poses_in_cluster, kClusters)
                 primal_cost_v_check = np.sum(primal_cost_v_check)
-                print("Checking cost after rest: ", round(primal_cost_v_check), " vs. ", round(primal_cost_v), " vs. ", round(primal_cost_u))
+                print("Checking cost after reset: f(v_best)=", round(primal_cost_v_check), " vs. f(v)=", round(primal_cost_v), " vs. f(u)=", round(primal_cost_u))
 
             ############
             # VERSION U is doing nothing actually. This is differetn if taking actula steps as below.
@@ -1031,7 +1234,8 @@ for global_iteration in range(global_iterations):
                     blockEig_in_cluster[ci] = np.minimum(blockEig_in_cluster[ci] * be_mult__, globalBlockEigUpperLimit)
                 print("Be *= ", be_mult__, " Be ", blockEig_in_cluster, " ", np.mean(LipJ))
 
-            if dre_bfgs <= lastCostDRE_bfgs or 10000 * (dre_bfgs-lastCostDRE_bfgs) <= lastCostDRE_bfgs or (ls_it == line_search_iterations-1 and line_search_iterations > 1): # not correct yet, must be <= last - c/gamma |u-v|
+            if dre_bfgs <= lastCostDRE_bfgs or 10000 * (dre_bfgs-lastCostDRE_bfgs) <= lastCostDRE_bfgs \
+                or (ls_it == line_search_iterations-1 and line_search_iterations > 1): # not correct yet, must be <= last - c/gamma |u-v|
 
                 for ci in range(kClusters):
                     poses_s_in_cluster[ci] = poses_s_in_cluster_bfgs[ci].copy()
@@ -1050,6 +1254,7 @@ for global_iteration in range(global_iterations):
                 if ls_it != line_search_iterations-1:
                     #print("Reset counter after ", failedNesterovAcceleration , " failed acceleration steps")
                     failedNesterovAcceleration = 0 # success, reset counter
+                revert_lm = 0 # normal case accept
 
                 break # next full iteration
 

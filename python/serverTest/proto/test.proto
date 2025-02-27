@@ -47,12 +47,12 @@ message prox_cluster_proto {
 
 // return message from client to master
 message return_cluster_proto {
+  // repeated float cameras   = 1; // 3d
+  // repeated float landmarks = 2; // temporary
+  // repeated float step_size = 3;
   repeated float cameras   = 1; // 3d
   repeated float landmarks = 2; // temporary
-  repeated float step_size = 3;
-  // repeated double cameras   = 1; // 3d
-  // repeated double landmarks = 2; // temporary
-  // repeated double step_size = 3;  
+  repeated float step_size = 3;  
   int32 cluster_id = 4;
   float cost = 5;
 }
