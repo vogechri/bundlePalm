@@ -274,6 +274,44 @@ void WriteJacobian(ceres::Problem& problem, int numCameras, int numLandmarks) {
     std::cout << std::endl;
 }
 
+// Not sure if this copies or not.
+Eigen::DiagonalMatrix<double, Eigen::Dynamic> 
+Diagonal(SparseMatrix<double, Eigen::RowMajor>& mat) {
+  Eigen::DiagonalMatrix<double, Eigen::Dynamic> diag = mat.diagonal().asDiagonal(); // ?
+  // diag.diagonal() = mat.diagonal(); // copy?
+#ifdef _const_diag_
+  for (int b = 0; b < numCameras; ++b) { // block
+    double mv = diag(9*b);
+    for (int id = 1; id < 9; ++id) {
+      mv = std::max(mv, diag(9*b + id));
+    }
+    for (int id = 0; id < 9; ++id) {
+      diag(9*b + id) += be * mv;
+    }
+  }
+#else
+  //diag.diagonal().array() *= (1. + be * scale);
+#endif
+  //diag.diagonal().array() += 1e-18; // TODO: this is not good.
+  return diag;
+}
+
+// StepSize as matrix is needed for multiplication with vectors. Still should be easy as blockMult std vector with other vector.
+template<int N>
+std::vector<double> blockMult(const std::vector<double>& blockMat, const std::vector<double>& vec) {
+  std::vector<double> res(blockMat.size() / N, 0);
+  for (int id = 0; id < blockMat.size(); ++id) {
+      res[id / N] += blockMat[id] * vec[id / N];
+  }
+  return res;
+}
+
+bool stop_criterion(double delta, double delta_i, int i) {
+  // lower (1e-4) can be worse? maybe just the parts / how parts are.
+  const double eps = 1e-3; //#1e-2 used in paper, tune. might allow smaller as faster?
+  return (i+1) * delta_i < eps * delta;
+}
+
 // Ensure we can have a vector of programs. by id. maybe just a map : clusterid-> program.
 ///////////////////////////////////////////////////////
 class CeresProgram {
@@ -553,6 +591,159 @@ public:
         // }
     }
 
+////////////////////////////////////////
+// new stuff for self optimization
+
+void UpdatePreconditioningCameras(SparseMatrix<double, Eigen::RowMajor> JpJ) {
+  full_stepSize.resize(stepSize.size(), 0);
+  const double *values = JpJ.valuePtr();
+  std::copy(values, values + full_stepSize.size(), full_stepSize.data());
+  // ToDo: Is this ok or an issue to be resolved differently?
+  for (int b = 0; b < numCameras; ++b) {
+    for(int id = 0; id < 81; id += 10) { // diagonal entries !?
+      full_stepSize[81*b + id] = std::max(1e-36, full_stepSize[81*b + id]);
+    }
+  }
+}
+
+std::pair<Eigen::Matrix<double, Eigen::Dynamic, 1>, Eigen::Matrix<double, Eigen::Dynamic, 1>>
+SolveByGDNesterov(SparseMatrix<double, Eigen::RowMajor> Uli, SparseMatrix<double, Eigen::RowMajor>& Vli, 
+                const SparseMatrix<double, Eigen::RowMajor>& Jp, const SparseMatrix<double, Eigen::RowMajor>& Jl, 
+                const Eigen::Matrix<double, Eigen::Dynamic, 1>& res, int power_iterations) {
+  // compute bS, Vli, W
+  BlockInverse<3>(Vli);
+  BlockInverse<9>(Uli);
+  const double Lip = 0.9;
+  double lambda0 = (1. + std::sqrt(5.)) / 2.;
+  const SparseMatrix<double, Eigen::RowMajor> W = Jp.transpose() * Jl;
+  Eigen::Matrix<double, Eigen::Dynamic, 1> bS;
+  // bS = (bp + stepSize * prox_rhs - W * Vli * bl).flatten() # see XX equals 2 * (bp - W * Vli * bl)
+  bS = Jp.transpose() * res;
+  bS = bS + Eigen::Map<Eigen::Matrix<double, Eigen::Dynamic, 1> >(blockMult<9>(full_stepSize, cameras).data());
+  bS = bS - Eigen::Map<Eigen::Matrix<double, Eigen::Dynamic, 1> >(blockMult<9>(full_stepSize, cameras_s).data());
+  bS = bS - W * (Vli * (Jl.transpose() * res));
+  
+  Eigen::Matrix<double, Eigen::Dynamic, 1> ubs = -Uli * bS;
+  Eigen::Matrix<double, Eigen::Dynamic, 1> xk = bS;
+  Eigen::Matrix<double, Eigen::Dynamic, 1> y0 = bS;
+  // Lip = 0.9 # 100 -> 1. # TODO: play, find out how to progress over time.
+  // lambda0 = (1.+np.sqrt(5.)) / 2. # l=0 g=1, 0, .. L0=1 g = 0,..
+
+  for(int i=0;i<power_iterations; ++i) {
+      const double lambda1 = 1. + std::sqrt(1. + 4. * lambda0*lambda0) / 2.;
+      const double gamma = (1.-lambda0) / lambda1;
+      lambda0 = lambda1;
+
+      //     g = xk - Uli * ( W * (Vli * (W.transpose() * xk))) + ubs
+      //     yk = xk - 1/Lip * g
+      //     xk = (1-gamma) * yk + gamma * y0
+      //     y0 = yk
+      const Eigen::Matrix<double, Eigen::Dynamic, 1> g = xk - Uli * (W * (Vli * (W.transpose() * xk))) + ubs;
+      const Eigen::Matrix<double, Eigen::Dynamic, 1> yk = xk - 1. / Lip * g;
+      xk = (1. - gamma) * yk + gamma * y0;
+      y0 = yk;
+
+      if(stop_criterion(xk.norm(), 1. / Lip * g.norm(), i)) { // array().real().norm();?
+          break;
+      }
+  }
+  Eigen::Matrix<double, Eigen::Dynamic, 1> delta_l = Vli * ((W.transpose() * xk) + (Jl.transpose() * res));
+  return {-xk, delta_l};
+}
+
+void UpdateStepSizeAndSolve() { // Recompute.
+  auto [Jp, Jl, res] = GetJacobianAndResidual(); // also return sorted! residuals.
+  SparseMatrix<double, Eigen::RowMajor> Vl(3 * numLandmarks, 3 * numLandmarks);
+  Vl.reserve(VectorXi::Constant(3 * numLandmarks, 3));
+  Vl = Jl.transpose() * Jl;
+  if (firstIteration) { // preconditioning
+      const auto diag = Vl.diagonal().array().cwiseAbs().cwiseSqrt().cwiseMax(1e-10);
+      THROW_IF(diag.size() != vnorm.size());
+      std::cout << " Update vnorm " << cluster_id << " " << diag.size() << " == " << vnorm.size() << "\n";
+      for (int id = 0; id < vnorm.size(); ++id) {
+          landmarks[id] *= diag[id];
+          vnorm[id] = 1. / diag(id);
+      }
+  }
+  Eigen::DiagonalMatrix<double, Eigen::Dynamic> diagVL = Diagonal(Vl); // Vl = VL + L * diagVL
+
+  // JpJ, StepSize, diag JpJ
+  if(Jp.nonZeros() != 9 * Jp.rows())
+      std::cout << "Jp " << cluster_id << " | " << Jp.nonZeros() << " =? " << Jp.rows() * 9 << "\n";
+  THROW_IF(Jp.nonZeros() != 9 * Jp.rows());
+  SparseMatrix<double, Eigen::RowMajor> Ul(9 * numCameras, 9 * numCameras);
+  Ul.reserve(VectorXi::Constant(9 * numCameras, 9));
+  Ul = Jp.transpose() * Jp;
+  if (firstIteration) { // also handled setting be = 0 in 1st step.
+      UpdatePreconditioningCameras(Ul);
+  }
+  Eigen::DiagonalMatrix<double, Eigen::Dynamic> diagUP = Diagonal(Ul); // Vp = Vp + L * diagVp
+
+  const double scale = 1e-1; // 1e0: @29: 501k, no jump. 1e1 many jumps. 473k
+  Ul += scale * Ul + diagUP * current_be;
+  if (firstIteration) { // also handled setting be = 0 in 1st step.
+      const double* values = Ul.valuePtr();
+      std::copy(values, values + full_stepSize.size(), full_stepSize.data());
+  }
+
+  // Loop until ok or adjust tr_region
+  tr_radius = std::min(max_trust_region_radius, tr_radius);
+  double old_tr_radius = 0;
+
+  const Eigen::Matrix<double, Eigen::Dynamic, 1> residual = Eigen::Map<Eigen::Matrix<double, Eigen::Dynamic, 1> >(res.data());
+  const int power_iterations = 100;
+  const double costStart = residual.squaredNorm();
+
+  while ( true ) {
+      Ul += (1. / tr_radius - 1. / old_tr_radius) * diagUP;
+      Vl += (1. / tr_radius - 1. / old_tr_radius) * diagVL;
+      old_tr_radius = tr_radius;
+
+      const auto [delta_p, delta_l] = SolveByGDNesterov(Ul, Vl, Jp, Jl, residual, power_iterations);
+      // compute cost / tr_check
+      //fx0_new = fx0 + (J_pose * delta_p + J_land * delta_l)
+      const double costQuad = (residual + Jp * delta_p + Jl * delta_l).squaredNorm();
+      
+      Eigen::Map<Eigen::Matrix<double, Eigen::Dynamic, 1> >(blockMult<9>(full_stepSize, cameras).data());
+
+      std::vector<double> temp(9 * numCameras, 0.); // same size as camera vector
+      Eigen::Matrix<double, Eigen::Dynamic, 1> prox_rhs = Eigen::Map<Eigen::Matrix<double, Eigen::Dynamic, 1> > (temp.data());
+      prox_rhs = Eigen::Map<Eigen::Matrix<double, Eigen::Dynamic, 1> > (cameras.data()) - Eigen::Map<Eigen::Matrix<double, Eigen::Dynamic, 1> > (cameras_s.data()); 
+      const double penaltyStart = prox_rhs.dot( Eigen::Map<Eigen::Matrix<double, Eigen::Dynamic, 1> >(blockMult<9>(full_stepSize, temp).data()) );
+      prox_rhs += delta_p;
+      const double penaltyEnd = prox_rhs.dot( Eigen::Map<Eigen::Matrix<double, Eigen::Dynamic, 1> >( blockMult<9>(full_stepSize, temp).data() ) );
+
+      for (int id = 0; id < delta_p.size(); ++id) {
+          cameras[id] += delta_p[id];
+      }
+      for (int id = 0; id < delta_l.size(); ++id) {
+          landmarks[id] += delta_l[id];
+      }
+      const double costEnd = 2 * GetCost(); // demands cameras , landmarks already updated.
+
+      const double tr_check = (costStart - costEnd + penaltyStart - penaltyEnd) / std::max(0.1, costStart - costQuad + penaltyStart - penaltyEnd);
+
+      if(tr_check < 0.25) {
+          for (int id = 0; id < delta_p.size(); ++id) {
+              cameras[id] -= delta_p[id];
+          }
+          for (int id = 0; id < delta_l.size(); ++id) {
+              landmarks[id] -= delta_l[id];
+          }
+          tr_radius *= 2;
+      }
+      if(tr_check > 0.25) {
+          if(tr_check > 0.8) { 
+            tr_radius /= 2;
+          }
+          break;
+      }
+  }
+}
+
+
+///////////////////////////////////
+
 private:
 
     // Currently this is set 'stepsize' from Jp only.
@@ -684,7 +875,7 @@ private:
       // std::cout << " Cam 543: " << std::sqrt(JpJ_cam[0]) << " " << std::sqrt(JpJ_cam[1]) << " " << std::sqrt(JpJ_cam[2]) << " " << std::sqrt(JpJ_cam[3]) << " " << std::sqrt(JpJ_cam[4]) << " " << std::sqrt(JpJ_cam[5]) << " " << std::sqrt(JpJ_cam[6]) << " " << std::sqrt(JpJ_cam[7]) << " " << std::sqrt(JpJ_cam[8]) << "\n";
       Jp.makeCompressed();
       Jl.makeCompressed();
-      return {Jp,Jl,residuals};
+      return std::make_tuple(Jp,Jl,residuals);
     }
 
     // Also delivers residuals and gradient.
