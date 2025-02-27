@@ -813,12 +813,12 @@ FILE_NAME = "problem-49-7776-pre.txt.bz2"
 # FILE_NAME = "../problem-173-111908-pre.txt.bz2" # check if compute not only in jacobian
 
 # bug checking
-BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/ladybug/"
-FILE_NAME = "problem-646-73584-pre.txt.bz2"
-FILE_NAME = "problem-1064-113655-pre.txt.bz2"
+# BASE_URL = "http://grail.cs.washington.edu/projects/bal/data/ladybug/"
+# FILE_NAME = "problem-646-73584-pre.txt.bz2"
+# FILE_NAME = "problem-1064-113655-pre.txt.bz2"
 
 kClusters = 1 # todo: will still die if too many (0 in jac?)
-global_iterations = 10
+global_iterations = 30
 
 num_args = len(sys.argv)
 if num_args > 2:

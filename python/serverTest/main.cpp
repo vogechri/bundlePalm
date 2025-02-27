@@ -240,10 +240,10 @@ void BlockInverse(SparseMatrix<double, Eigen::RowMajor>& mat) {
     //std::cout << "before  "<< values[0]<< " " << values[1]<< " " << values[2]<< " " << values[3] << "\n";
 #pragma omp parallel for num_threads(options.num_threads)
     for (int i = 0; i < numrows / N; i++) {
-        auto mat9x9 = Eigen::Map< Eigen::Matrix<double,N,N> > (&(values[i * N*N]));//,  Eigen::Stride<0, 0>);
-        //std::cout << "before "<< mat9x9 << " \n";
-        mat9x9 = mat9x9.inverse();
-        //std::cout << "after "<< mat9x9 << " \n";        
+        auto matNxN = Eigen::Map< Eigen::Matrix<double,N,N> > (&(values[i * N*N]));//,  Eigen::Stride<0, 0>);
+        //std::cout << "before "<< matNxN << " \n";
+        matNxN = matNxN.inverse().eval();
+        //std::cout << "after "<< matNxN << " \n";        
     }
     //std::cout << "after  "<< values[0]<< " " << values[1]<< " " << values[2]<< " " << values[3] << "\n";
 }
@@ -275,24 +275,27 @@ void WriteJacobian(ceres::Problem& problem, int numCameras, int numLandmarks) {
 }
 
 // Not sure if this copies or not.
-Eigen::DiagonalMatrix<double, Eigen::Dynamic> 
+template<int N>
+Eigen::DiagonalMatrix<double, Eigen::Dynamic>
 Diagonal(SparseMatrix<double, Eigen::RowMajor>& mat) {
   Eigen::DiagonalMatrix<double, Eigen::Dynamic> diag = mat.diagonal().asDiagonal(); // ?
-  // diag.diagonal() = mat.diagonal(); // copy?
+//#define _const_diag_
 #ifdef _const_diag_
-  for (int b = 0; b < numCameras; ++b) { // block
-    double mv = diag(9*b);
-    for (int id = 1; id < 9; ++id) {
-      mv = std::max(mv, diag(9*b + id));
+  auto diagdiag = diag.diagonal();
+  for (int b = 0; b < mat.rows() / N; ++b) { // block
+    double mv = diagdiag(N*b);
+    for (int id = 1; id < N; ++id) {
+      mv = std::max(mv, diagdiag(N*b + id));
     }
-    for (int id = 0; id < 9; ++id) {
-      diag(9*b + id) += be * mv;
+    for (int id = 0; id < N; ++id) {
+        diagdiag(N*b + id) = mv;
     }
   }
 #else
   //diag.diagonal().array() *= (1. + be * scale);
 #endif
-  //diag.diagonal().array() += 1e-18; // TODO: this is not good.
+  // diag.diagonal().array() += 1e-18; // TODO: this is not good.
+  // std::cout << diag.diagonal() << "\n";
   return diag;
 }
 
@@ -326,6 +329,7 @@ public:
       Init(pro.num_clusters());
       numCameras = pro.cameras_size() / 9;
       numLandmarks = pro.landmarks_size() / 3;
+      numResiduals =  pro.observations_size() / 2;
       //std::cout << numCameras << " " << numLandmarks << "\n";
       cameras.clear();
       cameras.reserve(9 * numCameras);
@@ -607,7 +611,7 @@ void UpdatePreconditioningCameras(SparseMatrix<double, Eigen::RowMajor> JpJ) {
 }
 
 std::pair<Eigen::Matrix<double, Eigen::Dynamic, 1>, Eigen::Matrix<double, Eigen::Dynamic, 1>>
-SolveByGDNesterov(SparseMatrix<double, Eigen::RowMajor> Uli, SparseMatrix<double, Eigen::RowMajor>& Vli, 
+SolveByGDNesterov(SparseMatrix<double, Eigen::RowMajor> Uli, SparseMatrix<double, Eigen::RowMajor> Vli, 
                 const SparseMatrix<double, Eigen::RowMajor>& Jp, const SparseMatrix<double, Eigen::RowMajor>& Jl, 
                 const Eigen::Matrix<double, Eigen::Dynamic, 1>& res, int power_iterations) {
   // compute bS, Vli, W
@@ -617,21 +621,31 @@ SolveByGDNesterov(SparseMatrix<double, Eigen::RowMajor> Uli, SparseMatrix<double
   double lambda0 = (1. + std::sqrt(5.)) / 2.;
   const SparseMatrix<double, Eigen::RowMajor> W = Jp.transpose() * Jl;
   Eigen::Matrix<double, Eigen::Dynamic, 1> bS;
+  // bS = (bp_s                     - W * Vli * bl).flatten() # see XX equals 2 * (bp - W * Vli * bl)
+  //       bp_s = bp + stepSize * prox_rhs
   // bS = (bp + stepSize * prox_rhs - W * Vli * bl).flatten() # see XX equals 2 * (bp - W * Vli * bl)
   bS = Jp.transpose() * res;
-  bS = bS + Eigen::Map<Eigen::Matrix<double, Eigen::Dynamic, 1> >(blockMult<9>(full_stepSize, cameras).data());
-  bS = bS - Eigen::Map<Eigen::Matrix<double, Eigen::Dynamic, 1> >(blockMult<9>(full_stepSize, cameras_s).data());
+  bS = bS + Eigen::Map<Eigen::Matrix<double, Eigen::Dynamic, 1> >(blockMult<9>(full_stepSize, cameras).data(), 9*numCameras);
+  bS = bS - Eigen::Map<Eigen::Matrix<double, Eigen::Dynamic, 1> >(blockMult<9>(full_stepSize, cameras_s).data(), 9*numCameras);
   bS = bS - W * (Vli * (Jl.transpose() * res));
-  
+
+  //std::cout << " Jl " << Jl.valuePtr()[0] << " " << Jl.valuePtr()[1] << " " << Jl.valuePtr()[2] << "\n";
+//   std::cout << "bS :" << bS.array() << "\n";
+//   std::cout << "bp :" << (Jp.transpose() * res).array() << "\n";
+//   std::cout << "bl :" << (Jl.transpose() * res).array() << "\n";
+  // std::cout << "res :" << res.array() << "\n"; //ok
+
   Eigen::Matrix<double, Eigen::Dynamic, 1> ubs = -Uli * bS;
-  Eigen::Matrix<double, Eigen::Dynamic, 1> xk = bS;
-  Eigen::Matrix<double, Eigen::Dynamic, 1> y0 = bS;
+  Eigen::Matrix<double, Eigen::Dynamic, 1> xk = - ubs;
+  Eigen::Matrix<double, Eigen::Dynamic, 1> y0 = - ubs;
   // Lip = 0.9 # 100 -> 1. # TODO: play, find out how to progress over time.
   // lambda0 = (1.+np.sqrt(5.)) / 2. # l=0 g=1, 0, .. L0=1 g = 0,..
 
-  for(int i=0;i<power_iterations; ++i) {
-      const double lambda1 = 1. + std::sqrt(1. + 4. * lambda0*lambda0) / 2.;
-      const double gamma = (1.-lambda0) / lambda1;
+  std::cout << "xk :" << xk.squaredNorm() << "\n";
+
+  for(int i = 0;i < power_iterations; ++i) {
+      const double lambda1 = (1. + std::sqrt(1. + 4. * lambda0*lambda0)) / 2.;
+      const double gamma = (1. - lambda0) / lambda1;
       lambda0 = lambda1;
 
       //     g = xk - Uli * ( W * (Vli * (W.transpose() * xk))) + ubs
@@ -643,11 +657,13 @@ SolveByGDNesterov(SparseMatrix<double, Eigen::RowMajor> Uli, SparseMatrix<double
       xk = (1. - gamma) * yk + gamma * y0;
       y0 = yk;
 
+      //std::cout << i << ". xk :" << xk.squaredNorm() << "\n";
+
       if(stop_criterion(xk.norm(), 1. / Lip * g.norm(), i)) { // array().real().norm();?
           break;
       }
   }
-  Eigen::Matrix<double, Eigen::Dynamic, 1> delta_l = Vli * ((W.transpose() * xk) + (Jl.transpose() * res));
+  Eigen::Matrix<double, Eigen::Dynamic, 1> delta_l = Vli * ((W.transpose() * xk) - (Jl.transpose() * res));
   return {-xk, delta_l};
 }
 
@@ -657,15 +673,24 @@ void UpdateStepSizeAndSolve() { // Recompute.
   Vl.reserve(VectorXi::Constant(3 * numLandmarks, 3));
   Vl = Jl.transpose() * Jl;
   if (firstIteration) { // preconditioning
-      const auto diag = Vl.diagonal().array().cwiseAbs().cwiseSqrt().cwiseMax(1e-10);
+      // diag is a reference .. why? i do stuff on it.
+      const auto diag = Vl.diagonal().array().cwiseMax(1e-24).cwiseSqrt().cwiseInverse();
       THROW_IF(diag.size() != vnorm.size());
       std::cout << " Update vnorm " << cluster_id << " " << diag.size() << " == " << vnorm.size() << "\n";
       for (int id = 0; id < vnorm.size(); ++id) {
-          landmarks[id] *= diag[id];
-          vnorm[id] = 1. / diag(id);
+          landmarks[id] /= diag[id];
+          vnorm[id] = diag(id);
       }
+      // Update Vl as well.
+      std::cout << " Jl " << Jl.valuePtr()[0] << " " << Jl.valuePtr()[1] << " " << Jl.valuePtr()[2] << "\n";
+      Jl = (Jl * diag.matrix().asDiagonal()).eval(); // This does not happen as diag is diag of Vl. That gets changed. diag is not copied but reference.
+      std::cout << " Jl " << Jl.valuePtr()[0] << " " << Jl.valuePtr()[1] << " " << Jl.valuePtr()[2] << "\n";
+
+      Vl = diag.matrix().asDiagonal() * Vl * diag.matrix().asDiagonal();
   }
-  Eigen::DiagonalMatrix<double, Eigen::Dynamic> diagVL = Diagonal(Vl); // Vl = VL + L * diagVL
+  const Eigen::DiagonalMatrix<double, Eigen::Dynamic> diagVL = Diagonal<3>(Vl); // Vl = VL + L * diagVL
+
+  // std::cout << " diagVL " << diagVL.diagonal() << "\n"; // 1's
 
   // JpJ, StepSize, diag JpJ
   if(Jp.nonZeros() != 9 * Jp.rows())
@@ -677,41 +702,61 @@ void UpdateStepSizeAndSolve() { // Recompute.
   if (firstIteration) { // also handled setting be = 0 in 1st step.
       UpdatePreconditioningCameras(Ul);
   }
-  Eigen::DiagonalMatrix<double, Eigen::Dynamic> diagUP = Diagonal(Ul); // Vp = Vp + L * diagVp
+  const Eigen::DiagonalMatrix<double, Eigen::Dynamic> diagUP = Diagonal<9>(Ul); // Vp = Vp + L * diagVp
 
   const double scale = 1e-1; // 1e0: @29: 501k, no jump. 1e1 many jumps. 473k
-  Ul += scale * Ul + diagUP * current_be;
-  if (firstIteration) { // also handled setting be = 0 in 1st step.
-      const double* values = Ul.valuePtr();
-      std::copy(values, values + full_stepSize.size(), full_stepSize.data());
+  if (!firstIteration) { // also handled setting be = 0 in 1st step.
+    SparseMatrix<double, Eigen::RowMajor> stepSize = scale * Ul;
+    stepSize += diagUP * current_be;
+    const double* values = stepSize.valuePtr();
+    std::copy(values, values + full_stepSize.size(), full_stepSize.data());
+    Ul += stepSize;
+  } else {
+    Ul += scale * Ul;
+    Ul += diagUP * current_be;
   }
-
   // Loop until ok or adjust tr_region
   tr_radius = std::min(max_trust_region_radius, tr_radius);
-  double old_tr_radius = 0;
+  double inv_tr_radius = 0;
 
-  const Eigen::Matrix<double, Eigen::Dynamic, 1> residual = Eigen::Map<Eigen::Matrix<double, Eigen::Dynamic, 1> >(res.data());
+  const Eigen::Matrix<double, Eigen::Dynamic, 1> residual = Eigen::Map<Eigen::Matrix<double, Eigen::Dynamic, 1> >(res.data(), 2 * numResiduals);
   const int power_iterations = 100;
   const double costStart = residual.squaredNorm();
+  std::cout << " coststart " << costStart << "\n";
 
   while ( true ) {
-      Ul += (1. / tr_radius - 1. / old_tr_radius) * diagUP;
-      Vl += (1. / tr_radius - 1. / old_tr_radius) * diagVL;
-      old_tr_radius = tr_radius;
+    //   std::cout << " diagUP " << Ul.diagonal()[0] << " " << Ul.diagonal()[1] << " " << Ul.diagonal()[2] << "\n";
+    //   std::cout << " diagVL " << Vl.diagonal()[0] << " " << Vl.diagonal()[1] << " " << Vl.diagonal()[2] << "\n";// TOTALLY OFF after tr_check fails.
+      Ul += (1. / tr_radius - inv_tr_radius) * (diagUP + Jp.transpose() * Jp);
+      Vl += (1. / tr_radius - inv_tr_radius) * (diagVL + Jl.transpose() * Jl);
+    //   std::cout << " diagUp " << Ul.diagonal()[0] << " " << Ul.diagonal()[1] << " " << Ul.diagonal()[2] << "\n";
+    //   std::cout << " diagVL " << Vl.diagonal()[0] << " " << Vl.diagonal()[1] << " " << Vl.diagonal()[2] << "\n";
+      
+      //std::cout << " VL " << Vl.diagonal() << "\n";
+      inv_tr_radius = 1. / tr_radius;
 
       const auto [delta_p, delta_l] = SolveByGDNesterov(Ul, Vl, Jp, Jl, residual, power_iterations);
       // compute cost / tr_check
       //fx0_new = fx0 + (J_pose * delta_p + J_land * delta_l)
       const double costQuad = (residual + Jp * delta_p + Jl * delta_l).squaredNorm();
       
-      Eigen::Map<Eigen::Matrix<double, Eigen::Dynamic, 1> >(blockMult<9>(full_stepSize, cameras).data());
+      const double costQuad2 = (residual - Jp * delta_p - Jl * delta_l).squaredNorm();
+      const double costQuad3 = (residual - Jp * delta_p + Jl * delta_l).squaredNorm();
+      const double costQuad4 = (residual + Jp * delta_p - Jl * delta_l).squaredNorm();
+
+        std::cout << costStart << " > " << costQuad << " " << costQuad2 << " " << costQuad3 << " " << costQuad4 << "\n";
+
+      // std::cout << "res/dl/dp :" << residual.squaredNorm() << " " << delta_p.squaredNorm() << " " << delta_l.squaredNorm() << "\n";
+
+      // Eigen::Map<Eigen::Matrix<double, Eigen::Dynamic, 1> >(blockMult<9>(full_stepSize, cameras).data());
 
       std::vector<double> temp(9 * numCameras, 0.); // same size as camera vector
-      Eigen::Matrix<double, Eigen::Dynamic, 1> prox_rhs = Eigen::Map<Eigen::Matrix<double, Eigen::Dynamic, 1> > (temp.data());
-      prox_rhs = Eigen::Map<Eigen::Matrix<double, Eigen::Dynamic, 1> > (cameras.data()) - Eigen::Map<Eigen::Matrix<double, Eigen::Dynamic, 1> > (cameras_s.data()); 
-      const double penaltyStart = prox_rhs.dot( Eigen::Map<Eigen::Matrix<double, Eigen::Dynamic, 1> >(blockMult<9>(full_stepSize, temp).data()) );
+      Eigen::Matrix<double, Eigen::Dynamic, 1> prox_rhs = Eigen::Map<Eigen::Matrix<double, Eigen::Dynamic, 1> > (temp.data(), 9 * numCameras);
+      prox_rhs = Eigen::Map<Eigen::Matrix<double, Eigen::Dynamic, 1> > (cameras.data(), 9 * numCameras) -
+                 Eigen::Map<Eigen::Matrix<double, Eigen::Dynamic, 1> > (cameras_s.data(), 9 * numCameras);
+      const double penaltyStart = prox_rhs.dot( Eigen::Map<Eigen::Matrix<double, Eigen::Dynamic, 1> >(blockMult<9>(full_stepSize, temp).data(), 9 * numCameras) );
       prox_rhs += delta_p;
-      const double penaltyEnd = prox_rhs.dot( Eigen::Map<Eigen::Matrix<double, Eigen::Dynamic, 1> >( blockMult<9>(full_stepSize, temp).data() ) );
+      const double penaltyEnd = prox_rhs.dot( Eigen::Map<Eigen::Matrix<double, Eigen::Dynamic, 1> >(blockMult<9>(full_stepSize, temp).data(), 9 * numCameras) );
 
       for (int id = 0; id < delta_p.size(); ++id) {
           cameras[id] += delta_p[id];
@@ -720,8 +765,10 @@ void UpdateStepSizeAndSolve() { // Recompute.
           landmarks[id] += delta_l[id];
       }
       const double costEnd = 2 * GetCost(); // demands cameras , landmarks already updated.
+      std::cout << " costs " << costStart << " " << costQuad << " " << costEnd << "\n";
 
       const double tr_check = (costStart - costEnd + penaltyStart - penaltyEnd) / std::max(0.1, costStart - costQuad + penaltyStart - penaltyEnd);
+      std::cout << " tr_check " << tr_check << "\n";
 
       if(tr_check < 0.25) {
           for (int id = 0; id < delta_p.size(); ++id) {
@@ -730,11 +777,13 @@ void UpdateStepSizeAndSolve() { // Recompute.
           for (int id = 0; id < delta_l.size(); ++id) {
               landmarks[id] -= delta_l[id];
           }
-          tr_radius *= 2;
+          tr_radius /= 2;
+          std::cout << "decrease TR radius " << tr_radius << "\n";
       }
       if(tr_check > 0.25) {
-          if(tr_check > 0.8) { 
-            tr_radius /= 2;
+          if(tr_check > 0.8) {
+            tr_radius = std::min(max_trust_region_radius, 1.5 * tr_radius);
+            std::cout << "increase TR radius " << tr_radius << "\n";
           }
           break;
       }
@@ -875,7 +924,7 @@ private:
       // std::cout << " Cam 543: " << std::sqrt(JpJ_cam[0]) << " " << std::sqrt(JpJ_cam[1]) << " " << std::sqrt(JpJ_cam[2]) << " " << std::sqrt(JpJ_cam[3]) << " " << std::sqrt(JpJ_cam[4]) << " " << std::sqrt(JpJ_cam[5]) << " " << std::sqrt(JpJ_cam[6]) << " " << std::sqrt(JpJ_cam[7]) << " " << std::sqrt(JpJ_cam[8]) << "\n";
       Jp.makeCompressed();
       Jl.makeCompressed();
-      return std::make_tuple(Jp,Jl,residuals);
+      return std::make_tuple(Jp, Jl, residuals);
     }
 
     // Also delivers residuals and gradient.
@@ -935,6 +984,7 @@ private:
     void Init(int numClusters = 1) {
         numCameras = 0;
         numLandmarks = 0;
+        numResiduals = 0;
         firstIteration = true;
         current_be = init_be;
         start_be = init_be;
@@ -966,6 +1016,7 @@ private:
     int cluster_id;
     int numCameras = 0;
     int numLandmarks = 0;
+    int numResiduals = 0;
     const double init_be = 1e-4;
     double current_be = init_be;
     double start_be = init_be;
@@ -1046,8 +1097,11 @@ int main() {
           auto update_lambda = [&push_socket, &cluster_to_program, &mtx](int cluster_id) {
               CeresProgram& program = cluster_to_program[cluster_id];
               // std::cout << cluster_id << " Update "<< "\n";
-              program.UpdateStepSize();
-              program.Solve();
+
+            //   program.UpdateStepSize();
+            //   program.Solve();
+              program.UpdateStepSizeAndSolve();
+
               return_cluster_proto return_proto = program.FillReturnProto();
               const double cost = 2 * program.GetCost();
               return_proto.set_cost(cost);
@@ -1089,9 +1143,12 @@ int main() {
 
           auto program_lambda = [&cluster_to_program, &push_socket, &mtx](int cluster_id) {
             CeresProgram& program = cluster_to_program[cluster_id];
-            program.UpdateStepSize();
+
+            // program.UpdateStepSize();
+            // program.Solve();
             //std::this_thread::sleep_for(std::chrono::seconds(5));
-            program.Solve();
+            program.UpdateStepSizeAndSolve();
+
             return_cluster_proto return_proto = program.FillReturnProto();
             const double cost = 2 * program.GetCost();
             return_proto.set_cost(cost);
