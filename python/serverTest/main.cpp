@@ -685,7 +685,6 @@ void UpdateStepSizeAndSolve() { // Recompute.
       std::cout << " Jl " << Jl.valuePtr()[0] << " " << Jl.valuePtr()[1] << " " << Jl.valuePtr()[2] << "\n";
       Jl = (Jl * diag.matrix().asDiagonal()).eval(); // This does not happen as diag is diag of Vl. That gets changed. diag is not copied but reference.
       std::cout << " Jl " << Jl.valuePtr()[0] << " " << Jl.valuePtr()[1] << " " << Jl.valuePtr()[2] << "\n";
-
       Vl = diag.matrix().asDiagonal() * Vl * diag.matrix().asDiagonal();
   }
   const Eigen::DiagonalMatrix<double, Eigen::Dynamic> diagVL = Diagonal<3>(Vl); // Vl = VL + L * diagVL
@@ -723,74 +722,87 @@ void UpdateStepSizeAndSolve() { // Recompute.
   const int power_iterations = 100;
   const double costStart = residual.squaredNorm();
   std::cout << " coststart " << costStart << "\n";
+  // options.max_num_iterations 
+  while ( true ) { // if costStart + penaltyStart < costEnd + penaltyP
 
-  while ( true ) {
     //   std::cout << " diagUP " << Ul.diagonal()[0] << " " << Ul.diagonal()[1] << " " << Ul.diagonal()[2] << "\n";
     //   std::cout << " diagVL " << Vl.diagonal()[0] << " " << Vl.diagonal()[1] << " " << Vl.diagonal()[2] << "\n";// TOTALLY OFF after tr_check fails.
-      Ul += (1. / tr_radius - inv_tr_radius) * (diagUP + Jp.transpose() * Jp);
-      Vl += (1. / tr_radius - inv_tr_radius) * (diagVL + Jl.transpose() * Jl);
+
+    Ul += (1. / tr_radius - inv_tr_radius) * (diagUP);// + Jp.transpose() * Jp);
+    SparseMatrix<double, Eigen::RowMajor> temp_p(9 * numCameras, 9 * numCameras);
+    temp_p.reserve(VectorXi::Constant(9 * numCameras, 9));
+    temp_p = Jp.transpose() * Jp * (1. / tr_radius - inv_tr_radius);
+    Ul += temp_p;
+    Vl += (1. / tr_radius - inv_tr_radius) * (diagVL);// + Jl.transpose() * Jl);
+
+    // SparseMatrix<double, Eigen::RowMajor> temp_l(3 * numLandmarks, 3 * numLandmarks);
+    // temp_l.reserve(VectorXi::Constant(3 * numLandmarks, 3));
+    // temp_l = Jl.transpose() * Jl * (1. / tr_radius - inv_tr_radius);
+    // Vl += temp_l;
+
+    //Vl += (1. / tr_radius - inv_tr_radius) * (Jl.transpose() * Jl);
+
     //   std::cout << " diagUp " << Ul.diagonal()[0] << " " << Ul.diagonal()[1] << " " << Ul.diagonal()[2] << "\n";
     //   std::cout << " diagVL " << Vl.diagonal()[0] << " " << Vl.diagonal()[1] << " " << Vl.diagonal()[2] << "\n";
       
-      //std::cout << " VL " << Vl.diagonal() << "\n";
-      inv_tr_radius = 1. / tr_radius;
+    //std::cout << " VL " << Vl.diagonal() << "\n";
+    inv_tr_radius = 1. / tr_radius;
 
-      const auto [delta_p, delta_l] = SolveByGDNesterov(Ul, Vl, Jp, Jl, residual, power_iterations);
-      // compute cost / tr_check
-      //fx0_new = fx0 + (J_pose * delta_p + J_land * delta_l)
-      const double costQuad = (residual + Jp * delta_p + Jl * delta_l).squaredNorm();
-      
-      const double costQuad2 = (residual - Jp * delta_p - Jl * delta_l).squaredNorm();
-      const double costQuad3 = (residual - Jp * delta_p + Jl * delta_l).squaredNorm();
-      const double costQuad4 = (residual + Jp * delta_p - Jl * delta_l).squaredNorm();
+    const auto [delta_p, delta_l] = SolveByGDNesterov(Ul, Vl, Jp, Jl, residual, power_iterations);
+    // compute cost / tr_check
+    //fx0_new = fx0 + (J_pose * delta_p + J_land * delta_l)
+    const double costQuad  = (residual + Jp * delta_p + Jl * delta_l).squaredNorm();
+    const double costQuad2 = (residual - Jp * delta_p - Jl * delta_l).squaredNorm();
+    const double costQuad3 = (residual - Jp * delta_p + Jl * delta_l).squaredNorm();
+    const double costQuad4 = (residual + Jp * delta_p - Jl * delta_l).squaredNorm();
+    // This is wrong: costQuad cannot be greater costStart by definition. it can if s is in the wrong direction. 
+    // yet then penalties should have changed as well?
+    std::cout << costStart << " > " << costQuad << " " << costQuad2 << " " << costQuad3 << " " << costQuad4 << "\n";
 
-        std::cout << costStart << " > " << costQuad << " " << costQuad2 << " " << costQuad3 << " " << costQuad4 << "\n";
+    // std::cout << "res/dl/dp :" << residual.squaredNorm() << " " << delta_p.squaredNorm() << " " << delta_l.squaredNorm() << "\n";
+    // Eigen::Map<Eigen::Matrix<double, Eigen::Dynamic, 1> >(blockMult<9>(full_stepSize, cameras).data());
 
-      // std::cout << "res/dl/dp :" << residual.squaredNorm() << " " << delta_p.squaredNorm() << " " << delta_l.squaredNorm() << "\n";
+    std::vector<double> temp(9 * numCameras, 0.); // same size as camera vector
+    Eigen::Matrix<double, Eigen::Dynamic, 1> prox_rhs = Eigen::Map<Eigen::Matrix<double, Eigen::Dynamic, 1> > (temp.data(), 9 * numCameras);
+    prox_rhs = Eigen::Map<Eigen::Matrix<double, Eigen::Dynamic, 1> > (cameras.data(), 9 * numCameras) -
+               Eigen::Map<Eigen::Matrix<double, Eigen::Dynamic, 1> > (cameras_s.data(), 9 * numCameras);
+    const double penaltyStart = prox_rhs.dot( Eigen::Map<Eigen::Matrix<double, Eigen::Dynamic, 1> >(blockMult<9>(full_stepSize, temp).data(), 9 * numCameras) );
+    prox_rhs += delta_p;
+    const double penaltyEnd = prox_rhs.dot( Eigen::Map<Eigen::Matrix<double, Eigen::Dynamic, 1> >(blockMult<9>(full_stepSize, temp).data(), 9 * numCameras) );
 
-      // Eigen::Map<Eigen::Matrix<double, Eigen::Dynamic, 1> >(blockMult<9>(full_stepSize, cameras).data());
+    for (int id = 0; id < delta_p.size(); ++id) {
+        cameras[id] += delta_p[id];
+    }
+    for (int id = 0; id < delta_l.size(); ++id) {
+        landmarks[id] += delta_l[id];
+    }
+    const double costEnd = 2 * GetCost(); // demands cameras , landmarks already updated.
+    std::cout << " costs " << costStart << " " << costQuad << " " << costEnd << "\n";
+    std::cout << "start Cost < end cost: "<< costStart + penaltyStart << " < " << costEnd + penaltyEnd << "\n";
 
-      std::vector<double> temp(9 * numCameras, 0.); // same size as camera vector
-      Eigen::Matrix<double, Eigen::Dynamic, 1> prox_rhs = Eigen::Map<Eigen::Matrix<double, Eigen::Dynamic, 1> > (temp.data(), 9 * numCameras);
-      prox_rhs = Eigen::Map<Eigen::Matrix<double, Eigen::Dynamic, 1> > (cameras.data(), 9 * numCameras) -
-                 Eigen::Map<Eigen::Matrix<double, Eigen::Dynamic, 1> > (cameras_s.data(), 9 * numCameras);
-      const double penaltyStart = prox_rhs.dot( Eigen::Map<Eigen::Matrix<double, Eigen::Dynamic, 1> >(blockMult<9>(full_stepSize, temp).data(), 9 * numCameras) );
-      prox_rhs += delta_p;
-      const double penaltyEnd = prox_rhs.dot( Eigen::Map<Eigen::Matrix<double, Eigen::Dynamic, 1> >(blockMult<9>(full_stepSize, temp).data(), 9 * numCameras) );
+    const double tr_check = (costStart - costEnd + penaltyStart - penaltyEnd) / std::max(0.1, costStart - costQuad + penaltyStart - penaltyEnd);
+    std::cout << " tr_check " << tr_check << "\n";
+    if (tr_check < 0.25) {
+        tr_radius /= 2;
+        std::cout << "decrease TR radius " << tr_radius << "\n";
+    }
+    if (tr_check > 0.8) {
+      tr_radius = std::min(max_trust_region_radius, 2 * tr_radius);//1.5
+      std::cout << "increase TR radius " << tr_radius << "\n";
+    }
 
+    if (costStart + penaltyStart < costEnd + penaltyEnd) { // revert if cost does not improve
       for (int id = 0; id < delta_p.size(); ++id) {
-          cameras[id] += delta_p[id];
+          cameras[id] -= delta_p[id];
       }
       for (int id = 0; id < delta_l.size(); ++id) {
-          landmarks[id] += delta_l[id];
+        landmarks[id] -= delta_l[id];
       }
-      const double costEnd = 2 * GetCost(); // demands cameras , landmarks already updated.
-      std::cout << " costs " << costStart << " " << costQuad << " " << costEnd << "\n";
-
-      const double tr_check = (costStart - costEnd + penaltyStart - penaltyEnd) / std::max(0.1, costStart - costQuad + penaltyStart - penaltyEnd);
-      std::cout << " tr_check " << tr_check << "\n";
-
-      if(tr_check < 0.25) {
-          for (int id = 0; id < delta_p.size(); ++id) {
-              cameras[id] -= delta_p[id];
-          }
-          for (int id = 0; id < delta_l.size(); ++id) {
-              landmarks[id] -= delta_l[id];
-          }
-          tr_radius /= 2;
-          std::cout << "decrease TR radius " << tr_radius << "\n";
-      }
-      if(tr_check > 0.25) {
-          if(tr_check > 0.8) {
-            tr_radius = std::min(max_trust_region_radius, 1.5 * tr_radius);
-            std::cout << "increase TR radius " << tr_radius << "\n";
-          }
-          break;
-      }
+      continue;
+    }
+    break;
   }
 }
-
-
 ///////////////////////////////////
 
 private:
