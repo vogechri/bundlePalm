@@ -474,7 +474,7 @@ def prox_f_push_pull(camera_indices_in_cluster_, point_indices_in_cluster_, loca
             request.update.be = blockEig_in_cluster_[ci]
             request.update.cluster_id = ci
             if revert_lm == 1:
-                request.update.revert_lm = 1 # line search rejected step
+                request.update.revert_lm = 1 # line search rejected step -- this resets poses_s as well?
             elif revert_lm == 2:
                 request.update.revert_lm = 2
             else:

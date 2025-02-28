@@ -653,7 +653,7 @@ SolveByGDNesterov(SparseMatrix<double, Eigen::RowMajor> Uli, SparseMatrix<double
   for(int i=0;i< cameras.size(); ++i ){
     temp[i] = cameras[i] - cameras_s[i];
     if (i < 10)
-    std::cout << "temp " << i << " " << temp[i] << "\n";
+    std::cout << "temp " << i << " " << temp[i]  <<  " = " << cameras[i] << " - " << cameras_s[i] << "\n";
   } 
   Eigen::VectorXd prox_rhs = Eigen::Map<Eigen::VectorXd> (temp.data(), 9 * numCameras);
   const double penaltyStart = prox_rhs.dot( blockMult<9>(full_stepSize, prox_rhs) );
