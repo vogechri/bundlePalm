@@ -1,6 +1,7 @@
 // #define _ceres_num_threads_ 1
 // #define __unweighted_system__
 #define _num_threads_machine_ 31
+//#define _const_diag_
 
 #include <zmq.hpp>
 #include <string>
@@ -213,20 +214,20 @@ void BlockSqrt(SparseMatrix<double, Eigen::RowMajor>& mat) {
     //std::cout << "before  "<< values[0]<< " " << values[1]<< " " << values[2]<< " " << values[3] << "\n";
 #pragma omp parallel for num_threads(options.num_threads)
     for (int i = 0; i < numrows / N; i++) {
-        auto mat9x9 = Eigen::Map< Eigen::Matrix<double, N, N> > (&(values[i * N*N]));//,  Eigen::Stride<0, 0>);
-        //std::cout << "before "<< mat9x9 << " \n";
+        auto matNxN = Eigen::Map< Eigen::Matrix<double, N, N> > (&(values[i * N*N]));//,  Eigen::Stride<0, 0>);
+        //std::cout << "before "<< matNxN << " \n";
 
         Eigen::SelfAdjointEigenSolver<Eigen::Matrix<double,N,N> > eigensolver;
-        eigensolver.computeDirect(mat9x9, Eigen::DecompositionOptions::ComputeEigenvectors);
+        eigensolver.computeDirect(matNxN, Eigen::DecompositionOptions::ComputeEigenvectors);
         //VPQ_EXPECT_EQ(eigensolver.info(), Eigen::Success);
 
         // SqrtCovEigenValues are sorted in decreasing order.
         const Eigen::Vector<double, N> sqrtEigenValues = eigensolver.eigenvalues().cwiseAbs().cwiseSqrt().cwiseMax(1e-16);//.cwiseMax(lowerBoundSquared).cwiseSqrt().cwiseInverse();
         // recall : i had here min ev >= 1e-6 * maxEv. Could return a diag matrix
-        mat9x9 = eigensolver.eigenvectors() * sqrtEigenValues.asDiagonal() * eigensolver.eigenvectors().transpose();
-        
-        //auto mat9x9_out = Eigen::Map< Eigen::Matrix<double,N,N> > (&(values[i * N*N]));//,  Eigen::Stride<0, 0>);
-        //std::cout << "after  "<< mat9x9_out.transpose() * mat9x9_out << " \n";
+        matNxN = eigensolver.eigenvectors() * sqrtEigenValues.asDiagonal() * eigensolver.eigenvectors().transpose();
+
+        //auto matNxN_out = Eigen::Map< Eigen::Matrix<double,N,N> > (&(values[i * N*N]));//,  Eigen::Stride<0, 0>);
+        //std::cout << "after  "<< matNxN_out.transpose() * matNxN_out << " \n";
     }
     //std::cout << "after  "<< values[0]<< " " << values[1]<< " " << values[2]<< " " << values[3] << "\n";
 }
@@ -279,7 +280,6 @@ template<int N>
 Eigen::DiagonalMatrix<double, Eigen::Dynamic>
 Diagonal(SparseMatrix<double, Eigen::RowMajor>& mat) {
   Eigen::DiagonalMatrix<double, Eigen::Dynamic> diag = mat.diagonal().asDiagonal(); // ?
-//#define _const_diag_
 #ifdef _const_diag_
   auto diagdiag = diag.diagonal();
   for (int b = 0; b < mat.rows() / N; ++b) { // block
@@ -303,11 +303,40 @@ Diagonal(SparseMatrix<double, Eigen::RowMajor>& mat) {
 template<int N>
 std::vector<double> blockMult(const std::vector<double>& blockMat, const std::vector<double>& vec) {
   std::vector<double> res(blockMat.size() / N, 0);
-  for (int id = 0; id < blockMat.size(); ++id) {
-      res[id / N] += blockMat[id] * vec[id / N];
+  for (int id = 0; id < res.size(); ++id) {
+    for (int k = 0; k < N; ++k) {
+      res[id] += blockMat[id * N + k] * vec[(id / N ) * N + k];
+    }
   }
   return res;
 }
+
+template<int N>
+Eigen::VectorXd blockMult(const std::vector<double>& blockMat, const Eigen::VectorXd& vec) {
+  const int num = blockMat.size() / N;
+  Eigen::VectorXd res = Eigen::VectorXd::Zero(num); // Eigen::Vector<double, Eigen::Dynamic> res(num, 0);
+  for (int id = 0; id < res.size(); ++id) {
+    for (int k = 0; k < N; ++k) {
+      res[id] += blockMat[id * N + k] * vec[(id / N ) * N + k];
+    }
+  }
+  return res;
+}
+
+
+// template<int N>
+// void blockAdd(std::vector<double>& dest, std::vector<double>& add) {
+//   for (int id = 0; id < dest.size(); ++id) {
+//     dest[id] += add[id];
+//   }
+// }
+
+// template<int N>
+// void blockSub(std::vector<double>& dest, std::vector<double>& sub) {
+//   for (int id = 0; id < dest.size(); ++id) {
+//     dest[id] -= sub[id];
+//   }
+// }
 
 bool stop_criterion(double delta, double delta_i, int i) {
   // lower (1e-4) can be worse? maybe just the parts / how parts are.
@@ -560,6 +589,7 @@ public:
       }
     }
 
+    // With that Jl changes but it does not matter.
     void UpdateStepSize() { // Recompute.
       const auto [Jp, Jl] = GetJacobian();
       if (firstIteration) {
@@ -599,7 +629,7 @@ public:
 // new stuff for self optimization
 
 void UpdatePreconditioningCameras(SparseMatrix<double, Eigen::RowMajor> JpJ) {
-  full_stepSize.resize(stepSize.size(), 0);
+  full_stepSize.resize(81 * numCameras, 0);
   const double *values = JpJ.valuePtr();
   std::copy(values, values + full_stepSize.size(), full_stepSize.data());
   // ToDo: Is this ok or an issue to be resolved differently?
@@ -616,35 +646,62 @@ SolveByGDNesterov(SparseMatrix<double, Eigen::RowMajor> Uli, SparseMatrix<double
                 const Eigen::Matrix<double, Eigen::Dynamic, 1>& res, int power_iterations) {
   // compute bS, Vli, W
   BlockInverse<3>(Vli);
+  SparseMatrix<double, Eigen::RowMajor> Ul = Uli.eval();
+  double startCost = res.squaredNorm();
+
+  std::vector<double> temp(9 * numCameras, 0.); // same size as camera vector
+  for(int i=0;i< cameras.size(); ++i ){
+    temp[i] = cameras[i] - cameras_s[i];
+    if (i < 10)
+    std::cout << "temp " << i << " " << temp[i] << "\n";
+  } 
+  Eigen::VectorXd prox_rhs = Eigen::Map<Eigen::VectorXd> (temp.data(), 9 * numCameras);
+  const double penaltyStart = prox_rhs.dot( blockMult<9>(full_stepSize, prox_rhs) );
+  if (true) {
+    double cost = res.squaredNorm();
+    std::cout << " gd cost " << -2 << " " << cost + penaltyStart << "\n";
+  }
+
   BlockInverse<9>(Uli);
   const double Lip = 0.9;
   double lambda0 = (1. + std::sqrt(5.)) / 2.;
-  const SparseMatrix<double, Eigen::RowMajor> W = Jp.transpose() * Jl;
-  Eigen::Matrix<double, Eigen::Dynamic, 1> bS;
+  const SparseMatrix<double, Eigen::RowMajor> W = (Jp.transpose() * Jl).eval();
+  Eigen::Matrix<double, Eigen::Dynamic, 1> bS = Jp.transpose() * res;
   // bS = (bp_s                     - W * Vli * bl).flatten() # see XX equals 2 * (bp - W * Vli * bl)
   //       bp_s = bp + stepSize * prox_rhs
   // bS = (bp + stepSize * prox_rhs - W * Vli * bl).flatten() # see XX equals 2 * (bp - W * Vli * bl)
-  bS = Jp.transpose() * res;
-  bS = bS + Eigen::Map<Eigen::Matrix<double, Eigen::Dynamic, 1> >(blockMult<9>(full_stepSize, cameras).data(), 9*numCameras);
-  bS = bS - Eigen::Map<Eigen::Matrix<double, Eigen::Dynamic, 1> >(blockMult<9>(full_stepSize, cameras_s).data(), 9*numCameras);
-  bS = bS - W * (Vli * (Jl.transpose() * res));
+  bS += Eigen::Map<Eigen::Matrix<double, Eigen::Dynamic, 1> >(blockMult<9>(full_stepSize, cameras).data(), 9 * numCameras);
+  bS -= Eigen::Map<Eigen::Matrix<double, Eigen::Dynamic, 1> >(blockMult<9>(full_stepSize, cameras_s).data(), 9 * numCameras);
+  bS -= W * (Vli * (Jl.transpose() * res));
 
-  //std::cout << " Jl " << Jl.valuePtr()[0] << " " << Jl.valuePtr()[1] << " " << Jl.valuePtr()[2] << "\n";
-//   std::cout << "bS :" << bS.array() << "\n";
-//   std::cout << "bp :" << (Jp.transpose() * res).array() << "\n";
-//   std::cout << "bl :" << (Jl.transpose() * res).array() << "\n";
+  // std::cout << " Jl " << Jl.valuePtr()[0] << " " << Jl.valuePtr()[1] << " " << Jl.valuePtr()[2] << "\n";
+  // std::cout << "bS :" << bS.array() << "\n";
+  // std::cout << "bp :" << (Jp.transpose() * res).array() << "\n";
+  // std::cout << "bl :" << (Jl.transpose() * res).array() << "\n";
   // std::cout << "res :" << res.array() << "\n"; //ok
 
   Eigen::Matrix<double, Eigen::Dynamic, 1> ubs = -Uli * bS;
-  Eigen::Matrix<double, Eigen::Dynamic, 1> xk = - ubs;
-  Eigen::Matrix<double, Eigen::Dynamic, 1> y0 = - ubs;
+  // Todo : * 1. / Lip *
+  Eigen::Matrix<double, Eigen::Dynamic, 1> xk = - ubs; // xk =0, g = ubs, yk = -1. / Lip * g = - 1. / Lip * ubs; xk = (1-gamma) yk + gamma y0, gamma = 0
+  Eigen::Matrix<double, Eigen::Dynamic, 1> y0 = - ubs; // xk =0, g = ubs, yk = -1. / Lip * g = - 1. / Lip * ubs; y0 = yk.
   // Lip = 0.9 # 100 -> 1. # TODO: play, find out how to progress over time.
   // lambda0 = (1.+np.sqrt(5.)) / 2. # l=0 g=1, 0, .. L0=1 g = 0,..
 
-  std::cout << "xk :" << xk.squaredNorm() << "\n";
+  if (true) {
+    Eigen::Matrix<double, Eigen::Dynamic, 1> delta_l = Vli * ((W.transpose() * xk) - (Jl.transpose() * res));
+    double cost = (res - Jp * xk + Jl * delta_l).squaredNorm();
 
-  for(int i = 0;i < power_iterations; ++i) {
-      const double lambda1 = (1. + std::sqrt(1. + 4. * lambda0*lambda0)) / 2.;
+    prox_rhs -= xk;
+    const double penaltyEnd = prox_rhs.dot( blockMult<9>(full_stepSize, prox_rhs) );
+    prox_rhs += xk;
+
+    std::cout << " gd cost " << -1 << " " << cost + penaltyEnd << "\n";
+  }
+
+  // std::cout << "xk :" << xk.squaredNorm() << "\n";
+
+  for (int i = 0; i < power_iterations; ++i) {
+      const double lambda1 = (1. + std::sqrt(1. + 4. * lambda0 * lambda0)) / 2.;
       const double gamma = (1. - lambda0) / lambda1;
       lambda0 = lambda1;
 
@@ -652,14 +709,34 @@ SolveByGDNesterov(SparseMatrix<double, Eigen::RowMajor> Uli, SparseMatrix<double
       //     yk = xk - 1/Lip * g
       //     xk = (1-gamma) * yk + gamma * y0
       //     y0 = yk
-      const Eigen::Matrix<double, Eigen::Dynamic, 1> g = xk - Uli * (W * (Vli * (W.transpose() * xk))) + ubs;
+      // const Eigen::Matrix<double, Eigen::Dynamic, 1> g = (xk - Uli * (W * (Vli * (W.transpose() * xk).eval()).eval()).eval() + ubs).eval();
+      const Eigen::Matrix<double, Eigen::Dynamic, 1> g = (xk - Uli * (W * (Vli * (W.transpose() * xk))) + ubs);
       const Eigen::Matrix<double, Eigen::Dynamic, 1> yk = xk - 1. / Lip * g;
       xk = (1. - gamma) * yk + gamma * y0;
       y0 = yk;
 
+      if (true) {
+        // # eq is Ul [I - Uli * W * Vli * W.transpose()] x = b
+        // costk = xk.dot(Ul * xk - W * (Vli * (W.transpose() * xk)) - 2 * bS)
+        // print(it__, " gd cost ", costk)
+        // double cost = startCost + xk.dot(Ul * xk - W * (Vli * (W.transpose() * xk)) - 2. * bS);
+        // costk = np.sum(((Ul - W * Vli * W.transpose()) * xk - bS) ** 2)
+        // double cost = (Ul * xk - W * (Vli * (W.transpose() * xk)) - bS).squaredNorm();
+
+        // costQuad  = (residual + Jp * delta_p + Jl * delta_l).squaredNorm();
+        Eigen::Matrix<double, Eigen::Dynamic, 1> delta_l = Vli * ((W.transpose() * xk) - (Jl.transpose() * res));
+        double cost = (res - Jp * xk + Jl * delta_l).squaredNorm();
+
+        prox_rhs -= xk;
+        const double penaltyEnd = prox_rhs.dot( blockMult<9>(full_stepSize, prox_rhs) );
+        //const double penaltyEnd = prox_rhs.dot( Eigen::Map<Eigen::Matrix<double, Eigen::Dynamic, 1> >(blockMult<9>(full_stepSize, temp).data(), 9 * numCameras) );
+        prox_rhs += xk;
+
+        std::cout << " gd cost " << i << " " << cost + penaltyEnd << "\n";
+      }
       //std::cout << i << ". xk :" << xk.squaredNorm() << "\n";
 
-      if(stop_criterion(xk.norm(), 1. / Lip * g.norm(), i)) { // array().real().norm();?
+      if (stop_criterion(xk.norm(), 1. / Lip * g.norm(), i)) { // array().real().norm();?
           break;
       }
   }
@@ -674,7 +751,7 @@ void UpdateStepSizeAndSolve() { // Recompute.
   Vl = Jl.transpose() * Jl;
   if (firstIteration) { // preconditioning
       // diag is a reference .. why? i do stuff on it.
-      const auto diag = Vl.diagonal().array().cwiseMax(1e-24).cwiseSqrt().cwiseInverse();
+      const auto diag = Vl.diagonal().array().cwiseMax(1e-24).cwiseSqrt().cwiseInverse().eval();
       THROW_IF(diag.size() != vnorm.size());
       std::cout << " Update vnorm " << cluster_id << " " << diag.size() << " == " << vnorm.size() << "\n";
       for (int id = 0; id < vnorm.size(); ++id) {
@@ -703,16 +780,19 @@ void UpdateStepSizeAndSolve() { // Recompute.
   }
   const Eigen::DiagonalMatrix<double, Eigen::Dynamic> diagUP = Diagonal<9>(Ul); // Vp = Vp + L * diagVp
 
-  const double scale = 1e-1; // 1e0: @29: 501k, no jump. 1e1 many jumps. 473k
+  const double scale = 1e0;//1e-1; // 1e0: @29: 501k, no jump. 1e1 many jumps. 473k
   if (!firstIteration) { // also handled setting be = 0 in 1st step.
     SparseMatrix<double, Eigen::RowMajor> stepSize = scale * Ul;
     stepSize += diagUP * current_be;
     const double* values = stepSize.valuePtr();
-    std::copy(values, values + full_stepSize.size(), full_stepSize.data());
+    std::copy(values, values + full_stepSize.size(), full_stepSize.data()); 
     Ul += stepSize;
   } else {
-    Ul += scale * Ul;
-    Ul += diagUP * current_be;
+    //Ul += scale * Ul;
+    //Ul += diagUP * current_be;
+    // let full_Stepsize define setpsize always. else confusing to debug: cost optimized differs from cost evaluated.
+    const SparseMatrix<double, Eigen::RowMajor> stepSize = Ul;
+    Ul += stepSize;
   }
   // Loop until ok or adjust tr_region
   tr_radius = std::min(max_trust_region_radius, tr_radius);
@@ -728,17 +808,18 @@ void UpdateStepSizeAndSolve() { // Recompute.
     //   std::cout << " diagUP " << Ul.diagonal()[0] << " " << Ul.diagonal()[1] << " " << Ul.diagonal()[2] << "\n";
     //   std::cout << " diagVL " << Vl.diagonal()[0] << " " << Vl.diagonal()[1] << " " << Vl.diagonal()[2] << "\n";// TOTALLY OFF after tr_check fails.
 
+    // if not complicated this will lead to total chaos, likely the 
     Ul += (1. / tr_radius - inv_tr_radius) * (diagUP);// + Jp.transpose() * Jp);
     SparseMatrix<double, Eigen::RowMajor> temp_p(9 * numCameras, 9 * numCameras);
     temp_p.reserve(VectorXi::Constant(9 * numCameras, 9));
     temp_p = Jp.transpose() * Jp * (1. / tr_radius - inv_tr_radius);
     Ul += temp_p;
-    Vl += (1. / tr_radius - inv_tr_radius) * (diagVL);// + Jl.transpose() * Jl);
 
-    // SparseMatrix<double, Eigen::RowMajor> temp_l(3 * numLandmarks, 3 * numLandmarks);
-    // temp_l.reserve(VectorXi::Constant(3 * numLandmarks, 3));
-    // temp_l = Jl.transpose() * Jl * (1. / tr_radius - inv_tr_radius);
-    // Vl += temp_l;
+    Vl += (1. / tr_radius - inv_tr_radius) * (diagVL);// + Jl.transpose() * Jl);
+    SparseMatrix<double, Eigen::RowMajor> temp_l(3 * numLandmarks, 3 * numLandmarks);
+    temp_l.reserve(VectorXi::Constant(3 * numLandmarks, 3));
+    temp_l = Jl.transpose() * Jl * (1. / tr_radius - inv_tr_radius);
+    Vl += temp_l;
 
     //Vl += (1. / tr_radius - inv_tr_radius) * (Jl.transpose() * Jl);
 
@@ -763,13 +844,29 @@ void UpdateStepSizeAndSolve() { // Recompute.
     // Eigen::Map<Eigen::Matrix<double, Eigen::Dynamic, 1> >(blockMult<9>(full_stepSize, cameras).data());
 
     std::vector<double> temp(9 * numCameras, 0.); // same size as camera vector
-    Eigen::Matrix<double, Eigen::Dynamic, 1> prox_rhs = Eigen::Map<Eigen::Matrix<double, Eigen::Dynamic, 1> > (temp.data(), 9 * numCameras);
-    prox_rhs = Eigen::Map<Eigen::Matrix<double, Eigen::Dynamic, 1> > (cameras.data(), 9 * numCameras) -
-               Eigen::Map<Eigen::Matrix<double, Eigen::Dynamic, 1> > (cameras_s.data(), 9 * numCameras);
-    const double penaltyStart = prox_rhs.dot( Eigen::Map<Eigen::Matrix<double, Eigen::Dynamic, 1> >(blockMult<9>(full_stepSize, temp).data(), 9 * numCameras) );
-    prox_rhs += delta_p;
-    const double penaltyEnd = prox_rhs.dot( Eigen::Map<Eigen::Matrix<double, Eigen::Dynamic, 1> >(blockMult<9>(full_stepSize, temp).data(), 9 * numCameras) );
+    for(int i=0;i< cameras.size(); ++i ){
+      temp[i] = cameras[i] - cameras_s[i];
+      // if (i < 10)
+      //   std::cout << "outside temp " << i << " " << temp[i] << "\n";   // OK
+    } 
+    Eigen::VectorXd prox_rhs = Eigen::Map<Eigen::VectorXd> (temp.data(), 9 * numCameras);
+    const double penaltyStart = prox_rhs.dot( blockMult<9>(full_stepSize, prox_rhs) );
+    prox_rhs += delta_p; // this does not add to temp.
+    const double penaltyEnd = prox_rhs.dot( blockMult<9>(full_stepSize, prox_rhs) );
+    const double penaltyEnd2 = (Jp * prox_rhs).squaredNorm();
+    //const double penaltyEnd3 = prox_rhs.transpose() * ( blockMult<9>(full_stepSize, prox_rhs) );
+    //const double penaltyEnd4 = prox_rhs.dot( Ul * prox_rhs );
 
+    SparseMatrix<double, Eigen::RowMajor> Ul_(9 * numCameras, 9 * numCameras);
+    Ul_.reserve(VectorXi::Constant(9 * numCameras, 9));
+    Ul_ = Jp.transpose() * Jp;
+    //UpdatePreconditioningCameras(Ul_);
+    //const double penaltyEnd5 = prox_rhs.transpose() * ( blockMult<9>(full_stepSize, prox_rhs) );
+    const double penaltyEnd6 = prox_rhs.dot( Ul_ * prox_rhs );
+ 
+    std::cout << "==Penalties end/end2: " << penaltyEnd << " ?= " << penaltyEnd2 << " == " << penaltyEnd6 << "\n"; // since full_step differs from Jp cna differ  
+    
+    // Needs to be done due to GetCost.
     for (int id = 0; id < delta_p.size(); ++id) {
         cameras[id] += delta_p[id];
     }
@@ -777,21 +874,24 @@ void UpdateStepSizeAndSolve() { // Recompute.
         landmarks[id] += delta_l[id];
     }
     const double costEnd = 2 * GetCost(); // demands cameras , landmarks already updated.
-    std::cout << " costs " << costStart << " " << costQuad << " " << costEnd << "\n";
-    std::cout << "start Cost < end cost: "<< costStart + penaltyStart << " < " << costEnd + penaltyEnd << "\n";
+    std::cout << "==Costs start/quad/end: " << costStart << " " << costQuad << " " << costEnd << "\n";
+    std::cout << "==Penalties start/end: " << penaltyStart << " " << penaltyEnd << "\n";
 
     const double tr_check = (costStart - costEnd + penaltyStart - penaltyEnd) / std::max(0.1, costStart - costQuad + penaltyStart - penaltyEnd);
     std::cout << " tr_check " << tr_check << "\n";
     if (tr_check < 0.25) {
-        tr_radius /= 2;
-        std::cout << "decrease TR radius " << tr_radius << "\n";
+      tr_radius /= 2;
+      std::cout << "decrease TR radius " << tr_radius << "\n";
     }
     if (tr_check > 0.8) {
       tr_radius = std::min(max_trust_region_radius, 2 * tr_radius);//1.5
       std::cout << "increase TR radius " << tr_radius << "\n";
     }
 
+    std::cout << "==Start Cost < estimated cost: " << costStart + penaltyStart << " < " << costQuad + penaltyEnd << "\n";
+
     if (costStart + penaltyStart < costEnd + penaltyEnd) { // revert if cost does not improve
+      std::cout << "Reject Start Cost < end cost: "<< costStart + penaltyStart << " < " << costEnd + penaltyEnd << "\n";
       for (int id = 0; id < delta_p.size(); ++id) {
           cameras[id] -= delta_p[id];
       }
@@ -800,6 +900,7 @@ void UpdateStepSizeAndSolve() { // Recompute.
       }
       continue;
     }
+    std::cout << "Accept Start Cost > end cost: "<< costStart + penaltyStart << " > " << costEnd + penaltyEnd << "\n";
     break;
   }
 }
@@ -828,7 +929,7 @@ private:
       THROW_IF(JpJ.nonZeros() != numCameras * 81);
 
       if (firstIteration) { // also handled setting be = 0 in 1st step.
-        full_stepSize.resize(stepSize.size(), 0);
+        full_stepSize.resize(81 * numCameras, 0);
         const double *values = JpJ.valuePtr();
         std::copy(values, values + full_stepSize.size(), full_stepSize.data());
         // ToDo: Is this ok or an issue to be resolved differently?
@@ -845,7 +946,6 @@ private:
       //const double scale = std::max(1. / 1.005, 1e1 * std::sqrt(start_be / current_be)); // 1e0: @29: 501k, no jump. 1e1 many jumps. 473k
       std::cout << "scale " << scale << " " << start_be << " " << current_be << "\n";
       JpJ = JpJ * (1. / scale); // optional to test. in theory should almost always suffice.
-#define _const_diag_
 #ifdef _const_diag_
       auto diag = JpJ.diagonal().array();
       for (int b = 0; b < numCameras; ++b) { // block
@@ -873,7 +973,7 @@ private:
       //JpJ.diagonal().array().cwise
 
       if (!firstIteration) {
-        full_stepSize.resize(stepSize.size(), 0);
+        full_stepSize.resize(81 * numCameras, 0);
         const double *values = JpJ.valuePtr();
         std::copy(values, values + full_stepSize.size(), full_stepSize.data());
       }
