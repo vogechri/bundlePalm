@@ -852,7 +852,7 @@ LipJ = 1 # unused
 global_init = True
 resetIt = 0
 globalBlockEigUpperLimit = 5e-1 # 1e-1, 1e-3?
-blockEig_in_cluster = 5e-5 * np.ones(kClusters) # 1e-4 or 1e-5
+blockEig_in_cluster = 5e-5 * np.ones(kClusters) # 1e-4 or 1e-5, 5e-5?
 failedNesterovAcceleration = 0
 maxFailedNesterovAcceleration = 3
 print("input blockEig_in_cluster[ci] ", blockEig_in_cluster[0])
@@ -934,7 +934,10 @@ print(-1, " ", round(currentCost), " gain ", round(lastCost - currentCost),
     ". ============= sum fk update takes ", end - start," s",)
 #print(Ul_in_cluster)
 #print(Ul_in_cluster[0])
-poses_v, U_all, Up_cluster = average_cameras_new(camera_indices_in_cluster, poses_in_cluster,
+# TODO: DO NOT UPDATE poses_v since usig bad? Ul's?
+# poses_v, U_all, Up_cluster =
+poses_v = best_poses_v
+_, U_all, Up_cluster = average_cameras_new(camera_indices_in_cluster, poses_in_cluster,
                                                  poses_s_in_cluster, L_in_cluster, Ul_in_cluster, nabla_p_in_cluster)
 
 #DRE cost BEFORE s update, always lower than AFTER update.
@@ -947,7 +950,7 @@ relative_diff  = np.abs(Unorm_.data.flatten() - unorm_t.flatten()) / unorm_t.fla
 relative_diff2 = np.abs(Unorm_.data.flatten()) / np.fmin(unorm_t.flatten(),Unorm_.data.flatten())
 print("All badly pcg cams ", np.arange(relative_diff.shape[0]) [relative_diff > 1e1] // 9)
 print("All badly pcg cams2 ", np.arange(relative_diff2.shape[0]) [relative_diff2 > 1e1] // 9)
-print(relative_diff.reshape((-1,9)))
+#print(relative_diff.reshape((-1,9)))
 print(np.max(relative_diff))
 print(np.max( (Unorm_.data.flatten() - unorm_t.flatten()) / Unorm_.data.flatten()) )
 amax  = np.argmax(relative_diff)
@@ -1073,6 +1076,7 @@ for global_iteration in range(global_iterations):
         else: # does not work well here.
             poses_in_cluster_bfgs = [poses_v.copy() for _ in range(kClusters)]
 
+        # print(poses_s_in_cluster_pre[0].flatten()[0:10], " ==? " , poses_in_cluster_bfgs[0].flatten()[0:10], " vs " , poses_s_in_cluster[0].flatten()[0:10] )
         if ls_it > 0:
             revert_lm = 1 # revert landmark to last step (as the pose as well)
             print("-------------------- revert_lm ", revert_lm, "--------------------")
@@ -1246,6 +1250,13 @@ for global_iteration in range(global_iterations):
                     poses_in_cluster[ci] = poses_in_cluster_bfgs[ci].copy()
                     Ul_in_cluster[ci] = Ul_in_cluster_bfgs[ci].copy()
                     blockEig_in_cluster[ci] = blockEig_in_cluster_bfgs[ci]
+
+                # here poses_s_in_cluster_pre == poses_in_cluster_bfgs
+                # single cluster v=u step =0?
+                # print("Accept: ", poses_s_in_cluster_pre[0].flatten()[0:10], " ==? " ,
+                #       poses_in_cluster_bfgs[0].flatten()[0:10], " vs " , poses_s_in_cluster[0].flatten()[0:10], 
+                #       " step ", s_step_cluster.flatten()[0:10], " " )
+                    
                 L_in_cluster = L_in_cluster_bfgs.copy()
                 landmarks = landmarks_bfgs.copy()
                 lastCostDRE_bfgs = dre_bfgs.copy()

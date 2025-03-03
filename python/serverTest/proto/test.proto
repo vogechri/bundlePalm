@@ -3,9 +3,9 @@ syntax = "proto3";
 
 // Complete program to call Ceres on: read in python, send to server that runs optimization.
 message program_proto {
-  repeated float cameras = 1; // 3d, cameras_s init is by cameras. later extra input.
-  repeated float landmarks = 2; // 9d
-  repeated float observations = 3; // 2d
+  repeated double cameras = 1; // 3d, cameras_s init is by cameras. later extra input.
+  repeated double landmarks = 2; // 9d
+  repeated double observations = 3; // 2d
   repeated int32 cam_id = 4; // per observation 1 cam
   repeated int32 lm_id = 5;  // per observation 1 landmark
   int32 iterations = 6;
@@ -18,27 +18,28 @@ message program_proto {
   int32 num_clusters = 13;
 }
 
+// sent once
 message preconditioning_proto {
   int32 cluster_id = 1;
-  repeated float unorm = 2;
+  repeated double unorm = 2; // must be double
   repeated float vnorm = 3;
 }
 
-message solution_proto {
-  repeated float cameras = 1; // 3d
-  repeated float landmarks = 2; // 9d
-}
+// message solution_proto {
+//   repeated float cameras = 1; // 3d
+//   repeated float landmarks = 2; // 9d
+// }
 
 // we only return new solution for cameras -- later stepsize as well.
 // Test: if we send cameras, we use current program , update cam buffer only and repeat.
-message camera_proto {
-  repeated float cameras = 1; // 3d
-}
+// message camera_proto {
+//   repeated double cameras = 1; // 3d
+// }
 
 // send from master to client
 message prox_cluster_proto {
-  repeated float cameras   = 1; // 3d actually not needed
-  repeated float cameras_s = 2; // 3d
+  repeated double cameras   = 1; // 3d actually not needed mostly/always?
+  repeated double cameras_s = 2; // 3d
   float be = 3;
   int32 cluster_id = 4;
   int32 revert_lm = 5; // if acc. stepsize is reverted, revert lm as well: 1. Also revert to best solution: 2.
@@ -50,16 +51,16 @@ message return_cluster_proto {
   // repeated float cameras   = 1; // 3d
   // repeated float landmarks = 2; // temporary
   // repeated float step_size = 3;
-  repeated float cameras   = 1; // 3d
+  repeated double cameras  = 1; // 3d, must be double
   repeated float landmarks = 2; // temporary
-  repeated float step_size = 3;  
+  repeated float step_size = 3; // can be float -- actually same perf.
   int32 cluster_id = 4;
   float cost = 5;
 }
 
 // send to get cost
 message cost_proto {
-  repeated float cameras = 1; // 3d
+  repeated double cameras = 1; // 3d, bad is not double -- weird.
   int32 cluster_id = 2;
 }
 
@@ -72,13 +73,13 @@ message return_cost_proto {
 message request_proto {
     oneof options {
         program_proto program = 1;
-        camera_proto cameras = 2;
+        //camera_proto cameras = 2;
         prox_cluster_proto update = 3;
         cost_proto cost_update = 4;
         preconditioning_proto preconditioning_update = 5;
   }
 }
 
-message serverMessages_proto {
-    repeated float solution = 1;
-}
+// message serverMessages_proto {
+//     repeated float solution = 1;
+// }
