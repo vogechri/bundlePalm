@@ -2,7 +2,7 @@
 // #define __unweighted_system__
 #define _num_threads_machine_ 31
 #define _const_diag_
-#define __ceresVersion__
+// #define __ceresVersion__
 
 #include <zmq.hpp>
 #include <string>
@@ -285,28 +285,67 @@ Eigen::DiagonalMatrix<double, Eigen::Dynamic>
 Diagonal(SparseMatrix<double, RowMajor>& mat) {
   Eigen::DiagonalMatrix<double, Eigen::Dynamic> diag = mat.diagonal().asDiagonal(); // ?
 #ifdef _const_diag_
-  auto& diagdiag = diag.diagonal();
-  for (int b = 0; b < mat.rows() / N; ++b) { // block
-    double mv = diagdiag(N*b);
-    for (int id = 1; id < N; ++id) {
-      mv = std::max(mv, diagdiag(N*b + id));
-    }
-    for (int id = 0; id < N; ++id) {
-        diagdiag(N*b + id) = mv;
+  if (N == 9) {
+    // const double target = 1e-2; // the larger the stricter regularized.
+    // const double eps = 1e-20;
+    // const double d = -std::log10(eps);
+    // const double t = 1e-1; // should map to target == 1e-3. 1e-3 is best value that works if too small.
+
+    // const double f_t = -std::log10(t + eps) / d;
+    // const double power = std::log(target) / std::log(f_t);
+
+    // const double test = std::pow( -std::log10(std::min(1., t) + eps) / d, power);
+    // std::cout << "t=" << t << " should map to " << target << " == f(t) = " << test << "\n";
+
+    auto& diagdiag = diag.diagonal();
+#pragma omp parallel for num_threads(options.num_threads)
+    for (int b = 0; b < mat.rows() / N; ++b) { // block
+      double mv = diagdiag(N*b);
+      for (int id = 1; id < N; ++id) {
+        mv = std::max(mv, diagdiag(N*b + id));
+      }
+      mv = std::max(1e-32, mv);
+      // TODO: stricter if max is very small?
+      // With PCG, The GN-Hessian aprox should have a scale of #clusters (1/#clusters?). So we can say if max is < t we must correct. 
+      // t = 1e-4. We can even scale. if 1 -> 1e-10, 1e-4: 1e-3. maybe log() -- could also be global min (max cam block)
+      // log(1e-4)
+
+      // f(mv): with f(t)=target, f(1) = 0, f(0) = 1.
+      // const double variableThresh = std::pow( -std::log10(std::min( 1., mv) + eps) / d, power);
+      // if (N == 9 && b < 10) {
+      //   std::cout << "mv " << b << ": f(" << mv << ") = " << variableThresh << "\n";
+      // }
+      for (int id = 0; id < N; ++id) {
+          // diagdiag(N*b + id) = mv;
+
+          // This does ok in handling cases with degenerate cameras (observing only 1/2/3 landmarks in cluster).
+          // Bad clustering 1e-3, not 1e-4. so < 1e-4, but 1e-2 a bit better than 1e-3? a bit random.
+          diagdiag(N*b + id) = std::max(1e-3 * mv, diagdiag(N*b + id)); // not < 1/inf. also 1e10: ok, 1e-6: bit worse
+
+          //diagdiag(N*b + id) = std::max(variableThresh * mv, diagdiag(N*b + id)); // not < 1/inf. also 1e10: ok, 1e-6: bit worse
+      }
     }
   }
 #else
   //diag.diagonal().array() *= (1. + be * scale);
 #endif
-  // diag.diagonal().array() += 1e-18; // TODO: this is not good.
+  // diag.diagonal().array() += 1e-16; // TODO: this is not good/ ok?. does something? test 3086
+  // diag.diagonal().array() = diag.diagonal().array().cwiseMax(1e-10); 
+
+  // just like const diag, add 1e-16 * max value to all diagonal entries / cwiseMax(1e-16 * mv).
+
   // std::cout << diag.diagonal() << "\n";
   return diag;
 }
+
+// TODO: Add a best landmarks from fixed poses (best, all same globally). Run after reset to restart with optimal landmarks to poses.
+// same as set s to large value, yet faster: no need for solving eqs == set iterations to 0.
 
 // StepSize as matrix is needed for multiplication with vectors. Still should be easy as blockMult std vector with other vector.
 template<int N>
 std::vector<double> blockMult(const std::vector<double>& blockMat, const std::vector<double>& vec) {
   std::vector<double> res(blockMat.size() / N, 0);
+#pragma omp parallel for num_threads(options.num_threads)
   for (int id = 0; id < res.size(); ++id) {
     for (int k = 0; k < N; ++k) {
       res[id] += blockMat[id * N + k] * vec[(id / N ) * N + k];
@@ -319,6 +358,7 @@ template<int N>
 Eigen::VectorXd blockMult(const std::vector<double>& blockMat, const Eigen::VectorXd& vec) {
   const int num = blockMat.size() / N;
   Eigen::VectorXd res = Eigen::VectorXd::Zero(num); // Eigen::Vector<double, Eigen::Dynamic> res(num, 0);
+#pragma omp parallel for num_threads(options.num_threads)
   for (int id = 0; id < res.size(); ++id) {
     for (int k = 0; k < N; ++k) {
       res[id] += blockMat[id * N + k] * vec[(id / N ) * N + k];
@@ -500,7 +540,7 @@ public:
       std::cout << "Added " << numCameras << " Stepsize Residual blocks\n";
     }
 
-    double GetCost() {
+    double GetCost(bool revert_lm = false) {
       // 1st get Jacobian(s):
       ceres::Problem::EvaluateOptions evalOptions;
       evalOptions.apply_loss_function = true;
@@ -509,12 +549,34 @@ public:
       evalOptions.num_threads = options.num_threads;
       std::vector<double> residuals;
       double cost;
-      problem.Evaluate(evalOptions, &cost, &residuals, nullptr, nullptr);
-      std::cout << cluster_id << ". Eval cost: " << 2 * cost << "\n";
-      if (cost < best_cost) {
-        best_landmarks = landmarks;
-        best_cost = cost;
+      if (revert_lm) {
+        std::vector<double> temp_landmarks = landmarks;
+        landmarks = best_landmarks;
+        problem.Evaluate(evalOptions, &cost, &residuals, nullptr, nullptr);
+        landmarks = temp_landmarks;
+        std::cout << cluster_id << ". Eval cost with best landmarks: " << 2 * cost << "\n";
+      } else {
+        problem.Evaluate(evalOptions, &cost, &residuals, nullptr, nullptr);
+        std::cout << cluster_id << ". Eval cost: " << 2 * cost << "\n";
       }
+
+      // if (cost < best_cost) { // by v! not by u. -- not working like this .. we must send GLOBAL best cost signal -> save best lms. now those are individual
+      //   best_landmarks = landmarks;
+      //   //best_poses = cameras;
+      //   best_cost = cost;
+      //   std::cout << cluster_id << ". Best cost: " << 2 * cost << "\n";
+
+      //   std::cout << "best poses: ";
+      //   for(int i=0; i< 18; ++i)
+      //   std::cout << cameras[i] << ", ";
+      //   std::cout << "\n";
+
+      //   std::cout << "best lms: ";
+      //   for(int i=0; i< 18; ++i)
+      //   std::cout << best_landmarks[i] << ", ";
+      //   std::cout << "\n";
+      // }
+
       return cost;
     }
 
@@ -588,6 +650,34 @@ public:
       } else if (update.revert_lm() == 2) {
         std::cout << cluster_id << ". Revert landmarks to best cost lms\n";
         landmarks = best_landmarks; // hmm could be same as last_landmarks.
+        //cameras = best_poses;
+        //cameras_s = best_poses;
+
+        // Can I fix cameras and compute best landmarks
+
+        // TODO: new idea: No.
+        // tr_radius = init_trust_region_radius;
+        //tr_radius = 1e-0; // reset as well. TODO. Does nothing for some reason.
+
+        // Get new cost: compare to best cost 
+        const double maybe_best_cost = 2 * GetCost(); // demands cameras , landmarks already updated.
+
+        if (maybe_best_cost != best_cost) {
+          std::cout << cluster_id << "\n=============== Best cost changed: " << best_cost << " vs " << maybe_best_cost << " ===================\n";
+
+          std::cout << "best poses: ";
+          for(int i=0; i< 18; ++i)
+          std::cout << cameras[i] << ", ";
+          std::cout << "\n";
+  
+          std::cout << "lms: ";
+          for(int i=0; i< 18; ++i)
+          std::cout << best_landmarks[i] << ", ";
+          std::cout << "\n";
+        } else {
+          std::cout << cluster_id << "\n!!!!!!!!!!!!!!!! Best cost matched: " << best_cost << " vs " << maybe_best_cost << " !!!!!!!!!!!!!!!!!!\n";
+        }
+
       }
       else {
         last_landmarks = landmarks;
@@ -631,6 +721,16 @@ public:
         // }
     }
 
+    void UpdateBestCost(best_cost_proto ppro) {
+      THROW_IF(ppro.cluster_id() != cluster_id);
+      std::cout << "Best cost update " << cluster_id << " " << ppro.cost() << " < " << best_cost << "\n";
+//      if (ppro.cost() < best_cost) {
+        best_cost = ppro.cost();
+        best_landmarks = landmarks;
+        //new_best_cost = true;
+//      }
+    }
+
 ////////////////////////////////////////
 // new stuff for self optimization
 
@@ -650,8 +750,17 @@ std::pair<Matrix<double, Eigen::Dynamic, 1>, Matrix<double, Eigen::Dynamic, 1>>
 SolveByGDNesterov(SparseMatrix<double, RowMajor> Uli, SparseMatrix<double, RowMajor> Vli, 
                 const SparseMatrix<double, RowMajor>& Jp, const SparseMatrix<double, RowMajor>& Jl, 
                 const Matrix<double, Eigen::Dynamic, 1>& res, int power_iterations) {
+
   // compute bS, Vli, W
   BlockInverse<3>(Vli);
+
+  if (power_iterations == 0) {  // quick hack: xk = delta_p = 0
+    Matrix<double, Eigen::Dynamic, 1> ubs = Uli * (Jp.transpose() * res);
+    Matrix<double, Eigen::Dynamic, 1> xk = 0 * ubs;
+    Matrix<double, Eigen::Dynamic, 1> delta_l = Vli * (-Jl.transpose() * res);
+    return {xk, delta_l};
+   }
+
   bool print_cost = false;
   std::vector<double> temp(9 * numCameras, 0.); // same size as camera vector
   Eigen::VectorXd prox_rhs = Map<Eigen::VectorXd> (temp.data(), 9 * numCameras);
@@ -669,7 +778,7 @@ SolveByGDNesterov(SparseMatrix<double, RowMajor> Uli, SparseMatrix<double, RowMa
   BlockInverse<9>(Uli);
   const double Lip = 0.9;
   double lambda0 = (1. + std::sqrt(5.)) / 2.;
-  const SparseMatrix<double, RowMajor> W = (Jp.transpose() * Jl).eval();
+  const SparseMatrix<double, RowMajor> W = (Jp.transpose() * Jl);//.eval();
   Matrix<double, Eigen::Dynamic, 1> bS = Jp.transpose() * res;
   // bS = (bp_s                     - W * Vli * bl).flatten() # see XX equals 2 * (bp - W * Vli * bl)
   //       bp_s = bp + stepSize * prox_rhs
@@ -742,12 +851,21 @@ SolveByGDNesterov(SparseMatrix<double, RowMajor> Uli, SparseMatrix<double, RowMa
           break;
       }
   }
+
   Matrix<double, Eigen::Dynamic, 1> delta_l = Vli * ((W.transpose() * xk) - (Jl.transpose() * res));
   return {-xk, delta_l};
 }
 
-void UpdateStepSizeAndSolve() { // Recompute.
+void UpdateStepSizeAndSolve() {//bool keep_cameras_fixed = false) { // Recompute.
+  // if (keep_cameras_fixed) {
+  //   keep_cameras_fixed = new_best_cost;
+  // }
+
   auto [Jp, Jl, res] = GetJacobianAndResidual(); // also return sorted! residuals.
+  if(Jp.nonZeros() != 9 * Jp.rows())
+  std::cout << "Jp " << cluster_id << " | " << Jp.nonZeros() << " =? " << Jp.rows() * 9 << "\n";
+  THROW_IF(Jp.nonZeros() != 9 * Jp.rows());
+
   const Matrix<double, Eigen::Dynamic, 1> residual = Map<Matrix<double, Eigen::Dynamic, 1> >(res.data(), 2 * numResiduals);
   SparseMatrix<double, RowMajor> Vl(3 * numLandmarks, 3 * numLandmarks);
   Vl.reserve(VectorXi::Constant(3 * numLandmarks, 3));
@@ -762,33 +880,33 @@ void UpdateStepSizeAndSolve() { // Recompute.
           vnorm[id] = diag(id);
       }
       best_landmarks = landmarks;
-      // Update Vl as well.
-      std::cout << " Jl " << Jl.valuePtr()[0] << " " << Jl.valuePtr()[1] << " " << Jl.valuePtr()[2] << "\n";
-      Jl = (Jl * diag.matrix().asDiagonal()).eval(); // This does not happen as diag is diag of Vl. That gets changed. diag is not copied but reference.
-      std::cout << " Jl " << Jl.valuePtr()[0] << " " << Jl.valuePtr()[1] << " " << Jl.valuePtr()[2] << "\n";
-      Vl = diag.matrix().asDiagonal() * Vl * diag.matrix().asDiagonal();
+      // Update Vl as well. we return below in 1st it, so not needed.
+      // std::cout << " Jl " << Jl.valuePtr()[0] << " " << Jl.valuePtr()[1] << " " << Jl.valuePtr()[2] << "\n";
+      // Jl = (Jl * diag.matrix().asDiagonal()).eval(); // This does not happen as diag is diag of Vl. That gets changed. diag is not copied but reference.
+      // std::cout << " Jl " << Jl.valuePtr()[0] << " " << Jl.valuePtr()[1] << " " << Jl.valuePtr()[2] << "\n";
+      // Vl = diag.matrix().asDiagonal() * Vl * diag.matrix().asDiagonal();
   }
-  const Eigen::DiagonalMatrix<double, Eigen::Dynamic> diagVL = Diagonal<3>(Vl); // Vl = VL + L * diagVL
-
+  
   // std::cout << " diagVL " << diagVL.diagonal() << "\n"; // 1's
-
+  
   // JpJ, StepSize, diag JpJ
-  if(Jp.nonZeros() != 9 * Jp.rows())
-      std::cout << "Jp " << cluster_id << " | " << Jp.nonZeros() << " =? " << Jp.rows() * 9 << "\n";
-  THROW_IF(Jp.nonZeros() != 9 * Jp.rows());
   SparseMatrix<double, RowMajor> Ul(9 * numCameras, 9 * numCameras);
   Ul.reserve(VectorXi::Constant(9 * numCameras, 9));
   Ul = Jp.transpose() * Jp;
   if (firstIteration) { // also handled setting be = 0 in 1st step.
-      UpdatePreconditioningCameras(Ul);
-      // Debug: write cost
-      const double costEnd = 2 * GetCost(); // demands cameras , landmarks already updated.
-      std::cout << cluster_id << ". Sending no update but pcg. costStart == costend: " << residual.squaredNorm() << " == "  << costEnd << "\n";
-      return; // 1st step only preconditioning as it can go very wrong?
+    UpdatePreconditioningCameras(Ul);
+    // Debug: write cost
+    const double costEnd = 2 * GetCost(); // demands cameras , landmarks already updated.
+    std::cout << cluster_id << ". Sending no update but pcg. costStart == costend: " << residual.squaredNorm() << " == "  << costEnd << "\n";
+    return; // 1st step only preconditioning as it can go very wrong?
   }
+  const Eigen::DiagonalMatrix<double, Eigen::Dynamic> diagVL = Diagonal<3>(Vl); // Vl = VL + L * diagVL
   const Eigen::DiagonalMatrix<double, Eigen::Dynamic> diagUP = 1e1 * Diagonal<9>(Ul); // Vp = Vp + L * diagVp
 
-  const double scale = 1e-1; // 1e0: @29: 501k, no jump. 1e1 many jumps. 473k
+  //const double scale = 1e-1; // 1e0: @29: 501k, no jump. 1e1 many jumps. 473k
+  // TODO
+  const double scale = std::min(1.005, 1e-1 * std::sqrt(current_be / start_be));
+
   if (!firstIteration) { // also handled setting be = 0 in 1st step.
     SparseMatrix<double, RowMajor> stepSize = scale * Ul;
     stepSize += diagUP * current_be;
@@ -806,9 +924,8 @@ void UpdateStepSizeAndSolve() { // Recompute.
   tr_radius = std::min(max_trust_region_radius, tr_radius);
   double inv_tr_radius = 0;
 
-  const int power_iterations = 100;
+  const int power_iterations = 100; //keep_cameras_fixed ? 0 : 100;
   const double costStart = residual.squaredNorm();
-  std::cout << " coststart " << costStart << "\n";
   // options.max_num_iterations 
   while ( true ) { // if costStart + penaltyStart < costEnd + penaltyP
 
@@ -822,19 +939,29 @@ void UpdateStepSizeAndSolve() { // Recompute.
     temp_p = Jp.transpose() * Jp * (1. / tr_radius - inv_tr_radius);
     Ul += temp_p;
 
+//#define _slow_
+#ifdef _slow_
+    ///// Here we should do not recompute Vl al the time as Jl^T Jl = Vl. 
     Vl += (1. / tr_radius - inv_tr_radius) * (diagVL);// + Jl.transpose() * Jl);
     SparseMatrix<double, RowMajor> temp_l(3 * numLandmarks, 3 * numLandmarks);
     temp_l.reserve(VectorXi::Constant(3 * numLandmarks, 3));
     temp_l = Jl.transpose() * Jl * (1. / tr_radius - inv_tr_radius);
     Vl += temp_l;
-
-
-    //Vl += (1. / tr_radius - inv_tr_radius) * (Jl.transpose() * Jl);
+#else
+    // 1. inverse
+    if ( inv_tr_radius != 0 ) {
+      Vl -= inv_tr_radius * diagVL;
+      Vl *= 1. / (1. + inv_tr_radius);
+    }
+    // 2. multiply orig JlJl by 1/tr_radius. add diagonal part 1/tr * diagL
+    Vl *= (1. + 1. / tr_radius);
+    Vl += (1. / tr_radius) * diagVL;
+#endif
+    inv_tr_radius = 1. / tr_radius;
     //   std::cout << " diagUp " << Ul.diagonal()[0] << " " << Ul.diagonal()[1] << " " << Ul.diagonal()[2] << "\n";
     //   std::cout << " diagVL " << Vl.diagonal()[0] << " " << Vl.diagonal()[1] << " " << Vl.diagonal()[2] << "\n";
-      
+
     //std::cout << " VL " << Vl.diagonal() << "\n";
-    inv_tr_radius = 1. / tr_radius;
 
     const auto [delta_p, delta_l] = SolveByGDNesterov(Ul, Vl, Jp, Jl, residual, power_iterations);
     // compute cost / tr_check
@@ -880,19 +1007,19 @@ void UpdateStepSizeAndSolve() { // Recompute.
     std::cout << "==Penalties start/end: " << penaltyStart << " " << penaltyEnd << "\n";
 
     const double tr_check = (costStart - costEnd + penaltyStart - penaltyEnd) / std::max(0.1, costStart - costQuad + penaltyStart - penaltyEnd);
-    std::cout << " tr_check " << tr_check << "\n";
     if (tr_check < 0.25) {
       tr_radius /= 2;
-      std::cout << "decrease TR radius " << tr_radius << "\n";
+      std::cout << tr_check << ": decrease TR radius " << tr_radius << "\n";
     }
     if (tr_check > 0.8) {
       tr_radius = std::min(max_trust_region_radius, 2 * tr_radius);//1.5
-      std::cout << "increase TR radius " << tr_radius << "\n";
+      std::cout << tr_check << ": increase TR radius " << tr_radius << "\n";
     }
 
-    std::cout << "==Start Cost < estimated cost: " << costStart + penaltyStart << " < " << costQuad + penaltyEnd << "\n";
+    if (costStart + penaltyStart > costQuad + penaltyEnd)
+      std::cout << "==Start Cost < estimated cost: " << costStart + penaltyStart << " < " << costQuad + penaltyEnd << "\n";
 
-    if (costStart + penaltyStart < costEnd + penaltyEnd) { // revert if cost does not improve
+    if (costStart + penaltyStart < (costEnd + penaltyEnd) * 0.9999) { // revert if cost does not improve
       std::cout << "Reject Start Cost < end cost: "<< costStart + penaltyStart << " < " << costEnd + penaltyEnd << "\n";
       for (int id = 0; id < delta_p.size(); ++id) {
           cameras[id] -= delta_p[id];
@@ -903,6 +1030,13 @@ void UpdateStepSizeAndSolve() { // Recompute.
       continue;
     }
     std::cout << "Accept Start Cost > end cost: "<< costStart + penaltyStart << " > " << costEnd + penaltyEnd << "\n";
+
+    // if (keep_cameras_fixed) {
+    //   best_landmarks = landmarks; // landmarks optimal for fixed cameras.
+    //   best_cost = costEnd;
+    //   new_best_cost = false; // internal true if new est cost found -> new global cameras, landmarks not optimized for those.
+    // }
+  
     break;
   }
 }
@@ -910,433 +1044,466 @@ void UpdateStepSizeAndSolve() { // Recompute.
 
 private:
 
-    // Currently this is set 'stepsize' from Jp only.
-    void SetStepSize(const SparseMatrix<double, RowMajor> &Jp) {
-      // std::cout << "Set step size " << cluster_id << "\n";
-      if(Jp.nonZeros() != 9 * Jp.rows())
-          std::cout << "Jp " << cluster_id << " | " << Jp.nonZeros() << " =? " << Jp.rows() * 9 << "\n";
-      THROW_IF(Jp.nonZeros() != 9 * Jp.rows());
-      SparseMatrix<double, RowMajor> JpJ(9 * numCameras, 9 * numCameras);
-      JpJ.reserve(VectorXi::Constant(9 * numCameras, 9));
-      JpJ = Jp.transpose() * Jp;
-      JpJ.makeCompressed();
+  // Currently this is set 'stepsize' from Jp only.
+  void SetStepSize(const SparseMatrix<double, RowMajor> &Jp) {
+    // std::cout << "Set step size " << cluster_id << "\n";
+    if(Jp.nonZeros() != 9 * Jp.rows())
+        std::cout << "Jp " << cluster_id << " | " << Jp.nonZeros() << " =? " << Jp.rows() * 9 << "\n";
+    THROW_IF(Jp.nonZeros() != 9 * Jp.rows());
+    SparseMatrix<double, RowMajor> JpJ(9 * numCameras, 9 * numCameras);
+    JpJ.reserve(VectorXi::Constant(9 * numCameras, 9));
+    JpJ = Jp.transpose() * Jp;
+    JpJ.makeCompressed();
 
-      // SparseMatrix<double, RowMajor> JlJ(3 * numLandmarks, 3 * numLandmarks);
-      // JlJ.reserve(VectorXi::Constant(3 * numLandmarks, 3));
-      // JlJ = Jl.transpose() * Jl;
-      // auto JpJ_diag = JpJ.diagonal().array();
-      if(JpJ.nonZeros() != stepSize.size() || JpJ.rows() * 9 != numCameras * 81)
-        std::cout << "JpJ " << cluster_id << " | " << JpJ.nonZeros() << " =? " << JpJ.rows() * 9
-                  << " " << stepSize.size() << " " << numCameras * 81 << "\n";
-      THROW_IF(JpJ.nonZeros() != numCameras * 81);
+    // SparseMatrix<double, RowMajor> JlJ(3 * numLandmarks, 3 * numLandmarks);
+    // JlJ.reserve(VectorXi::Constant(3 * numLandmarks, 3));
+    // JlJ = Jl.transpose() * Jl;
+    // auto JpJ_diag = JpJ.diagonal().array();
+    if(JpJ.nonZeros() != stepSize.size() || JpJ.rows() * 9 != numCameras * 81)
+      std::cout << "JpJ " << cluster_id << " | " << JpJ.nonZeros() << " =? " << JpJ.rows() * 9
+                << " " << stepSize.size() << " " << numCameras * 81 << "\n";
+    THROW_IF(JpJ.nonZeros() != numCameras * 81);
 
-      if (firstIteration) { // also handled setting be = 0 in 1st step.
-        full_stepSize.resize(81 * numCameras, 0);
-        const double *values = JpJ.valuePtr();
-        std::copy(values, values + full_stepSize.size(), full_stepSize.data());
-        // ToDo: Is this ok or an issue to be resolved differently?
-        for (int b = 0; b < numCameras; ++b) {
-          for(int id = 0; id < 81; id += 10) { // diagonal entries !?
-            full_stepSize[81*b + id] = std::max(1e-36, full_stepSize[81*b + id]);
-          }
+    if (firstIteration) { // also handled setting be = 0 in 1st step.
+      full_stepSize.resize(81 * numCameras, 0);
+      const double *values = JpJ.valuePtr();
+      std::copy(values, values + full_stepSize.size(), full_stepSize.data());
+      // ToDo: Is this ok or an issue to be resolved differently?
+      for (int b = 0; b < numCameras; ++b) {
+        for(int id = 0; id < 81; id += 10) { // diagonal entries !?
+          full_stepSize[81*b + id] = std::max(1e-36, full_stepSize[81*b + id]);
         }
-        best_landmarks = landmarks; // !
-        //return; // 1st iteration only preconditioning. do not solve! needs other stuff do be dones below.
       }
+      best_landmarks = landmarks; // !
+      //best_poses = cameras; // ? 
+      //return; // 1st iteration only preconditioning. do not solve! needs other stuff do be dones below.
+    }
 
-      // Allow to scale JtJ as well?
-      const double scale = 1e1;
-      // TODO.
-      //const double scale = std::max(1. / 1.005, 1e1 * std::sqrt(start_be / current_be)); // 1e0: @29: 501k, no jump. 1e1 many jumps. 473k
-      std::cout << "scale " << scale << " " << start_be << " " << current_be << "\n";
-      JpJ = JpJ * (1. / scale); // optional to test. in theory should almost always suffice.
+    // Allow to scale JtJ as well?
+    const double scale = 1e1;
+    // TODO.
+    //const double scale = std::max(1. / 1.005, 1e1 * std::sqrt(start_be / current_be)); // 1e0: @29: 501k, no jump. 1e1 many jumps. 473k
+    std::cout << "scale " << scale << " " << start_be << " " << current_be << "\n";
+    JpJ = JpJ * (1. / scale); // optional to test. in theory should almost always suffice.
 #ifdef _const_diag_
-      auto diag = JpJ.diagonal().array();
-      for (int b = 0; b < numCameras; ++b) { // block
-        double mv = diag(9*b);
-        for (int id = 1; id < 9; ++id) {
-          mv = std::max(mv, diag(9*b + id));
-        }
-        mv *= scale;
-        for (int id = 0; id < 9; ++id) {
-          diag(9*b + id) += current_be * mv;
-        }
+    auto diag = JpJ.diagonal().array();
+#pragma omp parallel for num_threads(options.num_threads)
+    for (int b = 0; b < numCameras; ++b) { // block
+      double mv = diag(9*b);
+      for (int id = 1; id < 9; ++id) {
+        mv = std::max(mv, diag(9*b + id));
       }
+      mv *= scale;
+      for (int id = 0; id < 9; ++id) {
+        diag(9*b + id) += current_be * std::max(mv * 1e-3, diag(9*b + id));
+      }
+    }
 #else
-      JpJ.diagonal().array() *= (1. + current_be * scale);
+    JpJ.diagonal().array() *= (1. + current_be * scale);
 #endif
-      // JpJ.diagonal().array() += 1e-18; // TODO: this is not good.
+    // JpJ.diagonal().array() += 1e-18; // TODO: this is not good.
 
-      //JpJ.diagonal().array() *= (1. + be); //+= be * JpJ.diagonal().array();
-      // JpJ = JpJ * 3; // optional to test. in theory should almost always suffice.
-      //   const auto JpJDiagonal = JpJ.diagonal();//.array();
-      //   JpJ = JpJ * 0.5 * 1e-12;
-      //   //JpJ.diagonal() = JpJ.diagonal() + be * JpJDiagonal;
-      //   JpJ.diagonal() = JpJDiagonal * (1. + be);
-      //JpJ.diagonal() += be * JpJ.diagonal();
-      //JpJ.diagonal().array().cwise
+    //JpJ.diagonal().array() *= (1. + be); //+= be * JpJ.diagonal().array();
+    // JpJ = JpJ * 3; // optional to test. in theory should almost always suffice.
+    //   const auto JpJDiagonal = JpJ.diagonal();//.array();
+    //   JpJ = JpJ * 0.5 * 1e-12;
+    //   //JpJ.diagonal() = JpJ.diagonal() + be * JpJDiagonal;
+    //   JpJ.diagonal() = JpJDiagonal * (1. + be);
+    //JpJ.diagonal() += be * JpJ.diagonal();
+    //JpJ.diagonal().array().cwise
 
-      if (!firstIteration) {
-        full_stepSize.resize(81 * numCameras, 0);
-        const double *values = JpJ.valuePtr();
-        std::copy(values, values + full_stepSize.size(), full_stepSize.data());
+    if (!firstIteration) {
+      full_stepSize.resize(81 * numCameras, 0);
+      const double *values = JpJ.valuePtr();
+      std::copy(values, values + full_stepSize.size(), full_stepSize.data());
+    }
+
+    // std::cout << "BlockSqrt " << cluster_id << "\n";
+    BlockSqrt<9>(JpJ); // need templated fct.
+    // instead reset variable block(s) JpJ and s to sqrt(Stepsize)
+    const double* values = JpJ.valuePtr();
+    std::copy(values, values + stepSize.size(), stepSize.data());
+  }
+
+  std::tuple<SparseMatrix<double, RowMajor>, SparseMatrix<double, RowMajor>,
+             std::vector<double>>
+  GetJacobianAndResidual() {
+    // 1st get Jacobian(s):
+    ceres::Problem::EvaluateOptions evalOptions;
+    evalOptions.apply_loss_function = true;
+    // evalOpt.parameter_blocks = {}; // TODO only poses.
+    evalOptions.residual_blocks = function_residual_blocks;
+    evalOptions.num_threads = options.num_threads;
+    ceres::CRSMatrix jacobian;
+    std::vector<double> residuals;
+    // std::cout << "GetJacobian: Evaluate " << cluster_id << "\n"; 
+    problem.Evaluate(evalOptions, &startCost, &residuals, nullptr, &jacobian);
+    const size_t numUnknowns = jacobian.num_cols;
+    //   std::cout << "GetJacobian: " << cluster_id << " Finished eval problem "
+    //             << jacobian.num_rows << "-" << 9 * numCameras << "\n";
+
+    // Now. I need JpTJp, hence.
+    const int relevantRows = jacobian.num_rows;// - 9 * numCameras; // since I use residual_blocks
+    SparseMatrix<double, RowMajor> Jp(relevantRows, 9 * numCameras);
+    SparseMatrix<double, RowMajor> Jl(relevantRows, 3 * numLandmarks);
+    Jp.reserve(VectorXi::Constant(relevantRows, 9));
+    Jl.reserve(VectorXi::Constant(relevantRows, 3));
+    // JP.setFromTriplets(coefficients.begin(), coefficients.end());
+
+    // std::vector<double> JpJ_cam(9,0);
+    for (Eigen::Index r = 0; r < relevantRows; ++r) {
+      const int lm_id = lm_obs[r/2];
+      const int cam_id = cam_obs[r/2];
+      //std::cout << r << ":";
+      Eigen::Index idx = jacobian.rows[r];
+      // const Eigen::Index c = jacobian.cols[idx]; // index of variable.
+      for (int i = 0; i < 9 && idx < jacobian.rows[r + static_cast<Eigen::Index>(1)];++idx, ++i) {
+          // if (9 * cam_id + i != jacobian.cols[idx])
+          //     std::cout << cluster_id << " jacobian cam/idx do not match " << 9 * cam_id + i << " = " << jacobian.cols[idx] << " | ";
+          Jp.insert(r, 9 * cam_id + i) = jacobian.values[idx];
+          // if (cam_id == 543) {
+          //   std::cout << i << " " << " r " << r << " < " << relevantRows << " " << jacobian.values[idx] << "\n";
+          //   JpJ_cam[i] += jacobian.values[idx] * jacobian.values[idx];
+          // }
       }
-
-      // std::cout << "BlockSqrt " << cluster_id << "\n";
-      BlockSqrt<9>(JpJ); // need templated fct.
-      // instead reset variable block(s) JpJ and s to sqrt(Stepsize)
-      const double* values = JpJ.valuePtr();
-      std::copy(values, values + stepSize.size(), stepSize.data());
-    }
-
-    std::tuple<SparseMatrix<double, RowMajor>,
-               SparseMatrix<double, RowMajor>, 
-               std::vector<double>>
-      GetJacobianAndResidual() {
-      // 1st get Jacobian(s):
-      ceres::Problem::EvaluateOptions evalOptions;
-      evalOptions.apply_loss_function = true;
-      // evalOpt.parameter_blocks = {}; // TODO only poses.
-      evalOptions.residual_blocks = function_residual_blocks;
-      evalOptions.num_threads = options.num_threads;
-      ceres::CRSMatrix jacobian;
-      std::vector<double> residuals;
-      // std::cout << "GetJacobian: Evaluate " << cluster_id << "\n"; 
-      problem.Evaluate(evalOptions, &startCost, &residuals, nullptr, &jacobian);
-      const size_t numUnknowns = jacobian.num_cols;
-      //   std::cout << "GetJacobian: " << cluster_id << " Finished eval problem "
-      //             << jacobian.num_rows << "-" << 9 * numCameras << "\n";
-
-      // Now. I need JpTJp, hence.
-      const int relevantRows = jacobian.num_rows;// - 9 * numCameras; // since I use residual_blocks
-      SparseMatrix<double, RowMajor> Jp(relevantRows, 9 * numCameras);
-      SparseMatrix<double, RowMajor> Jl(relevantRows, 3 * numLandmarks);
-      Jp.reserve(VectorXi::Constant(relevantRows, 9));
-      Jl.reserve(VectorXi::Constant(relevantRows, 3));
-      // JP.setFromTriplets(coefficients.begin(), coefficients.end());
-
-      // std::vector<double> JpJ_cam(9,0);
-      for (Eigen::Index r = 0; r < relevantRows; ++r) {
-        const int lm_id = lm_obs[r/2];
-        const int cam_id = cam_obs[r/2];
-        //std::cout << r << ":";
-        Eigen::Index idx = jacobian.rows[r];
-        // const Eigen::Index c = jacobian.cols[idx]; // index of variable.
-        for (int i = 0; i < 9 && idx < jacobian.rows[r + static_cast<Eigen::Index>(1)];++idx, ++i) {
-            // if (9 * cam_id + i != jacobian.cols[idx])
-            //     std::cout << cluster_id << " jacobian cam/idx do not match " << 9 * cam_id + i << " = " << jacobian.cols[idx] << " | ";
-            Jp.insert(r, 9 * cam_id + i) = jacobian.values[idx];
-            // if (cam_id == 543) {
-            //   std::cout << i << " " << " r " << r << " < " << relevantRows << " " << jacobian.values[idx] << "\n";
-            //   JpJ_cam[i] += jacobian.values[idx] * jacobian.values[idx];
-            // }
-        }
-        for (int i = 0; i < 3 && idx < jacobian.rows[r + static_cast<Eigen::Index>(1)];++idx, ++i) {
-            // if (cameras.size() + 3 * lm_id + i != jacobian.cols[idx])
-            //     std::cout << 3 * lm_id + i << " = " << jacobian.cols[idx];
-            Jl.insert(r, 3 * lm_id + i) = jacobian.values[idx];
-        }
+      for (int i = 0; i < 3 && idx < jacobian.rows[r + static_cast<Eigen::Index>(1)];++idx, ++i) {
+          // if (cameras.size() + 3 * lm_id + i != jacobian.cols[idx])
+          //     std::cout << 3 * lm_id + i << " = " << jacobian.cols[idx];
+          Jl.insert(r, 3 * lm_id + i) = jacobian.values[idx];
       }
-      // std::cout << " Cam 543: " << std::sqrt(JpJ_cam[0]) << " " << std::sqrt(JpJ_cam[1]) << " " << std::sqrt(JpJ_cam[2]) << " " << std::sqrt(JpJ_cam[3]) << " " << std::sqrt(JpJ_cam[4]) << " " << std::sqrt(JpJ_cam[5]) << " " << std::sqrt(JpJ_cam[6]) << " " << std::sqrt(JpJ_cam[7]) << " " << std::sqrt(JpJ_cam[8]) << "\n";
-      Jp.makeCompressed();
-      Jl.makeCompressed();
-      return std::make_tuple(Jp, Jl, residuals);
     }
+    // std::cout << " Cam 543: " << std::sqrt(JpJ_cam[0]) << " " << std::sqrt(JpJ_cam[1]) << " " << std::sqrt(JpJ_cam[2]) << " " << std::sqrt(JpJ_cam[3]) << " " << std::sqrt(JpJ_cam[4]) << " " << std::sqrt(JpJ_cam[5]) << " " << std::sqrt(JpJ_cam[6]) << " " << std::sqrt(JpJ_cam[7]) << " " << std::sqrt(JpJ_cam[8]) << "\n";
+    Jp.makeCompressed();
+    Jl.makeCompressed();
+    return std::make_tuple(Jp, Jl, residuals);
+  }
 
-    // Also delivers residuals and gradient.
-    std::pair<SparseMatrix<double, RowMajor>,
-              SparseMatrix<double, RowMajor>>
-    GetJacobian() {
-      // 1st get Jacobian(s):
-      ceres::Problem::EvaluateOptions evalOptions;
-      evalOptions.apply_loss_function = true;
-      // evalOpt.parameter_blocks = {}; // TODO only poses.
-      evalOptions.residual_blocks = function_residual_blocks;
-      evalOptions.num_threads = options.num_threads;
-      ceres::CRSMatrix jacobian;
-      //std::vector<double> residuals;
-      // std::cout << "GetJacobian: Evaluate " << cluster_id << "\n"; 
-      problem.Evaluate(evalOptions, &startCost, nullptr, nullptr, &jacobian); //&residuals
-      const size_t numUnknowns = jacobian.num_cols;
-      //   std::cout << "GetJacobian: " << cluster_id << " Finished eval problem "
-      //             << jacobian.num_rows << "-" << 9 * numCameras << "\n";
+  // Also delivers residuals and gradient.
+  std::pair<SparseMatrix<double, RowMajor>,
+            SparseMatrix<double, RowMajor>>
+  GetJacobian() {
+    // 1st get Jacobian(s):
+    ceres::Problem::EvaluateOptions evalOptions;
+    evalOptions.apply_loss_function = true;
+    // evalOpt.parameter_blocks = {}; // TODO only poses.
+    evalOptions.residual_blocks = function_residual_blocks;
+    evalOptions.num_threads = options.num_threads;
+    ceres::CRSMatrix jacobian;
+    //std::vector<double> residuals;
+    // std::cout << "GetJacobian: Evaluate " << cluster_id << "\n"; 
+    problem.Evaluate(evalOptions, &startCost, nullptr, nullptr, &jacobian); //&residuals
+    const size_t numUnknowns = jacobian.num_cols;
+    //   std::cout << "GetJacobian: " << cluster_id << " Finished eval problem "
+    //             << jacobian.num_rows << "-" << 9 * numCameras << "\n";
 
-      // Now. I need JpTJp, hence.
-      const int relevantRows = jacobian.num_rows;// - 9 * numCameras; // since I use residual_blocks
-      SparseMatrix<double, RowMajor> Jp(relevantRows, 9 * numCameras);
-      SparseMatrix<double, RowMajor> Jl(relevantRows, 3 * numLandmarks);
-      Jp.reserve(VectorXi::Constant(relevantRows, 9));
-      Jl.reserve(VectorXi::Constant(relevantRows, 3));
-      // JP.setFromTriplets(coefficients.begin(), coefficients.end());
+    // Now. I need JpTJp, hence.
+    const int relevantRows = jacobian.num_rows;// - 9 * numCameras; // since I use residual_blocks
+    SparseMatrix<double, RowMajor> Jp(relevantRows, 9 * numCameras);
+    SparseMatrix<double, RowMajor> Jl(relevantRows, 3 * numLandmarks);
+    Jp.reserve(VectorXi::Constant(relevantRows, 9));
+    Jl.reserve(VectorXi::Constant(relevantRows, 3));
+    // JP.setFromTriplets(coefficients.begin(), coefficients.end());
 
-      // std::vector<double> JpJ_cam(9,0);
-      for (Eigen::Index r = 0; r < relevantRows; ++r) {
-        const int lm_id = lm_obs[r/2];
-        const int cam_id = cam_obs[r/2];
-        //std::cout << r << ":";
-        Eigen::Index idx = jacobian.rows[r];
-        // const Eigen::Index c = jacobian.cols[idx]; // index of variable.
-        for (int i = 0; i < 9 && idx < jacobian.rows[r + static_cast<Eigen::Index>(1)];++idx, ++i) {
-            // if (9 * cam_id + i != jacobian.cols[idx])
-            //     std::cout << cluster_id << " jacobian cam/idx do not match " << 9 * cam_id + i << " = " << jacobian.cols[idx] << " | ";
-            Jp.insert(r, 9 * cam_id + i) = jacobian.values[idx];
-            // if (cam_id == 543) {
-            //   std::cout << i << " " << " r " << r << " < " << relevantRows << " " << jacobian.values[idx] << "\n";
-            //   JpJ_cam[i] += jacobian.values[idx] * jacobian.values[idx];
-            // }
-        }
-        for (int i = 0; i < 3 && idx < jacobian.rows[r + static_cast<Eigen::Index>(1)];++idx, ++i) {
-            // if (cameras.size() + 3 * lm_id + i != jacobian.cols[idx])
-            //     std::cout << 3 * lm_id + i << " = " << jacobian.cols[idx];
-            Jl.insert(r, 3 * lm_id + i) = jacobian.values[idx];
-        }
+    // std::vector<double> JpJ_cam(9,0);
+    for (Eigen::Index r = 0; r < relevantRows; ++r) {
+      const int lm_id = lm_obs[r/2];
+      const int cam_id = cam_obs[r/2];
+      //std::cout << r << ":";
+      Eigen::Index idx = jacobian.rows[r];
+      // const Eigen::Index c = jacobian.cols[idx]; // index of variable.
+      for (int i = 0; i < 9 && idx < jacobian.rows[r + static_cast<Eigen::Index>(1)];++idx, ++i) {
+          // if (9 * cam_id + i != jacobian.cols[idx])
+          //     std::cout << cluster_id << " jacobian cam/idx do not match " << 9 * cam_id + i << " = " << jacobian.cols[idx] << " | ";
+          Jp.insert(r, 9 * cam_id + i) = jacobian.values[idx];
+          // if (cam_id == 543) {
+          //   std::cout << i << " " << " r " << r << " < " << relevantRows << " " << jacobian.values[idx] << "\n";
+          //   JpJ_cam[i] += jacobian.values[idx] * jacobian.values[idx];
+          // }
       }
-      // std::cout << " Cam 543: " << std::sqrt(JpJ_cam[0]) << " " << std::sqrt(JpJ_cam[1]) << " " << std::sqrt(JpJ_cam[2]) << " " << std::sqrt(JpJ_cam[3]) << " " << std::sqrt(JpJ_cam[4]) << " " << std::sqrt(JpJ_cam[5]) << " " << std::sqrt(JpJ_cam[6]) << " " << std::sqrt(JpJ_cam[7]) << " " << std::sqrt(JpJ_cam[8]) << "\n";
-      Jp.makeCompressed();
-      Jl.makeCompressed();
-      return {Jp,Jl};
+      for (int i = 0; i < 3 && idx < jacobian.rows[r + static_cast<Eigen::Index>(1)];++idx, ++i) {
+          // if (cameras.size() + 3 * lm_id + i != jacobian.cols[idx])
+          //     std::cout << 3 * lm_id + i << " = " << jacobian.cols[idx];
+          Jl.insert(r, 3 * lm_id + i) = jacobian.values[idx];
+      }
     }
+    // std::cout << " Cam 543: " << std::sqrt(JpJ_cam[0]) << " " << std::sqrt(JpJ_cam[1]) << " " << std::sqrt(JpJ_cam[2]) << " " << std::sqrt(JpJ_cam[3]) << " " << std::sqrt(JpJ_cam[4]) << " " << std::sqrt(JpJ_cam[5]) << " " << std::sqrt(JpJ_cam[6]) << " " << std::sqrt(JpJ_cam[7]) << " " << std::sqrt(JpJ_cam[8]) << "\n";
+    Jp.makeCompressed();
+    Jl.makeCompressed();
+    return {Jp,Jl};
+  }
 
-    void Init(int numClusters = 1) {
-        numCameras = 0;
-        numLandmarks = 0;
-        numResiduals = 0;
-        firstIteration = true;
-        current_be = init_be;
-        start_be = init_be;
-        tr_radius = std::min(max_trust_region_radius, init_trust_region_radius);
-        startCost = 1e20;
-        cost = 1e20;
-        best_cost = cost;
-        cluster_id = -1;
-        function_residual_blocks.clear();
-        // Solve
-        // Make Ceres automatically detect the bundle structure. Note that the
-        // standard solver, SPARSE_NORMAL_CHOLESKY, also works fine but it is
-        // slower for standard bundle adjustment problems.
-        //options.linear_solver_type = ceres::DENSE_SCHUR; // SPARSE_SCHUR;// same
-        options.linear_solver_type = ceres::ITERATIVE_SCHUR; // same ceres::CGNR;//
-        // options.linear_solver_type = ceres::CGNR;
-        // options.linear_solver_type = ceres::DENSE_QR; // SHIT
-        // options.max_linear_solver_iterations = 100;
-        const int threads_per_cluster = std::max(1, _num_threads_machine_ / numClusters);
-        Eigen::setNbThreads(_num_threads_machine_ / numClusters);
-        options.num_threads = threads_per_cluster; // _ceres_num_threads_; // single cpu -> still slow / bottleneck.
-        // options.preconditioner_type = ceres::IDENTITY; // Sucks if CGNR of course. 
-        // options.preconditioner_type = ceres::JACOBI; // CGNR -> jacobi anyway.
-        options.max_num_iterations = 1;
-        // options.minimizer_progress_to_stdout = true;
-        options.minimizer_progress_to_stdout = false;
-        // options.logging_type = ceres::SILENT;  
-    }
+  void Init(int numClusters = 1) {
+      numCameras = 0;
+      numLandmarks = 0;
+      numResiduals = 0;
+      firstIteration = true;
+      //new_best_cost = false;
+      current_be = init_be;
+      start_be = init_be;
+      tr_radius = std::min(max_trust_region_radius, init_trust_region_radius);
+      startCost = 1e20;
+      cost = 1e20;
+      best_cost = cost;
+      cluster_id = -1;
+      function_residual_blocks.clear();
+      // Solve
+      // Make Ceres automatically detect the bundle structure. Note that the
+      // standard solver, SPARSE_NORMAL_CHOLESKY, also works fine but it is
+      // slower for standard bundle adjustment problems.
+      //options.linear_solver_type = ceres::DENSE_SCHUR; // SPARSE_SCHUR;// same
+      options.linear_solver_type = ceres::ITERATIVE_SCHUR; // same ceres::CGNR;//
+      // options.linear_solver_type = ceres::CGNR;
+      // options.linear_solver_type = ceres::DENSE_QR; // SHIT
+      // options.max_linear_solver_iterations = 100;
+      const int threads_per_cluster = std::max(1, _num_threads_machine_ / numClusters);
+      Eigen::setNbThreads(_num_threads_machine_ / numClusters);
+      options.num_threads = threads_per_cluster; // _ceres_num_threads_; // single cpu -> still slow / bottleneck.
+      // options.preconditioner_type = ceres::IDENTITY; // Sucks if CGNR of course. 
+      // options.preconditioner_type = ceres::JACOBI; // CGNR -> jacobi anyway.
+      options.max_num_iterations = 1;
+      // options.minimizer_progress_to_stdout = true;
+      options.minimizer_progress_to_stdout = false;
+      // options.logging_type = ceres::SILENT;  
+  }
 
-    int cluster_id;
-    int numCameras = 0;
-    int numLandmarks = 0;
-    int numResiduals = 0;
-    const double init_be = 1e-4;
-    double current_be = init_be;
-    double start_be = init_be;
-    const double init_trust_region_radius = 1e1; // Todo: set to 1?
-    double tr_radius = init_trust_region_radius; // 1e4 is ceres standard. -> Init()
-    const double max_trust_region_radius = 1e6;
-    double startCost;
-    double cost;
-    double best_cost;
-    bool firstIteration = true; // full step is wo. diag part to acc.
-    std::vector<ceres::ResidualBlockId> function_residual_blocks;
-    std::vector<double> cameras;
-    std::vector<double> cameras_s;
-    std::vector<double> landmarks;// todo: either revert or send landmarkss all the time.
-    std::vector<double> last_landmarks;
-    std::vector<double> best_landmarks;
-    std::vector<double> stepSize; // internally modelling prox term. 'sqrt' of full_stepSize 
-    std::vector<double> full_stepSize; // returned to compute s update in DRS.
-    std::vector<double> unorm;
-    std::vector<double> vnorm;
-    std::vector<int> cam_obs;
-    std::vector<int> lm_obs;
-    ceres::Problem problem;
-    ceres::Solver::Options options;
+  int cluster_id;
+  int numCameras = 0;
+  int numLandmarks = 0;
+  int numResiduals = 0;
+  const double init_be = 1e-4;
+  double current_be = init_be;
+  double start_be = init_be;
+  const double init_trust_region_radius = 1e1; // Todo: set to 1?
+  double tr_radius = init_trust_region_radius; // 1e4 is ceres standard. -> Init()
+  const double max_trust_region_radius = 1e6;
+  double startCost;
+  double cost;
+  double best_cost;
+  bool firstIteration = true; // full step is wo. diag part to acc.
+  //bool new_best_cost = false;
+  std::vector<ceres::ResidualBlockId> function_residual_blocks;
+  std::vector<double> cameras;
+  //std::vector<double> best_poses;
+  std::vector<double> cameras_s;
+  std::vector<double> landmarks;// todo: either revert or send landmarkss all the time.
+  std::vector<double> last_landmarks;
+  std::vector<double> best_landmarks;
+  std::vector<double> stepSize; // internally modelling prox term. 'sqrt' of full_stepSize 
+  std::vector<double> full_stepSize; // returned to compute s update in DRS.
+  std::vector<double> unorm;
+  std::vector<double> vnorm;
+  std::vector<int> cam_obs;
+  std::vector<int> lm_obs;
+  ceres::Problem problem;
+  ceres::Solver::Options options;
 };
 ///////////////////////////////////////////////////////
 
 int main() {
-    // Initialize the context
-    zmq::context_t context(1);
+  // Initialize the context
+  zmq::context_t context(1);
 
-    // Create a socket of type REP (reply)
-    zmq::socket_t socket(context, ZMQ_REP);
+  // Create a socket of type REP (reply)
+  zmq::socket_t socket(context, ZMQ_REP);
 
-    //zmq::socket_t push_socket(context, ZMQ_REQ);// ZMQ_PUSH);
-    zmq::socket_t push_socket(context, ZMQ_PUSH);
-    zmq::socket_t pull_socket(context, ZMQ_REP);// ZMQ_PULL);
+  // zmq::socket_t push_socket(context, ZMQ_REQ);// ZMQ_PUSH);
+  zmq::socket_t push_socket(context, ZMQ_PUSH);
+  zmq::socket_t pull_socket(context, ZMQ_REP); // ZMQ_PULL);
 
-    std::mutex mtx; // Mutex for critical section.
+  std::mutex mtx; // Mutex for critical section.
 
-    // Bind the socket to a TCP address
-    std::cout << "Starting the server on port 5555..." << std::endl;
-    socket.bind("tcp://*:5555");
-    pull_socket.bind("tcp://*:5556");
-    push_socket.bind("tcp://*:5557");
+  // Bind the socket to a TCP address
+  std::cout << "Starting the server on port 5555..." << std::endl;
+  socket.bind("tcp://*:5555");
+  pull_socket.bind("tcp://*:5556");
+  push_socket.bind("tcp://*:5557");
 
-    std::map<int, CeresProgram> cluster_to_program;
+  std::map<int, CeresProgram> cluster_to_program;
 
-    while (true) {
-      zmq::message_t request;
+  while (true) {
+    zmq::message_t request;
 
-      // Wait for the next request from a client
-      // socket.recv(&request);
-      pull_socket.recv(&request);
-      // std::cout << "Received pull request \n";
+    // Wait for the next request from a client
+    // socket.recv(&request);
+    pull_socket.recv(&request);
+    // std::cout << "Received pull request \n";
 
-      // ParseFromString expects a byte string.
-      // ParseFromArray expects a byte array and the size of the array.
-      // ParseFromString(value) is the same as ParseFromArray(value.data(), value.size()). 
+    // ParseFromString expects a byte string.
+    // ParseFromArray expects a byte array and the size of the array.
+    // ParseFromString(value) is the same as ParseFromArray(value.data(),
+    // value.size()).
 
-      // const std::string received_message(static_cast<char*>(request.data()), request.size());
-      request_proto request_p;
-      // request_p.ParseFromString(received_message);
-      request_p.ParseFromArray(request.data(), request.size());
-      // std::cout << "Request ParseFromArray\n";
+    // const std::string received_message(static_cast<char*>(request.data()),
+    // request.size());
+    request_proto request_p;
+    // request_p.ParseFromString(received_message);
+    request_p.ParseFromArray(request.data(), request.size());
+    // std::cout << "Request ParseFromArray\n";
 
-      switch(request_p.options_case()) {
+    switch (request_p.options_case()) {
 
-        case request_proto::OptionsCase::kUpdate: {
-          const prox_cluster_proto update = request_p.update(); // we get an update for the cameras only -- update buffer, run its iterations.
-          const int cluster_id = update.cluster_id();
-          std::cout << "request_proto::OptionsCase::kUpdate " << cluster_id << std::endl;
-          THROW_IF(cluster_to_program.find(cluster_id) == cluster_to_program.end());
-          CeresProgram& program = cluster_to_program[cluster_id];
-          program.UpdateData(update); // update is local, we nned to fill data in main thread.
+    case request_proto::OptionsCase::kUpdate: {
+      const prox_cluster_proto update =
+          request_p.update(); // we get an update for the cameras only -- update
+                              // buffer, run its iterations.
+      const int cluster_id = update.cluster_id();
+      std::cout << "request_proto::OptionsCase::kUpdate " << cluster_id
+                << std::endl;
+      THROW_IF(cluster_to_program.find(cluster_id) == cluster_to_program.end());
+      CeresProgram &program = cluster_to_program[cluster_id];
 
-          // Define a Lambda Expression
-          auto update_lambda = [&push_socket, &cluster_to_program, &mtx](int cluster_id) {
-              CeresProgram& program = cluster_to_program[cluster_id];
-              // std::cout << cluster_id << " Update "<< "\n";
+      //bool keep_cameras_fixed = (update.revert_lm() == 2) ? true : false;
+
+      program.UpdateData(update); // update is local, we nned to fill data in main thread.
+
+      // Define a Lambda Expression
+      auto update_lambda = [&push_socket, &cluster_to_program,
+                            &mtx](int cluster_id) {
+        CeresProgram &program = cluster_to_program[cluster_id];
+        // std::cout << cluster_id << " Update "<< "\n";
 #ifdef __ceresVersion__
-              program.UpdateStepSize();
-              program.Solve();
+        program.UpdateStepSize();
+        program.Solve();
 #else
-              program.UpdateStepSizeAndSolve();
+        program.UpdateStepSizeAndSolve();//keep_cameras_fixed);
 #endif
-              return_cluster_proto return_proto = program.FillReturnProto();
-              const double cost = 2 * program.GetCost();
-              std::cout << cluster_id << ". Cost from update: " << cost << "\n";
-              return_proto.set_cost(cost);
-              //std::cout << "Cost from update " << cost <<"\n";
-              // SerializeToArray saves memory and time?
-              size_t bytes = return_proto.ByteSizeLong();
-              zmq::message_t reply(bytes);
-              return_proto.SerializeToArray(reply.data(), bytes);
-              std::lock_guard<std::mutex> lock(mtx);
-              push_socket.send(reply, zmq::send_flags::none);
-              // std::cout << cluster_id << ". Update send" << std::endl;
-          };
+        return_cluster_proto return_proto = program.FillReturnProto();
+        const double cost = 2 * program.GetCost();
+        std::cout << cluster_id << ". Cost from update: " << cost << "\n";
+        return_proto.set_cost(cost);
+        // std::cout << "Cost from update " << cost <<"\n";
+        //  SerializeToArray saves memory and time?
+        size_t bytes = return_proto.ByteSizeLong();
+        zmq::message_t reply(bytes);
+        return_proto.SerializeToArray(reply.data(), bytes);
+        std::lock_guard<std::mutex> lock(mtx);
+        push_socket.send(reply, zmq::send_flags::none);
+        // std::cout << cluster_id << ". Update send" << std::endl;
+      };
 
-          //std::thread update_thread(update_lambda, std::ref(program), std::cref(update));
-          std::thread update_thread(update_lambda, cluster_id);
-          update_thread.detach();
-          ///update_thread.join();
+      // std::thread update_thread(update_lambda, std::ref(program),
+      // std::cref(update));
+      std::thread update_thread(update_lambda, cluster_id);//, keep_cameras_fixed);
+      update_thread.detach();
+      /// update_thread.join();
 
-          break;
-        }
+      break;
+    }
 
-        // one idea would be to receive, start a thread to compute result, send the result.
-        // Problem: ZMQ_REP is blocking -- zmq.REQ is alos blocking in python.
-        // Dealer is like an assync Req socket. Router is like an assync Rep Socket.
-        // Request (REQ) / reply (REP).
-        // If we replace REP with ROUTER. This gives us an asynchronous server that can talk to multiple REQ clients
-        //Push/Pull Pattern. 
-        // client pushes to port A, server listens/pull to port A in loop
-        // server does threaded work and sends/pushes result to port B, client listens/pulls to port B 
+    // one idea would be to receive, start a thread to compute result, send the
+    // result. Problem: ZMQ_REP is blocking -- zmq.REQ is alos blocking in
+    // python. Dealer is like an assync Req socket. Router is like an assync Rep
+    // Socket. Request (REQ) / reply (REP). If we replace REP with ROUTER. This
+    // gives us an asynchronous server that can talk to multiple REQ clients
+    // Push/Pull Pattern.
+    // client pushes to port A, server listens/pull to port A in loop
+    // server does threaded work and sends/pushes result to port B, client
+    // listens/pulls to port B
 
-        // if we get program we setup new program. if we get cam & prox we update cams (?) and prox term only! do one more it, etc.
-        case request_proto::OptionsCase::kProgram : {
-          const program_proto pro = request_p.program();
-          const int cluster_id =  pro.cluster_id();
-          std::cout << "request_proto::OptionsCase::kProgram " << cluster_id << std::endl;
-          //if(cluster_to_program.find(cluster_id) == cluster_to_program.end())
-          CeresProgram& program = cluster_to_program[pro.cluster_id()];
-          program.ResetProgram(pro);
+    // if we get program we setup new program. if we get cam & prox we update
+    // cams (?) and prox term only! do one more it, etc.
+    case request_proto::OptionsCase::kProgram: {
+      const program_proto pro = request_p.program();
+      const int cluster_id = pro.cluster_id();
+      std::cout << "request_proto::OptionsCase::kProgram " << cluster_id
+                << std::endl;
+      // if(cluster_to_program.find(cluster_id) == cluster_to_program.end())
+      CeresProgram &program = cluster_to_program[pro.cluster_id()];
+      program.ResetProgram(pro);
 
-          auto program_lambda = [&cluster_to_program, &push_socket, &mtx](int cluster_id) {
-            CeresProgram& program = cluster_to_program[cluster_id];
+      auto program_lambda = [&cluster_to_program, &push_socket,
+                             &mtx](int cluster_id) {
+        CeresProgram &program = cluster_to_program[cluster_id];
 
 #ifdef __ceresVersion__
-            program.UpdateStepSize();
-            // program.Solve(); // only pcg!
-            //std::this_thread::sleep_for(std::chrono::seconds(5));
+        program.UpdateStepSize();
+        // program.Solve(); // only pcg!
+        // std::this_thread::sleep_for(std::chrono::seconds(5));
 #else
-            program.UpdateStepSizeAndSolve();
+        program.UpdateStepSizeAndSolve();
 #endif
-            return_cluster_proto return_proto = program.FillReturnProto();
-            const double cost = 2 * program.GetCost();
-            return_proto.set_cost(cost);
-            std::cout << cluster_id << ". Cost from program: " << cost << "\n";
-            // SerializeToArray saves memory and time?
-            const size_t bytes = return_proto.ByteSizeLong();
-            zmq::message_t reply(bytes);
-            return_proto.SerializeToArray(reply.data(), bytes);
-            std::lock_guard<std::mutex> lock(mtx);
-            push_socket.send(reply, zmq::send_flags::none);
-          };
-          //std::thread program_thread(program_lambda, std::ref(program), std::cref(pro));
-          std::thread program_thread(program_lambda, cluster_id);
-          program_thread.detach();
-          //program_thread.join();// ok, so proto pro runs out of scope / gets deleted.
-          //std::this_thread::sleep_for(std::chrono::seconds(0)); // >5 s ok, so .. haeh?
-          break;
-        }
+        return_cluster_proto return_proto = program.FillReturnProto();
+        const double cost = 2 * program.GetCost();
+        return_proto.set_cost(cost);
+        std::cout << cluster_id << ". Cost from program: " << cost << "\n";
+        // SerializeToArray saves memory and time?
+        const size_t bytes = return_proto.ByteSizeLong();
+        zmq::message_t reply(bytes);
+        return_proto.SerializeToArray(reply.data(), bytes);
+        std::lock_guard<std::mutex> lock(mtx);
+        push_socket.send(reply, zmq::send_flags::none);
+      };
+      // std::thread program_thread(program_lambda, std::ref(program),
+      // std::cref(pro));
+      std::thread program_thread(program_lambda, cluster_id);
+      program_thread.detach();
+      // program_thread.join();// ok, so proto pro runs out of scope / gets
+      // deleted. std::this_thread::sleep_for(std::chrono::seconds(0)); // >5 s
+      // ok, so .. haeh?
+      break;
+    }
 
-        case request_proto::OptionsCase::kCostUpdate: {
-          const cost_proto costUpdate = request_p.cost_update();
-          const int cluster_id = costUpdate.cluster_id();
-          std::cout << "request_proto::OptionsCase::kCostUpdate " << cluster_id << std::endl;
-          THROW_IF(cluster_to_program.find(cluster_id) == cluster_to_program.end());
-          CeresProgram& program = cluster_to_program[cluster_id];
-          program.UpdateCameras(costUpdate); // update is local, we need to fill data in main thread.
-          
-          // Define a Lambda Expression
-          auto cost_lambda = [&push_socket, &cluster_to_program, &mtx](int cluster_id) {
-            CeresProgram& program = cluster_to_program[cluster_id];
-            const double cost = 2 * program.GetCost();
-            std::cout << cluster_id << ". Cost from cost: " << cost << "\n";
-            return_cost_proto return_proto;
-            return_proto.set_cost(cost);
-            return_proto.set_cluster_id(cluster_id);
-            // SerializeToArray saves memory and time?
-            const size_t bytes = return_proto.ByteSizeLong();
-            zmq::message_t reply(bytes);
-            return_proto.SerializeToArray(reply.data(), bytes);
-            std::lock_guard<std::mutex> lock(mtx);
-            push_socket.send(reply, zmq::send_flags::none);
-          };
-          std::thread cost_thread(cost_lambda, cluster_id);
-          cost_thread.detach();
-          break;
-        }
+    case request_proto::OptionsCase::kCostUpdate: {
+      const cost_proto costUpdate = request_p.cost_update();
+      const int cluster_id = costUpdate.cluster_id();
+      std::cout << "request_proto::OptionsCase::kCostUpdate " << cluster_id
+                << std::endl;
+      THROW_IF(cluster_to_program.find(cluster_id) == cluster_to_program.end());
+      CeresProgram &program = cluster_to_program[cluster_id];
+      program.UpdateCameras(
+          costUpdate); // update is local, we need to fill data in main thread.
+      bool revert_lms = costUpdate.revert_lm() == 2 ? true : false;
+      // Define a Lambda Expression
+      auto cost_lambda = [&push_socket, &cluster_to_program,
+                          &mtx](int cluster_id, bool revert_lms) {
+        CeresProgram &program = cluster_to_program[cluster_id];
+        const double cost = 2 * program.GetCost(revert_lms);
+        std::cout << cluster_id << ". Cost from cost: " << cost << "\n";
+        return_cost_proto return_proto;
+        return_proto.set_cost(cost);
+        return_proto.set_cluster_id(cluster_id);
+        // SerializeToArray saves memory and time?
+        const size_t bytes = return_proto.ByteSizeLong();
+        zmq::message_t reply(bytes);
+        return_proto.SerializeToArray(reply.data(), bytes);
+        std::lock_guard<std::mutex> lock(mtx);
+        push_socket.send(reply, zmq::send_flags::none);
+      };
+      std::thread cost_thread(cost_lambda, cluster_id, revert_lms);
+      cost_thread.detach();
+      break;
+    }
 
-        case request_proto::OptionsCase::kPreconditioningUpdate : {
-            std::cout << "request_proto::OptionsCase::kPreconditioningUpdate" << std::endl;
-            const preconditioning_proto ppro = request_p.preconditioning_update();
-            // Define a Lambda Expression
-            CeresProgram& program = cluster_to_program[ppro.cluster_id()];
-            program.UpdatePreconditioning(ppro);
-        }
+    case request_proto::OptionsCase::kPreconditioningUpdate: {
+      std::cout << "request_proto::OptionsCase::kPreconditioningUpdate"
+                << std::endl;
+      const preconditioning_proto ppro = request_p.preconditioning_update();
+      // Define a Lambda Expression
+      CeresProgram &program = cluster_to_program[ppro.cluster_id()];
+      program.UpdatePreconditioning(ppro);
+    }
 
-        default: {
-        break;
-        }
-      }
+    case request_proto::OptionsCase::kBestCost: {
+      std::cout << "request_proto::OptionsCase::kBestCost" << std::endl;
+      const best_cost_proto ppro = request_p.best_cost();
+      // Define a Lambda Expression
+      CeresProgram &program = cluster_to_program[ppro.cluster_id()];
+      program.UpdateBestCost(ppro);
+    }
 
-      // Here one would send back 'ack' / 'ok'. Unclear if necessary, blocks on sender -- maybe good idea.
-      // std::cout << "Sending message acknowledged to pull_socket\n";
-      const std::string reply_message = "Ok";
-      zmq::message_t reply(reply_message.size());
-      memcpy(reply.data(), reply_message.data(), reply_message.size());
-      pull_socket.send(reply, zmq::send_flags::none);
-    } // end while 
+    default: {
+      break;
+    }
+    }
 
-    return 0;
+    // Here one would send back 'ack' / 'ok'. Unclear if necessary, blocks on
+    // sender -- maybe good idea. std::cout << "Sending message acknowledged to
+    // pull_socket\n";
+    const std::string reply_message = "Ok";
+    zmq::message_t reply(reply_message.size());
+    memcpy(reply.data(), reply_message.data(), reply_message.size());
+    pull_socket.send(reply, zmq::send_flags::none);
+  } // end while
+
+  return 0;
 }

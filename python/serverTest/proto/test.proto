@@ -52,8 +52,8 @@ message return_cluster_proto {
   // repeated float landmarks = 2; // temporary
   // repeated float step_size = 3;
   repeated double cameras  = 1; // 3d, must be double
-  repeated float landmarks = 2; // temporary
-  repeated float step_size = 3; // can be float -- actually same perf.
+  repeated float landmarks = 2; // temporary turn off should still work
+  repeated float step_size = 3; // can be float -- actually same perf .. haeh? compress to 2048 or float16
   int32 cluster_id = 4;
   float cost = 5;
 }
@@ -62,9 +62,15 @@ message return_cluster_proto {
 message cost_proto {
   repeated double cameras = 1; // 3d, bad is not double -- weird.
   int32 cluster_id = 2;
+  int32 revert_lm = 3; // only for cost, revert back after.
 }
 
 message return_cost_proto {
+  float cost = 1;
+  int32 cluster_id = 2;
+}
+
+message best_cost_proto {
   float cost = 1;
   int32 cluster_id = 2;
 }
@@ -77,6 +83,7 @@ message request_proto {
         prox_cluster_proto update = 3;
         cost_proto cost_update = 4;
         preconditioning_proto preconditioning_update = 5;
+        best_cost_proto best_cost = 6;
   }
 }
 
