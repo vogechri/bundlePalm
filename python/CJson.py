@@ -67,9 +67,9 @@ def readData(data):
 #    data = json.load(file)
 # plotName = "allInOneCompressX.png"
 
-with open('C.json', 'r') as file:
-   data = json.load(file)
-plotName = "JtJStep.png"
+# with open('C.json', 'r') as file:
+#    data = json.load(file)
+# plotName = "JtJStep.png"
 
 with open('cl30.json', 'r') as file:
    data = json.load(file)
