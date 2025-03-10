@@ -154,6 +154,63 @@ def scale_adjust_small_focal_distance(camera_params_, camera_indices_, points_2d
     #points_2d_[flip_point_ids] *= -1
     return camera_params_, points_2d_
 
+def AngleAxisRotatePointNP(angleAxis, pt):
+    theta2 = np.sum(angleAxis * angleAxis, axis=1)
+
+    mask = (theta2 > 0).astype(float)
+
+    theta = np.sqrt(theta2 + (1 - mask))
+
+    mask = np.hstack([mask[:, np.newaxis], mask[:, np.newaxis], mask[:, np.newaxis]])
+
+    costheta = np.cos(theta)
+    sintheta = np.sin(theta)
+    thetaInverse = 1.0 / theta
+
+    w0 = angleAxis[:, 0] * thetaInverse
+    w1 = angleAxis[:, 1] * thetaInverse
+    w2 = angleAxis[:, 2] * thetaInverse
+
+    wCrossPt0 = w1 * pt[:, 2] - w2 * pt[:, 1]
+    wCrossPt1 = w2 * pt[:, 0] - w0 * pt[:, 2]
+    wCrossPt2 = w0 * pt[:, 1] - w1 * pt[:, 0]
+
+    tmp_ = (w0 * pt[:, 0] + w1 * pt[:, 1] + w2 * pt[:, 2]) * (1.0 - costheta)
+
+    r0 = pt[:, 0] * costheta + wCrossPt0 * sintheta + w0 * tmp_
+    r1 = pt[:, 1] * costheta + wCrossPt1 * sintheta + w1 * tmp_
+    r2 = pt[:, 2] * costheta + wCrossPt2 * sintheta + w2 * tmp_
+
+    res1 = np.vstack([r0, r1, r2]).transpose()
+
+    wCrossPt0 = angleAxis[:, 1] * pt[:, 2] - angleAxis[:, 2] * pt[:, 1]
+    wCrossPt1 = angleAxis[:, 2] * pt[:, 0] - angleAxis[:, 0] * pt[:, 2]
+    wCrossPt2 = angleAxis[:, 0] * pt[:, 1] - angleAxis[:, 1] * pt[:, 0]
+
+    r00 = pt[:, 0] + wCrossPt0
+    r01 = pt[:, 1] + wCrossPt1
+    r02 = pt[:, 2] + wCrossPt2
+
+    res2 = np.vstack([r00, r01, r02]).transpose()
+
+    return res1 * mask + res2 * (1 - mask)
+
+# idea: median ste to 0, scale set to 100: let 95% fall into < 100 distance to center.
+def normalize_by_points(points_3d_, cameras_):
+    # 1. get median in each direction.
+    median = np.median(points_3d_, axis=0)
+    points_3d_ = points_3d_ - median
+    # simpler: rot median (still per camera)
+    cam_loc = -AngleAxisRotatePointNP(-cameras_[:,0:3], cameras_[:,3:6])
+    cam_loc = cam_loc - median
+    norm = np.linalg.norm(points_3d_, axis=1)
+    sceneScale = np.percentile(norm, 95)
+    scale = 1000 / sceneScale # 100 is good?
+    points_3d_ = points_3d_ * scale
+    cam_loc = cam_loc * scale
+    cameras_[:,3:6] = -AngleAxisRotatePointNP(cameras_[:,0:3], cam_loc)
+    return points_3d_, cameras_
+
 def read_bal_data(file_name):
     with bz2.open(file_name, "rt") as file:
         n_cameras_, n_points_, n_observations = map(int, file.readline().split())
@@ -183,11 +240,11 @@ def read_bal_data(file_name):
         remove_large_points(points_3d_, camera_indices_, points_2d_, point_indices_)
 
     # invert points_2d_ and focal distance if needed
-    (camera_params, points_2d_) = \
-        invert_focal_distance(camera_params, camera_indices_, points_2d_)
+    (camera_params, points_2d_) = invert_focal_distance(camera_params, camera_indices_, points_2d_)
 
-    (camera_params, points_2d_) = \
-        adjust_focal_scale(camera_params, points_2d_)
+    (camera_params, points_2d_) = adjust_focal_scale(camera_params, points_2d_)
+
+    (points_3d_ ,camera_params) = normalize_by_points(points_3d_ ,camera_params)
 
     # why is this so bad?
     # camera_params = combine_focal_distance_and_kappas(camera_params)
@@ -1068,8 +1125,7 @@ def maxDiagA(M, bs):
     if bs > 1:
         diag = M.diagonal()
         for i_ in range(int(diag.shape[0] / bs)):
-            maxDiag_ = diag[bs * i_ : bs * i_ + bs].copy()
-            Ei[bs * i_ : bs * i_ + bs] = np.max(maxDiag_) # largest
+            Ei[bs * i_ : bs * i_ + bs] = np.max(diag[bs * i_ : bs * i_ + bs]) # largest
         Ei = diag_sparse(Ei)
     else:
         Ei = diag_sparse(M.diag())
@@ -1295,6 +1351,17 @@ def solveByGDNesterov(Ul, W, Vli, bS, m):
     xk = - ubs
     y0 = - ubs
 
+    # also depends on the cost of doing 1 matrix matrix vs 1 matrix vector product actually.
+    #print( "W + Vli = w*Vli nzs: ", W.count_nonzero(), " + ", Vli.count_nonzero(), " ? ", (Vli * W.transpose()).count_nonzero())
+    #print( "Uli + W = Uli * W nzs: ", Uli.count_nonzero(), " + ", W.count_nonzero(), " ? ", (Uli * W).count_nonzero())
+    #print( "W + Vli + W = W * Vli * W^T nzs: ", Vli.count_nonzero(), " + ", 2*W.count_nonzero(), " ? ", (W * Vli * W.transpose()).count_nonzero())
+    #print( "Uli + W + Vli + W = W * Vli * W^T nzs: ", Uli.count_nonzero(), " + ", Vli.count_nonzero(), " + ", 2*W.count_nonzero(), " ? ", (Uli * W * Vli * W.transpose()).count_nonzero())
+    # W = Jp^T Jl -> Vli * W^T = Vli * Jl Jp^T and Vli * Jl
+
+    # M = (Uli *  W) * (Vli * W.transpose()) # TOTALLY NOT : SLOW
+    #M1 = Uli *  W
+    #M2 = Vli * W.transpose() # SLOW
+
     verbose = False
     if verbose:
         costk = xk.dot(Ul * xk - W * (Vli * (W.transpose() * xk)) - 2 * bS)
@@ -1307,6 +1374,7 @@ def solveByGDNesterov(Ul, W, Vli, bS, m):
 
         #( I - Uli * W * Vli * W.transpose())
         g = xk - Uli * ( W * (Vli * (W.transpose() * xk))) + ubs
+        #g = xk - M1 * (M2* xk) + ubs
         yk = xk - 1/Lip * g
         xk = (1-gamma) * yk + gamma * y0
         y0 = yk
@@ -2098,7 +2166,7 @@ def bundle_adjust(
         if jointVersion:
             bp_s = bp + (L * JtJDiag + stepSize) * prox_rhs # AAA
 
-        bS = (bp_s - W * Vli * bl).flatten() # see XX equals 2 * (bp - W * Vli * bl)
+        bS = (bp_s - W * (Vli * bl)).flatten() # see XX equals 2 * (bp - W * Vli * bl)
         # look in power its paper.
 
         # Lesson: |f(x0) + Jp^t dp + Jl^t dl|^2 = |f(x0) + Jp^t dp - Jl^t Vli * (W^T * dp) - Jl^t Vli * Jl f(x0))) |^2
@@ -2200,7 +2268,7 @@ def bundle_adjust(
             # the gradient only wrt. delta_p. this should be the rhs of system ignoring the prox and tr part.
             # == bp - W * Vli * bl, yet delta_l = -Vli * ((W.transpose() * delta_p).flatten() + bl)
             # hence -(W * Vli * bl)^T delta_p = bl^T (delta_l - Vli * bl). which is not above: +- switch
-            Lfklin = (bp - W * Vli * bl).dot(delta_p)
+            Lfklin = (bp - W * (Vli * bl)).dot(delta_p)
             LfkQuad = delta_p.dot(stepSize * delta_p) / decent_lemma_divisor # my estimate for Lf.
             if jointVersion:
                 LfkQuad = delta_p.dot((L * JtJDiag + stepSize) * delta_p) / decent_lemma_divisor
@@ -2889,6 +2957,8 @@ def GetPreconditioners(cameras_, points_3d_, points_2d_, camera_indices_, point_
         # temp_ = np.sqrt(temp_) # a bit better with sqrt (especially for diag prox).
         Vnorm_ = diag_sparse(temp_.flatten())
 
+    print( "W nonzeros: ", (J_land.transpose() * J_pose).count_nonzero(), " ", J_pose.count_nonzero(), " ", J_land.count_nonzero())
+
     return Unorm_, Vnorm_, fx0_
 
 def UpdatePreconditioners(cameras_, points_3d_, points_2d_, camera_indices_, point_indices_, Unorm_old, Vnorm_old):
@@ -3290,7 +3360,7 @@ else:
     rnaBufferSize = 6
 
     (cost, dre, L_in_cluster, Ul_in_cluster, poses_in_cluster, poses_v, landmarks, nabla_p_in_cluster,
-     blockEig_in_cluster, poses_s_in_cluster_pre, U_cluster_zeros, steplength, primal_cost_v) = \
+    blockEig_in_cluster, poses_s_in_cluster_pre, U_cluster_zeros, steplength, primal_cost_v) = \
         perform_full_iteration(camera_indices_in_cluster, point_indices_in_cluster,
             local_camera_indices_in_cluster, local_landmark_indices_in_cluster,
             points_2d_in_cluster, poses_in_cluster, landmarks, poses_s_in_cluster, L_in_cluster,
