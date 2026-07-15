@@ -32,6 +32,7 @@ message(${CMAKE_CURRENT_BINARY_DIR})
 add_library(proto-objects OBJECT "${CMAKE_CURRENT_LIST_DIR}/proto/test.proto")
 target_link_libraries(proto-objects PUBLIC protobuf::libprotobuf)
 set(PROTO_BINARY_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated")
+file(MAKE_DIRECTORY "${PROTO_BINARY_DIR}")
 #set(PROTO_BINARY_DIR "${CMAKE_CURRENT_LIST_DIR}/generated")
 target_include_directories(proto-objects PUBLIC "$<BUILD_INTERFACE:${PROTO_BINARY_DIR}>")
 protobuf_generate(

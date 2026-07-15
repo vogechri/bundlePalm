@@ -11,7 +11,7 @@
 #include <mutex>
 #include <omp.h>
 //#include <chrono>
-#include "generated/proto/test.pb.h"
+#include "proto/test.pb.h"
 #include <google/protobuf/message_lite.h>
 
 #include <Eigen/Core>

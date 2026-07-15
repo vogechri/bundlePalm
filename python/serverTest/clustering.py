@@ -62,6 +62,17 @@ def init_lib():
     lib.cluster_cameras_degeneracy.argtypes = [ctypes.c_int, ctypes.c_void_p, ctypes.c_void_p,
                                                ctypes.c_void_p] # in&out]
 
+    lib.cluster_cameras_hypergraph.restype = ctypes.c_int
+    lib.cluster_cameras_hypergraph.argtypes = [ctypes.c_int, ctypes.c_int, ctypes.c_int,
+                                               ctypes.c_double, ctypes.c_void_p,
+                                               ctypes.c_void_p, ctypes.c_void_p]
+
+    lib.cluster_landmarks_clean.restype = ctypes.c_int
+    lib.cluster_landmarks_clean.argtypes = [ctypes.c_int, ctypes.c_int, ctypes.c_int,
+                                            ctypes.c_int,
+                                            ctypes.c_double, ctypes.c_void_p,
+                                            ctypes.c_void_p, ctypes.c_void_p]
+
 def cluster_covis_lib(kClusters, pre_merges_, camera_indices__, point_indices__):
     c_kClusters_ = ctypes.c_int(kClusters)
     #pre_merges_ = 0
@@ -484,6 +495,111 @@ def cluster_deg_by_landmark(camera_indices_, points_2d_, point_indices_, kCluste
         print("sum_cams_cover ", sum_cams_cover, " / ", num_cams)
         print("sum_landmarks_cover ", sum_landmarks_cover, " / ", num_lands)
         return
+
+    return (
+        camera_indices_in_cluster_,
+        point_indices_in_cluster_,
+        points_2d_in_cluster_,
+        kClusters_
+    )
+
+def cluster_by_camera_hypergraph(
+    camera_indices_, points_2d_, point_indices_, kClusters_, n_cameras_, n_points_,
+    camera_balance_slack=0.0
+):
+    camera_indices_list = camera_indices_.tolist()
+    point_indices_list = point_indices_.tolist()
+    c_camera_indices = (ctypes.c_int * len(camera_indices_list))(*camera_indices_list)
+    c_point_indices = (ctypes.c_int * len(point_indices_list))(*point_indices_list)
+    c_camera_indices_cpp = lib.new_vector_by_copy(c_camera_indices, len(c_camera_indices))
+    c_point_indices_cpp = lib.new_vector_by_copy(c_point_indices, len(c_point_indices))
+    camera_to_cluster_cpp = lib.new_vector()
+
+    try:
+        status = lib.cluster_cameras_hypergraph(
+            ctypes.c_int(kClusters_), ctypes.c_int(n_cameras_), ctypes.c_int(n_points_),
+            ctypes.c_double(camera_balance_slack), c_camera_indices_cpp,
+            c_point_indices_cpp, camera_to_cluster_cpp)
+        if status != 0:
+            raise RuntimeError("camera hypergraph partitioning failed")
+        camera_to_cluster = fillPythonVecSimple(camera_to_cluster_cpp)
+    finally:
+        lib.delete_vector(camera_to_cluster_cpp)
+        lib.delete_vector(c_point_indices_cpp)
+        lib.delete_vector(c_camera_indices_cpp)
+
+    if camera_to_cluster.shape[0] != n_cameras_:
+        raise RuntimeError("camera hypergraph partitioning returned an invalid assignment")
+
+    camera_indices_in_cluster_ = []
+    point_indices_in_cluster_ = []
+    points_2d_in_cluster_ = []
+    low_degree_counts = np.zeros(10, dtype=np.int64)
+    point_cluster_occurrences = np.zeros(n_points_, dtype=np.int64)
+    for cluster in range(kClusters_):
+        residual_mask = camera_to_cluster[camera_indices_] == cluster
+        cluster_camera_indices = camera_indices_[residual_mask]
+        cluster_point_indices = point_indices_[residual_mask]
+        camera_indices_in_cluster_.append(cluster_camera_indices)
+        point_indices_in_cluster_.append(cluster_point_indices)
+        points_2d_in_cluster_.append(points_2d_[residual_mask])
+
+        unique_points, point_degrees = np.unique(cluster_point_indices, return_counts=True)
+        point_cluster_occurrences[unique_points] += 1
+        degree_histogram = np.bincount(point_degrees, minlength=10)
+        low_degree_counts += degree_histogram[:10]
+
+    camera_counts = np.bincount(camera_to_cluster, minlength=kClusters_)
+    copied_points = np.maximum(point_cluster_occurrences - 1, 0).sum()
+    print("camera hypergraph cameras per cluster:", camera_counts.tolist())
+    print("camera hypergraph additional point copies:", int(copied_points))
+    print("camera hypergraph point-cluster degree counts 1..9:",
+          low_degree_counts[1:10].tolist())
+
+    return (
+        camera_indices_in_cluster_,
+        point_indices_in_cluster_,
+        points_2d_in_cluster_,
+        kClusters_
+    )
+
+def cluster_by_landmark_clean(
+    camera_indices_, points_2d_, point_indices_, kClusters_, n_cameras_, n_points_,
+    residual_balance_slack=0.05, minimum_camera_landmarks=20
+):
+    camera_indices_list = camera_indices_.tolist()
+    point_indices_list = point_indices_.tolist()
+    c_camera_indices = (ctypes.c_int * len(camera_indices_list))(*camera_indices_list)
+    c_point_indices = (ctypes.c_int * len(point_indices_list))(*point_indices_list)
+    c_camera_indices_cpp = lib.new_vector_by_copy(c_camera_indices, len(c_camera_indices))
+    c_point_indices_cpp = lib.new_vector_by_copy(c_point_indices, len(c_point_indices))
+    landmark_to_cluster_cpp = lib.new_vector()
+
+    try:
+        status = lib.cluster_landmarks_clean(
+            ctypes.c_int(kClusters_), ctypes.c_int(n_cameras_), ctypes.c_int(n_points_),
+            ctypes.c_int(minimum_camera_landmarks),
+            ctypes.c_double(residual_balance_slack), c_camera_indices_cpp,
+            c_point_indices_cpp, landmark_to_cluster_cpp)
+        if status != 0:
+            raise RuntimeError("clean landmark partitioning failed")
+        landmark_to_cluster = fillPythonVecSimple(landmark_to_cluster_cpp)
+    finally:
+        lib.delete_vector(landmark_to_cluster_cpp)
+        lib.delete_vector(c_point_indices_cpp)
+        lib.delete_vector(c_camera_indices_cpp)
+
+    if landmark_to_cluster.shape[0] != n_points_:
+        raise RuntimeError("clean landmark partitioning returned an invalid assignment")
+
+    camera_indices_in_cluster_ = []
+    point_indices_in_cluster_ = []
+    points_2d_in_cluster_ = []
+    for cluster in range(kClusters_):
+        residual_mask = landmark_to_cluster[point_indices_] == cluster
+        camera_indices_in_cluster_.append(camera_indices_[residual_mask])
+        point_indices_in_cluster_.append(point_indices_[residual_mask])
+        points_2d_in_cluster_.append(points_2d_[residual_mask])
 
     return (
         camera_indices_in_cluster_,

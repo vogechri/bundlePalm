@@ -17,7 +17,7 @@ import json
 
 import torch
 
-from clustering import init_lib, cluster_deg_by_landmark
+from clustering import cluster_by_landmark_clean, cluster_deg_by_landmark
 from scipy.sparse import csr_array, csr_matrix, issparse
 from scipy.sparse import diags as diag_sparse
 from numpy.linalg import inv as inv_nonHermetian
@@ -904,15 +904,35 @@ pull_socket.connect("tcp://localhost:5557")
 #lib = ctypes.CDLL("./libprocess_clusters.so")
 # init_lib() # ?
 start = time.time() # this is not working at all. Slower then iteratively
-(
-    camera_indices_in_cluster,
-    point_indices_in_cluster,
-    points_2d_in_cluster,
-    kClusters,
-) = cluster_deg_by_landmark(
-    camera_indices, points_2d, point_indices, kClusters)
+clustering_mode = os.environ.get("BUNDLE_PALM_CLUSTERING", "landmark")
+if clustering_mode == "landmark":
+    (
+        camera_indices_in_cluster,
+        point_indices_in_cluster,
+        points_2d_in_cluster,
+        kClusters,
+    ) = cluster_deg_by_landmark(
+        camera_indices, points_2d, point_indices, kClusters)
+elif clustering_mode == "landmark_clean":
+    residual_balance_slack = float(
+        os.environ.get("BUNDLE_PALM_RESIDUAL_BALANCE_SLACK", "0.05"))
+    minimum_camera_landmarks = int(
+        os.environ.get("BUNDLE_PALM_MIN_CAMERA_LANDMARKS", "20"))
+    (
+        camera_indices_in_cluster,
+        point_indices_in_cluster,
+        points_2d_in_cluster,
+        kClusters,
+    ) = cluster_by_landmark_clean(
+        camera_indices, points_2d, point_indices, kClusters,
+        n_cameras, n_points, residual_balance_slack,
+        minimum_camera_landmarks)
+else:
+    raise ValueError(
+        "BUNDLE_PALM_CLUSTERING must be 'landmark' or 'landmark_clean'")
 end = time.time() # this is not working at all. Slower then iteratively
-print("========== clustering took ", end - start, " s ==========")
+print("==========", clustering_mode, "clustering took", end - start,
+      "s ===========")
 
 for ci in range(kClusters):
     values, counts = np.unique(camera_indices_in_cluster[ci], return_counts=True)
