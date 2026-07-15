@@ -2813,7 +2813,77 @@ def getScaling(min_, max_): # aim at max * min = 1. So max * x = 1/(min * x). x^
 # problem is what happens to Ws non zero pattern. As I would need to apply on JtJ and W.
 # Then when averaging we need to apply P on the input, solve system and apply Q on the output.
 
-# next a local version of this? keep relative weight?
+# ============================================================================
+# DIAGONAL PRECONDITIONING VIA CHANGE OF VARIABLES
+# ============================================================================
+#
+# Overview:
+#   We precondition the bundle adjustment by performing a diagonal change of
+#   variables. Instead of optimizing over the original camera parameters c and
+#   landmark positions l, we work with scaled variables:
+#
+#       c_tilde = D_c * c,      l_tilde = D_l * l
+#
+#   where D_c (9 per camera) and D_l (3 per landmark) are diagonal scaling
+#   matrices computed once at initialization from the Gauss-Newton Hessian.
+#
+# How D_c, D_l are computed (this function):
+#   1. Extract the Jacobi preconditioner: d_i = sqrt(|diag(J^T J)_i|)
+#   2. Balance min/max: multiply by t = sqrt(1 / (d_min * d_max)) so that
+#      d_min * d_max ≈ 1 after scaling (geometric centering of the spectrum).
+#   3. Threshold to [1e-18, 1e18] to avoid numerical issues.
+#   4. Rescale so that diag(D^{-1} J^T J D^{-1}) has median ≈ 1, making the
+#      preconditioned Hessian well-scaled for unit step sizes.
+#
+# How the scaling is applied:
+#   - At init (GetPreconditioners):
+#       D_c, D_l are returned as diagonal matrices (Unorm, Vnorm).
+#       cameras   <- D_c * cameras          (scale into new space)
+#       points_3d <- D_l * points_3d
+#       Unorm <- 1/D_c    (store inverse for use inside residuals)
+#       Vnorm <- 1/D_l
+#
+#   - In residual evaluation (torchSingleResiduumXScaled / YScaled):
+#       The residual functions receive the scaled variables c_tilde, l_tilde
+#       and undo the scaling internally:
+#           c_effective = c_tilde * D_c^{-1} = c   (original parameters)
+#           l_effective = l_tilde * D_l^{-1} = l
+#       This means the physical reprojection is always evaluated at the true
+#       parameter values, but PyTorch autograd computes derivatives w.r.t.
+#       the scaled variables.
+#
+#   - Effect on the Jacobian (ComputeDerivativeMatricesNew):
+#       J_tilde_c = dR/dc_tilde = (dR/dc) * D_c^{-1} = J_c * D_c^{-1}
+#       J_tilde_l = dR/dl_tilde = (dR/dl) * D_l^{-1} = J_l * D_l^{-1}
+#       This happens automatically via the chain rule in autograd.
+#
+#   - Effect on the Gauss-Newton Hessian:
+#       H_tilde = J_tilde^T J_tilde = D^{-1} J^T J D^{-1}
+#       With D ≈ sqrt(|diag(J^T J)|), the diagonal of H_tilde ≈ ±1,
+#       giving a well-conditioned system where all parameter directions
+#       (rotation, translation, focal length, distortion) have comparable
+#       scale. This improves convergence of the Nesterov-accelerated
+#       proximal solver and the DRS consensus step.
+#
+#   - In DRS averaging (average_cameras_new):
+#       The step-size matrices U_l returned by bundle_adjust live in the
+#       scaled space. The averaging v = (sum_k U_k)^{-1} (sum_k U_k (2u_k - s_k))
+#       and subsequent s-updates all operate in the scaled space consistently.
+#
+#   - In the C++ server variant (client_acc.py / main.cpp):
+#       The same idea is used: D_c^{-1} is sent as constant parameter blocks
+#       (unorm) to the Ceres cost function, which multiplies each camera
+#       parameter by unorm[i] before evaluating the reprojection. D_l^{-1}
+#       (vnorm) is computed on the C++ side from diag(J_l^T J_l).
+#
+# Why this works:
+#   Bundle adjustment cameras have parameters spanning many orders of
+#   magnitude (rotation ~1, focal length ~1000, distortion ~1e-7). Without
+#   preconditioning, the Hessian condition number is enormous, causing slow
+#   convergence and numerical issues in the proximal/DRS steps. The diagonal
+#   change of variables makes all directions comparable, reducing the
+#   effective condition number to O(1) on the diagonal.
+# ============================================================================
 def GetPcgScalingDiag(JtJ, W):
     baseVersion = False #True #False
     if baseVersion:
