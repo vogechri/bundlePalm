@@ -66,13 +66,20 @@ void ReplaceWeakDegree(int old_degree,
   }
 }
 
+int ResidualViolationForCluster(int residuals,
+                                int minimum_residuals,
+                                int maximum_residuals) {
+  return std::max(0, minimum_residuals - residuals) +
+         std::max(0, residuals - maximum_residuals);
+}
+
 int ResidualViolation(const std::vector<int>& residuals_per_cluster,
                       int minimum_residuals,
                       int maximum_residuals) {
   int violation = 0;
   for (int residuals : residuals_per_cluster) {
-    violation += std::max(0, minimum_residuals - residuals);
-    violation += std::max(0, residuals - maximum_residuals);
+    violation += ResidualViolationForCluster(
+        residuals, minimum_residuals, maximum_residuals);
   }
   return violation;
 }
@@ -147,14 +154,13 @@ Objective ScoreMove(const BipartiteCameraPointGraph& graph,
   return candidate;
 }
 
-void ApplyMove(const BipartiteCameraPointGraph& graph,
-               const LandmarkPartitioningOptions& options,
-               int landmark,
-               int source_cluster,
-               int target_cluster,
-               const Objective& objective,
-               State& state,
-               std::vector<int>& landmark_to_cluster) {
+void ApplyMoveToState(const BipartiteCameraPointGraph& graph,
+                      const LandmarkPartitioningOptions& options,
+                      int landmark,
+                      int source_cluster,
+                      int target_cluster,
+                      const Objective& objective,
+                      State& state) {
   const int weight = graph.cameras_from_point[landmark].size();
   for (int camera : graph.cameras_from_point[landmark]) {
     if (source_cluster >= 0) {
@@ -172,8 +178,135 @@ void ApplyMove(const BipartiteCameraPointGraph& graph,
     state.residuals_per_cluster[source_cluster] -= weight;
   }
   state.residuals_per_cluster[target_cluster] += weight;
-  landmark_to_cluster[landmark] = target_cluster;
   state.objective = objective;
+}
+
+void ApplyMove(const BipartiteCameraPointGraph& graph,
+               const LandmarkPartitioningOptions& options,
+               int landmark,
+               int source_cluster,
+               int target_cluster,
+               const Objective& objective,
+               State& state,
+               std::vector<int>& landmark_to_cluster) {
+  ApplyMoveToState(graph, options, landmark, source_cluster, target_cluster,
+                   objective, state);
+  landmark_to_cluster[landmark] = target_cluster;
+}
+
+bool TryMoveLandmarkOutOfWeakCamera(
+    const BipartiteCameraPointGraph& graph,
+    const LandmarkPartitioningOptions& options,
+    int camera,
+    int landmark,
+    int source_cluster,
+    int minimum_residuals,
+    int maximum_residuals,
+    State& state,
+    std::vector<int>& landmark_to_cluster,
+    std::vector<std::vector<int>>& landmarks_per_cluster,
+    bool& landmarks_per_cluster_ready) {
+
+  Objective best_first_objective;
+  Objective best_objective;
+  int best_target = -1;
+  int best_outbound = -1;
+  bool found = false;
+  for (int target = 0; target < options.cluster_count; ++target) {
+    if (target == source_cluster) {
+      continue;
+    }
+
+    Objective first_objective = ScoreMove(
+      graph, options, state, landmark, source_cluster, target);
+    Objective final_objective = first_objective;
+
+    int outbound_for_target = -1;
+    const int weight = graph.cameras_from_point[landmark].size();
+    if (state.residuals_per_cluster[source_cluster] - weight <
+        minimum_residuals ||
+      state.residuals_per_cluster[target] + weight > maximum_residuals) {
+      const Objective original_objective = state.objective;
+      ApplyMoveToState(graph, options, landmark, source_cluster, target,
+                       first_objective, state);
+      if (!landmarks_per_cluster_ready) {
+        for (int outbound = 0; outbound < graph.point_count; ++outbound) {
+          const int cluster = landmark_to_cluster[outbound];
+          landmarks_per_cluster[cluster].push_back(outbound);
+        }
+        landmarks_per_cluster_ready = true;
+      }
+      int best_outbound = -1;
+      Objective best_exchange_objective;
+      for (int outbound : landmarks_per_cluster[target]) {
+        if (std::binary_search(graph.cameras_from_point[outbound].begin(),
+                               graph.cameras_from_point[outbound].end(),
+                               camera)) {
+          continue;
+        }
+        const int outbound_weight = graph.cameras_from_point[outbound].size();
+        const int source_after =
+          state.residuals_per_cluster[source_cluster] +
+            outbound_weight;
+        const int target_after =
+          state.residuals_per_cluster[target] - outbound_weight;
+        if (source_after < minimum_residuals ||
+            source_after > maximum_residuals ||
+            target_after < minimum_residuals ||
+            target_after > maximum_residuals) {
+          continue;
+        }
+        Objective exchange_objective = ScoreMove(
+          graph, options, state, outbound, target, source_cluster);
+        if (best_outbound < 0 ||
+            IsBetter(exchange_objective, best_exchange_objective)) {
+          best_outbound = outbound;
+          best_exchange_objective = std::move(exchange_objective);
+        }
+      }
+      ApplyMoveToState(graph, options, landmark, target, source_cluster,
+                       original_objective, state);
+      if (best_outbound < 0) {
+        continue;
+      }
+      outbound_for_target = best_outbound;
+      final_objective = best_exchange_objective;
+    }
+
+    if (!found || IsBetter(final_objective, best_objective)) {
+      found = true;
+      best_first_objective = first_objective;
+      best_objective = final_objective;
+      best_target = target;
+      best_outbound = outbound_for_target;
+    }
+  }
+  if (!found) {
+    return false;
+  }
+  ApplyMove(graph, options, landmark, source_cluster, best_target,
+            best_first_objective, state, landmark_to_cluster);
+  if (landmarks_per_cluster_ready) {
+    auto& source_landmarks = landmarks_per_cluster[source_cluster];
+    source_landmarks.erase(std::lower_bound(
+        source_landmarks.begin(), source_landmarks.end(), landmark));
+    auto& target_landmarks = landmarks_per_cluster[best_target];
+    target_landmarks.insert(std::lower_bound(
+        target_landmarks.begin(), target_landmarks.end(), landmark),
+        landmark);
+  }
+  if (best_outbound >= 0) {
+    ApplyMove(graph, options, best_outbound, best_target, source_cluster,
+              best_objective, state, landmark_to_cluster);
+    auto& target_landmarks = landmarks_per_cluster[best_target];
+    target_landmarks.erase(std::lower_bound(
+        target_landmarks.begin(), target_landmarks.end(), best_outbound));
+    auto& source_landmarks = landmarks_per_cluster[source_cluster];
+    source_landmarks.insert(std::lower_bound(
+        source_landmarks.begin(), source_landmarks.end(), best_outbound),
+        best_outbound);
+  }
+  return true;
 }
 
 bool TryEvacuateWeakCamera(
@@ -186,43 +319,27 @@ bool TryEvacuateWeakCamera(
     State& state,
     std::vector<int>& landmark_to_cluster) {
   std::vector<int> landmarks;
-  int removed_residuals = 0;
   for (int landmark : graph.points_from_camera[camera]) {
     if (landmark_to_cluster[landmark] == source_cluster) {
       landmarks.push_back(landmark);
-      removed_residuals += graph.cameras_from_point[landmark].size();
     }
   }
-  if (landmarks.empty() ||
-      state.residuals_per_cluster[source_cluster] - removed_residuals <
-        minimum_residuals) {
+  if (landmarks.empty()) {
     return false;
   }
 
   State candidate_state = state;
   std::vector<int> candidate_assignment = landmark_to_cluster;
+  std::vector<std::vector<int>> landmarks_per_cluster(options.cluster_count);
+  bool landmarks_per_cluster_ready = false;
   for (int landmark : landmarks) {
-    const int weight = graph.cameras_from_point[landmark].size();
-    int best_target = -1;
-    Objective best_objective;
-    for (int target = 0; target < options.cluster_count; ++target) {
-      if (target == source_cluster ||
-          candidate_state.residuals_per_cluster[target] + weight >
-              maximum_residuals) {
-        continue;
-      }
-      Objective candidate = ScoreMove(
-          graph, options, candidate_state, landmark, source_cluster, target);
-      if (best_target < 0 || IsBetter(candidate, best_objective)) {
-        best_target = target;
-        best_objective = std::move(candidate);
-      }
-    }
-    if (best_target < 0) {
+    if (!TryMoveLandmarkOutOfWeakCamera(
+            graph, options, camera, landmark, source_cluster,
+            minimum_residuals, maximum_residuals, candidate_state,
+            candidate_assignment, landmarks_per_cluster,
+            landmarks_per_cluster_ready)) {
       return false;
     }
-    ApplyMove(graph, options, landmark, source_cluster, best_target,
-              best_objective, candidate_state, candidate_assignment);
   }
 
   if (!IsBetter(candidate_state.objective, state.objective) ||
@@ -572,17 +689,27 @@ LandmarkPartition LandmarkPartitioner::Partition(
       const int weight = graph.cameras_from_point[landmark].size();
       int best_target = source;
       Objective best_objective = state.objective;
-      int best_violation = ResidualViolation(
+        const int current_violation = ResidualViolation(
           state.residuals_per_cluster, minimum_residuals, maximum_residuals);
+        int best_violation = current_violation;
       for (int target = 0; target < options_.cluster_count; ++target) {
         if (target == source) {
           continue;
         }
-        std::vector<int> candidate_residuals = state.residuals_per_cluster;
-        candidate_residuals[source] -= weight;
-        candidate_residuals[target] += weight;
-        const int violation = ResidualViolation(
-            candidate_residuals, minimum_residuals, maximum_residuals);
+        const int source_residuals = state.residuals_per_cluster[source];
+        const int target_residuals = state.residuals_per_cluster[target];
+        const int violation =
+          current_violation -
+          ResidualViolationForCluster(
+            source_residuals, minimum_residuals, maximum_residuals) -
+          ResidualViolationForCluster(
+            target_residuals, minimum_residuals, maximum_residuals) +
+          ResidualViolationForCluster(
+            source_residuals - weight,
+            minimum_residuals, maximum_residuals) +
+          ResidualViolationForCluster(
+            target_residuals + weight,
+            minimum_residuals, maximum_residuals);
         if (violation > best_violation) {
           continue;
         }

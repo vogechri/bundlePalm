@@ -139,6 +139,38 @@ def read_bal_data(file_name):
 
     return camera_params, points_3d_, camera_indices_, point_indices_, points_2d_
 
+def is_valid_bz2(file_name):
+    if not os.path.isfile(file_name):
+        return False
+    try:
+        with bz2.open(file_name, "rb") as file:
+            while file.read(1024 * 1024):
+                pass
+        return True
+    except (EOFError, OSError):
+        return False
+
+def get_bal_file(base_url, file_name):
+    candidates = [file_name, os.path.join("..", file_name)]
+    for candidate in candidates:
+        if is_valid_bz2(candidate):
+            return candidate
+
+    target = file_name
+    temporary = target + ".part"
+    if os.path.exists(temporary):
+        os.remove(temporary)
+    print("Downloading", base_url + file_name, "to", target)
+    try:
+        urllib.request.urlretrieve(base_url + file_name, temporary)
+        if not is_valid_bz2(temporary):
+            raise RuntimeError("downloaded BAL archive is incomplete")
+        os.replace(temporary, target)
+    finally:
+        if os.path.exists(temporary):
+            os.remove(temporary)
+    return target
+
 def check_symmetric(a, tol=1e-8):
     return np.all(np.abs(a-a.T) < tol)
 
@@ -865,15 +897,8 @@ if num_args > 2:
     if num_args > 4:
         kClusters = int(sys.argv[4])
 
-    URL = BASE_URL + FILE_NAME
-    if not os.path.isfile(FILE_NAME):
-        urllib.request.urlretrieve(URL, FILE_NAME)
-
-URL = BASE_URL + FILE_NAME
-if not os.path.isfile("../" + FILE_NAME):
-    urllib.request.urlretrieve(URL, "../" + FILE_NAME)
-
-cameras, points_3d, camera_indices, point_indices, points_2d = read_bal_data("../" + FILE_NAME)
+bal_file = get_bal_file(BASE_URL, FILE_NAME)
+cameras, points_3d, camera_indices, point_indices, points_2d = read_bal_data(bal_file)
 n_cameras = cameras.shape[0]
 n_points = points_3d.shape[0]
 
@@ -1239,7 +1264,8 @@ for global_iteration in range(global_iterations):
         beMin = np.minimum(globalBlockEigUpperLimit, np.min(blockEig_in_cluster))
 
         iteration_factor      = (1 - (global_iteration / global_iterations))**4 # 1 at start, ~0 at end.
-        iteration_factor_five = (1 - (5 / global_iterations))**4 #, could also running mean of gains and use 5% of those (positive gains, if < - (5% of mean) ).
+        reference_iteration = min(5, global_iterations - 1)
+        iteration_factor_five = (1 - (reference_iteration / global_iterations))**4 #, could also running mean of gains and use 5% of those (positive gains, if < - (5% of mean) ).
         maxPct = 1 + 0.01 * iteration_factor / iteration_factor_five # aim at 1% at 5 iterations?
 
         disable_best_pose = False
