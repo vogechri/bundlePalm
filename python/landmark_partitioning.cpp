@@ -33,6 +33,13 @@ struct State {
   Objective objective;
 };
 
+struct MoveRecord {
+  int landmark;
+  int source_cluster;
+  int target_cluster;
+  Objective objective_before;
+};
+
 bool IsBetter(const Objective& left, const Objective& right) {
   if (left.weak_camera_count != right.weak_camera_count) {
     return left.weak_camera_count < right.weak_camera_count;
@@ -192,6 +199,36 @@ void ApplyMove(const BipartiteCameraPointGraph& graph,
   ApplyMoveToState(graph, options, landmark, source_cluster, target_cluster,
                    objective, state);
   landmark_to_cluster[landmark] = target_cluster;
+}
+
+void ApplyRecordedMove(const BipartiteCameraPointGraph& graph,
+                       const LandmarkPartitioningOptions& options,
+                       int landmark,
+                       int source_cluster,
+                       int target_cluster,
+                       const Objective& objective,
+                       State& state,
+                       std::vector<int>& landmark_to_cluster,
+                       std::vector<MoveRecord>& move_log) {
+  move_log.push_back(
+      {landmark, source_cluster, target_cluster, state.objective});
+  ApplyMove(graph, options, landmark, source_cluster, target_cluster,
+            objective, state, landmark_to_cluster);
+}
+
+void RollbackMoves(const BipartiteCameraPointGraph& graph,
+                   const LandmarkPartitioningOptions& options,
+                   std::size_t first_move,
+                   State& state,
+                   std::vector<int>& landmark_to_cluster,
+                   std::vector<MoveRecord>& move_log) {
+  for (std::size_t index = move_log.size(); index > first_move; --index) {
+    const MoveRecord& move = move_log[index - 1];
+    ApplyMove(graph, options, move.landmark, move.target_cluster,
+              move.source_cluster, move.objective_before, state,
+              landmark_to_cluster);
+  }
+  move_log.resize(first_move);
 }
 
 bool TryMoveLandmarkOutOfWeakCamera(
@@ -360,7 +397,8 @@ bool ReinforceWeakCameraInPlace(
     int minimum_residuals,
     int maximum_residuals,
     State& state,
-    std::vector<int>& landmark_to_cluster) {
+    std::vector<int>& landmark_to_cluster,
+    std::vector<MoveRecord>& move_log) {
   const int offset = camera * options.cluster_count + target_cluster;
   while (state.camera_cluster_degree[offset] <
          options.weak_camera_degree_limit) {
@@ -422,13 +460,14 @@ bool ReinforceWeakCameraInPlace(
       if (outbound_landmark < 0) {
         return false;
       }
-      ApplyMove(graph, options, outbound_landmark, target_cluster,
-                outbound_target, outbound_objective, state,
-                landmark_to_cluster);
+      ApplyRecordedMove(graph, options, outbound_landmark, target_cluster,
+                        outbound_target, outbound_objective, state,
+                        landmark_to_cluster, move_log);
       continue;
     }
-    ApplyMove(graph, options, best_landmark, best_source, target_cluster,
-              best_objective, state, landmark_to_cluster);
+    ApplyRecordedMove(graph, options, best_landmark, best_source,
+                      target_cluster, best_objective, state,
+                      landmark_to_cluster, move_log);
   }
   return true;
 }
@@ -444,9 +483,11 @@ bool TryReinforceWeakCamera(
     std::vector<int>& landmark_to_cluster) {
   State candidate_state = state;
   std::vector<int> candidate_assignment = landmark_to_cluster;
+    std::vector<MoveRecord> move_log;
   if (!ReinforceWeakCameraInPlace(
           graph, options, camera, target_cluster, minimum_residuals,
-          maximum_residuals, candidate_state, candidate_assignment)) {
+      maximum_residuals, candidate_state, candidate_assignment,
+      move_log)) {
     return false;
   }
 
@@ -476,17 +517,17 @@ bool TryReinforceWeakCamera(
     if (next_offset < 0) {
       return false;
     }
-    State trial_state = candidate_state;
-    std::vector<int> trial_assignment = candidate_assignment;
+        const std::size_t first_trial_move = move_log.size();
     if (!ReinforceWeakCameraInPlace(
             graph, options, next_offset / options.cluster_count,
             next_offset % options.cluster_count, minimum_residuals,
-            maximum_residuals, trial_state, trial_assignment)) {
+        maximum_residuals, candidate_state, candidate_assignment,
+                move_log)) {
+      RollbackMoves(graph, options, first_trial_move, candidate_state,
+                  candidate_assignment, move_log);
       blocked[next_offset] = true;
       continue;
     }
-    candidate_state = std::move(trial_state);
-    candidate_assignment = std::move(trial_assignment);
     std::fill(blocked.begin(), blocked.end(), false);
   }
   if (!IsBetter(candidate_state.objective, state.objective)) {
