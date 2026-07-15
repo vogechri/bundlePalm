@@ -1,3 +1,8 @@
+// Concurrency contract: one client drives this server and waits for all
+// asynchronous cluster results before starting the next phase. Worker replies
+// share the PUSH socket under a mutex. Revisit socket ownership and program
+// synchronization before allowing multiple clients or overlapping phases.
+
 // #define _ceres_num_threads_ 1
 // #define __unweighted_system__
 #define _num_threads_machine_ 31
@@ -1481,6 +1486,7 @@ int main() {
       // Define a Lambda Expression
       CeresProgram &program = cluster_to_program[ppro.cluster_id()];
       program.UpdatePreconditioning(ppro);
+      break;
     }
 
     case request_proto::OptionsCase::kBestCost: {
