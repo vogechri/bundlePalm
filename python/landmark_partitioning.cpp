@@ -555,25 +555,26 @@ Objective ScoreSwap(const BipartiteCameraPointGraph& graph,
       Square(first_residuals) +
       Square(second_residuals - second_weight + first_weight) -
       Square(second_residuals);
-  std::vector<int> affected_cameras = graph.cameras_from_point[first_landmark];
-  affected_cameras.insert(affected_cameras.end(),
-                          graph.cameras_from_point[second_landmark].begin(),
-                          graph.cameras_from_point[second_landmark].end());
-  std::sort(affected_cameras.begin(), affected_cameras.end());
-  affected_cameras.erase(
-      std::unique(affected_cameras.begin(), affected_cameras.end()),
-      affected_cameras.end());
-
-  for (int camera : affected_cameras) {
-    const bool observes_first = std::binary_search(
-        graph.cameras_from_point[first_landmark].begin(),
-        graph.cameras_from_point[first_landmark].end(), camera);
-    const bool observes_second = std::binary_search(
-        graph.cameras_from_point[second_landmark].begin(),
-        graph.cameras_from_point[second_landmark].end(), camera);
-    if (observes_first == observes_second) {
+  const auto& first_cameras = graph.cameras_from_point[first_landmark];
+  const auto& second_cameras = graph.cameras_from_point[second_landmark];
+  std::size_t first_index = 0;
+  std::size_t second_index = 0;
+  while (first_index < first_cameras.size() ||
+         second_index < second_cameras.size()) {
+    if (first_index < first_cameras.size() &&
+        second_index < second_cameras.size() &&
+        first_cameras[first_index] == second_cameras[second_index]) {
+      ++first_index;
+      ++second_index;
       continue;
     }
+    const bool observes_first =
+        second_index == second_cameras.size() ||
+        (first_index < first_cameras.size() &&
+         first_cameras[first_index] < second_cameras[second_index]);
+    const int camera = observes_first
+                           ? first_cameras[first_index++]
+                           : second_cameras[second_index++];
     const int first_offset = camera * options.cluster_count + first_cluster;
     const int second_offset = camera * options.cluster_count + second_cluster;
     const int first_delta = observes_first ? -1 : 1;
