@@ -69,8 +69,8 @@ def init_lib():
 
     lib.cluster_landmarks_clean.restype = ctypes.c_int
     lib.cluster_landmarks_clean.argtypes = [ctypes.c_int, ctypes.c_int, ctypes.c_int,
-                                            ctypes.c_int,
-                                            ctypes.c_double, ctypes.c_void_p,
+                                            ctypes.c_int, ctypes.c_int, ctypes.c_int,
+                                            ctypes.c_int, ctypes.c_double, ctypes.c_void_p,
                                             ctypes.c_void_p, ctypes.c_void_p]
 
 def cluster_covis_lib(kClusters, pre_merges_, camera_indices__, point_indices__):
@@ -565,7 +565,9 @@ def cluster_by_camera_hypergraph(
 
 def cluster_by_landmark_clean(
     camera_indices_, points_2d_, point_indices_, kClusters_, n_cameras_, n_points_,
-    residual_balance_slack=0.05, minimum_camera_landmarks=20
+    residual_balance_slack=0.05, minimum_camera_landmarks=20,
+    max_refinement_passes=10, repair_restart_interval=1,
+    hard_group_max_cameras=0
 ):
     camera_indices_list = camera_indices_.tolist()
     point_indices_list = point_indices_.tolist()
@@ -579,6 +581,9 @@ def cluster_by_landmark_clean(
         status = lib.cluster_landmarks_clean(
             ctypes.c_int(kClusters_), ctypes.c_int(n_cameras_), ctypes.c_int(n_points_),
             ctypes.c_int(minimum_camera_landmarks),
+            ctypes.c_int(max_refinement_passes),
+            ctypes.c_int(repair_restart_interval),
+            ctypes.c_int(hard_group_max_cameras),
             ctypes.c_double(residual_balance_slack), c_camera_indices_cpp,
             c_point_indices_cpp, landmark_to_cluster_cpp)
         if status != 0:

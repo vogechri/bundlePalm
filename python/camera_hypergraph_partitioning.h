@@ -11,6 +11,7 @@ struct BipartiteCameraPointGraph {
   int point_count = 0;
   std::vector<std::vector<int>> points_from_camera;
   std::vector<std::vector<int>> cameras_from_point;
+  std::vector<int> point_multiplicity;
 
   static BipartiteCameraPointGraph FromObservations(
       int camera_count,

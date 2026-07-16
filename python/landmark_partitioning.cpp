@@ -1,7 +1,10 @@
 #include "landmark_partitioning.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
+#include <cstdlib>
+#include <cstring>
 #include <iostream>
 #include <limits>
 #include <map>
@@ -13,8 +16,8 @@ namespace bundle_palm {
 namespace {
 
 struct Objective {
+  std::int64_t weak_camera_penalty = 0;
   std::int64_t weak_camera_count = 0;
-  std::int64_t weak_camera_distance = 0;
   std::int64_t residual_imbalance = 0;
   std::int64_t copied_camera_count = 0;
 };
@@ -33,6 +36,69 @@ struct State {
   Objective objective;
 };
 
+class ProgressTrace {
+ public:
+  ProgressTrace()
+  : enabled_(TraceEnabled()),
+        start_(std::chrono::steady_clock::now()),
+        last_report_(start_) {}
+
+  void Begin(const char* phase, int pass) {
+    phase_ = phase;
+    pass_ = pass;
+    work_units_ = 0;
+  }
+
+  void Tick(const Objective& objective, std::int64_t work_units = 1) {
+    work_units_ += work_units;
+    if (!enabled_ || (++ticks_since_check_ & 1023) != 0) {
+      return;
+    }
+    const auto now = std::chrono::steady_clock::now();
+    if (now - last_report_ < std::chrono::seconds(5)) {
+      return;
+    }
+    Report(objective, now);
+  }
+
+  void Finish(const Objective& objective) {
+    if (enabled_) {
+      Report(objective, std::chrono::steady_clock::now());
+    }
+  }
+
+ private:
+  static bool TraceEnabled() {
+    const char* setting = std::getenv("BUNDLE_PALM_PARTITION_TRACE");
+    return setting == nullptr || std::strcmp(setting, "0") != 0;
+  }
+
+  void Report(const Objective& objective,
+              std::chrono::steady_clock::time_point now) {
+    const double elapsed =
+        std::chrono::duration<double>(now - start_).count();
+    std::cerr << "landmark partition progress: " << elapsed << " s, phase "
+              << phase_;
+    if (pass_ >= 0) {
+      std::cerr << ", pass " << pass_;
+    }
+    std::cerr << ", work " << work_units_
+              << ", weak " << objective.weak_camera_count
+              << ", weak penalty " << objective.weak_camera_penalty
+              << ", camera copies " << objective.copied_camera_count
+              << ", imbalance " << objective.residual_imbalance << '\n';
+    last_report_ = now;
+  }
+
+  bool enabled_;
+  std::chrono::steady_clock::time_point start_;
+  std::chrono::steady_clock::time_point last_report_;
+  const char* phase_ = "initialization";
+  int pass_ = -1;
+  std::int64_t work_units_ = 0;
+  std::uint64_t ticks_since_check_ = 0;
+};
+
 struct MoveRecord {
   int landmark;
   int source_cluster;
@@ -40,12 +106,12 @@ struct MoveRecord {
   Objective objective_before;
 };
 
-bool IsBetter(const Objective& left, const Objective& right) {
+constexpr bool IsBetter(const Objective& left, const Objective& right) {
+  if (left.weak_camera_penalty != right.weak_camera_penalty) {
+    return left.weak_camera_penalty < right.weak_camera_penalty;
+  }
   if (left.weak_camera_count != right.weak_camera_count) {
     return left.weak_camera_count < right.weak_camera_count;
-  }
-  if (left.weak_camera_distance != right.weak_camera_distance) {
-    return left.weak_camera_distance < right.weak_camera_distance;
   }
   if (left.residual_imbalance != right.residual_imbalance) {
     return left.residual_imbalance < right.residual_imbalance;
@@ -57,19 +123,35 @@ bool IsEquivalent(const Objective& left, const Objective& right) {
   return !IsBetter(left, right) && !IsBetter(right, left);
 }
 
+constexpr std::int64_t WeakCameraPenalty(int degree, int degree_limit) {
+  if (degree <= 0 || degree >= degree_limit) {
+    return 0;
+  }
+  const std::int64_t deficit = degree_limit - degree;
+  return deficit * deficit * deficit;
+}
+
+static_assert(WeakCameraPenalty(0, 20) == 0);
+static_assert(WeakCameraPenalty(1, 20) == 6859);
+static_assert(WeakCameraPenalty(10, 20) == 1000);
+static_assert(WeakCameraPenalty(19, 20) == 1);
+static_assert(WeakCameraPenalty(20, 20) == 0);
+static_assert(IsBetter(Objective{1000, 2, 0, 0},
+                       Objective{2000, 1, 0, 0}));
+
 void ReplaceWeakDegree(int old_degree,
                        int new_degree,
                        int degree_limit,
                        Objective& objective) {
   if (old_degree > 0 && old_degree < degree_limit) {
     --objective.weak_camera_count;
-    objective.weak_camera_distance -=
-        std::min(old_degree, degree_limit - old_degree);
+    objective.weak_camera_penalty -=
+        WeakCameraPenalty(old_degree, degree_limit);
   }
   if (new_degree > 0 && new_degree < degree_limit) {
     ++objective.weak_camera_count;
-    objective.weak_camera_distance +=
-        std::min(new_degree, degree_limit - new_degree);
+    objective.weak_camera_penalty +=
+        WeakCameraPenalty(new_degree, degree_limit);
   }
 }
 
@@ -95,20 +177,30 @@ std::int64_t Square(int value) {
   return static_cast<std::int64_t>(value) * value;
 }
 
+int PointMultiplicity(const BipartiteCameraPointGraph& graph, int landmark) {
+  return graph.point_multiplicity.empty()
+             ? 1
+             : graph.point_multiplicity[landmark];
+}
+
+int LandmarkWeight(const BipartiteCameraPointGraph& graph, int landmark) {
+  return PointMultiplicity(graph, landmark) *
+         static_cast<int>(graph.cameras_from_point[landmark].size());
+}
+
 std::pair<int, int> ResidualBounds(
     const BipartiteCameraPointGraph& graph,
     const LandmarkPartitioningOptions& options) {
-  const int residual_count = std::accumulate(
-      graph.cameras_from_point.begin(), graph.cameras_from_point.end(), 0,
-      [](int sum, const std::vector<int>& cameras) {
-        return sum + static_cast<int>(cameras.size());
-      });
+  int residual_count = 0;
+  for (int landmark = 0; landmark < graph.point_count; ++landmark) {
+    residual_count += LandmarkWeight(graph, landmark);
+  }
   const double target = static_cast<double>(residual_count) /
                         static_cast<double>(options.cluster_count);
   int largest_landmark = 0;
-  for (const auto& cameras : graph.cameras_from_point) {
-    largest_landmark =
-        std::max(largest_landmark, static_cast<int>(cameras.size()));
+  for (int landmark = 0; landmark < graph.point_count; ++landmark) {
+    largest_landmark = std::max(
+        largest_landmark, LandmarkWeight(graph, landmark));
   }
   const int minimum_residuals = static_cast<int>(
       std::floor(target * (1.0 - options.residual_balance_slack)));
@@ -126,7 +218,8 @@ Objective ScoreMove(const BipartiteCameraPointGraph& graph,
                     int source_cluster,
                     int target_cluster) {
   Objective candidate = state.objective;
-  const int weight = graph.cameras_from_point[landmark].size();
+  const int multiplicity = PointMultiplicity(graph, landmark);
+  const int weight = LandmarkWeight(graph, landmark);
   if (source_cluster >= 0) {
     const int source_residuals = state.residuals_per_cluster[source_cluster];
     candidate.residual_imbalance +=
@@ -141,15 +234,15 @@ Objective ScoreMove(const BipartiteCameraPointGraph& graph,
     if (source_cluster >= 0) {
       const int source_offset = camera * options.cluster_count + source_cluster;
       const int source_degree = state.camera_cluster_degree[source_offset];
-      ReplaceWeakDegree(source_degree, source_degree - 1,
+      ReplaceWeakDegree(source_degree, source_degree - multiplicity,
                         options.weak_camera_degree_limit, candidate);
-      if (source_degree == 1) {
+      if (source_degree == multiplicity) {
         --occurrences_after;
       }
     }
     const int target_offset = camera * options.cluster_count + target_cluster;
     const int target_degree = state.camera_cluster_degree[target_offset];
-    ReplaceWeakDegree(target_degree, target_degree + 1,
+    ReplaceWeakDegree(target_degree, target_degree + multiplicity,
                       options.weak_camera_degree_limit, candidate);
     if (target_degree == 0) {
       ++occurrences_after;
@@ -168,18 +261,21 @@ void ApplyMoveToState(const BipartiteCameraPointGraph& graph,
                       int target_cluster,
                       const Objective& objective,
                       State& state) {
-  const int weight = graph.cameras_from_point[landmark].size();
+  const int multiplicity = PointMultiplicity(graph, landmark);
+  const int weight = LandmarkWeight(graph, landmark);
   for (int camera : graph.cameras_from_point[landmark]) {
     if (source_cluster >= 0) {
       const int source_offset = camera * options.cluster_count + source_cluster;
-      if (--state.camera_cluster_degree[source_offset] == 0) {
+      state.camera_cluster_degree[source_offset] -= multiplicity;
+      if (state.camera_cluster_degree[source_offset] == 0) {
         --state.camera_cluster_count[camera];
       }
     }
     const int target_offset = camera * options.cluster_count + target_cluster;
-    if (state.camera_cluster_degree[target_offset]++ == 0) {
+    if (state.camera_cluster_degree[target_offset] == 0) {
       ++state.camera_cluster_count[camera];
     }
+    state.camera_cluster_degree[target_offset] += multiplicity;
   }
   if (source_cluster >= 0) {
     state.residuals_per_cluster[source_cluster] -= weight;
@@ -209,11 +305,22 @@ void ApplyRecordedMove(const BipartiteCameraPointGraph& graph,
                        const Objective& objective,
                        State& state,
                        std::vector<int>& landmark_to_cluster,
-                       std::vector<MoveRecord>& move_log) {
+                         std::vector<MoveRecord>& move_log,
+                         std::vector<std::vector<int>>* landmarks_per_cluster =
+                           nullptr) {
   move_log.push_back(
       {landmark, source_cluster, target_cluster, state.objective});
   ApplyMove(graph, options, landmark, source_cluster, target_cluster,
             objective, state, landmark_to_cluster);
+              if (landmarks_per_cluster != nullptr) {
+              auto& source_landmarks = (*landmarks_per_cluster)[source_cluster];
+              source_landmarks.erase(std::lower_bound(
+                source_landmarks.begin(), source_landmarks.end(), landmark));
+              auto& target_landmarks = (*landmarks_per_cluster)[target_cluster];
+              target_landmarks.insert(std::lower_bound(
+                target_landmarks.begin(), target_landmarks.end(), landmark),
+                landmark);
+              }
 }
 
 void RollbackMoves(const BipartiteCameraPointGraph& graph,
@@ -221,12 +328,25 @@ void RollbackMoves(const BipartiteCameraPointGraph& graph,
                    std::size_t first_move,
                    State& state,
                    std::vector<int>& landmark_to_cluster,
-                   std::vector<MoveRecord>& move_log) {
+                     std::vector<MoveRecord>& move_log,
+                     std::vector<std::vector<int>>* landmarks_per_cluster =
+                       nullptr) {
   for (std::size_t index = move_log.size(); index > first_move; --index) {
     const MoveRecord& move = move_log[index - 1];
     ApplyMove(graph, options, move.landmark, move.target_cluster,
               move.source_cluster, move.objective_before, state,
               landmark_to_cluster);
+            if (landmarks_per_cluster != nullptr) {
+              auto& target_landmarks =
+                (*landmarks_per_cluster)[move.target_cluster];
+              target_landmarks.erase(std::lower_bound(
+                target_landmarks.begin(), target_landmarks.end(), move.landmark));
+              auto& source_landmarks =
+                (*landmarks_per_cluster)[move.source_cluster];
+              source_landmarks.insert(std::lower_bound(
+                source_landmarks.begin(), source_landmarks.end(), move.landmark),
+                move.landmark);
+            }
   }
   move_log.resize(first_move);
 }
@@ -242,7 +362,8 @@ bool TryMoveLandmarkOutOfWeakCamera(
     State& state,
     std::vector<int>& landmark_to_cluster,
     std::vector<std::vector<int>>& landmarks_per_cluster,
-    bool& landmarks_per_cluster_ready) {
+    std::vector<MoveRecord>& move_log,
+    ProgressTrace& progress) {
 
   Objective best_first_objective;
   Objective best_objective;
@@ -259,29 +380,24 @@ bool TryMoveLandmarkOutOfWeakCamera(
     Objective final_objective = first_objective;
 
     int outbound_for_target = -1;
-    const int weight = graph.cameras_from_point[landmark].size();
+    const int weight = LandmarkWeight(graph, landmark);
     if (state.residuals_per_cluster[source_cluster] - weight <
         minimum_residuals ||
       state.residuals_per_cluster[target] + weight > maximum_residuals) {
       const Objective original_objective = state.objective;
       ApplyMoveToState(graph, options, landmark, source_cluster, target,
                        first_objective, state);
-      if (!landmarks_per_cluster_ready) {
-        for (int outbound = 0; outbound < graph.point_count; ++outbound) {
-          const int cluster = landmark_to_cluster[outbound];
-          landmarks_per_cluster[cluster].push_back(outbound);
-        }
-        landmarks_per_cluster_ready = true;
-      }
       int best_outbound = -1;
+      int tried = 0;
       Objective best_exchange_objective;
       for (int outbound : landmarks_per_cluster[target]) {
+        progress.Tick(state.objective);
         if (std::binary_search(graph.cameras_from_point[outbound].begin(),
                                graph.cameras_from_point[outbound].end(),
                                camera)) {
           continue;
         }
-        const int outbound_weight = graph.cameras_from_point[outbound].size();
+        const int outbound_weight = LandmarkWeight(graph, outbound);
         const int source_after =
           state.residuals_per_cluster[source_cluster] +
             outbound_weight;
@@ -292,6 +408,11 @@ bool TryMoveLandmarkOutOfWeakCamera(
             target_after < minimum_residuals ||
             target_after > maximum_residuals) {
           continue;
+        }
+        if (options.repair_restart_interval != 1 &&
+          options.max_swap_candidates_per_landmark > 0 &&
+            tried++ >= options.max_swap_candidates_per_landmark) {
+          break;
         }
         Objective exchange_objective = ScoreMove(
           graph, options, state, outbound, target, source_cluster);
@@ -321,27 +442,14 @@ bool TryMoveLandmarkOutOfWeakCamera(
   if (!found) {
     return false;
   }
-  ApplyMove(graph, options, landmark, source_cluster, best_target,
-            best_first_objective, state, landmark_to_cluster);
-  if (landmarks_per_cluster_ready) {
-    auto& source_landmarks = landmarks_per_cluster[source_cluster];
-    source_landmarks.erase(std::lower_bound(
-        source_landmarks.begin(), source_landmarks.end(), landmark));
-    auto& target_landmarks = landmarks_per_cluster[best_target];
-    target_landmarks.insert(std::lower_bound(
-        target_landmarks.begin(), target_landmarks.end(), landmark),
-        landmark);
-  }
+  ApplyRecordedMove(graph, options, landmark, source_cluster, best_target,
+                    best_first_objective, state, landmark_to_cluster,
+                    move_log, &landmarks_per_cluster);
   if (best_outbound >= 0) {
-    ApplyMove(graph, options, best_outbound, best_target, source_cluster,
-              best_objective, state, landmark_to_cluster);
-    auto& target_landmarks = landmarks_per_cluster[best_target];
-    target_landmarks.erase(std::lower_bound(
-        target_landmarks.begin(), target_landmarks.end(), best_outbound));
-    auto& source_landmarks = landmarks_per_cluster[source_cluster];
-    source_landmarks.insert(std::lower_bound(
-        source_landmarks.begin(), source_landmarks.end(), best_outbound),
-        best_outbound);
+    ApplyRecordedMove(graph, options, best_outbound, best_target,
+                      source_cluster, best_objective, state,
+                      landmark_to_cluster, move_log,
+                      &landmarks_per_cluster);
   }
   return true;
 }
@@ -354,7 +462,9 @@ bool TryEvacuateWeakCamera(
     int minimum_residuals,
     int maximum_residuals,
     State& state,
-    std::vector<int>& landmark_to_cluster) {
+    std::vector<int>& landmark_to_cluster,
+    std::vector<std::vector<int>>& landmarks_per_cluster,
+    ProgressTrace& progress) {
   std::vector<int> landmarks;
   for (int landmark : graph.points_from_camera[camera]) {
     if (landmark_to_cluster[landmark] == source_cluster) {
@@ -365,27 +475,28 @@ bool TryEvacuateWeakCamera(
     return false;
   }
 
-  State candidate_state = state;
-  std::vector<int> candidate_assignment = landmark_to_cluster;
-  std::vector<std::vector<int>> landmarks_per_cluster(options.cluster_count);
-  bool landmarks_per_cluster_ready = false;
+  const Objective objective_before = state.objective;
+  std::vector<MoveRecord> move_log;
   for (int landmark : landmarks) {
+      progress.Tick(state.objective);
     if (!TryMoveLandmarkOutOfWeakCamera(
             graph, options, camera, landmark, source_cluster,
-            minimum_residuals, maximum_residuals, candidate_state,
-            candidate_assignment, landmarks_per_cluster,
-            landmarks_per_cluster_ready)) {
+            minimum_residuals, maximum_residuals, state,
+            landmark_to_cluster, landmarks_per_cluster,
+        move_log, progress)) {
+          RollbackMoves(graph, options, 0, state, landmark_to_cluster, move_log,
+                &landmarks_per_cluster);
       return false;
     }
   }
 
-  if (!IsBetter(candidate_state.objective, state.objective) ||
-      candidate_state.camera_cluster_degree[
+  if (!IsBetter(state.objective, objective_before) ||
+      state.camera_cluster_degree[
           camera * options.cluster_count + source_cluster] != 0) {
+      RollbackMoves(graph, options, 0, state, landmark_to_cluster, move_log,
+              &landmarks_per_cluster);
     return false;
   }
-  state = std::move(candidate_state);
-  landmark_to_cluster = std::move(candidate_assignment);
   return true;
 }
 
@@ -398,19 +509,23 @@ bool ReinforceWeakCameraInPlace(
     int maximum_residuals,
     State& state,
     std::vector<int>& landmark_to_cluster,
-    std::vector<MoveRecord>& move_log) {
+    std::vector<MoveRecord>& move_log,
+    std::vector<std::vector<int>>& landmarks_per_cluster,
+    ProgressTrace& progress) {
   const int offset = camera * options.cluster_count + target_cluster;
+  int capacity_moves = 0;
   while (state.camera_cluster_degree[offset] <
          options.weak_camera_degree_limit) {
     int best_landmark = -1;
     int best_source = -1;
     Objective best_objective;
     for (int landmark : graph.points_from_camera[camera]) {
+      progress.Tick(state.objective);
       const int source = landmark_to_cluster[landmark];
       if (source == target_cluster) {
         continue;
       }
-      const int weight = graph.cameras_from_point[landmark].size();
+      const int weight = LandmarkWeight(graph, landmark);
         if (state.residuals_per_cluster[source] - weight <
               minimum_residuals ||
           state.residuals_per_cluster[target_cluster] + weight >
@@ -426,17 +541,21 @@ bool ReinforceWeakCameraInPlace(
       }
     }
     if (best_landmark < 0) {
+        if (options.repair_restart_interval != 1 &&
+          capacity_moves >= options.weak_camera_degree_limit) {
+        return false;
+      }
       int outbound_landmark = -1;
       int outbound_target = -1;
       Objective outbound_objective;
-      for (int landmark = 0; landmark < graph.point_count; ++landmark) {
-        if (landmark_to_cluster[landmark] != target_cluster ||
-            std::binary_search(graph.cameras_from_point[landmark].begin(),
+      for (int landmark : landmarks_per_cluster[target_cluster]) {
+        progress.Tick(state.objective);
+        if (std::binary_search(graph.cameras_from_point[landmark].begin(),
                                graph.cameras_from_point[landmark].end(),
                                camera)) {
           continue;
         }
-        const int weight = graph.cameras_from_point[landmark].size();
+        const int weight = LandmarkWeight(graph, landmark);
         if (state.residuals_per_cluster[target_cluster] - weight <
             minimum_residuals) {
           continue;
@@ -462,12 +581,15 @@ bool ReinforceWeakCameraInPlace(
       }
       ApplyRecordedMove(graph, options, outbound_landmark, target_cluster,
                         outbound_target, outbound_objective, state,
-                        landmark_to_cluster, move_log);
+                        landmark_to_cluster, move_log,
+                        &landmarks_per_cluster);
+      ++capacity_moves;
       continue;
     }
     ApplyRecordedMove(graph, options, best_landmark, best_source,
                       target_cluster, best_objective, state,
-                      landmark_to_cluster, move_log);
+                      landmark_to_cluster, move_log,
+                      &landmarks_per_cluster);
   }
   return true;
 }
@@ -480,32 +602,39 @@ bool TryReinforceWeakCamera(
     int minimum_residuals,
     int maximum_residuals,
     State& state,
-    std::vector<int>& landmark_to_cluster) {
-  State candidate_state = state;
-  std::vector<int> candidate_assignment = landmark_to_cluster;
-    std::vector<MoveRecord> move_log;
+    std::vector<int>& landmark_to_cluster,
+    std::vector<std::vector<int>>& landmarks_per_cluster,
+    ProgressTrace& progress) {
+  const Objective objective_before = state.objective;
+  std::vector<MoveRecord> move_log;
   if (!ReinforceWeakCameraInPlace(
           graph, options, camera, target_cluster, minimum_residuals,
-      maximum_residuals, candidate_state, candidate_assignment,
-      move_log)) {
+          maximum_residuals, state, landmark_to_cluster, move_log,
+          landmarks_per_cluster, progress)) {
+    RollbackMoves(graph, options, 0, state, landmark_to_cluster, move_log,
+                  &landmarks_per_cluster);
     return false;
   }
 
   std::vector<bool> blocked(
       graph.camera_count * options.cluster_count, false);
+    const int repair_limit = options.repair_restart_interval != 1
+      ? options.weak_camera_degree_limit
+      : graph.camera_count;
   for (int repair = 0;
-       !IsBetter(candidate_state.objective, state.objective) &&
-       repair < graph.camera_count;
+       !IsBetter(state.objective, objective_before) &&
+       repair < repair_limit;
        ++repair) {
     int next_offset = -1;
     int next_degree = -1;
     for (int candidate_camera = 0;
          candidate_camera < graph.camera_count; ++candidate_camera) {
       for (int cluster = 0; cluster < options.cluster_count; ++cluster) {
+        progress.Tick(state.objective);
         const int candidate_offset =
             candidate_camera * options.cluster_count + cluster;
         const int degree =
-            candidate_state.camera_cluster_degree[candidate_offset];
+          state.camera_cluster_degree[candidate_offset];
         if (!blocked[candidate_offset] && degree > 0 &&
             degree < options.weak_camera_degree_limit &&
             degree > next_degree) {
@@ -515,26 +644,28 @@ bool TryReinforceWeakCamera(
       }
     }
     if (next_offset < 0) {
+      RollbackMoves(graph, options, 0, state, landmark_to_cluster, move_log,
+                    &landmarks_per_cluster);
       return false;
     }
-        const std::size_t first_trial_move = move_log.size();
+    const std::size_t first_trial_move = move_log.size();
     if (!ReinforceWeakCameraInPlace(
             graph, options, next_offset / options.cluster_count,
             next_offset % options.cluster_count, minimum_residuals,
-        maximum_residuals, candidate_state, candidate_assignment,
-                move_log)) {
-      RollbackMoves(graph, options, first_trial_move, candidate_state,
-                  candidate_assignment, move_log);
+                maximum_residuals, state, landmark_to_cluster, move_log,
+              landmarks_per_cluster, progress)) {
+      RollbackMoves(graph, options, first_trial_move, state,
+                  landmark_to_cluster, move_log, &landmarks_per_cluster);
       blocked[next_offset] = true;
       continue;
     }
     std::fill(blocked.begin(), blocked.end(), false);
   }
-  if (!IsBetter(candidate_state.objective, state.objective)) {
+  if (!IsBetter(state.objective, objective_before)) {
+    RollbackMoves(graph, options, 0, state, landmark_to_cluster, move_log,
+                  &landmarks_per_cluster);
     return false;
   }
-  state = std::move(candidate_state);
-  landmark_to_cluster = std::move(candidate_assignment);
   return true;
 }
 
@@ -546,8 +677,10 @@ Objective ScoreSwap(const BipartiteCameraPointGraph& graph,
                     int first_cluster,
                     int second_cluster) {
   Objective candidate = state.objective;
-  const int first_weight = graph.cameras_from_point[first_landmark].size();
-  const int second_weight = graph.cameras_from_point[second_landmark].size();
+  const int first_multiplicity = PointMultiplicity(graph, first_landmark);
+  const int second_multiplicity = PointMultiplicity(graph, second_landmark);
+  const int first_weight = LandmarkWeight(graph, first_landmark);
+  const int second_weight = LandmarkWeight(graph, second_landmark);
   const int first_residuals = state.residuals_per_cluster[first_cluster];
   const int second_residuals = state.residuals_per_cluster[second_cluster];
   candidate.residual_imbalance +=
@@ -561,24 +694,30 @@ Objective ScoreSwap(const BipartiteCameraPointGraph& graph,
   std::size_t second_index = 0;
   while (first_index < first_cameras.size() ||
          second_index < second_cameras.size()) {
-    if (first_index < first_cameras.size() &&
-        second_index < second_cameras.size() &&
-        first_cameras[first_index] == second_cameras[second_index]) {
-      ++first_index;
-      ++second_index;
-      continue;
-    }
-    const bool observes_first =
-        second_index == second_cameras.size() ||
-        (first_index < first_cameras.size() &&
-         first_cameras[first_index] < second_cameras[second_index]);
+    const bool observes_first = first_index < first_cameras.size() &&
+        (second_index == second_cameras.size() ||
+         first_cameras[first_index] <= second_cameras[second_index]);
+    const bool observes_second = second_index < second_cameras.size() &&
+        (first_index == first_cameras.size() ||
+         second_cameras[second_index] <= first_cameras[first_index]);
     const int camera = observes_first
-                           ? first_cameras[first_index++]
-                           : second_cameras[second_index++];
+                           ? first_cameras[first_index]
+                           : second_cameras[second_index];
+    if (observes_first) {
+      ++first_index;
+    }
+    if (observes_second) {
+      ++second_index;
+    }
     const int first_offset = camera * options.cluster_count + first_cluster;
     const int second_offset = camera * options.cluster_count + second_cluster;
-    const int first_delta = observes_first ? -1 : 1;
+    const int first_delta =
+        (observes_second ? second_multiplicity : 0) -
+        (observes_first ? first_multiplicity : 0);
     const int second_delta = -first_delta;
+    if (first_delta == 0) {
+      continue;
+    }
     const int old_first = state.camera_cluster_degree[first_offset];
     const int old_second = state.camera_cluster_degree[second_offset];
     ReplaceWeakDegree(old_first, old_first + first_delta,
@@ -605,28 +744,47 @@ void ApplySwap(const BipartiteCameraPointGraph& graph,
                const Objective& objective,
                State& state,
                std::vector<int>& landmark_to_cluster) {
-  for (int camera : graph.cameras_from_point[first_landmark]) {
+  const int first_multiplicity = PointMultiplicity(graph, first_landmark);
+  const int second_multiplicity = PointMultiplicity(graph, second_landmark);
+  const auto& first_cameras = graph.cameras_from_point[first_landmark];
+  const auto& second_cameras = graph.cameras_from_point[second_landmark];
+  std::size_t first_index = 0;
+  std::size_t second_index = 0;
+  while (first_index < first_cameras.size() ||
+         second_index < second_cameras.size()) {
+    const bool observes_first = first_index < first_cameras.size() &&
+        (second_index == second_cameras.size() ||
+         first_cameras[first_index] <= second_cameras[second_index]);
+    const bool observes_second = second_index < second_cameras.size() &&
+        (first_index == first_cameras.size() ||
+         second_cameras[second_index] <= first_cameras[first_index]);
+    const int camera = observes_first
+                           ? first_cameras[first_index]
+                           : second_cameras[second_index];
+    if (observes_first) {
+      ++first_index;
+    }
+    if (observes_second) {
+      ++second_index;
+    }
+    const int first_delta =
+        (observes_second ? second_multiplicity : 0) -
+        (observes_first ? first_multiplicity : 0);
+    if (first_delta == 0) {
+      continue;
+    }
     const int first_offset = camera * options.cluster_count + first_cluster;
     const int second_offset = camera * options.cluster_count + second_cluster;
-    if (--state.camera_cluster_degree[first_offset] == 0) {
-      --state.camera_cluster_count[camera];
-    }
-    if (state.camera_cluster_degree[second_offset]++ == 0) {
-      ++state.camera_cluster_count[camera];
-    }
+    const int old_first = state.camera_cluster_degree[first_offset];
+    const int old_second = state.camera_cluster_degree[second_offset];
+    state.camera_cluster_degree[first_offset] += first_delta;
+    state.camera_cluster_degree[second_offset] -= first_delta;
+    state.camera_cluster_count[camera] +=
+        (state.camera_cluster_degree[first_offset] > 0) - (old_first > 0) +
+        (state.camera_cluster_degree[second_offset] > 0) - (old_second > 0);
   }
-  for (int camera : graph.cameras_from_point[second_landmark]) {
-    const int second_offset = camera * options.cluster_count + second_cluster;
-    const int first_offset = camera * options.cluster_count + first_cluster;
-    if (--state.camera_cluster_degree[second_offset] == 0) {
-      --state.camera_cluster_count[camera];
-    }
-    if (state.camera_cluster_degree[first_offset]++ == 0) {
-      ++state.camera_cluster_count[camera];
-    }
-  }
-  const int first_weight = graph.cameras_from_point[first_landmark].size();
-  const int second_weight = graph.cameras_from_point[second_landmark].size();
+  const int first_weight = LandmarkWeight(graph, first_landmark);
+  const int second_weight = LandmarkWeight(graph, second_landmark);
   state.residuals_per_cluster[first_cluster] += second_weight - first_weight;
   state.residuals_per_cluster[second_cluster] += first_weight - second_weight;
   landmark_to_cluster[first_landmark] = second_cluster;
@@ -653,6 +811,56 @@ void Validate(const BipartiteCameraPointGraph& graph,
       options.max_swap_candidates_per_landmark < 0) {
     throw std::invalid_argument("refinement limits cannot be negative");
   }
+  if (options.repair_restart_interval < 0) {
+    throw std::invalid_argument("repair restart interval cannot be negative");
+  }
+  if (options.hard_group_max_camera_count < 0) {
+    throw std::invalid_argument("hard-group camera limit cannot be negative");
+  }
+}
+
+struct HardGroupedGraph {
+  BipartiteCameraPointGraph graph;
+  std::vector<std::vector<int>> original_landmarks;
+};
+
+HardGroupedGraph BuildHardGroupedGraph(
+    const BipartiteCameraPointGraph& original,
+    const LandmarkPartitioningOptions& options) {
+  const int maximum_residuals = ResidualBounds(original, options).second;
+  std::map<std::vector<int>, std::vector<int>> landmarks_by_signature;
+  for (int landmark = 0; landmark < original.point_count; ++landmark) {
+    landmarks_by_signature[original.cameras_from_point[landmark]].push_back(
+        landmark);
+  }
+
+  HardGroupedGraph grouped;
+  grouped.graph.camera_count = original.camera_count;
+  grouped.graph.points_from_camera.resize(original.camera_count);
+  for (const auto& [signature, landmarks] : landmarks_by_signature) {
+    const bool eligible = !signature.empty() && landmarks.size() > 1 &&
+        static_cast<int>(signature.size()) <=
+            options.hard_group_max_camera_count;
+    const int maximum_chunk_size = eligible
+        ? std::max(1, maximum_residuals /
+                          static_cast<int>(signature.size()))
+        : 1;
+    for (std::size_t begin = 0; begin < landmarks.size();
+         begin += maximum_chunk_size) {
+      const std::size_t end = std::min(
+          landmarks.size(), begin + maximum_chunk_size);
+      const int grouped_landmark = grouped.graph.point_count++;
+      grouped.graph.cameras_from_point.push_back(signature);
+      grouped.graph.point_multiplicity.push_back(
+          static_cast<int>(end - begin));
+      grouped.original_landmarks.emplace_back(
+          landmarks.begin() + begin, landmarks.begin() + end);
+      for (int camera : signature) {
+        grouped.graph.points_from_camera[camera].push_back(grouped_landmark);
+      }
+    }
+  }
+  return grouped;
 }
 
 }  // namespace
@@ -663,6 +871,36 @@ LandmarkPartitioner::LandmarkPartitioner(LandmarkPartitioningOptions options)
 LandmarkPartition LandmarkPartitioner::Partition(
     const BipartiteCameraPointGraph& graph) const {
   Validate(graph, options_);
+  if (options_.hard_group_max_camera_count > 0) {
+    HardGroupedGraph grouped = BuildHardGroupedGraph(graph, options_);
+    if (grouped.graph.point_count < options_.cluster_count) {
+      throw std::invalid_argument(
+          "hard grouping leaves fewer landmark groups than clusters");
+    }
+    LandmarkPartitioningOptions grouped_options = options_;
+    grouped_options.hard_group_max_camera_count = 0;
+    LandmarkPartition grouped_result =
+        LandmarkPartitioner(grouped_options).Partition(grouped.graph);
+
+    LandmarkPartition result;
+    result.landmark_to_cluster.assign(graph.point_count, -1);
+    for (int grouped_landmark = 0;
+         grouped_landmark < grouped.graph.point_count; ++grouped_landmark) {
+      const int cluster =
+          grouped_result.landmark_to_cluster[grouped_landmark];
+      for (int original_landmark :
+           grouped.original_landmarks[grouped_landmark]) {
+        result.landmark_to_cluster[original_landmark] = cluster;
+      }
+    }
+    result.metrics = Evaluate(graph, result.landmark_to_cluster, options_);
+    result.accepted_refinement_moves =
+        grouped_result.accepted_refinement_moves;
+    std::cout << "Hard-grouped " << graph.point_count << " landmarks into "
+              << grouped.graph.point_count << " weighted groups\n";
+    return result;
+  }
+  ProgressTrace progress;
   const auto [minimum_residuals, maximum_residuals] =
       ResidualBounds(graph, options_);
   State state(graph, options_);
@@ -683,7 +921,7 @@ LandmarkPartition LandmarkPartitioner::Partition(
       [&graph](const std::vector<int>* left, const std::vector<int>* right) {
         const auto group_weight = [&graph](const std::vector<int>* group) {
           return group->size() *
-                 graph.cameras_from_point[group->front()].size();
+                 LandmarkWeight(graph, group->front());
         };
         return group_weight(left) > group_weight(right);
       });
@@ -693,8 +931,10 @@ LandmarkPartition LandmarkPartitioner::Partition(
     order.insert(order.end(), group->begin(), group->end());
   }
 
+  progress.Begin("initialization", -1);
   for (int landmark : order) {
-    const int weight = graph.cameras_from_point[landmark].size();
+    progress.Tick(state.objective);
+    const int weight = LandmarkWeight(graph, landmark);
     int best_cluster = -1;
     Objective best_objective;
     for (int cluster = 0; cluster < options_.cluster_count; ++cluster) {
@@ -722,13 +962,16 @@ LandmarkPartition LandmarkPartitioner::Partition(
     ApplyMove(graph, options_, landmark, -1, best_cluster, best_objective,
               state, landmark_to_cluster);
   }
+  progress.Finish(state.objective);
 
   int accepted_moves = 0;
   for (int pass = 0; pass < options_.max_refinement_passes; ++pass) {
     bool changed = false;
+    progress.Begin("direct moves", pass);
     for (int landmark = 0; landmark < graph.point_count; ++landmark) {
+      progress.Tick(state.objective);
       const int source = landmark_to_cluster[landmark];
-      const int weight = graph.cameras_from_point[landmark].size();
+      const int weight = LandmarkWeight(graph, landmark);
       int best_target = source;
       Objective best_objective = state.objective;
         const int current_violation = ResidualViolation(
@@ -770,11 +1013,14 @@ LandmarkPartition LandmarkPartitioner::Partition(
         changed = true;
       }
     }
+    progress.Finish(state.objective);
 
+    progress.Begin("swaps", pass);
     for (int first = 0;
           pass == 0 && state.objective.weak_camera_count > 0 &&
           first < graph.point_count;
          ++first) {
+          progress.Tick(state.objective);
       const int first_cluster = landmark_to_cluster[first];
       int tried = 0;
       for (int second = 0; second < graph.point_count; ++second) {
@@ -786,8 +1032,8 @@ LandmarkPartition LandmarkPartitioner::Partition(
           break;
         }
         const int second_cluster = landmark_to_cluster[second];
-        const int first_weight = graph.cameras_from_point[first].size();
-        const int second_weight = graph.cameras_from_point[second].size();
+        const int first_weight = LandmarkWeight(graph, first);
+        const int second_weight = LandmarkWeight(graph, second);
         const int new_first_residuals =
             state.residuals_per_cluster[first_cluster] - first_weight +
             second_weight;
@@ -812,15 +1058,25 @@ LandmarkPartition LandmarkPartitioner::Partition(
         }
       }
     }
+    progress.Finish(state.objective);
 
+    std::vector<std::vector<int>> landmarks_per_cluster(
+        options_.cluster_count);
+    for (int landmark = 0; landmark < graph.point_count; ++landmark) {
+      landmarks_per_cluster[landmark_to_cluster[landmark]].push_back(landmark);
+    }
+    progress.Begin("evacuation", pass);
     bool evacuated = true;
     while (evacuated && state.objective.weak_camera_count > 0) {
       evacuated = false;
+      bool restart_scan = false;
+      int repairs_this_scan = 0;
       for (int degree = 1;
-           degree < options_.weak_camera_degree_limit && !evacuated;
-           ++degree) {
-        for (int camera = 0; camera < graph.camera_count && !evacuated;
-             ++camera) {
+          degree < options_.weak_camera_degree_limit && !restart_scan;
+          ++degree) {
+        for (int camera = 0;
+           camera < graph.camera_count && !restart_scan;
+           ++camera) {
           for (int cluster = 0; cluster < options_.cluster_count; ++cluster) {
             if (state.camera_cluster_degree[
                     camera * options_.cluster_count + cluster] != degree) {
@@ -828,23 +1084,36 @@ LandmarkPartition LandmarkPartitioner::Partition(
             }
             if (TryEvacuateWeakCamera(
                     graph, options_, camera, cluster, minimum_residuals,
-                  maximum_residuals, state, landmark_to_cluster)) {
+                  maximum_residuals, state, landmark_to_cluster,
+                  landmarks_per_cluster, progress)) {
               ++accepted_moves;
               changed = true;
               evacuated = true;
-              break;
+              ++repairs_this_scan;
+              if (options_.repair_restart_interval > 0 &&
+                  repairs_this_scan >= options_.repair_restart_interval) {
+                restart_scan = true;
+                break;
+              }
             }
+            progress.Tick(state.objective);
           }
         }
       }
     }
+    progress.Finish(state.objective);
+    progress.Begin("reinforcement", pass);
     bool reinforced = true;
     while (reinforced && state.objective.weak_camera_count > 0) {
       reinforced = false;
+      bool restart_scan = false;
+      int repairs_this_scan = 0;
       for (int degree = options_.weak_camera_degree_limit - 1;
-           degree > 0 && !reinforced; --degree) {
-        for (int camera = 0; camera < graph.camera_count && !reinforced;
-             ++camera) {
+          degree > 0 && !restart_scan;
+          --degree) {
+        for (int camera = 0;
+           camera < graph.camera_count && !restart_scan;
+           ++camera) {
           for (int cluster = 0; cluster < options_.cluster_count; ++cluster) {
             if (state.camera_cluster_degree[
                     camera * options_.cluster_count + cluster] != degree) {
@@ -852,16 +1121,24 @@ LandmarkPartition LandmarkPartitioner::Partition(
             }
             if (TryReinforceWeakCamera(
                     graph, options_, camera, cluster, minimum_residuals,
-                    maximum_residuals, state, landmark_to_cluster)) {
+                  maximum_residuals, state, landmark_to_cluster,
+                  landmarks_per_cluster, progress)) {
               ++accepted_moves;
               changed = true;
               reinforced = true;
-              break;
+              ++repairs_this_scan;
+              if (options_.repair_restart_interval > 0 &&
+                  repairs_this_scan >= options_.repair_restart_interval) {
+                restart_scan = true;
+                break;
+              }
             }
+            progress.Tick(state.objective);
           }
         }
       }
     }
+    progress.Finish(state.objective);
     if (!changed) {
       break;
     }
@@ -899,10 +1176,10 @@ LandmarkPartitionMetrics LandmarkPartitioner::Evaluate(
           "landmark assignment contains an invalid cluster");
     }
     ++metrics.landmarks_per_cluster[cluster];
-    metrics.residuals_per_cluster[cluster] +=
-        graph.cameras_from_point[landmark].size();
+    metrics.residuals_per_cluster[cluster] += LandmarkWeight(graph, landmark);
     for (int camera : graph.cameras_from_point[landmark]) {
-      ++camera_cluster_degree[camera * options.cluster_count + cluster];
+      camera_cluster_degree[camera * options.cluster_count + cluster] +=
+          PointMultiplicity(graph, landmark);
     }
   }
   for (int camera = 0; camera < graph.camera_count; ++camera) {
@@ -935,7 +1212,10 @@ extern "C" int cluster_landmarks_clean(
     int cluster_count,
     int camera_count,
     int landmark_count,
-  int minimum_camera_landmarks,
+    int minimum_camera_landmarks,
+    int max_refinement_passes,
+    int repair_restart_interval,
+    int hard_group_max_camera_count,
     double residual_balance_slack,
     const std::vector<int>& camera_indices,
     const std::vector<int>& landmark_indices,
@@ -946,6 +1226,9 @@ extern "C" int cluster_landmarks_clean(
     bundle_palm::LandmarkPartitioningOptions options;
     options.cluster_count = cluster_count;
     options.weak_camera_degree_limit = minimum_camera_landmarks;
+    options.max_refinement_passes = max_refinement_passes;
+    options.repair_restart_interval = repair_restart_interval;
+    options.hard_group_max_camera_count = hard_group_max_camera_count;
     options.residual_balance_slack = residual_balance_slack;
     const auto result =
         bundle_palm::LandmarkPartitioner(options).Partition(graph);

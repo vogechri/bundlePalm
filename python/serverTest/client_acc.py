@@ -1,7 +1,11 @@
 from __future__ import print_function
+import faulthandler
+import tracemalloc
 import zmq
 #from proto import test_pb2 #import ImageVector #, Image
 import sys, os
+faulthandler.enable(all_threads=True)
+tracemalloc.start(25)
 sys.path.insert(0, './generated/proto/')
 #from test import test_pb2
 import test_pb2
@@ -29,7 +33,7 @@ from numpy.linalg import inv as inv_nonHermetian
 # sudo apt install protobuf-compiler
 # pip3 install zmq
 
-# pip install protobuf==3.20.3
+# pip install protobuf==4.25.9
 # in /proto:
 # cd proto; protoc --python_out=. test.proto; cd -
 # protoc --cpp_out=./output_directory your_file.proto
@@ -511,8 +515,8 @@ def prox_f_push_pull(camera_indices_in_cluster_, point_indices_in_cluster_, loca
 
     for k in range(kClusters_):
         #print("Receiving return …", k)
-        message_in_bytes_ = pull_socket.recv()
         return_proto_ = test_pb2.return_cluster_proto()
+        message_in_bytes_ = pull_socket.recv()
 
         #message_out_str = "Ok" # this might not be needed if this socket is pull not REC
         #message_out_bytes = message_out_str.encode("utf-8")
@@ -943,6 +947,15 @@ elif clustering_mode == "landmark_clean":
         os.environ.get("BUNDLE_PALM_RESIDUAL_BALANCE_SLACK", "0.05"))
     minimum_camera_landmarks = int(
         os.environ.get("BUNDLE_PALM_MIN_CAMERA_LANDMARKS", "20"))
+    max_refinement_passes = int(
+        os.environ.get("BUNDLE_PALM_MAX_REFINEMENT_PASSES", "10"))
+    batch_repair_scans = os.environ.get(
+        "BUNDLE_PALM_BATCH_REPAIR_SCANS", "0") == "1"
+    repair_restart_interval = int(os.environ.get(
+        "BUNDLE_PALM_REPAIR_RESTART_INTERVAL",
+        "0" if batch_repair_scans else "1"))
+    hard_group_max_cameras = int(os.environ.get(
+        "BUNDLE_PALM_HARD_GROUP_MAX_CAMERAS", "0"))
     (
         camera_indices_in_cluster,
         point_indices_in_cluster,
@@ -951,7 +964,8 @@ elif clustering_mode == "landmark_clean":
     ) = cluster_by_landmark_clean(
         camera_indices, points_2d, point_indices, kClusters,
         n_cameras, n_points, residual_balance_slack,
-        minimum_camera_landmarks)
+        minimum_camera_landmarks, max_refinement_passes,
+        repair_restart_interval, hard_group_max_cameras)
 else:
     raise ValueError(
         "BUNDLE_PALM_CLUSTERING must be 'landmark' or 'landmark_clean'")

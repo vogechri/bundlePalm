@@ -250,6 +250,7 @@ BipartiteCameraPointGraph BipartiteCameraPointGraph::FromObservations(
   graph.point_count = point_count;
   graph.points_from_camera.resize(camera_count);
   graph.cameras_from_point.resize(point_count);
+  graph.point_multiplicity.assign(point_count, 1);
   for (std::size_t observation = 0; observation < camera_indices.size();
        ++observation) {
     const int camera = camera_indices[observation];
