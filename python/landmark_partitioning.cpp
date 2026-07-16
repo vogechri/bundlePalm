@@ -113,10 +113,10 @@ constexpr bool IsBetter(const Objective& left, const Objective& right) {
   if (left.weak_camera_count != right.weak_camera_count) {
     return left.weak_camera_count < right.weak_camera_count;
   }
-  if (left.residual_imbalance != right.residual_imbalance) {
-    return left.residual_imbalance < right.residual_imbalance;
+  if (left.copied_camera_count != right.copied_camera_count) {
+    return left.copied_camera_count < right.copied_camera_count;
   }
-  return left.copied_camera_count < right.copied_camera_count;
+  return left.residual_imbalance < right.residual_imbalance;
 }
 
 bool IsEquivalent(const Objective& left, const Objective& right) {
@@ -138,6 +138,10 @@ static_assert(WeakCameraPenalty(19, 20) == 1);
 static_assert(WeakCameraPenalty(20, 20) == 0);
 static_assert(IsBetter(Objective{1000, 2, 0, 0},
                        Objective{2000, 1, 0, 0}));
+static_assert(IsBetter(Objective{0, 0, 1000000, 9},
+                       Objective{0, 0, 0, 10}));
+static_assert(IsBetter(Objective{0, 0, 9, 10},
+                       Objective{0, 0, 10, 10}));
 
 void ReplaceWeakDegree(int old_degree,
                        int new_degree,
