@@ -944,18 +944,18 @@ if clustering_mode == "landmark":
         camera_indices, points_2d, point_indices, kClusters)
 elif clustering_mode == "landmark_clean":
     residual_balance_slack = float(
-        os.environ.get("BUNDLE_PALM_RESIDUAL_BALANCE_SLACK", "0.05"))
+        os.environ.get("BUNDLE_PALM_RESIDUAL_BALANCE_SLACK", "0.02"))
     minimum_camera_landmarks = int(
         os.environ.get("BUNDLE_PALM_MIN_CAMERA_LANDMARKS", "20"))
     max_refinement_passes = int(
-        os.environ.get("BUNDLE_PALM_MAX_REFINEMENT_PASSES", "10"))
+        os.environ.get("BUNDLE_PALM_MAX_REFINEMENT_PASSES", "2"))
     batch_repair_scans = os.environ.get(
         "BUNDLE_PALM_BATCH_REPAIR_SCANS", "0") == "1"
     repair_restart_interval = int(os.environ.get(
         "BUNDLE_PALM_REPAIR_RESTART_INTERVAL",
-        "0" if batch_repair_scans else "1"))
+        "0" if batch_repair_scans else "32"))
     hard_group_max_cameras = int(os.environ.get(
-        "BUNDLE_PALM_HARD_GROUP_MAX_CAMERAS", "0"))
+        "BUNDLE_PALM_HARD_GROUP_MAX_CAMERAS", "2"))
     (
         camera_indices_in_cluster,
         point_indices_in_cluster,
@@ -1249,9 +1249,11 @@ for global_iteration in range(global_iterations):
         dre_bfgs = max(dre_bfgs, primal_cost_v) # sandwich lemma
         blockEigLastIt = blockEig_in_cluster
         #blockEigLastIt = getBlockEigUsed() # the actual used not the one written into memory or whatever blockEig_in_cluster_bfgs is.
-        diffToGain = np.maximum(round(primal_cost_v) - round(primal_cost_u) - round(lastCostDRE_bfgs - dre_bfgs), 0.) / round(primal_cost_u)
-        gapToGain = np.maximum(1. * round(primal_cost_v- primal_cost_u) - round(lastCostDRE_bfgs - dre_bfgs), 1.) / np.maximum(1, round(lastCostDRE_bfgs - dre_bfgs))
-        currentGap = np.maximum(1. * round(primal_cost_v - primal_cost_u), 1. ) #- round(lastCostDRE_bfgs - dre_bfgs), 1) # not sure ..
+        dre_gain = float(lastCostDRE_bfgs - dre_bfgs)
+        primal_gap = float(primal_cost_v - primal_cost_u)
+        diffToGain = max(primal_gap - dre_gain, 0.) / float(primal_cost_u)
+        gapToGain = max(primal_gap - dre_gain, 1.) / max(dre_gain, 1.)
+        currentGap = max(primal_gap, 1.) #- round(lastCostDRE_bfgs - dre_bfgs), 1) # not sure ..
         differentialGap = prevGap - currentGap
         costGain = lastCostDRE_bfgs - dre_bfgs
         G2C = round(1000 * costGain / currentGap) / 1000
@@ -1260,7 +1262,7 @@ for global_iteration in range(global_iterations):
             " G ", currentGap , " dG ", differentialGap, " ", differentialGap / np.maximum(costGain, 1.), #" D2G ", diffToGain, "G2G ", gapToGain, 
             " G2C ", G2C, " BE ", blockEigLastIt[0]) #, " L ", L_in_cluster_bfgs) #blockEig_in_cluster_bfgs)
         print( global_iteration, "/", ls_it, " f(v) = ", primal_cost_v_all, " f(u) = ", primal_cost_u_all)
-        prevGap = currentGap.copy()
+        prevGap = currentGap
 
         if primal_cost_v < bestCost:
             best_poses_v = poses_v_bfgs.copy()
