@@ -1,11 +1,11 @@
 from __future__ import print_function
 import faulthandler
-import tracemalloc
+# import tracemalloc
 import zmq
 #from proto import test_pb2 #import ImageVector #, Image
 import sys, os
 faulthandler.enable(all_threads=True)
-tracemalloc.start(25)
+# tracemalloc.start(25)
 sys.path.insert(0, './generated/proto/')
 #from test import test_pb2
 import test_pb2
