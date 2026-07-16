@@ -396,6 +396,11 @@ bool TryMoveLandmarkOutOfWeakCamera(
       Objective best_exchange_objective;
       for (int outbound : landmarks_per_cluster[target]) {
         progress.Tick(state.objective);
+        if (options.repair_restart_interval != 1 &&
+            options.max_swap_candidates_per_landmark > 0 &&
+            tried++ >= options.max_swap_candidates_per_landmark) {
+          break;
+        }
         if (std::binary_search(graph.cameras_from_point[outbound].begin(),
                                graph.cameras_from_point[outbound].end(),
                                camera)) {
@@ -412,11 +417,6 @@ bool TryMoveLandmarkOutOfWeakCamera(
             target_after < minimum_residuals ||
             target_after > maximum_residuals) {
           continue;
-        }
-        if (options.repair_restart_interval != 1 &&
-          options.max_swap_candidates_per_landmark > 0 &&
-            tried++ >= options.max_swap_candidates_per_landmark) {
-          break;
         }
         Objective exchange_objective = ScoreMove(
           graph, options, state, outbound, target, source_cluster);
