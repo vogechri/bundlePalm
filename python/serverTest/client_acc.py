@@ -1,30 +1,27 @@
-from __future__ import print_function
-import faulthandler
-# import tracemalloc
-import zmq
-#from proto import test_pb2 #import ImageVector #, Image
-import sys, os
-faulthandler.enable(all_threads=True)
-# tracemalloc.start(25)
-sys.path.insert(0, './generated/proto/')
-#from test import test_pb2
-import test_pb2
-
-import numpy as np
-context = zmq.Context()
+"""Coordinate distributed bundle adjustment over the ZeroMQ C++ server."""
 
 import bz2
+import faulthandler
+import importlib
+import json
+import os
+import sys
 import time
 import urllib.request
-#import urllib
-import json
 
+import numpy as np
 import torch
+import zmq
 
 from clustering import cluster_by_landmark_clean, cluster_deg_by_landmark
-from scipy.sparse import csr_array, csr_matrix, issparse
-from scipy.sparse import diags as diag_sparse
 from numpy.linalg import inv as inv_nonHermetian
+from scipy.sparse import csr_array, csr_matrix
+from scipy.sparse import diags as diag_sparse
+
+faulthandler.enable(all_threads=True)
+sys.path.insert(0, './generated/proto/')
+test_pb2 = importlib.import_module("test_pb2")
+context = zmq.Context()
 
 # download ceres, edit CMakeList EXPORT_dir : On, cmake ../ceres-solver-2.2.0
 
@@ -94,6 +91,7 @@ def AngleAxisRotatePoint(angleAxis, pt):
 
 # idea: median ste to 0, scale set to 100: let 95% fall into < 100 distance to center.
 def normalize_by_points(points_3d_, cameras_):
+    """Center the scene and scale its 95th-percentile point radius to 100."""
     # 1. get median in each direction.
     median = np.median(points_3d_, axis=0)
     points_3d_ = points_3d_ - median
@@ -104,6 +102,8 @@ def normalize_by_points(points_3d_, cameras_):
     #cameras_[:,3:6] = cameras_[:,3:6] - median
     norm = np.linalg.norm(points_3d_, axis=1)
     scene_scale = np.percentile(norm, 95)
+    if not np.isfinite(scene_scale) or scene_scale <= np.finfo(float).eps:
+        raise ValueError("cannot normalize a scene with zero spatial extent")
     scale = 100 / scene_scale # scale = 1 to turn off, median always on?
     points_3d_ = points_3d_ * scale
     #cameras_[:,3:6] = cameras_[:,3:6] * scale
@@ -175,6 +175,33 @@ def get_bal_file(base_url, file_name):
             os.remove(temporary)
     return target
 
+def recv_message(socket_, operation):
+    """Receive one message, adding context when the configured timeout expires."""
+    try:
+        return socket_.recv()
+    except zmq.Again as error:
+        raise TimeoutError(f"timed out while {operation}") from error
+
+def send_request(push_socket_, request_serialized, operation):
+    """Send one server request and verify its immediate acceptance ACK."""
+    try:
+        push_socket_.send(request_serialized)
+    except zmq.Again as error:
+        raise TimeoutError(f"timed out while {operation}") from error
+    acknowledgement = recv_message(
+        push_socket_, f"waiting for acknowledgement while {operation}")
+    if acknowledgement != b"Ok":
+        raise RuntimeError(
+            f"unexpected acknowledgement while {operation}: "
+            f"{acknowledgement!r}")
+
+def consume_cluster_reply(pending_cluster_ids, cluster_id, operation):
+    """Ensure each asynchronous batch contains exactly one reply per cluster."""
+    if cluster_id not in pending_cluster_ids:
+        raise RuntimeError(
+            f"unexpected or duplicate cluster {cluster_id} while {operation}")
+    pending_cluster_ids.remove(cluster_id)
+
 def check_symmetric(a, tol=1e-8):
     return np.all(np.abs(a-a.T) < tol)
 
@@ -213,6 +240,7 @@ def blockInverse(M, bs):
 def cost_DRE(
     #camera_indices_in_cluster, poses_in_cluster, poses_s_in_cluster, L_in_cluster, Ul_in_cluster, pose_v
     camera_indices_in_cluster_,  poses_in_cluster_, poses_s_in_cluster_, L_in_cluster_, Ul_in_cluster_, pose_v_, nabla_p_in_cluster_):
+    """Evaluate the Douglas-Rachford envelope contribution by cluster."""
     num_cams =  poses_in_cluster_[0].shape[0]
     #sum_Ds_2u = np.zeros(num_cams * 9)
     #sum_constant_term = 0
@@ -222,8 +250,6 @@ def cost_DRE(
     sum_2u_s_v = 0
     cost_dre = 0
     dre_per_part = []
-    penalty_per_cluster = []
-    EV = []
     # for i in range(len(Ul_in_cluster_)):
     for i, Ul_in_cluster_i in enumerate(Ul_in_cluster_):
         camera_indices_ = np.unique(camera_indices_in_cluster_[i])
@@ -298,9 +324,9 @@ def cost_DRE(
 
 def average_cameras_new(
     camera_indices_in_cluster_, poses_in_cluster_, poses_s_in_cluster_, L_in_cluster_, UL_in_cluster_, nabla_p_in_cluster_):
+    """Compute the block-metric weighted consensus camera parameters."""
     num_cameras = poses_in_cluster_[0].shape[0]
     sum_D_u2_s = np.zeros(num_cameras * 9)
-    sum_constant_term = 0
     UL_zeros_in_cluster_ = []
 
     # Here or per part.
@@ -375,84 +401,12 @@ def average_cameras_new(
     return pose_v_out.reshape(num_cameras, 9), Up_all, UL_zeros_in_cluster_
 
 
-# pollin: blocking receive for parellel message receiving. low cpu
-# get program back. right now we also need landmarks. Likely not needed in smart implementation.
-# We need to eval cost / send back cost. problem f(v) also needed now. DRE as well.
-# master: compute fv, send s = 2u-v -> send v to slaves, they send cost back (need anyway to do step).
-# can send both f(v) and f(u)! can do acceleration locally i guess or with minimal information.
-def prox_f(camera_indices_in_cluster_, point_indices_in_cluster_, local_camera_indices_in_cluster_,
-           local_landmark_indices_in_cluster_, points_2d_in_cluster_, poses_in_cluster_, landmarks_,
-           poses_s_in_cluster_, L_in_cluster_, Vl_in_cluster_, blockEig_in_cluster_, kClusters_,
-           LipJ_, innerIts_=1, sequential_=True) :
-    cost_ = np.zeros(kClusters_)
-    nabla_p_in_cluster_ = [0 for _ in range(kClusters_)]
-
-    # ignore for now:
-    # num_poses = poses_in_cluster_[0].shape[0]
-    # pose_occurences = np.zeros(num_poses)
-    # for ci_ in range(kClusters):
-    #     unique_poses_in_c_ = np.unique(camera_indices_in_cluster_[ci_])
-    #     pose_occurences[unique_poses_in_c_] +=1
-
-    global global_iteration
-    global socket
-    for ci in range(kClusters_):
-        unique_points_in_c_ = np.unique(point_indices_in_cluster_[ci])
-        unique_poses_in_c_ = np.unique(camera_indices_in_cluster_[ci])
-        if global_iteration == 0:
-            # print("Sending program …", ci)
-            request = test_pb2.request_proto()
-            #request.program.SetInParent()
-            #program = request.program
-            request.program.cameras[:] = poses_in_cluster_[ci].ravel()
-            #request.program.cameras_s[:] = cameras.ravel() # set later in prox_cluster_proto
-            request.program.landmarks[:] = landmarks_[unique_points_in_c_].ravel()
-            request.program.observations[:] = points_2d_in_cluster_[ci].ravel()
-            request.program.cam_id[:] = local_camera_indices_in_cluster_[ci].ravel()
-            request.program.lm_id[:] = local_landmark_indices_in_cluster_[ci].ravel()
-            request.program.num_clusters = kClusters_
-            request.program.iterations = innerIts_
-            request.program.be = blockEig_in_cluster_[ci]
-            request.program.cluster_id = ci
-            request.program.init_l = LipJ_
-            #request.unorm
-            #request.vnorm
-        else: # just update
-            # print("Sending request …", ci)
-            request = test_pb2.request_proto()
-            #cameras = test_pb2.camera_proto()
-            #temp = program_deserialized.cameras[:]
-            #temp = [i * 10 for i in temp]
-            #request.cameras.cameras[:] = temp # ok, program works with changed data.
-            request.update.cameras[:] = poses_in_cluster_[ci].ravel()
-            request.update.cameras_s[:] = poses_s_in_cluster_[ci].ravel()
-            request.update.be = blockEig_in_cluster_[ci]
-            request.update.cluster_id = ci
-
-        request_serialized_ = request.SerializeToString()
-        # request_serialized_ = request.SerializeToArray() #?
-        socket.send(request_serialized_) # ? HOW THE FUCK DOES IT KNOW WHAT MESSAGE TYPE IT IS?
-
-        message_in_bytes_ = socket.recv()
-        return_proto_ = test_pb2.return_cluster_proto()
-        return_proto_.ParseFromString(message_in_bytes_)
-        # return_proto_.ParseFromArray(message_in_bytes_)
-
-        # output should be:
-        cost_[ci] = return_proto_.cost
-        # L_in_cluster_[ci] = LipJ_ # unsused anyway
-        Vl_in_cluster_[ci] = np.array(return_proto_.step_size[:]) # stepsize
-        poses_in_cluster_[ci][unique_poses_in_c_, :] = np.array(return_proto_.cameras[:]).reshape((-1, 9))
-        landmarks_[unique_points_in_c_,:] = np.array(return_proto_.landmarks[:]).reshape((-1, 3))
-        #blockEig_in_cluster_[ci] = blockEig_in_c_ # not done
-
-    return (cost_, L_in_cluster_, Vl_in_cluster_, poses_in_cluster_, landmarks_, nabla_p_in_cluster_, blockEig_in_cluster_)
-
 # Operates sequentially.
 def prox_f_push_pull(camera_indices_in_cluster_, point_indices_in_cluster_, local_camera_indices_in_cluster_,
            local_landmark_indices_in_cluster_, points_2d_in_cluster_, poses_in_cluster_, landmarks_,
            poses_s_in_cluster_, L_in_cluster_, Vl_in_cluster_, blockEig_in_cluster_, kClusters_,
            LipJ_, innerIts_ = 1, revert_lm = 0) :
+    """Run one proximal solve per cluster and collect out-of-order results."""
     cost_ = np.zeros(kClusters_)
     nabla_p_in_cluster_ = [0 for _ in range(kClusters_)]
 
@@ -500,8 +454,10 @@ def prox_f_push_pull(camera_indices_in_cluster_, point_indices_in_cluster_, loca
             request.update.cameras_s[:] = poses_s_in_cluster_[ci][unique_poses_in_c_].ravel()
             request.update.be = blockEig_in_cluster_[ci]
             request.update.cluster_id = ci
+            # 0 accepts the current landmarks, 1 restores the previous trial,
+            # and 2 restores the landmarks saved with the global best cost.
             if revert_lm == 1:
-                request.update.revert_lm = 1 # line search rejected step -- this resets poses_s as well?
+                request.update.revert_lm = 1
             elif revert_lm == 2:
                 request.update.revert_lm = 2
                 # here send lms as well, else those are empty -- or better last cost was best -> keep lms.
@@ -509,14 +465,14 @@ def prox_f_push_pull(camera_indices_in_cluster_, point_indices_in_cluster_, loca
                 request.update.revert_lm = 0 # next step
 
         request_serialized_ = request.SerializeToString() # SerializeToArray() does not exist
-        push_socket.send(request_serialized_)
-        temp = push_socket.recv() # ok back, blocking to wait for thread start.
-        # do i need to send back a 'yes'?/ack?
+        send_request(push_socket, request_serialized_, f"starting cluster {ci}")
 
+    pending_cluster_ids = set(range(kClusters_))
     for k in range(kClusters_):
         #print("Receiving return …", k)
         return_proto_ = test_pb2.return_cluster_proto()
-        message_in_bytes_ = pull_socket.recv()
+        message_in_bytes_ = recv_message(
+            pull_socket, "waiting for a cluster result")
 
         #message_out_str = "Ok" # this might not be needed if this socket is pull not REC
         #message_out_bytes = message_out_str.encode("utf-8")
@@ -524,10 +480,27 @@ def prox_f_push_pull(camera_indices_in_cluster_, point_indices_in_cluster_, loca
 
         return_proto_.ParseFromString(message_in_bytes_)# ParseFromArray(message_in_bytes_)
         ci = return_proto_.cluster_id
+        consume_cluster_reply(
+            pending_cluster_ids, ci, "receiving cluster results")
         #print("Return for cluster …", ci)
 
         unique_points_in_c_ = np.unique(point_indices_in_cluster_[ci])
         unique_poses_in_c_ = np.unique(camera_indices_in_cluster_[ci])
+        expected_camera_values = 9 * unique_poses_in_c_.size
+        expected_landmark_values = 3 * unique_points_in_c_.size
+        expected_step_values = 81 * unique_poses_in_c_.size
+        if len(return_proto_.cameras) != expected_camera_values:
+            raise RuntimeError(
+                f"cluster {ci} returned {len(return_proto_.cameras)} camera "
+                f"values; expected {expected_camera_values}")
+        if len(return_proto_.landmarks) != expected_landmark_values:
+            raise RuntimeError(
+                f"cluster {ci} returned {len(return_proto_.landmarks)} landmark "
+                f"values; expected {expected_landmark_values}")
+        if len(return_proto_.step_size) != expected_step_values:
+            raise RuntimeError(
+                f"cluster {ci} returned {len(return_proto_.step_size)} step-size "
+                f"values; expected {expected_step_values}")
         cost_[ci] = return_proto_.cost
         # L_in_cluster_[ci] = LipJ_ # unsused anyway
         Vl_in_cluster_[ci] = np.array(return_proto_.step_size[:]) #.copy() # stepsize
@@ -565,16 +538,19 @@ def primal_cost_push_pull(camera_indices_in_cluster_, poses_in_cluster_, k_clust
             request.cost_update.revert_lm = 0
 
         request_serialized_ = request.SerializeToString() # SerializeToArray() does not exist
-        push_socket.send(request_serialized_)
-        temp = push_socket.recv() # ok back, blocking to wait for thread start.
+        send_request(push_socket, request_serialized_, f"requesting cost for cluster {ci}")
 
     cost_ = np.zeros(k_clusters)
+    pending_cluster_ids = set(range(k_clusters))
     for k in range(k_clusters):
         #print("Receiving return …", k)
         return_proto_ = test_pb2.return_cost_proto()
-        message_in_bytes_ = pull_socket.recv()
+        message_in_bytes_ = recv_message(
+            pull_socket, "waiting for a cluster cost")
         return_proto_.ParseFromString(message_in_bytes_)
         ci = return_proto_.cluster_id
+        consume_cluster_reply(
+            pending_cluster_ids, ci, "receiving cluster costs")
         # print("Receiving cost for cluster …", ci, " = ", return_proto_.cost)
         cost_[ci] = return_proto_.cost
 
@@ -594,8 +570,8 @@ def best_cost_found_push_pull(k_clusters, costs) :
         request.best_cost.cluster_id = ci
 
         request_serialized_ = request.SerializeToString() # SerializeToArray() does not exist
-        push_socket.send(request_serialized_)
-        temp = push_socket.recv() # ok back, blocking to wait for thread start.
+        send_request(
+            push_socket, request_serialized_, f"updating best cost for cluster {ci}")
     return
 
 
@@ -673,14 +649,17 @@ def preconditioning_push(poses_v_, poses_in_cluster_, poses_s_in_cluster_, camer
         request.preconditioning_update.vnorm[:] = np.ones(3 * unique_landmarks_in_c_.shape[0])
         request.preconditioning_update.cluster_id = ci
         request_serialized_ = request.SerializeToString() # SerializeToArray() does not exist
-        push_socket.send(request_serialized_)
-        temp = push_socket.recv() # ok back, blocking to wait for thread start.
+        send_request(
+            push_socket, request_serialized_, f"preconditioning cluster {ci}")
     return poses_v_, poses_in_cluster_, poses_s_in_cluster_
 
 def GetLocalIndices(point_indices_in_cluster, camera_indices_in_cluster):
+    if len(point_indices_in_cluster) != len(camera_indices_in_cluster):
+        raise ValueError("point and camera cluster lists must have equal length")
+    cluster_count = len(point_indices_in_cluster)
     # test, yes much faster if precompute:
     local_landmark_indices_in_cluster = [] # for residuals in cluster. local indices for landmark data send to cluster.
-    for ci in range(kClusters):
+    for ci in range(cluster_count):
         # can be used to index out global to local data. local/cluster = global[landmark_indices_in_c_]
         landmark_indices_in_c_ = np.unique(point_indices_in_cluster[ci])
         # print("local landmarks in ", ci, " " ,landmark_indices_in_c_.shape[0])
@@ -691,7 +670,7 @@ def GetLocalIndices(point_indices_in_cluster, camera_indices_in_cluster):
             local_landmark_indices_in_cluster[ci][point_indices_in_cluster[ci] == landmark_indices_in_c_[i]] = i
 
     local_camera_indices_in_cluster = [] # for residuals in cluster. local indices for pose data send to cluster.
-    for ci in range(kClusters):
+    for ci in range(cluster_count):
         # can be used to index out global to local data. local/cluster = global[landmark_indices_in_c_]
         # or global[landmark_indices_in_c_]  = local
         cameras_indices_in_c_ = np.unique(camera_indices_in_cluster[ci])
@@ -822,8 +801,15 @@ def torchSingleResiduumY(camera_params, point_params, p2d) :
     return resY
 
 def ComputeDerivativeMatrixInit(x0_c_, x0_l_, points_2d, camera_indices, point_indices):
-    funx0_st1 = lambda X0, X1, X2: torchSingleResiduumX(X0.view(-1,9), X1.view(-1,3), X2.view(-1,2)) # 1d fucntion -> grad possible
-    funy0_st1 = lambda X0, X1, X2: torchSingleResiduumY(X0.view(-1,9), X1.view(-1,3), X2.view(-1,2)) # 1d fucntion -> grad possible
+    def residual_x(camera_values, landmark_values, observations):
+        return torchSingleResiduumX(
+            camera_values.view(-1, 9), landmark_values.view(-1, 3),
+            observations.view(-1, 2))
+
+    def residual_y(camera_values, landmark_values, observations):
+        return torchSingleResiduumY(
+            camera_values.view(-1, 9), landmark_values.view(-1, 3),
+            observations.view(-1, 2))
 
     torch_cams = torch.from_numpy(x0_c_.reshape(-1,9)[camera_indices[:],:])
     torch_lands = torch.from_numpy(x0_l_.reshape(-1,3)[point_indices[:],:])
@@ -835,7 +821,7 @@ def ComputeDerivativeMatrixInit(x0_c_, x0_l_, points_2d, camera_indices, point_i
     torch_points_2d = torch.from_numpy(points_2d)
     torch_points_2d.requires_grad_(False)
 
-    resX = funx0_st1(torch_cams, torch_lands, torch_points_2d[:,:]).flatten()
+    resX = residual_x(torch_cams, torch_lands, torch_points_2d[:,:]).flatten()
     lossX = torch.sum(resX)
     lossX.backward()
 
@@ -844,7 +830,7 @@ def ComputeDerivativeMatrixInit(x0_c_, x0_l_, points_2d, camera_indices, point_i
 
     torch_cams.grad.zero_()
     torch_lands.grad.zero_()
-    resY = funy0_st1(torch_cams, torch_lands, torch_points_2d[:,:]).flatten()
+    resY = residual_y(torch_cams, torch_lands, torch_points_2d[:,:]).flatten()
     lossY = torch.sum(resY)
     lossY.backward()
     cam_grad_y = torch_cams.grad.detach().numpy().copy()
@@ -859,9 +845,7 @@ def ComputeDerivativeMatrixInit(x0_c_, x0_l_, points_2d, camera_indices, point_i
 # per camera print.
 def print_selected_cameras(poses_, poses_v_, selected_cameras, cluster_set_few_obs_, k_clusters):
     CRED = '\033[91m'
-    CBLUE = '\033[94m'
     CGREEN = '\033[92m'
-    CYELLOW = '\033[93m'
     CEND = '\033[0m'
     for i in range(selected_cameras.shape[0]):
         for ci in range(k_clusters):
@@ -889,6 +873,9 @@ kClusters = 1 # todo: will still die if too many (0 in jac?)
 global_iterations = 30
 
 num_args = len(sys.argv)
+if num_args not in (1, 3, 4, 5):
+    raise ValueError(
+        "usage: client_acc.py [BASE_URL FILE_NAME [ITERATIONS [CLUSTERS]]]")
 if num_args > 2:
     print("Total arguments passed:", num_args)
     # Arguments passed
@@ -900,6 +887,11 @@ if num_args > 2:
         global_iterations = int(sys.argv[3])
     if num_args > 4:
         kClusters = int(sys.argv[4])
+
+if global_iterations < 0:
+    raise ValueError("global iterations must be nonnegative")
+if kClusters <= 0:
+    raise ValueError("cluster count must be positive")
 
 bal_file = get_bal_file(BASE_URL, FILE_NAME)
 cameras, points_3d, camera_indices, point_indices, points_2d = read_bal_data(bal_file)
@@ -925,9 +917,19 @@ print("Connecting to cpp server…")
 
 # new idea.
 push_socket = context.socket(zmq.REQ)#PUSH)
-push_socket.connect("tcp://localhost:5556")
 #pull_socket = context.socket(zmq.REP)#.PULL)
 pull_socket = context.socket(zmq.PULL)
+
+# Bound transport failures while allowing long cluster solves to complete.
+zmq_timeout_ms = int(os.environ.get("BUNDLE_PALM_ZMQ_TIMEOUT_MS", "600000"))
+if zmq_timeout_ms <= 0:
+    raise ValueError("BUNDLE_PALM_ZMQ_TIMEOUT_MS must be positive")
+for active_socket in (push_socket, pull_socket):
+    active_socket.setsockopt(zmq.RCVTIMEO, zmq_timeout_ms)
+    active_socket.setsockopt(zmq.SNDTIMEO, zmq_timeout_ms)
+    active_socket.setsockopt(zmq.LINGER, 0)
+
+push_socket.connect("tcp://localhost:5556")
 pull_socket.connect("tcp://localhost:5557")
 
 #lib = ctypes.CDLL("./libprocess_clusters.so")
@@ -973,15 +975,22 @@ end = time.time() # this is not working at all. Slower then iteratively
 print("==========", clustering_mode, "clustering took", end - start,
       "s ===========")
 
-for ci in range(kClusters):
-    values, counts = np.unique(camera_indices_in_cluster[ci], return_counts=True)
-    if counts.shape[0] < 1:
-        kClusters -= 1
-        if ci < kClusters:
-            camera_indices_in_cluster[ci] = camera_indices_in_cluster[kClusters].copy()
-            point_indices_in_cluster[ci] = point_indices_in_cluster[kClusters].copy()
-            points_2d_in_cluster[ci] = points_2d_in_cluster[kClusters].copy()
-        ci = ci - 1
+nonempty_cluster_ids = [
+    ci for ci in range(kClusters)
+    if camera_indices_in_cluster[ci].size > 0
+]
+if not nonempty_cluster_ids:
+    raise RuntimeError("clustering produced no nonempty clusters")
+if len(nonempty_cluster_ids) != kClusters:
+    print("Dropping empty clusters:", kClusters - len(nonempty_cluster_ids))
+    camera_indices_in_cluster = [
+        camera_indices_in_cluster[ci] for ci in nonempty_cluster_ids]
+    point_indices_in_cluster = [
+        point_indices_in_cluster[ci] for ci in nonempty_cluster_ids]
+    points_2d_in_cluster = [
+        points_2d_in_cluster[ci] for ci in nonempty_cluster_ids]
+    blockEig_in_cluster = blockEig_in_cluster[nonempty_cluster_ids]
+    kClusters = len(nonempty_cluster_ids)
 
 (local_landmark_indices_in_cluster, local_camera_indices_in_cluster) = \
     GetLocalIndices(point_indices_in_cluster, camera_indices_in_cluster)
@@ -1018,6 +1027,9 @@ lastCostDRE = lastCost
 best_poses_v = cameras.copy()
 best_landmarks = points_3d.copy()
 bestCost = lastCost
+bestIt = -1
+bestCost60 = bestCost
+bestCost30 = bestCost
 tau = 1 # 2 is best ? does not generalize!
 revert_lm = 0
 
@@ -1129,12 +1141,18 @@ if primal_cost_v < bestCost:
     best_poses_v = poses_v.copy()
     best_landmarks = landmarks.copy()
     bestCost = primal_cost_v
+    bestCost60 = bestCost
+    bestCost30 = bestCost
     best_cost_found_push_pull(kClusters, primal_costs_v)
 
 # init state
 print_selected_cameras(poses_in_cluster, best_poses_v, cameras_with_few_observations, cluster_set_few_obs, kClusters)
 
-#################################
+# Nesterov history is flattened across all cluster-camera parameter blocks.
+acceleration_state_size = kClusters * 9 * n_cameras
+s_prev = np.zeros(acceleration_state_size)
+delta_s_old_ = np.zeros(acceleration_state_size)
+prev_dk = np.zeros(acceleration_state_size)
 for global_iteration in range(global_iterations):
 
     delta_s  = np.zeros(kClusters * 9 * n_cameras)
@@ -1233,9 +1251,10 @@ for global_iteration in range(global_iterations):
         dre_bfgs += currentCost_bfgs
 
         # debugging cost block ################
-        primal_cost_v_all = primal_cost_push_pull(camera_indices_in_cluster, poses_v_bfgs, kClusters, True)
-        primal_cost_v = np.sum(primal_cost_v_all)
-        primal_cost_v_all = [round(cost) for cost in primal_cost_v_all]
+        primal_cost_v_costs = primal_cost_push_pull(
+            camera_indices_in_cluster, poses_v_bfgs, kClusters, True)
+        primal_cost_v = np.sum(primal_cost_v_costs)
+        primal_cost_v_all = [round(cost) for cost in primal_cost_v_costs]
 
         #primal_cost_u_all = []
         #primal_cost_u_all = primal_cost_push_pull(camera_indices_in_cluster, poses_in_cluster_bfgs, kClusters, False)
@@ -1267,10 +1286,10 @@ for global_iteration in range(global_iterations):
         if primal_cost_v < bestCost:
             best_poses_v = poses_v_bfgs.copy()
             best_landmarks = landmarks_bfgs.copy() # send a this cost was best -> store lms.
-            best_cost_found_push_pull(kClusters, primal_cost_v_all)
+            bestCost = primal_cost_v
+            bestIt = global_iteration
+            best_cost_found_push_pull(kClusters, primal_cost_v_costs)
             # send best proto
-        bestCost = np.minimum(primal_cost_v, bestCost)
-        bestIt = global_iteration
         if global_iteration < 60:
             bestCost60 = bestCost
         if global_iteration < 30:
@@ -1329,6 +1348,8 @@ for global_iteration in range(global_iterations):
 
             print_selected_cameras(poses_in_cluster_bfgs, poses_v_bfgs, cameras_with_few_observations, cluster_set_few_obs, kClusters)
 
+            # A rejected final trial resets every local copy and its landmarks
+            # to the state associated with the best global primal cost.
             poses_in_cluster = [best_poses_v.copy() for _ in poses_in_cluster]
             for ci in range(kClusters):
                 poses_s_in_cluster_pre[ci] = best_poses_v.copy() # s + u-v = s in this case, do we use the best s?
@@ -1426,3 +1447,4 @@ result_dict = {"base_url": BASE_URL, "file_name": FILE_NAME, "iterations" : glob
             "bestCost60" : round(bestCost60), "bestCost30" : round(bestCost30) }
 with open('results_server.json', 'a') as json_file:
     json.dump(result_dict, json_file)
+    json_file.write('\n')
