@@ -1,10 +1,13 @@
 #include "camera_hypergraph_partitioning.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
+#include <cstdlib>
+#include <cstring>
+#include <iostream>
 #include <limits>
 #include <numeric>
-#include <set>
 #include <stdexcept>
 #include <utility>
 
@@ -29,6 +32,77 @@ struct PartitionState {
   std::vector<int> point_cluster_count;
   std::vector<int> cameras_per_cluster;
   Objective objective;
+};
+
+class CameraProgressTrace {
+ public:
+  CameraProgressTrace()
+      : enabled_(TraceEnabled()),
+        interval_(TraceInterval()),
+        start_(std::chrono::steady_clock::now()),
+        last_report_(start_) {}
+
+  void Begin(const char* phase, int pass = -1) {
+    phase_ = phase;
+    pass_ = pass;
+    work_units_ = 0;
+  }
+
+  void Tick(const PartitionState& state, int accepted_moves,
+            std::int64_t work_units = 1) {
+    work_units_ += work_units;
+    if (!enabled_ ||
+        (interval_.count() > 0 && (++ticks_since_check_ & 1023) != 0)) {
+      return;
+    }
+    const auto now = std::chrono::steady_clock::now();
+    if (now - last_report_ < interval_) {
+      return;
+    }
+    std::int64_t low_degree_incidents = 0;
+    for (std::size_t degree = 1;
+         degree < state.objective.low_degree_point_counts.size(); ++degree) {
+      low_degree_incidents += state.objective.low_degree_point_counts[degree];
+    }
+    const auto [minimum_cameras, maximum_cameras] = std::minmax_element(
+        state.cameras_per_cluster.begin(), state.cameras_per_cluster.end());
+    const double elapsed = std::chrono::duration<double>(now - start_).count();
+    std::cerr << "camera seed progress: " << elapsed << " s, phase "
+              << phase_;
+    if (pass_ >= 0) {
+      std::cerr << ", pass " << pass_;
+    }
+    std::cerr << ", work " << work_units_
+              << ", accepted moves " << accepted_moves
+              << ", low-degree landmark incidences "
+              << low_degree_incidents
+              << ", copied landmarks " << state.objective.copied_point_count
+              << ", camera range [" << *minimum_cameras << ", "
+              << *maximum_cameras << "]\n";
+    last_report_ = now;
+  }
+
+ private:
+  static bool TraceEnabled() {
+    const char* setting = std::getenv("BUNDLE_PALM_PARTITION_TRACE");
+    return setting == nullptr || std::strcmp(setting, "0") != 0;
+  }
+
+  static std::chrono::seconds TraceInterval() {
+    const char* setting =
+        std::getenv("BUNDLE_PALM_PARTITION_TRACE_INTERVAL_SECONDS");
+    return std::chrono::seconds(
+        setting == nullptr ? 5 : std::max(0, std::atoi(setting)));
+  }
+
+  bool enabled_;
+  std::chrono::seconds interval_;
+  std::chrono::steady_clock::time_point start_;
+  std::chrono::steady_clock::time_point last_report_;
+  const char* phase_ = "initialization";
+  int pass_ = -1;
+  std::int64_t work_units_ = 0;
+  std::uint64_t ticks_since_check_ = 0;
 };
 
 bool IsBetter(const Objective& left, const Objective& right) {
@@ -120,26 +194,21 @@ Objective ScoreCameraSwap(const BipartiteCameraPointGraph& graph,
                           int first_cluster,
                           int second_cluster) {
   Objective candidate = state.objective;
-  std::vector<int> affected_points = graph.points_from_camera[first_camera];
-  affected_points.insert(affected_points.end(),
-                         graph.points_from_camera[second_camera].begin(),
-                         graph.points_from_camera[second_camera].end());
-  std::sort(affected_points.begin(), affected_points.end());
-  affected_points.erase(
-      std::unique(affected_points.begin(), affected_points.end()),
-      affected_points.end());
-
-  for (int point : affected_points) {
-    const bool first_observes = std::binary_search(
-        graph.points_from_camera[first_camera].begin(),
-        graph.points_from_camera[first_camera].end(), point);
-    const bool second_observes = std::binary_search(
-        graph.points_from_camera[second_camera].begin(),
-        graph.points_from_camera[second_camera].end(), point);
-    if (first_observes == second_observes) {
+  const auto& first_points = graph.points_from_camera[first_camera];
+  const auto& second_points = graph.points_from_camera[second_camera];
+  auto first = first_points.begin();
+  auto second = second_points.begin();
+  while (first != first_points.end() || second != second_points.end()) {
+    if (first != first_points.end() && second != second_points.end() &&
+        *first == *second) {
+      ++first;
+      ++second;
       continue;
     }
-
+    const bool first_observes =
+        second == second_points.end() ||
+        (first != first_points.end() && *first < *second);
+    const int point = first_observes ? *first++ : *second++;
     const int first_offset = point * options.cluster_count + first_cluster;
     const int second_offset = point * options.cluster_count + second_cluster;
     const int first_delta = first_observes ? -1 : 1;
@@ -283,6 +352,7 @@ CameraPartition CameraHypergraphPartitioner::Partition(
   ValidateOptions(graph, options_);
 
   PartitionState state(graph, options_);
+  CameraProgressTrace progress;
   std::vector<int> camera_to_cluster(graph.camera_count, -1);
   std::vector<int> target_sizes(options_.cluster_count,
                                 graph.camera_count / options_.cluster_count);
@@ -299,6 +369,7 @@ CameraPartition CameraHypergraphPartitioner::Partition(
                             graph.points_from_camera[right].size();
                    });
 
+  progress.Begin("initialization");
   for (int camera : camera_order) {
     int best_cluster = -1;
     Objective best_objective;
@@ -308,6 +379,7 @@ CameraPartition CameraHypergraphPartitioner::Partition(
       }
       Objective candidate = ScoreCameraMove(
           graph, options_, state, camera, -1, cluster);
+        progress.Tick(state, 0);
       if (best_cluster < 0 || IsBetter(candidate, best_objective) ||
           (!IsBetter(best_objective, candidate) &&
            state.cameras_per_cluster[cluster] <
@@ -323,8 +395,11 @@ CameraPartition CameraHypergraphPartitioner::Partition(
   const auto [minimum_cameras, maximum_cameras] =
       CameraCountBounds(graph.camera_count, options_);
   int accepted_moves = 0;
+  std::vector<int> swap_candidate_marks(graph.camera_count, -1);
+  std::vector<int> swap_candidates;
   for (int pass = 0; pass < options_.max_refinement_passes; ++pass) {
     bool changed = false;
+    progress.Begin("direct moves", pass);
     for (int camera = 0; camera < graph.camera_count; ++camera) {
       const int source = camera_to_cluster[camera];
       int best_target = source;
@@ -337,6 +412,7 @@ CameraPartition CameraHypergraphPartitioner::Partition(
         }
         Objective candidate = ScoreCameraMove(
             graph, options_, state, camera, source, target);
+        progress.Tick(state, accepted_moves);
         if (IsBetter(candidate, best_objective)) {
           best_target = target;
           best_objective = std::move(candidate);
@@ -350,19 +426,23 @@ CameraPartition CameraHypergraphPartitioner::Partition(
       }
     }
 
+    progress.Begin("swaps", pass);
     for (int first_camera = 0; first_camera < graph.camera_count;
          ++first_camera) {
-      std::set<int> candidates;
+      swap_candidates.clear();
       for (int point : graph.points_from_camera[first_camera]) {
         for (int second_camera : graph.cameras_from_point[point]) {
           if (camera_to_cluster[second_camera] !=
-              camera_to_cluster[first_camera]) {
-            candidates.insert(second_camera);
+                  camera_to_cluster[first_camera] &&
+              swap_candidate_marks[second_camera] != first_camera) {
+            swap_candidate_marks[second_camera] = first_camera;
+            swap_candidates.push_back(second_camera);
           }
         }
       }
+      std::sort(swap_candidates.begin(), swap_candidates.end());
       int tried = 0;
-      for (int second_camera : candidates) {
+      for (int second_camera : swap_candidates) {
         if (options_.max_swap_candidates_per_camera > 0 &&
             tried++ >= options_.max_swap_candidates_per_camera) {
           break;
@@ -372,6 +452,7 @@ CameraPartition CameraHypergraphPartitioner::Partition(
         Objective candidate = ScoreCameraSwap(
             graph, options_, state, first_camera, second_camera,
             first_cluster, second_cluster);
+        progress.Tick(state, accepted_moves);
         if (IsBetter(candidate, state.objective)) {
           ApplyCameraSwap(graph, options_, first_camera, second_camera,
                           first_cluster, second_cluster, candidate, state,

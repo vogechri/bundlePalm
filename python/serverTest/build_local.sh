@@ -17,6 +17,7 @@ g++ -std=c++17 -O3 -fPIC -fopenmp -shared \
     "${python_dir}/process_clusters.cpp" \
     "${python_dir}/camera_hypergraph_partitioning.cpp" \
     "${python_dir}/landmark_partitioning.cpp" \
+    "${python_dir}/scalable_landmark_partitioning.cpp" \
     -o "${python_dir}/libprocess_clusters.so"
 
 cmake -S "${script_dir}" -B "${script_dir}/build" \

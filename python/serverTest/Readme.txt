@@ -201,6 +201,37 @@ Clean landmark mode reports:
     - additional camera copies across clusters
     - clustering time
 
+To compare the optional camera-straggler objective against the baseline, run
+the same command twice. The default and explicit baseline are equivalent:
+
+    BUNDLE_PALM_OPTIMIZE_MAX_CAMERAS=0 ...
+
+Enable minimization of the largest per-cluster camera count with:
+
+    BUNDLE_PALM_OPTIMIZE_MAX_CAMERAS=1 ...
+
+When enabled, maximum camera count is optimized after weak camera quality and
+before total additional camera copies. Residual balance bounds remain hard.
+
+The scalable implementation is selected with:
+
+    BUNDLE_PALM_CLUSTERING=landmark_scalable ...
+
+It reports progress approximately every five seconds by default. Set
+BUNDLE_PALM_PARTITION_TRACE=0 to disable progress or set
+BUNDLE_PALM_PARTITION_TRACE_INTERVAL_SECONDS to change the interval. Each
+run reports BAL archive validation and parsing first, followed by camera-seed
+partitioning and scalable landmark partitioning. Partition reports include the
+phase, recovery round and pass, work, accepted moves, threshold-relative severe
+and weak incidences, the absolute degree 1 through 9 incidence count, camera
+copies, maximum cameras in a cluster, and the current residual range.
+
+Lowering BUNDLE_PALM_MIN_CAMERA_LANDMARKS relaxes the support objective; it does
+not directly remove low-degree camera-cluster incidences. For example, 20
+classifies degrees 1 through 9 as severe and 1 through 19 as weak, while 10
+classifies degrees 1 through 4 as severe and 1 through 9 as weak. Compare the
+absolute degree 1 through 9 statistic when evaluating different thresholds.
+
 
 7. Run the trimmed automatic comparison
 ----------------------------------------

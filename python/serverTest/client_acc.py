@@ -13,7 +13,11 @@ import numpy as np
 import torch
 import zmq
 
-from clustering import cluster_by_landmark_clean, cluster_deg_by_landmark
+from clustering import (
+    cluster_by_landmark_clean,
+    cluster_by_landmark_scalable,
+    cluster_deg_by_landmark,
+)
 from numpy.linalg import inv as inv_nonHermetian
 from scipy.sparse import csr_array, csr_matrix
 from scipy.sparse import diags as diag_sparse
@@ -22,6 +26,45 @@ faulthandler.enable(all_threads=True)
 sys.path.insert(0, './generated/proto/')
 test_pb2 = importlib.import_module("test_pb2")
 context = zmq.Context()
+
+
+class InputProgress:
+    def __init__(self):
+        self.enabled = os.environ.get("BUNDLE_PALM_PARTITION_TRACE", "1") != "0"
+        self.interval = max(0, int(os.environ.get(
+            "BUNDLE_PALM_PARTITION_TRACE_INTERVAL_SECONDS", "5")))
+        self.start = time.monotonic()
+        self.last_report = self.start
+        self.phase = "input"
+        self.total = None
+        self.unit = "items"
+        self.completed = 0
+        self.ticks = 0
+
+    def begin(self, phase, total=None, unit="items"):
+        self.phase = phase
+        self.total = total
+        self.unit = unit
+        self.completed = 0
+        self.ticks = 0
+
+    def tick(self, amount=1, check_every=1024):
+        self.completed += amount
+        self.ticks += 1
+        if (not self.enabled or
+                (self.interval > 0 and self.ticks % check_every != 0)):
+            return
+        now = time.monotonic()
+        if now - self.last_report < self.interval:
+            return
+        message = (
+            f"input progress: {now - self.start:.1f} s, phase {self.phase}, "
+            f"completed {self.completed} {self.unit}")
+        if self.total:
+            message += f" of {self.total} ({100 * self.completed / self.total:.1f}%)"
+        print(message, file=sys.stderr, flush=True)
+        self.last_report = now
+
 
 # download ceres, edit CMakeList EXPORT_dir : On, cmake ../ceres-solver-2.2.0
 
@@ -112,6 +155,7 @@ def normalize_by_points(points_3d_, cameras_):
     return points_3d_, cameras_
 
 def read_bal_data(file_name):
+    progress = InputProgress()
     with bz2.open(file_name, "rt") as file:
         n_cameras_, n_points_, n_observations = map(int, file.readline().split())
 
@@ -119,20 +163,26 @@ def read_bal_data(file_name):
         point_indices_ = np.empty(n_observations, dtype=int)
         points_2d_ = np.empty((n_observations, 2))
 
+        progress.begin("parse observations", n_observations, "observations")
         for i in range(n_observations):
             camera_index, point_index, x, y = file.readline().split()
             camera_indices_[i] = int(camera_index)
             point_indices_[i] = int(point_index)
             points_2d_[i] = [float(x), float(y)]
+            progress.tick()
 
         camera_params = np.empty(n_cameras_ * 9)
+        progress.begin("parse cameras", n_cameras_ * 9, "values")
         for i in range(n_cameras_ * 9):
             camera_params[i] = float(file.readline())
+            progress.tick()
         camera_params = camera_params.reshape((n_cameras_, -1))
 
         points_3d_ = np.empty(n_points_ * 3)
+        progress.begin("parse landmarks", n_points_ * 3, "values")
         for i in range(n_points_ * 3):
             points_3d_[i] = float(file.readline())
+            progress.tick()
         points_3d_ = points_3d_.reshape((n_points_, -1))
 
     # invert points_2d_ and focal distance if needed
@@ -146,10 +196,12 @@ def read_bal_data(file_name):
 def is_valid_bz2(file_name):
     if not os.path.isfile(file_name):
         return False
+    progress = InputProgress()
+    progress.begin("validate BAL archive", unit="MiB decompressed")
     try:
         with bz2.open(file_name, "rb") as file:
-            while file.read(1024 * 1024):
-                pass
+            while chunk := file.read(1024 * 1024):
+                progress.tick(len(chunk) / (1024 * 1024), check_every=1)
         return True
     except (EOFError, OSError):
         return False
@@ -844,6 +896,8 @@ def ComputeDerivativeMatrixInit(x0_c_, x0_l_, points_2d, camera_indices, point_i
 
 # per camera print.
 def print_selected_cameras(poses_, poses_v_, selected_cameras, cluster_set_few_obs_, k_clusters):
+    if os.environ.get("BUNDLE_PALM_PRINT_SELECTED_CAMERAS", "0") != "1":
+        return
     CRED = '\033[91m'
     CGREEN = '\033[92m'
     CEND = '\033[0m'
@@ -956,8 +1010,12 @@ elif clustering_mode == "landmark_clean":
     repair_restart_interval = int(os.environ.get(
         "BUNDLE_PALM_REPAIR_RESTART_INTERVAL",
         "0" if batch_repair_scans else "32"))
+    max_repair_work_per_phase = int(os.environ.get(
+        "BUNDLE_PALM_MAX_REPAIR_WORK_PER_PHASE", "0"))
     hard_group_max_cameras = int(os.environ.get(
         "BUNDLE_PALM_HARD_GROUP_MAX_CAMERAS", "2"))
+    optimize_max_camera_count = os.environ.get(
+        "BUNDLE_PALM_OPTIMIZE_MAX_CAMERAS", "0") == "1"
     (
         camera_indices_in_cluster,
         point_indices_in_cluster,
@@ -967,10 +1025,29 @@ elif clustering_mode == "landmark_clean":
         camera_indices, points_2d, point_indices, kClusters,
         n_cameras, n_points, residual_balance_slack,
         minimum_camera_landmarks, max_refinement_passes,
-        repair_restart_interval, hard_group_max_cameras)
+        repair_restart_interval, max_repair_work_per_phase,
+        hard_group_max_cameras,
+        optimize_max_camera_count)
+elif clustering_mode == "landmark_scalable":
+    residual_balance_slack = float(
+        os.environ.get("BUNDLE_PALM_RESIDUAL_BALANCE_SLACK", "0.02"))
+    minimum_camera_landmarks = int(
+        os.environ.get("BUNDLE_PALM_MIN_CAMERA_LANDMARKS", "20"))
+    max_refinement_passes = int(
+        os.environ.get("BUNDLE_PALM_MAX_REFINEMENT_PASSES", "2"))
+    (
+        camera_indices_in_cluster,
+        point_indices_in_cluster,
+        points_2d_in_cluster,
+        kClusters,
+    ) = cluster_by_landmark_scalable(
+        camera_indices, points_2d, point_indices, kClusters,
+        n_cameras, n_points, residual_balance_slack,
+        minimum_camera_landmarks, max_refinement_passes)
 else:
     raise ValueError(
-        "BUNDLE_PALM_CLUSTERING must be 'landmark' or 'landmark_clean'")
+        "BUNDLE_PALM_CLUSTERING must be 'landmark', 'landmark_clean', "
+        "or 'landmark_scalable'")
 end = time.time() # this is not working at all. Slower then iteratively
 print("==========", clustering_mode, "clustering took", end - start,
       "s ===========")

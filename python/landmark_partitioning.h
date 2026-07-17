@@ -15,7 +15,9 @@ struct LandmarkPartitioningOptions {
   int max_refinement_passes = 10;
   int max_swap_candidates_per_landmark = 256;
   int repair_restart_interval = 1;
+  std::int64_t max_repair_work_per_phase = 0;
   int hard_group_max_camera_count = 0;
+  bool optimize_max_camera_count = false;
 };
 
 struct LandmarkPartitionMetrics {
@@ -59,7 +61,9 @@ extern "C" int cluster_landmarks_clean(
     int minimum_camera_landmarks,
     int max_refinement_passes,
     int repair_restart_interval,
+    std::int64_t max_repair_work_per_phase,
     int hard_group_max_camera_count,
+    bool optimize_max_camera_count,
     double residual_balance_slack,
     const std::vector<int>& camera_indices,
     const std::vector<int>& landmark_indices,
