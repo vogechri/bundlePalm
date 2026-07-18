@@ -62,6 +62,17 @@ struct MoveDelta {
   int weak = 0;
   std::int64_t weak_penalty = 0;
   int target_camera_count = 0;
+  int degree_one_two = 0;
+  int degree_three = 0;
+  int degree_four_nine = 0;
+  int moderate_weak = 0;
+  int maximum_camera_count = 0;
+  std::int64_t low_support_penalty = 0;
+};
+
+struct SourceMoveDelta {
+  MoveDelta delta;
+  int removed_cameras = 0;
 };
 
 std::int64_t WeakPenalty(int degree, int limit) {
@@ -80,7 +91,47 @@ int IsSevereWeak(int degree, int limit) {
   return degree > 0 && degree < limit / 2;
 }
 
-bool BetterDelta(const MoveDelta& left, const MoveDelta& right) {
+std::int64_t LowSupportPenalty(int degree) {
+  if (degree <= 0 || degree >= 10) {
+    return 0;
+  }
+  if (degree == 1) {
+    return 10000;
+  }
+  if (degree == 2) {
+    return 3000;
+  }
+  const std::int64_t deficit = 10 - degree;
+  return deficit * deficit * deficit;
+}
+
+int InDegreeRange(int degree, int first, int last) {
+  return degree >= first && degree <= last;
+}
+
+bool BetterDelta(const MoveDelta& left, const MoveDelta& right,
+                 ScalableLandmarkObjective objective) {
+  if (objective == ScalableLandmarkObjective::kStability) {
+    if (left.severe_weak != right.severe_weak) {
+      return left.severe_weak < right.severe_weak;
+    }
+    if (left.low_support_penalty != right.low_support_penalty) {
+      return left.low_support_penalty < right.low_support_penalty;
+    }
+    if (left.copied_cameras != right.copied_cameras) {
+      return left.copied_cameras < right.copied_cameras;
+    }
+    if (left.maximum_camera_count != right.maximum_camera_count) {
+      return left.maximum_camera_count < right.maximum_camera_count;
+    }
+    if (left.moderate_weak != right.moderate_weak) {
+      return left.moderate_weak < right.moderate_weak;
+    }
+    if (left.weak_penalty != right.weak_penalty) {
+      return left.weak_penalty < right.weak_penalty;
+    }
+    return left.target_camera_count < right.target_camera_count;
+  }
   if (left.severe_weak != right.severe_weak) {
     return left.severe_weak < right.severe_weak;
   }
@@ -96,15 +147,141 @@ bool BetterDelta(const MoveDelta& left, const MoveDelta& right) {
   return left.target_camera_count < right.target_camera_count;
 }
 
+void AccumulateDelta(const MoveDelta& delta, MoveDelta& total) {
+  total.copied_cameras += delta.copied_cameras;
+  total.severe_weak += delta.severe_weak;
+  total.weak += delta.weak;
+  total.weak_penalty += delta.weak_penalty;
+  total.degree_one_two += delta.degree_one_two;
+  total.degree_three += delta.degree_three;
+  total.degree_four_nine += delta.degree_four_nine;
+  total.moderate_weak += delta.moderate_weak;
+  total.low_support_penalty += delta.low_support_penalty;
+}
+
+int MaximumCameraCount(const State& state) {
+  return *std::max_element(state.cameras_per_cluster.begin(),
+                           state.cameras_per_cluster.end());
+}
+
+SourceMoveDelta ScoreMoveSource(
+    const BipartiteCameraPointGraph& graph,
+    const LandmarkPartitioningOptions& options,
+    const State& state,
+    int landmark,
+    int source,
+    ScalableLandmarkObjective objective) {
+  SourceMoveDelta source_delta;
+  const int multiplicity = PointMultiplicity(graph, landmark);
+  for (int camera : graph.cameras_from_point[landmark]) {
+    const int source_offset = camera * options.cluster_count + source;
+    const int old_source = state.camera_cluster_degree[source_offset];
+    const int new_source = old_source - multiplicity;
+    source_delta.delta.copied_cameras +=
+        (new_source > 0) - (old_source > 0);
+    source_delta.delta.severe_weak +=
+        IsSevereWeak(new_source, options.weak_camera_degree_limit) -
+        IsSevereWeak(old_source, options.weak_camera_degree_limit);
+    source_delta.delta.weak +=
+        IsWeak(new_source, options.weak_camera_degree_limit) -
+        IsWeak(old_source, options.weak_camera_degree_limit);
+    source_delta.delta.weak_penalty +=
+        WeakPenalty(new_source, options.weak_camera_degree_limit) -
+        WeakPenalty(old_source, options.weak_camera_degree_limit);
+    if (objective == ScalableLandmarkObjective::kStability) {
+      source_delta.delta.low_support_penalty +=
+          LowSupportPenalty(new_source) - LowSupportPenalty(old_source);
+      source_delta.delta.degree_one_two +=
+          InDegreeRange(new_source, 1, 2) -
+          InDegreeRange(old_source, 1, 2);
+      source_delta.delta.degree_three +=
+          (new_source == 3) - (old_source == 3);
+      source_delta.delta.degree_four_nine +=
+          InDegreeRange(new_source, 4, 9) -
+          InDegreeRange(old_source, 4, 9);
+      source_delta.delta.moderate_weak +=
+          InDegreeRange(new_source, 10,
+                        options.weak_camera_degree_limit - 1) -
+          InDegreeRange(old_source, 10,
+                        options.weak_camera_degree_limit - 1);
+    }
+    source_delta.removed_cameras += new_source == 0;
+  }
+  return source_delta;
+}
+
+MoveDelta ScoreMoveTarget(
+    const BipartiteCameraPointGraph& graph,
+    const LandmarkPartitioningOptions& options,
+    const State& state,
+    int landmark,
+    int source,
+    int target,
+    ScalableLandmarkObjective objective,
+    const SourceMoveDelta& source_delta) {
+  MoveDelta delta = source_delta.delta;
+  const int multiplicity = PointMultiplicity(graph, landmark);
+  int new_target_cameras = 0;
+  for (int camera : graph.cameras_from_point[landmark]) {
+    const int target_offset = camera * options.cluster_count + target;
+    const int old_target = state.camera_cluster_degree[target_offset];
+    const int new_target = old_target + multiplicity;
+    delta.copied_cameras += (new_target > 0) - (old_target > 0);
+    delta.severe_weak +=
+        IsSevereWeak(new_target, options.weak_camera_degree_limit) -
+        IsSevereWeak(old_target, options.weak_camera_degree_limit);
+    delta.weak += IsWeak(new_target, options.weak_camera_degree_limit) -
+                  IsWeak(old_target, options.weak_camera_degree_limit);
+    delta.weak_penalty +=
+        WeakPenalty(new_target, options.weak_camera_degree_limit) -
+        WeakPenalty(old_target, options.weak_camera_degree_limit);
+    if (objective == ScalableLandmarkObjective::kStability) {
+      delta.low_support_penalty +=
+          LowSupportPenalty(new_target) - LowSupportPenalty(old_target);
+      delta.degree_one_two += InDegreeRange(new_target, 1, 2) -
+                              InDegreeRange(old_target, 1, 2);
+      delta.degree_three += (new_target == 3) - (old_target == 3);
+      delta.degree_four_nine += InDegreeRange(new_target, 4, 9) -
+                                InDegreeRange(old_target, 4, 9);
+      delta.moderate_weak +=
+          InDegreeRange(new_target, 10,
+                        options.weak_camera_degree_limit - 1) -
+          InDegreeRange(old_target, 10,
+                        options.weak_camera_degree_limit - 1);
+    }
+    new_target_cameras += old_target == 0;
+  }
+  delta.target_camera_count =
+      state.cameras_per_cluster[target] + new_target_cameras;
+  if (objective == ScalableLandmarkObjective::kStability) {
+    const int current_maximum = MaximumCameraCount(state);
+    int candidate_maximum = 0;
+    for (int cluster = 0; cluster < options.cluster_count; ++cluster) {
+      int camera_count = state.cameras_per_cluster[cluster];
+      if (cluster == source) {
+        camera_count -= source_delta.removed_cameras;
+      }
+      if (cluster == target) {
+        camera_count += new_target_cameras;
+      }
+      candidate_maximum = std::max(candidate_maximum, camera_count);
+    }
+    delta.maximum_camera_count = candidate_maximum - current_maximum;
+  }
+  return delta;
+}
+
 MoveDelta ScoreMove(const BipartiteCameraPointGraph& graph,
                     const LandmarkPartitioningOptions& options,
                     const State& state,
                     int landmark,
                     int source,
-                    int target) {
+                    int target,
+                    ScalableLandmarkObjective objective) {
   MoveDelta delta;
   const int multiplicity = PointMultiplicity(graph, landmark);
   int new_target_cameras = 0;
+  int removed_source_cameras = 0;
   for (int camera : graph.cameras_from_point[landmark]) {
     const int source_offset = camera * options.cluster_count + source;
     const int target_offset = camera * options.cluster_count + target;
@@ -127,10 +304,51 @@ MoveDelta ScoreMove(const BipartiteCameraPointGraph& graph,
         WeakPenalty(old_source, options.weak_camera_degree_limit) +
         WeakPenalty(new_target, options.weak_camera_degree_limit) -
         WeakPenalty(old_target, options.weak_camera_degree_limit);
+    if (objective == ScalableLandmarkObjective::kStability) {
+      delta.low_support_penalty +=
+          LowSupportPenalty(new_source) - LowSupportPenalty(old_source) +
+          LowSupportPenalty(new_target) - LowSupportPenalty(old_target);
+      delta.degree_one_two += InDegreeRange(new_source, 1, 2) -
+                  InDegreeRange(old_source, 1, 2) +
+                  InDegreeRange(new_target, 1, 2) -
+                  InDegreeRange(old_target, 1, 2);
+      delta.degree_three += (new_source == 3) - (old_source == 3) +
+                (new_target == 3) - (old_target == 3);
+      delta.degree_four_nine += InDegreeRange(new_source, 4, 9) -
+                  InDegreeRange(old_source, 4, 9) +
+                  InDegreeRange(new_target, 4, 9) -
+                  InDegreeRange(old_target, 4, 9);
+      delta.moderate_weak +=
+        InDegreeRange(new_source, 10,
+              options.weak_camera_degree_limit - 1) -
+        InDegreeRange(old_source, 10,
+              options.weak_camera_degree_limit - 1) +
+        InDegreeRange(new_target, 10,
+              options.weak_camera_degree_limit - 1) -
+        InDegreeRange(old_target, 10,
+              options.weak_camera_degree_limit - 1);
+    }
     new_target_cameras += old_target == 0;
+    removed_source_cameras += new_source == 0;
   }
   delta.target_camera_count =
       state.cameras_per_cluster[target] + new_target_cameras;
+  if (objective == ScalableLandmarkObjective::kStability) {
+    const int current_maximum = *std::max_element(
+        state.cameras_per_cluster.begin(), state.cameras_per_cluster.end());
+    int candidate_maximum = 0;
+    for (int cluster = 0; cluster < options.cluster_count; ++cluster) {
+      int camera_count = state.cameras_per_cluster[cluster];
+      if (cluster == source) {
+        camera_count -= removed_source_cameras;
+      }
+      if (cluster == target) {
+        camera_count += new_target_cameras;
+      }
+      candidate_maximum = std::max(candidate_maximum, camera_count);
+    }
+    delta.maximum_camera_count = candidate_maximum - current_maximum;
+  }
   return delta;
 }
 
@@ -269,9 +487,13 @@ class ScalableProgressTrace {
 }  // namespace
 
 ScalableLandmarkPartitioner::ScalableLandmarkPartitioner(
-    LandmarkPartitioningOptions options)
-    : options_(std::move(options)) {}
+  LandmarkPartitioningOptions options,
+  ScalableLandmarkObjective objective)
+  : options_(std::move(options)), objective_(objective) {}
 
+#if defined(__GNUC__) && !defined(__clang__)
+__attribute__((optimize("no-reorder-blocks-and-partition")))
+#endif
 LandmarkPartition ScalableLandmarkPartitioner::Partition(
     const BipartiteCameraPointGraph& graph) const {
   if (options_.cluster_count <= 0 ||
@@ -379,23 +601,31 @@ LandmarkPartition ScalableLandmarkPartitioner::Partition(
     for (int landmark : order) {
       const int source = assignment[landmark];
       const int weight = LandmarkWeight(graph, landmark);
+      if (state.residuals_per_cluster[source] - weight < minimum_residuals) {
+        progress.Tick(state, accepted_moves);
+        continue;
+      }
+      const SourceMoveDelta source_delta = ScoreMoveSource(
+          graph, options_, state, landmark, source, objective_);
       int best_target = source;
       MoveDelta best_delta;
       for (int target = 0; target < options_.cluster_count; ++target) {
         if (target == source ||
-            state.residuals_per_cluster[source] - weight < minimum_residuals ||
             state.residuals_per_cluster[target] + weight > maximum_residuals) {
           continue;
         }
-        const MoveDelta candidate = ScoreMove(
-            graph, options_, state, landmark, source, target);
-        if (best_target == source || BetterDelta(candidate, best_delta)) {
+        const MoveDelta candidate = ScoreMoveTarget(
+          graph, options_, state, landmark, source, target, objective_,
+          source_delta);
+        if (best_target == source ||
+          BetterDelta(candidate, best_delta, objective_)) {
           best_target = target;
           best_delta = candidate;
         }
       }
       const MoveDelta unchanged;
-      if (best_target != source && BetterDelta(best_delta, unchanged)) {
+        if (best_target != source &&
+          BetterDelta(best_delta, unchanged, objective_)) {
         ApplyMove(graph, options_.cluster_count, landmark, source, best_target,
                   state, assignment);
         ++accepted_moves;
@@ -436,19 +666,19 @@ LandmarkPartition ScalableLandmarkPartitioner::Partition(
       }
 
       MoveDelta batch_delta;
+      const int initial_maximum_cameras = MaximumCameraCount(state);
       for (int landmark : landmarks) {
         const MoveDelta delta = ScoreMove(
-            graph, options_, state, landmark, source, target);
-        batch_delta.copied_cameras += delta.copied_cameras;
-        batch_delta.severe_weak += delta.severe_weak;
-        batch_delta.weak += delta.weak;
-        batch_delta.weak_penalty += delta.weak_penalty;
+          graph, options_, state, landmark, source, target, objective_);
+        AccumulateDelta(delta, batch_delta);
         ApplyMove(graph, options_.cluster_count, landmark, source, target,
                   state, assignment);
       }
       batch_delta.target_camera_count = state.cameras_per_cluster[target];
+      batch_delta.maximum_camera_count =
+          MaximumCameraCount(state) - initial_maximum_cameras;
       const MoveDelta unchanged;
-      if (BetterDelta(batch_delta, unchanged)) {
+      if (BetterDelta(batch_delta, unchanged, objective_)) {
         accepted_moves += static_cast<int>(landmarks.size());
       } else {
         for (auto landmark = landmarks.rbegin();
@@ -480,6 +710,7 @@ LandmarkPartition ScalableLandmarkPartitioner::Partition(
         }
 
         MoveDelta batch_delta;
+        const int initial_maximum_cameras = MaximumCameraCount(state);
         std::vector<ReinforcementMove> moves;
         while (state.camera_cluster_degree[target_offset] <
                severe_degree_limit) {
@@ -507,8 +738,9 @@ LandmarkPartition ScalableLandmarkPartitioner::Partition(
               continue;
             }
             const MoveDelta candidate = ScoreMove(
-                graph, options_, state, landmark, source, target);
-            if (best_landmark < 0 || BetterDelta(candidate, best_delta)) {
+              graph, options_, state, landmark, source, target, objective_);
+            if (best_landmark < 0 ||
+              BetterDelta(candidate, best_delta, objective_)) {
               best_landmark = landmark;
               best_source = source;
               best_delta = candidate;
@@ -517,20 +749,19 @@ LandmarkPartition ScalableLandmarkPartitioner::Partition(
           if (best_landmark < 0) {
             break;
           }
-          batch_delta.copied_cameras += best_delta.copied_cameras;
-          batch_delta.severe_weak += best_delta.severe_weak;
-          batch_delta.weak += best_delta.weak;
-          batch_delta.weak_penalty += best_delta.weak_penalty;
+          AccumulateDelta(best_delta, batch_delta);
           moves.push_back({best_landmark, best_source});
           ApplyMove(graph, options_.cluster_count, best_landmark, best_source,
                     target, state, assignment);
         }
 
         batch_delta.target_camera_count = state.cameras_per_cluster[target];
+        batch_delta.maximum_camera_count =
+          MaximumCameraCount(state) - initial_maximum_cameras;
         const MoveDelta unchanged;
         if (state.camera_cluster_degree[target_offset] >=
                 severe_degree_limit &&
-            BetterDelta(batch_delta, unchanged)) {
+            BetterDelta(batch_delta, unchanged, objective_)) {
           accepted_moves += static_cast<int>(moves.size());
           repaired = true;
         } else {
@@ -583,13 +814,11 @@ LandmarkPartition ScalableLandmarkPartitioner::Partition(
           }
 
           MoveDelta batch_delta;
+          const int initial_maximum_cameras = MaximumCameraCount(state);
           for (int landmark : landmarks) {
             const MoveDelta delta = ScoreMove(
-                graph, options_, state, landmark, source, target);
-            batch_delta.copied_cameras += delta.copied_cameras;
-            batch_delta.severe_weak += delta.severe_weak;
-            batch_delta.weak += delta.weak;
-            batch_delta.weak_penalty += delta.weak_penalty;
+              graph, options_, state, landmark, source, target, objective_);
+            AccumulateDelta(delta, batch_delta);
             ApplyMove(graph, options_.cluster_count, landmark, source, target,
                       state, assignment);
           }
@@ -619,8 +848,10 @@ LandmarkPartition ScalableLandmarkPartitioner::Partition(
                 continue;
               }
               const MoveDelta candidate = ScoreMove(
-                  graph, options_, state, landmark, target, source);
-              if (best_landmark < 0 || BetterDelta(candidate, best_delta)) {
+                  graph, options_, state, landmark, target, source,
+                  objective_);
+                if (best_landmark < 0 ||
+                  BetterDelta(candidate, best_delta, objective_)) {
                 best_landmark = landmark;
                 best_delta = candidate;
               }
@@ -628,15 +859,14 @@ LandmarkPartition ScalableLandmarkPartitioner::Partition(
             if (best_landmark < 0) {
               break;
             }
-            batch_delta.copied_cameras += best_delta.copied_cameras;
-            batch_delta.severe_weak += best_delta.severe_weak;
-            batch_delta.weak += best_delta.weak;
-            batch_delta.weak_penalty += best_delta.weak_penalty;
+            AccumulateDelta(best_delta, batch_delta);
             backfill.push_back(best_landmark);
             ApplyMove(graph, options_.cluster_count, best_landmark, target,
                       source, state, assignment);
           }
           batch_delta.target_camera_count = state.cameras_per_cluster[target];
+            batch_delta.maximum_camera_count =
+              MaximumCameraCount(state) - initial_maximum_cameras;
           const bool balanced =
               state.residuals_per_cluster[source] >= minimum_residuals &&
               state.residuals_per_cluster[source] <= maximum_residuals &&
@@ -654,9 +884,10 @@ LandmarkPartition ScalableLandmarkPartitioner::Partition(
           }
 
           const MoveDelta unchanged;
-          if (balanced && BetterDelta(batch_delta, unchanged) &&
+            if (balanced &&
+              BetterDelta(batch_delta, unchanged, objective_) &&
               (best_target < 0 ||
-               BetterDelta(batch_delta, best_batch_delta))) {
+               BetterDelta(batch_delta, best_batch_delta, objective_))) {
             best_target = target;
             best_batch_delta = batch_delta;
             best_backfill = std::move(backfill);
@@ -691,23 +922,31 @@ LandmarkPartition ScalableLandmarkPartitioner::Partition(
     for (int landmark : order) {
       const int source = assignment[landmark];
       const int weight = LandmarkWeight(graph, landmark);
+      if (state.residuals_per_cluster[source] - weight < minimum_residuals) {
+        progress.Tick(state, accepted_moves);
+        continue;
+      }
+      const SourceMoveDelta source_delta = ScoreMoveSource(
+          graph, options_, state, landmark, source, objective_);
       int best_target = source;
       MoveDelta best_delta;
       for (int target = 0; target < options_.cluster_count; ++target) {
         if (target == source ||
-            state.residuals_per_cluster[source] - weight < minimum_residuals ||
             state.residuals_per_cluster[target] + weight > maximum_residuals) {
           continue;
         }
-        const MoveDelta candidate = ScoreMove(
-            graph, options_, state, landmark, source, target);
-        if (best_target == source || BetterDelta(candidate, best_delta)) {
+        const MoveDelta candidate = ScoreMoveTarget(
+          graph, options_, state, landmark, source, target, objective_,
+          source_delta);
+        if (best_target == source ||
+          BetterDelta(candidate, best_delta, objective_)) {
           best_target = target;
           best_delta = candidate;
         }
       }
       const MoveDelta unchanged;
-      if (best_target != source && BetterDelta(best_delta, unchanged)) {
+        if (best_target != source &&
+          BetterDelta(best_delta, unchanged, objective_)) {
         ApplyMove(graph, options_.cluster_count, landmark, source, best_target,
                   state, assignment);
         ++accepted_moves;
@@ -731,7 +970,9 @@ LandmarkPartition ScalableLandmarkPartitioner::Partition(
 
 }  // namespace bundle_palm
 
-extern "C" int cluster_landmarks_scalable(
+namespace {
+
+int ClusterLandmarksScalable(
     int cluster_count,
     int camera_count,
     int landmark_count,
@@ -740,7 +981,9 @@ extern "C" int cluster_landmarks_scalable(
     double residual_balance_slack,
     const std::vector<int>& camera_indices,
     const std::vector<int>& landmark_indices,
-    std::vector<int>& landmark_to_cluster_out) {
+    std::vector<int>& landmark_to_cluster_out,
+    bundle_palm::ScalableLandmarkObjective objective,
+    const char* label) {
   try {
     const auto graph = bundle_palm::BipartiteCameraPointGraph::FromObservations(
         camera_count, landmark_count, camera_indices, landmark_indices);
@@ -750,9 +993,10 @@ extern "C" int cluster_landmarks_scalable(
     options.max_refinement_passes = max_refinement_passes;
     options.residual_balance_slack = residual_balance_slack;
     const auto result =
-        bundle_palm::ScalableLandmarkPartitioner(options).Partition(graph);
+      bundle_palm::ScalableLandmarkPartitioner(options, objective).Partition(
+        graph);
     landmark_to_cluster_out = result.landmark_to_cluster;
-    std::cout << "Scalable landmark partition\n";
+    std::cout << label << "\n";
     std::cout << "Residual balance bounds ["
               << result.metrics.minimum_residuals << ", "
               << result.metrics.maximum_residuals << "], violation "
@@ -775,4 +1019,42 @@ extern "C" int cluster_landmarks_scalable(
     landmark_to_cluster_out.clear();
     return 1;
   }
+}
+
+}  // namespace
+
+extern "C" int cluster_landmarks_scalable(
+    int cluster_count,
+    int camera_count,
+    int landmark_count,
+    int minimum_camera_landmarks,
+    int max_refinement_passes,
+    double residual_balance_slack,
+    const std::vector<int>& camera_indices,
+    const std::vector<int>& landmark_indices,
+    std::vector<int>& landmark_to_cluster_out) {
+  return ClusterLandmarksScalable(
+      cluster_count, camera_count, landmark_count, minimum_camera_landmarks,
+      max_refinement_passes, residual_balance_slack, camera_indices,
+      landmark_indices, landmark_to_cluster_out,
+      bundle_palm::ScalableLandmarkObjective::kLegacy,
+      "Scalable landmark partition");
+}
+
+extern "C" int cluster_landmarks_scalable_stable(
+    int cluster_count,
+    int camera_count,
+    int landmark_count,
+    int minimum_camera_landmarks,
+    int max_refinement_passes,
+    double residual_balance_slack,
+    const std::vector<int>& camera_indices,
+    const std::vector<int>& landmark_indices,
+    std::vector<int>& landmark_to_cluster_out) {
+  return ClusterLandmarksScalable(
+      cluster_count, camera_count, landmark_count, minimum_camera_landmarks,
+      max_refinement_passes, residual_balance_slack, camera_indices,
+      landmark_indices, landmark_to_cluster_out,
+      bundle_palm::ScalableLandmarkObjective::kStability,
+      "Stability-focused scalable landmark partition");
 }

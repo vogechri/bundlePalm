@@ -217,6 +217,18 @@ The scalable implementation is selected with:
 
     BUNDLE_PALM_CLUSTERING=landmark_scalable ...
 
+The stability-focused scalable implementation is selected with:
+
+    BUNDLE_PALM_CLUSTERING=landmark_scalable_stable ...
+
+It preserves the scalable algorithm and residual-balance constraints. It first
+minimizes the total degree 1-9 camera incidences, then uses a steep finite
+penalty to prefer safer compositions when that count is equal. Degrees 1 and 2
+have additional penalties, while degrees 3-9 use the cubic deficit from degree
+10. Additional camera copies and maximum cameras in a cluster follow, with
+degree 10 through the configured weak-support limit last. The original
+landmark_scalable objective remains available for comparisons.
+
 It reports progress approximately every five seconds by default. Set
 BUNDLE_PALM_PARTITION_TRACE=0 to disable progress or set
 BUNDLE_PALM_PARTITION_TRACE_INTERVAL_SECONDS to change the interval. Each

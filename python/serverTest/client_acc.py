@@ -16,6 +16,7 @@ import zmq
 from clustering import (
     cluster_by_landmark_clean,
     cluster_by_landmark_scalable,
+    cluster_by_landmark_scalable_stable,
     cluster_deg_by_landmark,
 )
 from numpy.linalg import inv as inv_nonHermetian
@@ -1044,10 +1045,26 @@ elif clustering_mode == "landmark_scalable":
         camera_indices, points_2d, point_indices, kClusters,
         n_cameras, n_points, residual_balance_slack,
         minimum_camera_landmarks, max_refinement_passes)
+elif clustering_mode == "landmark_scalable_stable":
+    residual_balance_slack = float(
+        os.environ.get("BUNDLE_PALM_RESIDUAL_BALANCE_SLACK", "0.02"))
+    minimum_camera_landmarks = int(
+        os.environ.get("BUNDLE_PALM_MIN_CAMERA_LANDMARKS", "20"))
+    max_refinement_passes = int(
+        os.environ.get("BUNDLE_PALM_MAX_REFINEMENT_PASSES", "2"))
+    (
+        camera_indices_in_cluster,
+        point_indices_in_cluster,
+        points_2d_in_cluster,
+        kClusters,
+    ) = cluster_by_landmark_scalable_stable(
+        camera_indices, points_2d, point_indices, kClusters,
+        n_cameras, n_points, residual_balance_slack,
+        minimum_camera_landmarks, max_refinement_passes)
 else:
     raise ValueError(
         "BUNDLE_PALM_CLUSTERING must be 'landmark', 'landmark_clean', "
-        "or 'landmark_scalable'")
+        "'landmark_scalable', or 'landmark_scalable_stable'")
 end = time.time() # this is not working at all. Slower then iteratively
 print("==========", clustering_mode, "clustering took", end - start,
       "s ===========")

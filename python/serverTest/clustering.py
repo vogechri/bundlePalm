@@ -79,6 +79,12 @@ def init_lib():
                                                ctypes.c_int, ctypes.c_int,
                                                ctypes.c_double, ctypes.c_void_p,
                                                ctypes.c_void_p, ctypes.c_void_p]
+    lib.cluster_landmarks_scalable_stable.restype = ctypes.c_int
+    lib.cluster_landmarks_scalable_stable.argtypes = [ctypes.c_int, ctypes.c_int,
+                                                      ctypes.c_int, ctypes.c_int,
+                                                      ctypes.c_int, ctypes.c_double,
+                                                      ctypes.c_void_p, ctypes.c_void_p,
+                                                      ctypes.c_void_p]
 
 def cluster_covis_lib(kClusters, pre_merges_, camera_indices__, point_indices__):
     c_kClusters_ = ctypes.c_int(kClusters)
@@ -653,6 +659,53 @@ def cluster_by_landmark_scalable(
 
     if landmark_to_cluster.shape[0] != n_points_:
         raise RuntimeError("scalable landmark partitioning returned an invalid assignment")
+
+    camera_indices_in_cluster_ = []
+    point_indices_in_cluster_ = []
+    points_2d_in_cluster_ = []
+    for cluster in range(kClusters_):
+        residual_mask = landmark_to_cluster[point_indices_] == cluster
+        camera_indices_in_cluster_.append(camera_indices_[residual_mask])
+        point_indices_in_cluster_.append(point_indices_[residual_mask])
+        points_2d_in_cluster_.append(points_2d_[residual_mask])
+
+    return (
+        camera_indices_in_cluster_,
+        point_indices_in_cluster_,
+        points_2d_in_cluster_,
+        kClusters_
+    )
+
+def cluster_by_landmark_scalable_stable(
+    camera_indices_, points_2d_, point_indices_, kClusters_, n_cameras_, n_points_,
+    residual_balance_slack=0.05, minimum_camera_landmarks=20,
+    max_refinement_passes=2
+):
+    camera_indices_list = camera_indices_.tolist()
+    point_indices_list = point_indices_.tolist()
+    c_camera_indices = (ctypes.c_int * len(camera_indices_list))(*camera_indices_list)
+    c_point_indices = (ctypes.c_int * len(point_indices_list))(*point_indices_list)
+    c_camera_indices_cpp = lib.new_vector_by_copy(c_camera_indices, len(c_camera_indices))
+    c_point_indices_cpp = lib.new_vector_by_copy(c_point_indices, len(c_point_indices))
+    landmark_to_cluster_cpp = lib.new_vector()
+
+    try:
+        status = lib.cluster_landmarks_scalable_stable(
+            ctypes.c_int(kClusters_), ctypes.c_int(n_cameras_), ctypes.c_int(n_points_),
+            ctypes.c_int(minimum_camera_landmarks),
+            ctypes.c_int(max_refinement_passes),
+            ctypes.c_double(residual_balance_slack), c_camera_indices_cpp,
+            c_point_indices_cpp, landmark_to_cluster_cpp)
+        if status != 0:
+            raise RuntimeError("stability-focused scalable landmark partitioning failed")
+        landmark_to_cluster = fillPythonVecSimple(landmark_to_cluster_cpp)
+    finally:
+        lib.delete_vector(landmark_to_cluster_cpp)
+        lib.delete_vector(c_point_indices_cpp)
+        lib.delete_vector(c_camera_indices_cpp)
+
+    if landmark_to_cluster.shape[0] != n_points_:
+        raise RuntimeError("stability-focused scalable partitioning returned an invalid assignment")
 
     camera_indices_in_cluster_ = []
     point_indices_in_cluster_ = []
