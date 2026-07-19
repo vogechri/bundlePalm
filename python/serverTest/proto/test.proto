@@ -16,6 +16,8 @@ message program_proto {
   repeated float vnorm = 11;
   repeated int32 unique_cameras = 12; // should not be many -- if any ever. One could pack cams < 10 lms in one cluster == lms in cam are put in one cluster.
   int32 num_clusters = 13;
+  uint64 run_id = 14;
+  uint64 phase_id = 15;
 }
 
 // sent once
@@ -43,6 +45,8 @@ message prox_cluster_proto {
   float be = 3;
   int32 cluster_id = 4;
   int32 revert_lm = 5; // if acc. stepsize is reverted, revert lm as well: 1. Also revert to best solution: 2.
+  uint64 run_id = 6;
+  uint64 phase_id = 7;
   // clustering: lms by cam. # lms that can fill up cam in cl.
 }
 
@@ -56,6 +60,8 @@ message return_cluster_proto {
   repeated float step_size = 3; // can be float -- actually same perf .. haeh? compress to 2048 or float16
   int32 cluster_id = 4;
   float cost = 5;
+  uint64 run_id = 6;
+  uint64 phase_id = 7;
 }
 
 // send to get cost
@@ -63,11 +69,15 @@ message cost_proto {
   repeated double cameras = 1; // 3d, bad is not double -- weird.
   int32 cluster_id = 2;
   int32 revert_lm = 3; // only for cost, revert back after.
+  uint64 run_id = 4;
+  uint64 phase_id = 5;
 }
 
 message return_cost_proto {
   float cost = 1;
   int32 cluster_id = 2;
+  uint64 run_id = 3;
+  uint64 phase_id = 4;
 }
 
 message best_cost_proto {

@@ -2231,7 +2231,7 @@ double MergeParts(int partId, int otherPartId,
 }
 
 bool do_entries_match(const std::vector<int> &a, const std::vector<int> &b) {
-  if (a.size() != a.size()) {
+  if (a.size() != b.size()) {
     return false;
   }
   for (int i = 0; i < a.size(); ++i) {

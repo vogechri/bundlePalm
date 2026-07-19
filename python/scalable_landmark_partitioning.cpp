@@ -170,7 +170,7 @@ SourceMoveDelta ScoreMoveSource(
     const State& state,
     int landmark,
     int source,
-    ScalableLandmarkObjective objective) {
+  ScalableLandmarkObjective objective) {
   SourceMoveDelta source_delta;
   const int multiplicity = PointMultiplicity(graph, landmark);
   for (int camera : graph.cameras_from_point[landmark]) {
@@ -180,37 +180,37 @@ SourceMoveDelta ScoreMoveSource(
     source_delta.delta.copied_cameras +=
         (new_source > 0) - (old_source > 0);
     source_delta.delta.severe_weak +=
-        IsSevereWeak(new_source, options.weak_camera_degree_limit) -
-        IsSevereWeak(old_source, options.weak_camera_degree_limit);
+      IsSevereWeak(new_source, options.weak_camera_degree_limit) -
+      IsSevereWeak(old_source, options.weak_camera_degree_limit);
     source_delta.delta.weak +=
-        IsWeak(new_source, options.weak_camera_degree_limit) -
-        IsWeak(old_source, options.weak_camera_degree_limit);
+      IsWeak(new_source, options.weak_camera_degree_limit) -
+      IsWeak(old_source, options.weak_camera_degree_limit);
     source_delta.delta.weak_penalty +=
-        WeakPenalty(new_source, options.weak_camera_degree_limit) -
-        WeakPenalty(old_source, options.weak_camera_degree_limit);
+      WeakPenalty(new_source, options.weak_camera_degree_limit) -
+      WeakPenalty(old_source, options.weak_camera_degree_limit);
     if (objective == ScalableLandmarkObjective::kStability) {
       source_delta.delta.low_support_penalty +=
-          LowSupportPenalty(new_source) - LowSupportPenalty(old_source);
+        LowSupportPenalty(new_source) - LowSupportPenalty(old_source);
       source_delta.delta.degree_one_two +=
-          InDegreeRange(new_source, 1, 2) -
-          InDegreeRange(old_source, 1, 2);
+        InDegreeRange(new_source, 1, 2) -
+        InDegreeRange(old_source, 1, 2);
       source_delta.delta.degree_three +=
-          (new_source == 3) - (old_source == 3);
+        (new_source == 3) - (old_source == 3);
       source_delta.delta.degree_four_nine +=
-          InDegreeRange(new_source, 4, 9) -
-          InDegreeRange(old_source, 4, 9);
+        InDegreeRange(new_source, 4, 9) -
+        InDegreeRange(old_source, 4, 9);
       source_delta.delta.moderate_weak +=
-          InDegreeRange(new_source, 10,
-                        options.weak_camera_degree_limit - 1) -
-          InDegreeRange(old_source, 10,
-                        options.weak_camera_degree_limit - 1);
+        InDegreeRange(new_source, 10,
+              options.weak_camera_degree_limit - 1) -
+        InDegreeRange(old_source, 10,
+              options.weak_camera_degree_limit - 1);
     }
     source_delta.removed_cameras += new_source == 0;
   }
   return source_delta;
 }
 
-MoveDelta ScoreMoveTarget(
+  MoveDelta ScoreMoveTarget(
     const BipartiteCameraPointGraph& graph,
     const LandmarkPartitioningOptions& options,
     const State& state,
@@ -228,26 +228,26 @@ MoveDelta ScoreMoveTarget(
     const int new_target = old_target + multiplicity;
     delta.copied_cameras += (new_target > 0) - (old_target > 0);
     delta.severe_weak +=
-        IsSevereWeak(new_target, options.weak_camera_degree_limit) -
-        IsSevereWeak(old_target, options.weak_camera_degree_limit);
+      IsSevereWeak(new_target, options.weak_camera_degree_limit) -
+      IsSevereWeak(old_target, options.weak_camera_degree_limit);
     delta.weak += IsWeak(new_target, options.weak_camera_degree_limit) -
-                  IsWeak(old_target, options.weak_camera_degree_limit);
+            IsWeak(old_target, options.weak_camera_degree_limit);
     delta.weak_penalty +=
-        WeakPenalty(new_target, options.weak_camera_degree_limit) -
-        WeakPenalty(old_target, options.weak_camera_degree_limit);
+      WeakPenalty(new_target, options.weak_camera_degree_limit) -
+      WeakPenalty(old_target, options.weak_camera_degree_limit);
     if (objective == ScalableLandmarkObjective::kStability) {
       delta.low_support_penalty +=
-          LowSupportPenalty(new_target) - LowSupportPenalty(old_target);
+        LowSupportPenalty(new_target) - LowSupportPenalty(old_target);
       delta.degree_one_two += InDegreeRange(new_target, 1, 2) -
-                              InDegreeRange(old_target, 1, 2);
+                  InDegreeRange(old_target, 1, 2);
       delta.degree_three += (new_target == 3) - (old_target == 3);
       delta.degree_four_nine += InDegreeRange(new_target, 4, 9) -
-                                InDegreeRange(old_target, 4, 9);
+                  InDegreeRange(old_target, 4, 9);
       delta.moderate_weak +=
-          InDegreeRange(new_target, 10,
-                        options.weak_camera_degree_limit - 1) -
-          InDegreeRange(old_target, 10,
-                        options.weak_camera_degree_limit - 1);
+        InDegreeRange(new_target, 10,
+              options.weak_camera_degree_limit - 1) -
+        InDegreeRange(old_target, 10,
+              options.weak_camera_degree_limit - 1);
     }
     new_target_cameras += old_target == 0;
   }

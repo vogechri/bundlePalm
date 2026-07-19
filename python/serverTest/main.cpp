@@ -1363,7 +1363,8 @@ int main() {
 
       // Define a Lambda Expression
       auto update_lambda = [&push_socket, &cluster_to_program,
-                            &mtx](int cluster_id) {
+                &mtx](int cluster_id, std::uint64_t run_id,
+                  std::uint64_t phase_id) {
         CeresProgram &program = cluster_to_program[cluster_id];
         // std::cout << cluster_id << " Update "<< "\n";
 #ifdef __ceresVersion__
@@ -1373,6 +1374,8 @@ int main() {
         program.UpdateStepSizeAndSolve();//keep_cameras_fixed);
 #endif
         return_cluster_proto return_proto = program.FillReturnProto();
+        return_proto.set_run_id(run_id);
+        return_proto.set_phase_id(phase_id);
         const double cost = 2 * program.GetCost();
         std::cout << cluster_id << ". Cost from update: " << cost << "\n";
         return_proto.set_cost(cost);
@@ -1388,7 +1391,8 @@ int main() {
 
       // std::thread update_thread(update_lambda, std::ref(program),
       // std::cref(update));
-      std::thread update_thread(update_lambda, cluster_id);//, keep_cameras_fixed);
+      std::thread update_thread(update_lambda, cluster_id, update.run_id(),
+                update.phase_id());//, keep_cameras_fixed);
       update_thread.detach();
       /// update_thread.join();
 
@@ -1417,7 +1421,8 @@ int main() {
       program.ResetProgram(pro);
 
       auto program_lambda = [&cluster_to_program, &push_socket,
-                             &mtx](int cluster_id) {
+                 &mtx](int cluster_id, std::uint64_t run_id,
+                   std::uint64_t phase_id) {
         CeresProgram &program = cluster_to_program[cluster_id];
 
 #ifdef __ceresVersion__
@@ -1428,6 +1433,8 @@ int main() {
         program.UpdateStepSizeAndSolve();
 #endif
         return_cluster_proto return_proto = program.FillReturnProto();
+        return_proto.set_run_id(run_id);
+        return_proto.set_phase_id(phase_id);
         const double cost = 2 * program.GetCost();
         return_proto.set_cost(cost);
         std::cout << cluster_id << ". Cost from program: " << cost << "\n";
@@ -1440,7 +1447,8 @@ int main() {
       };
       // std::thread program_thread(program_lambda, std::ref(program),
       // std::cref(pro));
-      std::thread program_thread(program_lambda, cluster_id);
+      std::thread program_thread(program_lambda, cluster_id, pro.run_id(),
+                 pro.phase_id());
       program_thread.detach();
       // program_thread.join();// ok, so proto pro runs out of scope / gets
       // deleted. std::this_thread::sleep_for(std::chrono::seconds(0)); // >5 s
@@ -1460,13 +1468,17 @@ int main() {
       bool revert_lms = costUpdate.revert_lm() == 2 ? true : false;
       // Define a Lambda Expression
       auto cost_lambda = [&push_socket, &cluster_to_program,
-                          &mtx](int cluster_id, bool revert_lms) {
+              &mtx](int cluster_id, bool revert_lms,
+                std::uint64_t run_id,
+                std::uint64_t phase_id) {
         CeresProgram &program = cluster_to_program[cluster_id];
         const double cost = 2 * program.GetCost(revert_lms);
         std::cout << cluster_id << ". Cost from cost: " << cost << "\n";
         return_cost_proto return_proto;
         return_proto.set_cost(cost);
         return_proto.set_cluster_id(cluster_id);
+        return_proto.set_run_id(run_id);
+        return_proto.set_phase_id(phase_id);
         // SerializeToArray saves memory and time?
         const size_t bytes = return_proto.ByteSizeLong();
         zmq::message_t reply(bytes);
@@ -1474,7 +1486,8 @@ int main() {
         std::lock_guard<std::mutex> lock(mtx);
         push_socket.send(reply, zmq::send_flags::none);
       };
-      std::thread cost_thread(cost_lambda, cluster_id, revert_lms);
+      std::thread cost_thread(cost_lambda, cluster_id, revert_lms,
+              costUpdate.run_id(), costUpdate.phase_id());
       cost_thread.detach();
       break;
     }

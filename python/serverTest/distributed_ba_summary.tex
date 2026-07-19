@@ -1,0 +1,249 @@
+\documentclass[11pt]{article}
+
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{booktabs}
+\usepackage[hidelinks]{hyperref}
+
+\title{Distributed Bundle Adjustment in \texttt{client\_acc.py}}
+\author{}
+\date{}
+
+\begin{document}
+\maketitle
+
+\section{Overview}
+
+The implementation coordinates bundle-adjustment subproblems over several
+landmark clusters.  Each cluster owns a disjoint set of landmarks, but cameras
+may occur in several clusters.  Consequently, optimized landmarks can be
+written directly back to their global rows, whereas the duplicate camera
+estimates must be reconciled by a consensus step.
+
+The outer algorithm is a variable-metric Douglas--Rachford splitting (DRS)
+iteration with a Nesterov-like extrapolation of its cluster reference states.
+The local nonlinear least-squares problems are solved by the C++ workers; the
+Python coordinator dispatches those solves, merges their results, tests
+accelerated and unaccelerated outer steps, and maintains recovery state.
+
+\section{Notation and Code Variables}
+
+For cluster $i$, let
+\begin{align*}
+u_i &\quad\text{denote its optimized local camera copy},\\
+s_i &\quad\text{denote its proximal reference state},\\
+U_i &\quad\text{denote its block-diagonal camera metric},\\
+\ell_i &\quad\text{denote its owned landmarks},
+\end{align*}
+and let $v$ denote the global consensus camera vector.  Every camera has nine
+parameters, so each nonzero camera block of $U_i$ is a $9\times9$ matrix.
+
+\begin{center}
+\begin{tabular}{ll}
+\toprule
+Mathematical object & Python representation \\
+\midrule
+$u_i$ & \verb|poses_in_cluster[i]| \\
+$s_i$ & \verb|poses_s_in_cluster[i]| \\
+$s_i^{+}$ & \verb|poses_s_in_cluster_pre[i]| \\
+$v$ & \verb|poses_v| \\
+$U_i$ & \verb|Ul_in_cluster[i]| or \verb|Up_cluster[i]| \\
+$\ell_i$ & the rows owned by cluster $i$ in \verb|landmarks| \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Only cameras present in a cluster are active in that cluster's vectors and
+metric.  The Python arrays retain global camera indexing, while absent rows
+are masked to zero.
+
+\section{Local Cluster Problems}
+
+The function \verb|prox_f_push_pull| sends one request to every worker and
+collects the replies in arbitrary arrival order.  Conceptually, cluster $i$
+solves the proximal bundle-adjustment problem
+\begin{equation}
+  (u_i,\ell_i)
+  \approx
+  \underset{u,\ell}{\operatorname{argmin}}
+  \left\{
+    f_i(u,\ell)
+    + \frac{1}{2}(u-s_i)^{\mathsf T}U_i(u-s_i)
+  \right\},
+  \label{eq:local-prox}
+\end{equation}
+where $f_i$ is the reprojection objective for the observations assigned to
+cluster $i$.  The C++ server implements the second term as a camera prior and
+returns the optimized cameras, optimized landmarks, objective value, and one
+$9\times9$ metric block for every local camera.
+
+Replies carry a cluster identifier as well as run and phase identifiers.  The
+coordinator therefore associates out-of-order replies with the correct
+cluster and rejects stale replies left by an earlier asynchronous batch.
+
+\section{How Cluster Results Are Merged}
+
+\subsection{Landmarks}
+
+Clustering is performed by landmark: all observations of a landmark are
+assigned to one cluster.  A landmark consequently has a single optimizing
+owner and requires no averaging.  On receipt of a cluster reply,
+\verb|prox_f_push_pull| writes the returned landmark values directly into the
+corresponding global rows of \verb|landmarks|.
+
+\subsection{Cameras}
+
+A camera may observe landmarks in several clusters and can therefore have
+several local estimates.  The function \verb|average_cameras_new| embeds each
+cluster metric into the global camera space and forms the reflected DRS state
+\begin{equation}
+  r_i = 2u_i-s_i.
+\end{equation}
+It then computes the block-metric consensus
+\begin{equation}
+  v =
+  \left(\sum_i U_i\right)^{-1}
+  \sum_i U_i(2u_i-s_i).
+  \label{eq:consensus}
+\end{equation}
+Because all $U_i$ are block diagonal by camera, Equation~\eqref{eq:consensus}
+is evaluated independently for each camera.  For camera $c$ it becomes
+\begin{equation}
+  v_c =
+  \left(\sum_{i:\,c\in i}U_{i,c}\right)^{-1}
+  \sum_{i:\,c\in i}U_{i,c}(2u_{i,c}-s_{i,c}).
+\end{equation}
+This is not an arithmetic average.  A cluster contributes through a full
+$9\times9$ matrix, allowing its estimate to have different weights in
+different camera-parameter directions.
+
+\section{Plain Douglas--Rachford Update}
+
+After obtaining $v$, the unaccelerated update of each reference state is
+\begin{equation}
+  s_i^{+}=s_i+\tau(v-u_i).
+  \label{eq:drs-update}
+\end{equation}
+The code currently sets $\tau=1$, giving $s_i^{+}=s_i+v-u_i$.  The proposed
+plain state is stored in \verb|poses_s_in_cluster_pre[i]|.  If all local
+camera copies agree with the consensus, then $v-u_i=0$ and the reference
+state no longer moves.
+
+\section{Nesterov-Like Acceleration}
+
+\subsection{Accelerated State}
+
+Acceleration is applied to the outer DRS reference states, not directly to
+the landmarks, consensus cameras, or internal Ceres iterations.  The code
+stacks all cluster states into one vector,
+\begin{equation}
+  s_k = [s_{1,k}^{\mathsf T},\ldots,s_{K,k}^{\mathsf T}]^{\mathsf T},
+\end{equation}
+whose allocated size is $9K$ times the total number of cameras.  Let
+\begin{equation}
+  p_k=s_k^{+}-s_k
+\end{equation}
+be the plain DRS step.  The active momentum recurrence is
+\begin{align}
+  \beta_k &= \frac{k-r-1}{k-r+2},
+  \label{eq:beta}\\
+  d_k &= p_k+\beta_k d_{k-1},
+  \label{eq:direction}\\
+  s_k^{\mathrm{acc}} &= s_k+d_k,
+  \label{eq:accelerated-state}
+\end{align}
+where $r$ is \verb|resetIt|, the iteration index of the latest restart.  Thus
+the accelerated trial can equivalently be written as
+\begin{equation}
+  s_k^{\mathrm{acc}}=s_k^{+}+\beta_k d_{k-1}.
+\end{equation}
+
+The source also contains a conventional FISTA-style recurrence using
+\verb|lambda_0|, \verb|lambda_1|, and \verb|gamma|, but it is inside an
+\verb|if False| block and is not active.  Therefore, Equations
+\eqref{eq:beta}--\eqref{eq:accelerated-state}, rather than the disabled FISTA
+formula, describe the acceleration actually used by the coordinator.
+
+\subsection{Accelerated Trial and Plain Fallback}
+
+After the first iterations following a restart, the code normally evaluates
+two proximal centers.  It constructs
+\begin{equation}
+  \widehat{s}_k(t)
+  =t s_k^{+}+(1-t)s_k^{\mathrm{acc}}.
+  \label{eq:trial-interpolation}
+\end{equation}
+With two line-search iterations, the first trial uses $t=0$ and is therefore
+the accelerated state.  If that trial is not accepted, the second uses $t=1$
+and is the plain DRS state.  For every trial the coordinator performs a full
+set of local proximal solves, recomputes the metric consensus, and evaluates
+the resulting merit values.
+
+Variables carrying the suffix \verb|_bfgs| hold these trial states and
+results.  The active code does not perform a BFGS inverse-Hessian update, so
+the suffix is historical and should not be interpreted as the optimization
+method used here.
+
+\section{Merit Function, Acceptance, and Recovery}
+
+The function \verb|cost_DRE| computes the metric Douglas--Rachford envelope
+contribution
+\begin{equation}
+  \mathcal{E}_i
+  =\frac{1}{2}(u_i-v)^{\mathsf T}U_i
+    \bigl((u_i-v)+2(u_i-s_i)\bigr).
+  \label{eq:dre}
+\end{equation}
+The trial merit adds the local reprojection costs to the sum of these
+contributions.  The implementation also evaluates the reprojection objective
+at the consensus cameras, $f(v)$, and uses the maximum of this primal value
+and the computed envelope merit as a safeguard.  Diagnostics include the
+local cost $f(u)$ and the disagreement gap $f(v)-f(u)$.
+
+If the accelerated trial improves the merit sufficiently, it is accepted and
+the plain fallback is skipped.  Otherwise, the workers restore the landmarks
+from before the accelerated trial and solve again with the plain DRS center.
+The plain trial is accepted under a more permissive fallback condition unless
+both the envelope and primal consensus costs trigger the rejection logic.
+
+Repeated accelerated-trial failures increment
+\verb|failedNesterovAcceleration|.  After
+\verb|maxFailedNesterovAcceleration| failures, the implementation sets the
+previous direction to zero and records the current iteration in
+\verb|resetIt|.  This restarts both the momentum history and the coefficient
+schedule in Equation~\eqref{eq:beta}.  The first two iterations after a
+restart use only the plain DRS trial.
+
+A severe rejection additionally restores the best-known consensus cameras
+and landmarks, sets all local camera and reference states to that consensus,
+increases the block regularization parameter, and clears the momentum.  These
+operations are stability safeguards around the core DRS iteration rather
+than part of the basic Nesterov formula.
+
+\section{Algorithm Summary}
+
+One outer iteration can be summarized as follows:
+\begin{enumerate}
+  \item Form the plain DRS reference state $s_k^{+}$ using
+        Equation~\eqref{eq:drs-update}.
+  \item Build the Nesterov-like direction $d_k$ using
+        Equations~\eqref{eq:beta} and \eqref{eq:direction}.
+  \item Solve all cluster proximal problems at the accelerated center
+        $s_k^{\mathrm{acc}}$.
+  \item Merge duplicate cameras using the block-metric consensus in
+        Equation~\eqref{eq:consensus}; copy owned landmarks directly.
+  \item Evaluate the DRS merit and the primal objective at the consensus.
+  \item Accept the accelerated result if suitable; otherwise repeat the
+        cluster solves at the plain center $s_k^{+}$.
+  \item On repeated or severe failures, clear acceleration history and,
+        when necessary, restore the best-known primal state.
+\end{enumerate}
+
+The essential distinction is that local bundle-adjustment solutions are not
+merged as complete models.  Landmarks have unique owners, while shared camera
+copies are combined through a variable-metric DRS projection.  Nesterov-like
+momentum accelerates the sequence of DRS reference states and is protected by
+a plain-step fallback and explicit restart logic.
+
+\end{document}

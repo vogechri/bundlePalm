@@ -1,0 +1,234 @@
+\documentclass[11pt]{article}
+
+\usepackage[a4paper,margin=28mm]{geometry}
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs}
+
+\title{Diagonal Coordinate Normalization for the Bundle-Adjustment Schur System}
+\author{}
+\date{}
+
+\begin{document}
+\maketitle
+
+\section{Key insight}
+
+The camera, point, rotation, translation, focal-length, and distortion
+coordinates in bundle adjustment can have very different numerical scales.
+Consequently, the diagonal entries of the normal matrix may span many orders of
+magnitude.  Solving that system directly makes an approximate inner method
+sensitive to floating-point reduction order, pseudoinverse thresholds, and a
+stopping criterion measured in poorly scaled coordinates.
+
+The useful operation is a change of coordinates.  Let the diagonal matrices
+$D_c$ and $D_p$ contain square roots of the camera and point normal-matrix
+diagonals.  We solve for dimensionless variables $z_c,z_p$ and recover the
+physical increments by
+\begin{equation}
+  \delta_c = D_c^{-1} z_c,
+  \qquad
+  \delta_p = D_p^{-1} z_p.
+\end{equation}
+The transformed normal matrix has approximately unit diagonal.  This is useful
+for both PCG and Nesterov; it is not specific to either inner algorithm.
+
+\section{Original linearized problem}
+
+For residual vector $r$, camera Jacobian $J_c$, and point Jacobian $J_p$, a
+Gauss--Newton step minimizes
+\begin{equation}
+  \min_{\delta_c,\delta_p}
+  \left\|r + J_c\delta_c + J_p\delta_p\right\|_2^2.
+\end{equation}
+Define
+\begin{equation}
+  U = J_c^{\mathsf T}J_c,
+  \qquad
+  V = J_p^{\mathsf T}J_p,
+  \qquad
+  W = J_c^{\mathsf T}J_p,
+\end{equation}
+and
+\begin{equation}
+  b_c = -J_c^{\mathsf T}r,
+  \qquad
+  b_p = -J_p^{\mathsf T}r.
+\end{equation}
+The normal equations are
+\begin{equation}
+  \begin{bmatrix}
+    U & W \\
+    W^{\mathsf T} & V
+  \end{bmatrix}
+  \begin{bmatrix}
+    \delta_c \\
+    \delta_p
+  \end{bmatrix}
+  =
+  \begin{bmatrix}
+    b_c \\
+    b_p
+  \end{bmatrix}.
+\end{equation}
+Eliminating the points gives
+\begin{align}
+  S\delta_c &= b_S, \\
+  S &= U-WV^{-1}W^{\mathsf T}, \\
+  b_S &= b_c-WV^{-1}b_p.
+\end{align}
+After solving for $\delta_c$, point back-substitution is
+\begin{equation}
+  \delta_p = V^{-1}\left(b_p-W^{\mathsf T}\delta_c\right).
+\end{equation}
+
+\section{Diagonal coordinate transform}
+
+Choose a small floor $\tau>0$ and define
+\begin{align}
+  D_c &= \operatorname{diag}\left(
+    \max\left(\sqrt{\left|\operatorname{diag}(U)\right|},\tau\right)
+  \right), \\
+  D_p &= \operatorname{diag}\left(
+    \max\left(\sqrt{\left|\operatorname{diag}(V)\right|},\tau\right)
+  \right).
+\end{align}
+In the implementation, $\tau=10^{-10}$.  Let
+\begin{equation}
+  T = \operatorname{blkdiag}(D_c,D_p),
+  \qquad
+  \begin{bmatrix}\delta_c\\\delta_p\end{bmatrix}
+  = T^{-1}
+  \begin{bmatrix}z_c\\z_p\end{bmatrix}.
+\end{equation}
+Substitution into the quadratic model and multiplication by $T^{-1}$ produce
+the symmetric congruence transform
+\begin{equation}
+  H' = T^{-1}HT^{-1},
+  \qquad
+  b' = T^{-1}b.
+\end{equation}
+Its blocks are
+\begin{align}
+  U' &= D_c^{-1}UD_c^{-1}, \\
+  V' &= D_p^{-1}VD_p^{-1}, \\
+  W' &= D_c^{-1}WD_p^{-1}, \\
+  b_c' &= D_c^{-1}b_c, \\
+  b_p' &= D_p^{-1}b_p.
+\end{align}
+The transformed Schur equations are therefore
+\begin{align}
+  S'z_c &= b_S', \\
+  S' &= U'-W'(V')^{-1}(W')^{\mathsf T}, \\
+  b_S' &= b_c'-W'(V')^{-1}b_p'.
+\end{align}
+Point back-substitution and conversion to physical coordinates are
+\begin{align}
+  z_p &= (V')^{-1}\left(b_p'-(W')^{\mathsf T}z_c\right), \\
+  \delta_c &= D_c^{-1}z_c, \\
+  \delta_p &= D_p^{-1}z_p.
+\end{align}
+For an exact undamped solve in exact arithmetic, this transformation does not
+change the physical Gauss--Newton step.  It only changes the basis in which the
+linear system is represented.
+
+\section{Damping in normalized coordinates}
+
+The implementation first normalizes the Gauss--Newton blocks and then applies
+local damping:
+\begin{align}
+  U'_{\lambda} &= (1+\lambda)U' + \lambda\epsilon I, \\
+  V'_{\lambda} &= (1+\lambda)V' + \lambda\epsilon I.
+\end{align}
+The identity term is thus isotropic in dimensionless coordinates.  When mapped
+back to the original variables, it corresponds to the diagonal metric induced
+by $D_c$ and $D_p$, rather than an identity metric over quantities with
+incompatible physical units.  The nonlinear candidate cost is still evaluated
+in the original camera and point coordinates.
+
+For PALM acceptance, the corresponding block-diagonal damping penalty is
+evaluated directly as
+\begin{equation}
+  \lambda\left(
+    \|J_c\delta_c\|_2^2 + \|J_p\delta_p\|_2^2
+    + \epsilon\|z_c\|_2^2 + \epsilon\|z_p\|_2^2
+  \right).
+\end{equation}
+Computing the two Jacobian-vector norms directly avoids relying on a copied
+sparse normal matrix and makes the evaluated penalty identical to the metric
+used by the normalized damping equations.
+
+This detail means that the normalized damped step need not equal the old
+unnormalized damped step.  That difference is intentional: damping becomes
+comparable across coordinate families instead of being dominated by the
+largest raw scales.
+
+\section{Why approximate solvers improve}
+
+Although an exact undamped solution is invariant, a finite inner iteration is
+not invariant to coordinate scaling.  Normalization improves the practical
+solve for several reasons:
+
+\begin{enumerate}
+  \item The diagonal of $U'$ and $V'$ is approximately one, reducing the dynamic
+        range seen by sparse matrix products.
+  \item Relative residual and step stopping tests become meaningful because one
+        coordinate family no longer dominates the Euclidean norm.
+  \item Batched pseudoinverses are less sensitive to scale-dependent singular
+        value thresholds.
+  \item Roundoff and nondeterministic GPU sparse-reduction order are less likely
+        to be amplified by a severely ill-scaled Schur complement.
+  \item A fixed Nesterov step scale is much more appropriate for the normalized
+        operator.
+\end{enumerate}
+
+PCG still uses the camera block inverse as its Krylov preconditioner, and the
+Nesterov iteration still uses the camera block inverse in its gradient map.
+Those are algorithmic preconditioners.  The $D_c,D_p$ operation described here
+is different: it changes the coordinates of the entire camera--point system,
+including $U$, $V$, $W$, both right-hand sides, back-substitution, and final step
+recovery.
+
+\section{Observed effect}
+
+For Ladybug \texttt{problem-1064-113655-pre}, five overlap-refined partitions,
+20 epochs, and the original PALM acceptance condition, the observed results
+were
+\begin{center}
+\begin{tabular}{lrr}
+  \toprule
+  Inner method & Final objective & Time (s) \\
+  \midrule
+  PCG, unnormalized & approximately $1.9\times 10^6$ to $2.9\times 10^6$ & $25$--$33$ \\
+  PCG, normalized & $587050.84$ & $10.96$ \\
+  Nesterov, normalized & $586578.39$ & $12.23$ \\
+  CPU reference & approximately $591006$ & --- \\
+  \bottomrule
+\end{tabular}
+\end{center}
+The normalized runs generally required only ten inner iterations per block.
+Repeated normalized PCG runs also agreed to nearly machine precision, whereas
+the unnormalized trajectory was sensitive to small GPU numerical differences.
+
+\section{Implementation summary}
+
+For each local Schur solve:
+\begin{enumerate}
+  \item Assemble the original $U$, $V$, and $W$ blocks.
+    \item Compute $D_c^{-1}$ and $D_p^{-1}$ from the block diagonals.
+    \item Apply the two-sided scaling to $U$, $V$, and $W$.
+    \item Scale $b_c$ and $b_p$ once on the left.
+    \item Apply damping and solve the transformed Schur system with PCG or
+        Nesterov.
+    \item Back-substitute for $z_p$ in transformed coordinates.
+    \item Recover $\delta_c$ and $\delta_p$ with $D_c^{-1}$ and $D_p^{-1}$.
+    \item Evaluate the damping metric from $J_c\delta_c$, $J_p\delta_p$, $z_c$,
+      and $z_p$.
+    \item Evaluate the candidate and acceptance condition in original
+        coordinates.
+\end{enumerate}
+
+In \texttt{palm\_ba.py}, BAE local solves enable this transformation by
+default.  The option \texttt{--no-inner-jacobi} disables it for controlled
+comparisons.
+
+\end{document}

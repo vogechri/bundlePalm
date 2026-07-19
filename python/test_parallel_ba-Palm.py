@@ -109,6 +109,8 @@ FILE_NAME = "problem-173-111908-pre.txt.bz2"
 # FILE_NAME = "problem-93-61203-pre.txt.bz2"
 #FILE_NAME = "problem-394-100368-pre.txt.bz2" # this is a problem case failing simplistic parallel update scheme
 
+BASE_URL = os.environ.get("PALM_BASE_URL", BASE_URL)
+FILE_NAME = os.environ.get("PALM_FILE_NAME", FILE_NAME)
 URL = BASE_URL + FILE_NAME
 
 if not os.path.isfile(FILE_NAME):
@@ -722,6 +724,11 @@ def blockEigenvalue(M, bs):
     #Ei.data[:] = 0.1 * maxEv # 0.1 worked
     #Ei.data[:] *= 0.125 #0.25 promising # 0.1 already too low. could try line-search idea
     return Ei
+
+def jacobian_damping_penalty(J, delta, epsilon):
+    linearized_change = J * delta
+    return (linearized_change.dot(linearized_change)
+            + epsilon * delta.dot(delta))
 
 def copy_selected_blocks(M, block_selection_, bs):
     Mi = M.copy()
@@ -1817,8 +1824,8 @@ def local_bundle_adjust(
         #print("delta_l[uncovered_indices] ", delta_l[uncovered_indices_3d])
         #delta_l[uncovered_indices_3d] = 0
 
-        penaltyL = L * delta_l.dot(JltJlDiag * delta_l)
-        penaltyP = L * delta_p.dot(JtJDiag * delta_p)
+        penaltyL = L * jacobian_damping_penalty(J_land, delta_l, J_eps)
+        penaltyP = L * jacobian_damping_penalty(J_pose, delta_p, J_eps)
  
         delta_l_full = np.zeros(3*n_points_)
         # Fixing landmarks not covered completely
@@ -1883,8 +1890,10 @@ def local_bundle_adjust(
                 extr_l = x0_l_ + delta_l_full_ext.reshape(n_points_, 3)
 
                 delta_l_ext = delta_l_full_ext[covered_indices_3d]
-                penaltyL_extr = L * delta_l_ext.dot(JltJlDiag * delta_l_ext)
-                penaltyP_extr = L * delta_p_ext.dot(JtJDiag * delta_p_ext)
+                penaltyL_extr = L * jacobian_damping_penalty(
+                    J_land, delta_l_ext, J_eps)
+                penaltyP_extr = L * jacobian_damping_penalty(
+                    J_pose, delta_p_ext, J_eps)
 
                 fx1_o_extr = funx0_st1(
                     extr_p[local_camera_indices_in_,:],
@@ -2899,10 +2908,10 @@ if read_output:
 
 # 1. take problem and split, sort indices by camera, define local global map and test it.
 startL = 1
-kClusters_aim = 6 # 6 cluster also not bad at all !
+kClusters_aim = int(os.environ.get("PALM_CLUSTERS", "6")) # 6 cluster also not bad at all !
 kClusters = kClusters_aim
 innerIts = 1  # change to get an update, not 1 iteration Does help only at start yet. then never again. large L? get caught anyway later.
-iterations = 100
+iterations = int(os.environ.get("PALM_ITERATIONS", "100"))
 cost = np.zeros(kClusters_aim)
 lastCost = 1e20
 lastCostDRE = 1e20
@@ -3779,16 +3788,17 @@ else:
 if plot3d:
     vis.destroy_window()
 
-import matplotlib.pyplot as plt
-if len(costs) > 5:
-    costs = costs[4:] # drop too high start
-xS = np.arange(len(costs))
-plt.plot(xS, np.log(costs), label='costs')
-plt.title(FILE_NAME)
-plt.legend()
+if os.environ.get("PALM_PLOT", "1") != "0":
+    import matplotlib.pyplot as plt
+    if len(costs) > 5:
+        costs = costs[4:] # drop too high start
+    xS = np.arange(len(costs))
+    plt.plot(xS, np.log(costs), label='costs')
+    plt.title(FILE_NAME)
+    plt.legend()
 
-plt.savefig("mygraph.png")
-#plt.show()
+    plt.savefig("mygraph.png")
+    #plt.show()
 
 # later add gains
 # costs

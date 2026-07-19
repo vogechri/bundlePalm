@@ -3,8 +3,10 @@
 import bz2
 import faulthandler
 import importlib
+import itertools
 import json
 import os
+import secrets
 import sys
 import time
 import urllib.request
@@ -27,6 +29,8 @@ faulthandler.enable(all_threads=True)
 sys.path.insert(0, './generated/proto/')
 test_pb2 = importlib.import_module("test_pb2")
 context = zmq.Context()
+async_run_id = secrets.randbits(63) or 1
+async_phase_ids = itertools.count(1)
 
 
 class InputProgress:
@@ -255,6 +259,9 @@ def consume_cluster_reply(pending_cluster_ids, cluster_id, operation):
             f"unexpected or duplicate cluster {cluster_id} while {operation}")
     pending_cluster_ids.remove(cluster_id)
 
+def is_current_async_reply(reply, phase_id):
+    return reply.run_id == async_run_id and reply.phase_id == phase_id
+
 def check_symmetric(a, tol=1e-8):
     return np.all(np.abs(a-a.T) < tol)
 
@@ -474,6 +481,7 @@ def prox_f_push_pull(camera_indices_in_cluster_, point_indices_in_cluster_, loca
     #global global_iteration
     global push_socket
     global pull_socket
+    phase_id = next(async_phase_ids)
 
     for ci in range(kClusters_):
         unique_points_in_c_ = np.unique(point_indices_in_cluster_[ci])
@@ -493,6 +501,8 @@ def prox_f_push_pull(camera_indices_in_cluster_, point_indices_in_cluster_, loca
             request.program.be = blockEig_in_cluster_[ci]
             request.program.num_clusters = kClusters_
             request.program.cluster_id = ci
+            request.program.run_id = async_run_id
+            request.program.phase_id = phase_id
             request.program.init_l = LipJ_
             request.program.unorm[:] = np.ones(9 * unique_poses_in_c_.shape[0])
             request.program.vnorm[:] = np.ones(3 * unique_points_in_c_.shape[0])
@@ -507,6 +517,8 @@ def prox_f_push_pull(camera_indices_in_cluster_, point_indices_in_cluster_, loca
             request.update.cameras_s[:] = poses_s_in_cluster_[ci][unique_poses_in_c_].ravel()
             request.update.be = blockEig_in_cluster_[ci]
             request.update.cluster_id = ci
+            request.update.run_id = async_run_id
+            request.update.phase_id = phase_id
             # 0 accepts the current landmarks, 1 restores the previous trial,
             # and 2 restores the landmarks saved with the global best cost.
             if revert_lm == 1:
@@ -521,7 +533,8 @@ def prox_f_push_pull(camera_indices_in_cluster_, point_indices_in_cluster_, loca
         send_request(push_socket, request_serialized_, f"starting cluster {ci}")
 
     pending_cluster_ids = set(range(kClusters_))
-    for k in range(kClusters_):
+    uncorrelated_replies = 0
+    while pending_cluster_ids:
         #print("Receiving return …", k)
         return_proto_ = test_pb2.return_cluster_proto()
         message_in_bytes_ = recv_message(
@@ -532,6 +545,19 @@ def prox_f_push_pull(camera_indices_in_cluster_, point_indices_in_cluster_, loca
         #pull_socket.send(message_out_bytes)
 
         return_proto_.ParseFromString(message_in_bytes_)# ParseFromArray(message_in_bytes_)
+        if not is_current_async_reply(return_proto_, phase_id):
+            uncorrelated_replies += (
+                return_proto_.run_id == 0 and return_proto_.phase_id == 0)
+            if uncorrelated_replies >= kClusters_:
+                raise RuntimeError(
+                    "server replies do not contain correlation IDs; restart "
+                    "the rebuilt serverTest/build/zeromq_cpp_server_ex")
+            print(
+                "Discarding stale cluster result for run/phase "
+                f"{return_proto_.run_id}/{return_proto_.phase_id}",
+                file=sys.stderr,
+            )
+            continue
         ci = return_proto_.cluster_id
         consume_cluster_reply(
             pending_cluster_ids, ci, "receiving cluster results")
@@ -573,6 +599,7 @@ def primal_cost_push_pull(camera_indices_in_cluster_, poses_in_cluster_, k_clust
 
     global push_socket
     global pull_socket
+    phase_id = next(async_phase_ids)
 
     for ci in range(k_clusters):
         unique_poses_in_c_ = np.unique(camera_indices_in_cluster_[ci])
@@ -585,6 +612,8 @@ def primal_cost_push_pull(camera_indices_in_cluster_, poses_in_cluster_, k_clust
         else:
             request.cost_update.cameras[:] = poses_in_cluster_[ci][unique_poses_in_c_].ravel()
         request.cost_update.cluster_id = ci
+        request.cost_update.run_id = async_run_id
+        request.cost_update.phase_id = phase_id
         if revert_lm_:
             request.cost_update.revert_lm = 2
         else:
@@ -595,12 +624,26 @@ def primal_cost_push_pull(camera_indices_in_cluster_, poses_in_cluster_, k_clust
 
     cost_ = np.zeros(k_clusters)
     pending_cluster_ids = set(range(k_clusters))
-    for k in range(k_clusters):
+    uncorrelated_replies = 0
+    while pending_cluster_ids:
         #print("Receiving return …", k)
         return_proto_ = test_pb2.return_cost_proto()
         message_in_bytes_ = recv_message(
             pull_socket, "waiting for a cluster cost")
         return_proto_.ParseFromString(message_in_bytes_)
+        if not is_current_async_reply(return_proto_, phase_id):
+            uncorrelated_replies += (
+                return_proto_.run_id == 0 and return_proto_.phase_id == 0)
+            if uncorrelated_replies >= k_clusters:
+                raise RuntimeError(
+                    "server replies do not contain correlation IDs; restart "
+                    "the rebuilt serverTest/build/zeromq_cpp_server_ex")
+            print(
+                "Discarding stale cluster cost for run/phase "
+                f"{return_proto_.run_id}/{return_proto_.phase_id}",
+                file=sys.stderr,
+            )
+            continue
         ci = return_proto_.cluster_id
         consume_cluster_reply(
             pending_cluster_ids, ci, "receiving cluster costs")
@@ -709,30 +752,14 @@ def preconditioning_push(poses_v_, poses_in_cluster_, poses_s_in_cluster_, camer
 def GetLocalIndices(point_indices_in_cluster, camera_indices_in_cluster):
     if len(point_indices_in_cluster) != len(camera_indices_in_cluster):
         raise ValueError("point and camera cluster lists must have equal length")
-    cluster_count = len(point_indices_in_cluster)
-    # test, yes much faster if precompute:
-    local_landmark_indices_in_cluster = [] # for residuals in cluster. local indices for landmark data send to cluster.
-    for ci in range(cluster_count):
-        # can be used to index out global to local data. local/cluster = global[landmark_indices_in_c_]
-        landmark_indices_in_c_ = np.unique(point_indices_in_cluster[ci])
-        # print("local landmarks in ", ci, " " ,landmark_indices_in_c_.shape[0])
-        #landmarks_in_c = landmarks_[landmark_indices_in_c_]
-        # or global[landmark_indices_in_c_]  = local
-        local_landmark_indices_in_cluster.append(np.zeros(point_indices_in_cluster[ci].shape[0], dtype=int))
-        for i in range(landmark_indices_in_c_.shape[0]):
-            local_landmark_indices_in_cluster[ci][point_indices_in_cluster[ci] == landmark_indices_in_c_[i]] = i
-
-    local_camera_indices_in_cluster = [] # for residuals in cluster. local indices for pose data send to cluster.
-    for ci in range(cluster_count):
-        # can be used to index out global to local data. local/cluster = global[landmark_indices_in_c_]
-        # or global[landmark_indices_in_c_]  = local
-        cameras_indices_in_c_ = np.unique(camera_indices_in_cluster[ci])
-        # print("local cameras in ", ci, " " ,cameras_indices_in_c_.shape[0])
-        local_camera_indices_in_cluster.append( np.zeros(camera_indices_in_cluster[ci].shape[0], dtype=int) )
-        #print(local_camera_indices_in_cluster[ci].shape , " " , local_camera_indices_in_cluster[ci])
-        for i in range(cameras_indices_in_c_.shape[0]):
-            local_camera_indices_in_cluster[ci][camera_indices_in_cluster[ci] == cameras_indices_in_c_[i]] = i
-        #print(local_camera_indices_in_cluster[ci].shape , " " , local_camera_indices_in_cluster[ci])
+    local_landmark_indices_in_cluster = [
+        np.unique(indices, return_inverse=True)[1]
+        for indices in point_indices_in_cluster
+    ]
+    local_camera_indices_in_cluster = [
+        np.unique(indices, return_inverse=True)[1]
+        for indices in camera_indices_in_cluster
+    ]
 
     return (local_landmark_indices_in_cluster, local_camera_indices_in_cluster)
 
