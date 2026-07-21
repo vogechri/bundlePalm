@@ -1,0 +1,162 @@
+\documentclass[11pt]{article}
+
+\usepackage[a4paper,margin=28mm]{geometry}
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs}
+\usepackage[hidelinks]{hyperref}
+
+\title{Caching and Bounded-Memory Execution for PALM Bundle Adjustment}
+\author{}
+\date{}
+
+\begin{document}
+\maketitle
+
+\section{Purpose}
+
+This note summarizes profiling and memory measurements for the single-device
+PALM bundle-adjustment implementation.  The design goal is not to reproduce a
+global GPU solve.  PALM should retain bounded-memory regional solves while
+avoiding unnecessary host--device transfers and repeated graph construction.
+A second target is a permanently changing graph, where only affected regions
+should be updated instead of recomputing the complete problem.
+
+\section{Measured performance}
+
+The BAE backend already provides the sparse graph Jacobian used by PALM through
+\texttt{bae.autograd.graph.jacobian}.  PALM adds partition ownership, fixed-side
+observations, sequential regional updates, consensus, and outer acceleration.
+Caching the three static observation-ownership groups in each local residual
+removed repeated GPU mask construction and synchronization.
+
+On \texttt{problem-1723-156502}, using ten partitions and 20 outer epochs, the
+measured result was
+\begin{center}
+\begin{tabular}{lrr}
+  \toprule
+  Implementation & Runtime (s) & Best objective \\
+  \midrule
+  Previous PALM BAE wrapper & 14.57 & 796052.66 \\
+  Cached ownership graphs   & 12.61 & 796053.10 \\
+  Global BAE LM             &  4.67 & 766949.73 \\
+  \bottomrule
+\end{tabular}
+\end{center}
+The ownership-graph cache therefore improved PALM throughput by $15.6\%$ with
+a negligible objective difference.  Global BAE remains faster, but it solves a
+single global system rather than the partitioned PALM map.
+
+\section{Why global BAE is faster}
+
+For the same problem, PALM processes 1112383 block-observation instances from
+678718 original observations, a duplication factor of 1.639.  Each epoch builds
+ten smaller Jacobians sequentially, while global BAE builds one direct residual
+and one Jacobian.  PALM observations are split into 245053 owned/owned, 433665
+camera-only, and 433665 point-only instances; no partition is fully local.
+The fixed-side groups are required by the ownership semantics and prevent direct
+use of BAE's all-variable example residual as a general replacement.
+
+Additional costs include smaller GPU kernels, repeated kernel launches,
+regional Schur solves, NumPy--CUDA transfers, consensus, and safeguarded outer
+acceleration.  Profiling identifies Jacobian construction as approximately
+half of synchronized local-solver time.  Inner Nesterov is about one tenth and
+is not the primary bottleneck.
+
+\section{Measured memory}
+
+A double-precision BA state requires
+\begin{equation}
+  M_{\mathrm{state}} = 8(9N_c + 3N_p)\ \text{bytes}.
+\end{equation}
+For the measured problems, state storage is small compared with sparse
+Jacobian and normal-matrix workspaces.
+
+\begin{center}
+\begin{tabular}{lrrr}
+  \toprule
+  Problem & One state (MiB) & Six states (MiB) & Cached models (MiB) \\
+  \midrule
+  1723/156502 & 3.7 & 22.2 & 148 \\
+  3068/310854 & 7.3 & 44.0 & 368 \\
+  \bottomrule
+\end{tabular}
+\end{center}
+
+Actual CUDA measurements on problem 1723 were
+\begin{center}
+\begin{tabular}{lrrr}
+  \toprule
+  Solver & Retained (MiB) & Peak allocated (MiB) & Peak reserved (MiB) \\
+  \midrule
+  PALM, ten cached blocks & 158 & 246 & 286 \\
+  Global BAE              & 485 & 6041 & 7254 \\
+  \bottomrule
+\end{tabular}
+\end{center}
+Thus global BAE used approximately 24.6 times more peak allocated memory.  The
+large peak is caused by global sparse derivatives and linear-algebra
+workspaces, not by the camera and landmark state itself.
+
+\section{Caching policy}
+
+PALM should cache lightweight state and structure but not every block's
+numerical Jacobian or normal matrix.  The proposed single-device policy is:
+\begin{enumerate}
+  \item Keep one authoritative camera/landmark state on the GPU when it fits.
+  \item Keep static partition ownership and observation index maps on the GPU,
+        subject to a configurable cache budget.
+  \item Let local residual models reference the shared state for fixed-side
+        observations instead of storing duplicated camera and point values.
+  \item Keep owned variables private during a trial step and scatter them into
+        the authoritative state only after acceptance.
+  \item Allocate one reusable derivative/Schur workspace sized for the largest
+        active region and release numerical derivatives after each region.
+  \item Use an LRU policy for local models when all partition metadata does not
+        fit the configured device-memory budget.
+\end{enumerate}
+This preserves the bounded-memory property while avoiding repeated transfers
+of fixed-side observation values.
+
+\section{Regional updates on changing graphs}
+
+For a permanently changing graph, PALM can maintain a dirty-region queue.
+Changes to observations or variables mark their owner blocks and neighboring
+blocks that share affected variables.  Scheduling can combine predicted gain,
+age, update magnitude, and estimated memory.  The solver then processes the
+largest useful region that fits the current device budget.
+
+When updates are localized, this changes the dominant work from scaling with
+the complete edge set, $O(|E|)$, to scaling with the affected edge set,
+$O(|E_{\mathrm{dirty}}|)$.  Cached objective contributions can be updated for
+affected observations, with periodic complete consistency sweeps.
+
+Outer Nesterov acceleration requires care because a changing active set changes
+the fixed-point map.  A conservative policy is to restart acceleration when the
+active region changes and apply global acceleration only after coherent full
+sweeps.  Region-local acceleration is a possible later extension.
+
+\section{Expected outcome}
+
+Keeping shared state resident should require only tens of MiB for the measured
+problems.  An experimental shared-state mode was implemented after the initial
+profiling.  It keeps one authoritative camera/landmark state and block index
+maps on CUDA.  Fixed-side observations gather values from this state, owned
+trial variables remain private, and accepted regional values are scattered
+back into the mirror.  Numerical Jacobians and Schur matrices remain ephemeral.
+
+On problem 1723 over 20 epochs, this mode changed retained CUDA allocation from
+158 MiB to 76 MiB and peak allocation from 246 MiB to 165 MiB.  This is a
+$52\%$ reduction in retained allocation and a $33\%$ reduction in peak
+allocation.  The trajectory remained equivalent at the recorded precision,
+but runtime increased from 12.61 s to 13.12 s, approximately $3.9\%$.  Shared
+state is therefore a memory-capacity mode, not the default throughput mode.
+It is selected with \texttt{--gpu-state-cache}; the copied fixed-side path
+remains the default and fallback.
+
+Capturing or specializing the remaining Jacobian path may still provide a
+combined 20--35\% improvement relative to the original PALM wrapper.  Such
+work must retain ephemeral derivative workspaces and a device-memory budget so
+that it does not sacrifice PALM's substantial memory advantage over a global
+solve.
+
+\end{document}

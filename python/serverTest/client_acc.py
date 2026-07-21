@@ -10,6 +10,7 @@ import secrets
 import sys
 import time
 import urllib.request
+from pathlib import Path
 
 import numpy as np
 import torch
@@ -22,15 +23,33 @@ from clustering import (
     cluster_deg_by_landmark,
 )
 from numpy.linalg import inv as inv_nonHermetian
-from scipy.sparse import csr_array, csr_matrix
+from scipy.sparse import bsr_matrix, csr_array, csr_matrix
 from scipy.sparse import diags as diag_sparse
 
 faulthandler.enable(all_threads=True)
-sys.path.insert(0, './generated/proto/')
+SCRIPT_DIRECTORY = Path(__file__).resolve().parent
+sys.path.insert(0, str(SCRIPT_DIRECTORY / "build" / "generated" / "proto"))
 test_pb2 = importlib.import_module("test_pb2")
 context = zmq.Context()
 async_run_id = secrets.randbits(63) or 1
 async_phase_ids = itertools.count(1)
+DRS_SCALING_METHOD = os.environ.get(
+    "BUNDLE_PALM_DRS_SCALING", "jacobi_gmean").lower()
+BLOCK_JACOBI_EIGENVALUE_FLOOR = float(os.environ.get(
+    "BUNDLE_PALM_BLOCK_JACOBI_EIGENVALUE_FLOOR", "1e-6"))
+if not 0 < BLOCK_JACOBI_EIGENVALUE_FLOOR <= 1:
+    raise ValueError("BUNDLE_PALM_BLOCK_JACOBI_EIGENVALUE_FLOOR must be in (0, 1]")
+DRS_SCALING_METHODS = {
+    "none", "jacobi", "jacobi_gmean", "pock", "pock_gmean",
+    "pock_alpha0", "pock_alpha0_gmean",
+    "jacobi_q025_gmean", "jacobi_q0375_gmean", "jacobi_q0625_gmean",
+    "jacobi_damped_gmean", "symmetric_ruiz_gmean",
+    "block_jacobi_gmean"
+}
+if DRS_SCALING_METHOD not in DRS_SCALING_METHODS:
+    raise ValueError(
+        "BUNDLE_PALM_DRS_SCALING must be one of "
+        + ", ".join(sorted(DRS_SCALING_METHODS)))
 
 
 class InputProgress:
@@ -399,29 +418,19 @@ def average_cameras_new(
     for i, UL_in_cluster_i in enumerate(UL_in_cluster_):
         # Lc = L_in_cluster_[i]
         camera_indices_ = np.unique(camera_indices_in_cluster_[i])
-        indices = np.repeat(
-            np.array([9 * camera_indices_ + j for j in range(9)]).transpose(), 9, axis=0).flatten()
-        # indices.append(np.array([3 * point_indices_ + j for j in range(3)]).transpose().flatten())
-        # indptr is to be set to have empty lines by 0 3 3 -> no entries in row 3. 0:0-3, row 1:3-3
-
-        indptr = [np.array([0])]
-        j = 0
-        for q in range(num_cameras):
-            # print(q, " ", j, " ", point_indices_.shape[0], " ", np.array([9*j+3, 9*j+6, 9*j+9]) )
-            if j < camera_indices_.shape[0] and camera_indices_[j] == q:
-                indptr.append(np.array([81 * j +  9, 81 * j + 18, 81 * j + 27,
-                                        81 * j + 36, 81 * j + 45, 81 * j + 54,
-                                        81 * j + 63, 81 * j + 72, 81 * j + 81]).flatten())
-                j = j + 1
-            else: # 9x9 block of "0's" not present in data
-                indptr.append(np.array([81 * j, 81 * j, 81 * j, 81 * j,
-                                        81 * j, 81 * j, 81 * j, 81 * j, 81 * j]).flatten())
-        indptr = np.concatenate(indptr)
-        # print(i, " UL_in_cluster_i.shape", (UL_in_cluster_i).shape)
-        U_pose = csr_matrix(
-            (UL_in_cluster_i, indices, indptr), # ((UL_in_cluster_i).data
+        block_values = np.asarray(UL_in_cluster_i)
+        expected_values = 81 * len(camera_indices_)
+        if block_values.size != expected_values:
+            raise ValueError(
+                f"cluster {i} returned {block_values.size} step-size values; "
+                f"expected {expected_values}")
+        block_indptr = np.zeros(num_cameras + 1, dtype=np.int64)
+        block_indptr[camera_indices_ + 1] = 1
+        np.cumsum(block_indptr, out=block_indptr)
+        U_pose = bsr_matrix(
+            (block_values.reshape(-1, 9, 9), camera_indices_, block_indptr),
             shape=(9 * num_cameras, 9 * num_cameras),
-        )
+        ).tocsr()
         UL_zeros_in_cluster_.append(U_pose)
         # print(mean_points.shape, " " , V_land.shape, points_3d_in_cluster_[i].shape)
         # print cost after/before.
@@ -506,6 +515,9 @@ def prox_f_push_pull(camera_indices_in_cluster_, point_indices_in_cluster_, loca
             request.program.init_l = LipJ_
             request.program.unorm[:] = np.ones(9 * unique_poses_in_c_.shape[0])
             request.program.vnorm[:] = np.ones(3 * unique_points_in_c_.shape[0])
+            request.program.camera_transform[:] = np.tile(
+                np.eye(9), (unique_poses_in_c_.shape[0], 1, 1)
+            ).ravel()
         else: # just update
             #print("Sending request …", ci)
             request = test_pb2.request_proto()
@@ -670,11 +682,45 @@ def best_cost_found_push_pull(k_clusters, costs) :
             push_socket, request_serialized_, f"updating best cost for cluster {ci}")
     return
 
+def normalize_geometric_mean(values, floor=1e-12):
+    values = np.asarray(values, dtype=np.float64)
+    safe_values = np.maximum(
+        np.where(np.isfinite(values), values, floor),
+        floor,
+    )
+    geometric_mean = np.exp(np.mean(np.log(safe_values)))
+    return values / geometric_mean
 
 def getScaling(min_, max_): # aim at max * min = 1. So max * x = 1/(min * x). x^2 = 1/(min * max)
     return np.sqrt(1. / (min_ * max_))
 
-def GetPcgScalingDiag(JtJ, W):
+def get_symmetric_ruiz_scaling(matrix, max_iterations=10, tolerance=1e-3):
+    absolute = np.abs(matrix).tocsr()
+    scaling = np.ones(matrix.shape[0], dtype=np.float64)
+    for _ in range(max_iterations):
+        inverse = np.reciprocal(scaling)
+        equilibrated = absolute.multiply(inverse[:, None]).multiply(inverse[None, :])
+        row_norms = np.asarray(equilibrated.max(axis=1).toarray()).ravel()
+        valid = row_norms[np.isfinite(row_norms) & (row_norms > 0)]
+        if valid.size == 0:
+            break
+        floor = max(1e-12 * np.median(valid), np.finfo(float).tiny)
+        update = np.sqrt(np.maximum(
+            np.where(np.isfinite(row_norms), row_norms, floor), floor
+        ))
+        scaling *= update
+        if np.max(np.abs(np.log(update))) < tolerance:
+            break
+    return scaling
+
+def GetPcgScalingDiag(JtJ, W, method=DRS_SCALING_METHOD):
+    if method in {"none", "block_jacobi_gmean"}:
+        return np.ones(JtJ.shape[1])
+
+    if method == "symmetric_ruiz_gmean":
+        temp_ = get_symmetric_ruiz_scaling(JtJ)
+        return normalize_geometric_mean(temp_)
+
     baseVersion = False
     if baseVersion:
         temp_  = np.squeeze(np.asarray((np.abs(JtJ)).sum(axis=0) )) # ATTENTION: must adjust / add sqrt on lms here below. CCC
@@ -692,22 +738,42 @@ def GetPcgScalingDiag(JtJ, W):
             #temp_ = np.squeeze(np.asarray((np.abs(JtJ)).sum(axis=0) ))
             #temp_W = np.squeeze(np.asarray((np.abs(W)).sum(axis=0) ))
             #temp_  = temp_ + temp_W # + 1e-6 does nothing
-            # Jacobi pcg: here sqrt here on both, not only on landm. externally
-            temp_ = np.squeeze(np.asarray((np.abs(JtJ.diagonal()))))
-            temp_ = np.sqrt(temp_) # works on Jacobi, not on rest ?
+            if method.startswith("pock_alpha0"):
+                squared = JtJ.copy()
+                squared.data = np.square(np.abs(squared.data))
+                temp_ = np.asarray(squared.sum(axis=0)).ravel()
+            elif method.startswith("pock"):
+                temp_ = np.asarray(np.abs(JtJ).sum(axis=0)).ravel()
+            else:
+                temp_ = np.abs(JtJ.diagonal())
+            positive = temp_[np.isfinite(temp_) & (temp_ > 0)]
+            if positive.size == 0:
+                return np.ones(JtJ.shape[1])
+            floor = max(1e-12 * np.median(positive), np.finfo(float).tiny)
+            temp_ = np.where(np.isfinite(temp_), temp_, floor)
+            if method == "jacobi_damped_gmean":
+                temp_ += 1e-3 * np.median(positive)
+            jacobi_exponents = {
+                "jacobi_q025_gmean": 0.25,
+                "jacobi_q0375_gmean": 0.375,
+                "jacobi_q0625_gmean": 0.625,
+            }
+            exponent = jacobi_exponents.get(method, 0.5)
+            temp_ = np.power(np.maximum(temp_, floor), exponent)
 
-    print("min/max Unorm before ", np.min(temp_), np.max(temp_))
-    minTemp = np.percentile(temp_[np.nonzero(temp_)], 0.0001) # not sure..
-    t = getScaling(minTemp, np.max(temp_))
-    temp_  = temp_ * t
-    print("min/max Unorm after ", np.min(temp_), np.max(temp_), " t ", t, " min*max= ", np.min(temp_) * np.max(temp_))
-    print("Preconditioners min/max Unorm ", np.min(temp_), np.max(temp_))
-    minTresh = 1e-18 # 12 -> 14 for 245 and scale!
-    maxTresh = 1e18
-    temp_ = np.fmin(np.fmax(temp_, minTresh), maxTresh) #np.sqrt(np.minimum(np.maximum(t, minTresh), maxTresh))
-    print("Preconditioners min/max Unorm after thresholding ", np.min(temp_), np.max(temp_))
+    if False: # clamp and rescale
+        print("min/max Unorm before ", np.min(temp_), np.max(temp_))
+        minTemp = np.percentile(temp_[np.nonzero(temp_)], 0.0001) # not sure..
+        t = getScaling(minTemp, np.max(temp_))
+        temp_  = temp_ * t
+        print("min/max Unorm after ", np.min(temp_), np.max(temp_), " t ", t, " min*max= ", np.min(temp_) * np.max(temp_))
+        print("Preconditioners min/max Unorm ", np.min(temp_), np.max(temp_))
+        minTresh = 1e-18 # 12 -> 14 for 245 and scale!
+        maxTresh = 1e18
+        temp_ = np.fmin(np.fmax(temp_, minTresh), maxTresh) #np.sqrt(np.minimum(np.maximum(t, minTresh), maxTresh))
+        print("Preconditioners min/max Unorm after thresholding ", np.min(temp_), np.max(temp_))
 
-    scaleToHaveValuesAroundOneForHess = True # cosmetics mostly.
+    scaleToHaveValuesAroundOneForHess = False #True # cosmetics mostly.
     if scaleToHaveValuesAroundOneForHess:
         absDiagJtJ = np.abs(JtJ.diagonal())
         guess = diag_sparse(1./temp_.flatten()) * absDiagJtJ * diag_sparse(1./temp_.flatten())
@@ -719,17 +785,61 @@ def GetPcgScalingDiag(JtJ, W):
         guess = diag_sparse(1./temp_.flatten()) * absDiagJtJ * diag_sparse(1./temp_.flatten())
         print("Preconditioners min/max guess ", np.min(guess), np.max(guess))
 
+    if method.endswith("_gmean"):
+        temp_ = normalize_geometric_mean(temp_)
     return temp_
 
 
+def get_camera_block_transforms(
+    matrix, block_size=9,
+    eigenvalue_floor=BLOCK_JACOBI_EIGENVALUE_FLOOR):
+    if matrix.shape[0] != matrix.shape[1] or matrix.shape[0] % block_size != 0:
+        raise ValueError("camera curvature matrix must contain complete square blocks")
+    num_cameras = matrix.shape[0] // block_size
+    transforms = np.empty((num_cameras, block_size, block_size))
+    for camera_id in range(num_cameras):
+        start = block_size * camera_id
+        block = matrix[start:start + block_size, start:start + block_size].toarray()
+        block = 0.5 * (block + block.T)
+        eigenvalues, eigenvectors = np.linalg.eigh(block)
+        largest = max(float(np.max(eigenvalues)), np.finfo(float).tiny)
+        eigenvalues = np.maximum(eigenvalues, eigenvalue_floor * largest)
+        transforms[camera_id] = (
+            eigenvectors * np.reciprocal(np.sqrt(eigenvalues))
+        ) @ eigenvectors.T
+
+    determinant_signs, log_determinants = np.linalg.slogdet(transforms)
+    if np.any(determinant_signs <= 0) or not np.all(np.isfinite(log_determinants)):
+        raise ValueError("camera block transform is not finite positive definite")
+    geometric_mean_singular_value = np.exp(
+        np.mean(log_determinants) / block_size
+    )
+    transforms /= geometric_mean_singular_value
+    if not np.all(np.isfinite(transforms)):
+        raise ValueError("camera block transform contains non-finite values")
+    return transforms
+
+
+def apply_camera_transforms(poses, transforms, inverse=False):
+    if inverse:
+        return np.linalg.solve(transforms, poses[..., None])[..., 0]
+    return np.einsum("nij,nj->ni", transforms, poses)
+
+
 def preconditioning_push(poses_v_, poses_in_cluster_, poses_s_in_cluster_, camera_indices_in_cluster_,
-                         point_indices_in_cluster_, unorm_, vnorm_, kClusters_) :
+                         point_indices_in_cluster_, unorm_, vnorm_, kClusters_,
+                         camera_transforms_=None) :
 
     global push_socket
 
     unorm_ *= 2. / np.sqrt(kClusters_) # TODO: check on small example
 
-    poses_v_ = (unorm_ * poses_v_.ravel()).reshape(-1,9)
+    if camera_transforms_ is None:
+        poses_v_ = (unorm_ * poses_v_.ravel()).reshape(-1,9)
+    else:
+        poses_v_ = apply_camera_transforms(
+            poses_v_, camera_transforms_, inverse=True
+        ) * (2. / np.sqrt(kClusters_))
 
     for ci in range(kClusters_):
         unique_poses_in_c_ = np.unique(camera_indices_in_cluster_[ci])
@@ -737,10 +847,27 @@ def preconditioning_push(poses_v_, poses_in_cluster_, poses_s_in_cluster_, camer
         #print("Sending preconditioning query …", ci)
         request = test_pb2.request_proto()
 
-        poses_in_cluster_[ci] = (unorm_ * poses_in_cluster_[ci].ravel()).reshape(-1,9)
-        poses_s_in_cluster_[ci] = (unorm_ * poses_s_in_cluster_[ci].ravel()).reshape(-1,9)
+        if camera_transforms_ is None:
+            poses_in_cluster_[ci] = (unorm_ * poses_in_cluster_[ci].ravel()).reshape(-1,9)
+            poses_s_in_cluster_[ci] = (unorm_ * poses_s_in_cluster_[ci].ravel()).reshape(-1,9)
+        else:
+            poses_in_cluster_[ci] = apply_camera_transforms(
+                poses_in_cluster_[ci], camera_transforms_, inverse=True
+            ) * (2. / np.sqrt(kClusters_))
+            poses_s_in_cluster_[ci] = apply_camera_transforms(
+                poses_s_in_cluster_[ci], camera_transforms_, inverse=True
+            ) * (2. / np.sqrt(kClusters_))
 
-        request.preconditioning_update.unorm[:] = 1./(unorm_.reshape(-1,9)[unique_poses_in_c_,:]).ravel()
+        if camera_transforms_ is None:
+            request.preconditioning_update.unorm[:] = 1./(unorm_.reshape(-1,9)[unique_poses_in_c_,:]).ravel()
+        else:
+            request.preconditioning_update.unorm[:] = np.full(
+                9 * unique_poses_in_c_.shape[0],
+                1. / (2. / np.sqrt(kClusters_)),
+            )
+            request.preconditioning_update.camera_transform[:] = (
+                camera_transforms_[unique_poses_in_c_]
+            ).ravel()
         #request.preconditioning_update.vnorm[:] = vnorm_[unique_landmarks_in_c_].ravel()
         request.preconditioning_update.vnorm[:] = np.ones(3 * unique_landmarks_in_c_.shape[0])
         request.preconditioning_update.cluster_id = ci
@@ -991,6 +1118,7 @@ blockEig_in_cluster = 5e-5 * np.ones(kClusters) # 1e-4 or 1e-5, 5e-5?
 failedNesterovAcceleration = 0
 maxFailedNesterovAcceleration = 3 # TODO: 2 or 3?
 print("input blockEig_in_cluster[ci] ", blockEig_in_cluster[0])
+print("DRS camera scaling:", DRS_SCALING_METHOD)
 
 # Connect to the server
 print("Connecting to cpp server…")
@@ -1189,6 +1317,9 @@ _, U_all, Up_cluster = average_cameras_new(camera_indices_in_cluster, poses_in_c
 dre, dre_per_part = cost_DRE(camera_indices_in_cluster, poses_in_cluster, poses_s_in_cluster, \
                             L_in_cluster, Ul_in_cluster, poses_v, nabla_p_in_cluster)
 
+camera_transforms = None
+if DRS_SCALING_METHOD == "block_jacobi_gmean":
+    camera_transforms = get_camera_block_transforms(U_all)
 unorm = GetPcgScalingDiag(U_all, 0)
 Unorm_ = diag_sparse(unorm.flatten())
 relative_diff  = np.abs(Unorm_.data.flatten() - unorm_t.flatten()) / unorm_t.flatten()
@@ -1220,7 +1351,8 @@ print("cam2 ", amax//9, " :" , (unorm_t.flatten().reshape((-1,9)))[amax // 9, :]
 # unorm = Unorm_.data.flatten()
 
 poses_v, poses_in_cluster, poses_s_in_cluster = preconditioning_push(poses_v, poses_in_cluster, poses_s_in_cluster,
-                                                                     camera_indices_in_cluster, point_indices_in_cluster, unorm, 0, kClusters)
+                                                                     camera_indices_in_cluster, point_indices_in_cluster, unorm, 0, kClusters,
+                                                                     camera_transforms)
 
 poses_s_in_cluster_pre = [0 for x in range(kClusters)] # dummy fill list
 for ci in range(kClusters):
@@ -1565,7 +1697,8 @@ for global_iteration in range(global_iterations):
 
 result_dict = {"base_url": BASE_URL, "file_name": FILE_NAME, "iterations" : global_iterations, \
             "bestCost" : round(bestCost), "bestIt": bestIt, "kClusters" : kClusters, \
-            "bestCost60" : round(bestCost60), "bestCost30" : round(bestCost30) }
+            "bestCost60" : round(bestCost60), "bestCost30" : round(bestCost30), \
+            "drsScaling": DRS_SCALING_METHOD }
 with open('results_server.json', 'a') as json_file:
     json.dump(result_dict, json_file)
     json_file.write('\n')

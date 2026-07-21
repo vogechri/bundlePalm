@@ -19,11 +19,40 @@ else
 fi
 EPOCHS=${EPOCHS:-90}
 PARTITIONS=${PARTITIONS:-10}
+BLOCK_OVERRELAXATION=${BLOCK_OVERRELAXATION:-1.0488088481701516}
+ACCELERATOR=${ACCELERATOR:-nesterov}
+GLOBAL_JACOBI=${GLOBAL_JACOBI:-full}
+GPU_STATE_CACHE=${GPU_STATE_CACHE:-0}
+REPARTITION_EVERY=${REPARTITION_EVERY:-0}
+REPARTITION_CANDIDATES=${REPARTITION_CANDIDATES:-4}
+PARTITION_SEED=${PARTITION_SEED:-0}
 RECOMPUTE=${RECOMPUTE:-}
-mkdir -p "$OUTPUT_DIR" "$(dirname -- "$RESULTS_FILE")"
-: > "$RESULTS_FILE"
+DRY_RUN=${DRY_RUN:-0}
+case "$ACCELERATOR" in
+    none|heavy_ball|nesterov|anderson|lbfgs|bfgs) ;;
+    *)
+        echo "Unsupported ACCELERATOR: $ACCELERATOR" >&2
+        exit 2
+        ;;
+esac
+    case "$GLOBAL_JACOBI" in
+        none|camera|full) ;;
+        *)
+        echo "Unsupported GLOBAL_JACOBI: $GLOBAL_JACOBI" >&2
+        exit 2
+        ;;
+    esac
+if [[ "$DRY_RUN" != "1" ]]; then
+    mkdir -p "$OUTPUT_DIR" "$(dirname -- "$RESULTS_FILE")"
+    : > "$RESULTS_FILE"
+fi
 
 echo "Run name: ${RUN_NAME:-default}"
+echo "Accelerator: $ACCELERATOR"
+echo "Global Jacobi: $GLOBAL_JACOBI"
+echo "GPU state cache: $GPU_STATE_CACHE"
+echo "Block over-relaxation: $BLOCK_OVERRELAXATION"
+echo "Repartition every: ${REPARTITION_EVERY:-never}"
 echo "Trajectories: $OUTPUT_DIR"
 echo "Summary: $RESULTS_FILE"
 
@@ -31,14 +60,23 @@ COMMON_ARGS=(
     --execution sequential
     --workers 1
     --local-solver bae
-    --accelerator nesterov
+    --accelerator "$ACCELERATOR"
     --momentum-schedule palm
     --local-nfev 2
     --runtime-weight 0
     --partitioner overlap
-    --block-overrelaxation 1.0488088481701516
+    --repartition-every "$REPARTITION_EVERY"
+    --repartition-candidates "$REPARTITION_CANDIDATES"
+    --partition-seed "$PARTITION_SEED"
+    --block-overrelaxation "$BLOCK_OVERRELAXATION"
     --no-block-safeguard
+    --global-jacobi "$GLOBAL_JACOBI"
 )
+if [[ "$GPU_STATE_CACHE" == "1" ]]; then
+    COMMON_ARGS+=(--gpu-state-cache)
+else
+    COMMON_ARGS+=(--no-gpu-state-cache)
+fi
 
 should_recompute() {
     local file_name=$1
@@ -66,20 +104,59 @@ run_problem() {
     local status=completed
     local recompute=false
 
+    if [[ "$DRY_RUN" == "1" ]]; then
+        printf '  '
+        printf '%q ' "$PYTHON" -u palm_ba.py "$base_url" "$file_name" \
+            "$EPOCHS" "$PARTITIONS" "${COMMON_ARGS[@]}" \
+            --output "$result_file"
+        printf '\n'
+        return
+    fi
+
     if should_recompute "$file_name" "$short_name"; then
         recompute=true
         echo "Recomputing $file_name"
     fi
 
-    if [[ "$recompute" == false && -s "$result_file" ]] && "$PYTHON" - "$result_file" "$EPOCHS" <<'PY'
+    if [[ "$recompute" == false && -s "$result_file" ]] && "$PYTHON" - \
+        "$result_file" "$EPOCHS" "$PARTITIONS" "$BLOCK_OVERRELAXATION" \
+        "$ACCELERATOR" "$GLOBAL_JACOBI" "$REPARTITION_EVERY" "$REPARTITION_CANDIDATES" \
+        "$PARTITION_SEED" "$GPU_STATE_CACHE" <<'PY'
 import json
+import math
 import sys
 
 with open(sys.argv[1], encoding="utf-8") as handle:
     records = [json.loads(line) for line in handle if line.strip()]
 expected_epochs = int(sys.argv[2])
+expected_partitions = int(sys.argv[3])
+expected_overrelaxation = float(sys.argv[4])
+expected_accelerator = sys.argv[5]
+expected_global_jacobi = sys.argv[6]
+expected_repartition_every = int(sys.argv[7])
+expected_repartition_candidates = int(sys.argv[8])
+expected_partition_seed = int(sys.argv[9])
+expected_gpu_state_cache = sys.argv[10] == "1"
+configuration_matches = records and all(
+    record.get("partitions") == expected_partitions
+    and record.get("execution") == "sequential"
+    and record.get("local_solver") == "bae"
+    and record.get("accelerator") == expected_accelerator
+    and record.get("momentum_schedule") == "palm"
+    and record.get("global_jacobi") == expected_global_jacobi
+    and record.get("partitioner") == "overlap"
+    and record.get("repartition_every", 0) == expected_repartition_every
+    and record.get("repartition_candidates", 4) == expected_repartition_candidates
+    and record.get("partition_seed", 0) == expected_partition_seed
+    and record.get("gpu_state_cache", False) is expected_gpu_state_cache
+    and record.get("block_backtracks") == 3
+    and record.get("block_safeguard") is False
+    and math.isclose(record.get("block_overrelaxation", 1.0),
+                     expected_overrelaxation, rel_tol=0.0, abs_tol=1e-14)
+    for record in (records[0], records[-1]))
 raise SystemExit(not (len(records) == expected_epochs
-                      and records[-1]["epoch"] == expected_epochs - 1))
+                      and records[-1]["epoch"] == expected_epochs - 1
+                      and configuration_matches))
 PY
     then
         echo "Skipping completed $file_name"
@@ -89,8 +166,8 @@ PY
             "$EPOCHS" "$PARTITIONS" "${COMMON_ARGS[@]}" \
             --output "$result_file" > "$log_file" 2>&1
         exit_code=$?
-        if [[ $exit_code -eq 132 ]]; then
-            echo "Retrying $file_name after SIGILL"
+        if [[ $exit_code -eq 132 || $exit_code -eq 139 ]]; then
+            echo "Retrying $file_name after native crash (exit $exit_code)"
             rm -f "$result_file" "$state_file"
             "$PYTHON" -u palm_ba.py "$base_url" "$file_name" \
                 "$EPOCHS" "$PARTITIONS" "${COMMON_ARGS[@]}" \
@@ -99,6 +176,7 @@ PY
         fi
         if [[ $exit_code -ne 0 ]]; then
             status=failed
+            ((FAILURES += 1))
             echo "$file_name failed with exit code $exit_code; see $log_file" >&2
         fi
     fi
@@ -130,10 +208,19 @@ summary = {
     "epochsCompleted": len(records),
     "execution": best_record["execution"],
     "accelerator": best_record["accelerator"],
+    "globalJacobi": best_record.get("global_jacobi", "none"),
+    "gpuStateCache": best_record.get("gpu_state_cache", False),
     "localSolver": best_record["local_solver"],
     "partitioner": best_record["partitioner"],
+    "repartitionEvery": best_record.get("repartition_every", 0),
+    "repartitionCandidates": best_record.get("repartition_candidates", 4),
+    "partitionSeed": best_record.get("partition_seed", 0),
+    "blockOverrelaxation": best_record.get("block_overrelaxation", 1.0),
+    "blockSafeguard": best_record.get("block_safeguard", True),
     "trajectory": trajectory_path,
 }
+
+FAILURES=0
 with open(summary_path, "a", encoding="utf-8") as handle:
     json.dump(summary, handle, separators=(",", ":"))
     handle.write("\n")
@@ -170,3 +257,8 @@ run_problem http://grail.cs.washington.edu/projects/bal/data/final/ problem-871-
 run_problem http://grail.cs.washington.edu/projects/bal/data/venice/ problem-1778-993923-pre.txt.bz2 1778
 run_problem http://grail.cs.washington.edu/projects/bal/data/venice/ problem-1490-935273-pre.txt.bz2 1490
 run_problem http://grail.cs.washington.edu/projects/bal/data/final/ problem-3068-310854-pre.txt.bz2 3068
+
+if ((FAILURES > 0)); then
+    echo "$FAILURES PALM problem(s) failed" >&2
+    exit 1
+fi

@@ -57,6 +57,56 @@ class State:
                    vector[camera_size:].reshape(-1, 3).copy())
 
 
+class CudaStateMirror:
+    def __init__(self, problem: BALProblem, blocks: list[Block],
+                 state: State, device: str):
+        self.device = torch.device(device)
+        self.cameras = torch.as_tensor(
+            state.cameras, dtype=torch.float64, device=self.device).clone()
+        self.points = torch.as_tensor(
+            state.points, dtype=torch.float64, device=self.device).clone()
+        self.block_cameras = [torch.as_tensor(
+            block.cameras, dtype=torch.long, device=self.device)
+            for block in blocks]
+        self.block_points = [torch.as_tensor(
+            block.points, dtype=torch.long, device=self.device)
+            for block in blocks]
+        self.observation_cameras = [torch.as_tensor(
+            problem.camera_indices[block.observation_indices],
+            dtype=torch.long, device=self.device) for block in blocks]
+        self.observation_points = [torch.as_tensor(
+            problem.point_indices[block.observation_indices],
+            dtype=torch.long, device=self.device) for block in blocks]
+
+    @torch.no_grad()
+    def reset(self, state: State) -> None:
+        self.cameras.copy_(torch.as_tensor(
+            state.cameras, dtype=self.cameras.dtype, device=self.device))
+        self.points.copy_(torch.as_tensor(
+            state.points, dtype=self.points.dtype, device=self.device))
+
+    def block_values(self, block_id: int) -> tuple[torch.Tensor, ...]:
+        camera_indices = self.block_cameras[block_id]
+        point_indices = self.block_points[block_id]
+        return (
+            self.cameras[camera_indices],
+            self.points[point_indices],
+            self.observation_cameras[block_id],
+            self.observation_points[block_id],
+        )
+
+    @torch.no_grad()
+    def apply(self, block: Block, result: LocalResult) -> None:
+        if result.gain < 0.0:
+            return
+        self.cameras.index_copy_(0, self.block_cameras[block.block_id],
+            torch.as_tensor(result.cameras, dtype=self.cameras.dtype,
+                            device=self.device))
+        self.points.index_copy_(0, self.block_points[block.block_id],
+            torch.as_tensor(result.points, dtype=self.points.dtype,
+                            device=self.device))
+
+
 @dataclass(frozen=True)
 class GlobalJacobiPreconditioner:
     mode: str
@@ -188,7 +238,12 @@ class Accelerator:
         ])
         system = delta_r.T @ delta_r
         system.flat[::system.shape[0] + 1] += self.regularization
-        coefficients = np.linalg.solve(system, delta_r.T @ residual)
+        right_hand_side = delta_r.T @ residual
+        try:
+            coefficients = np.linalg.solve(system, right_hand_side)
+        except np.linalg.LinAlgError:
+            coefficients = np.linalg.lstsq(
+                system, right_hand_side, rcond=None)[0]
         return mapped - (delta_x - delta_r) @ coefficients
 
     def _lbfgs_inverse(self, residual: np.ndarray) -> np.ndarray:
@@ -288,14 +343,57 @@ def objective(problem: BALProblem, state: State) -> float:
     return float(values @ values)
 
 
-def _assign_partition_owners(problem: BALProblem, count: int) -> tuple[np.ndarray, np.ndarray]:
+class ObjectiveEvaluator:
+    def __init__(self, problem: BALProblem, device: str,
+                 batch_size: int) -> None:
+        self.problem = problem
+        self.device = torch.device(device)
+        self.batch_size = batch_size
+        self.camera_indices: torch.Tensor | None = None
+        self.point_indices: torch.Tensor | None = None
+        self.observations: torch.Tensor | None = None
+        if self.device.type != "cpu":
+            self.camera_indices = torch.as_tensor(
+                problem.camera_indices, device=self.device)
+            self.point_indices = torch.as_tensor(
+                problem.point_indices, device=self.device)
+            self.observations = torch.as_tensor(
+                problem.observations, device=self.device)
+
+    def __call__(self, state: State) -> float:
+        if self.device.type == "cpu":
+            return objective(self.problem, state)
+        assert self.camera_indices is not None
+        assert self.point_indices is not None
+        assert self.observations is not None
+        with torch.inference_mode():
+            cameras = torch.as_tensor(state.cameras, device=self.device)
+            points = torch.as_tensor(state.points, device=self.device)
+            total = torch.zeros((), dtype=self.observations.dtype,
+                                device=self.device)
+            for start in range(0, len(self.observations), self.batch_size):
+                stop = min(start + self.batch_size, len(self.observations))
+                projected = torch_project(
+                    points[self.point_indices[start:stop]],
+                    cameras[self.camera_indices[start:stop]])
+                values = projected - self.observations[start:stop]
+                total += torch.sum(values * values)
+            return float(total.item())
+
+
+def _assign_partition_owners(
+    problem: BALProblem, count: int,
+    seed: int | None = None) -> tuple[np.ndarray, np.ndarray]:
     if count < 1 or count > problem.cameras.shape[0]:
         raise ValueError("partitions must be between 1 and the number of cameras")
     camera_load = np.bincount(problem.camera_indices,
                               minlength=problem.cameras.shape[0])
     block_load = np.zeros(count, dtype=np.int64)
     camera_owner = np.empty(problem.cameras.shape[0], dtype=np.int64)
-    for camera in np.argsort(-camera_load, kind="stable"):
+    camera_order = (np.argsort(-camera_load, kind="stable")
+                    if seed is None else
+                    np.random.default_rng(seed).permutation(len(camera_load)))
+    for camera in camera_order:
         owner = int(np.argmin(block_load))
         camera_owner[camera] = owner
         block_load[owner] += camera_load[camera]
@@ -438,8 +536,9 @@ def _refine_partition_overlap(problem: BALProblem, camera_owner: np.ndarray,
 def build_partitions(problem: BALProblem, count: int,
                      partitioner: str = "load", refinement_passes: int = 20,
                      balance_slack: float = 0.0,
-                     max_swap_candidates: int = 256) -> list[Block]:
-    camera_owner, point_owner = _assign_partition_owners(problem, count)
+                     max_swap_candidates: int = 256,
+                     seed: int | None = None) -> list[Block]:
+    camera_owner, point_owner = _assign_partition_owners(problem, count, seed)
     if partitioner == "overlap":
         camera_owner, point_owner = _refine_partition_overlap(
             problem, camera_owner, point_owner, count,
@@ -466,6 +565,76 @@ def build_partitions(problem: BALProblem, count: int,
                             observation_indices, local_cameras, local_points,
                             sparsity.tocsr()))
     return blocks
+
+
+def shared_observations(problem: BALProblem,
+                        blocks: list[Block]) -> np.ndarray:
+    camera_owner = np.empty(len(problem.cameras), dtype=np.int64)
+    point_owner = np.empty(len(problem.points), dtype=np.int64)
+    for block in blocks:
+        camera_owner[block.cameras] = block.block_id
+        point_owner[block.points] = block.block_id
+    return (camera_owner[problem.camera_indices]
+            != point_owner[problem.point_indices])
+
+def shared_variables(problem: BALProblem,
+                     shared: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    shared_cameras = np.zeros(len(problem.cameras), dtype=bool)
+    shared_points = np.zeros(len(problem.points), dtype=bool)
+    shared_cameras[problem.camera_indices[shared]] = True
+    shared_points[problem.point_indices[shared]] = True
+    return shared_cameras, shared_points
+
+
+def configure_blocks(blocks: list[Block], args: argparse.Namespace) -> None:
+    for block in blocks:
+        block.damping = args.initial_damping
+        block.damping_reject_multiplier = args.damping_reject_multiplier
+        block.local_acceptance = args.local_acceptance
+
+
+def partition_metrics(problem: BALProblem, blocks: list[Block]) -> tuple[int, float, float, np.ndarray]:
+    partition_loads = np.array([
+        len(block.observation_indices) for block in blocks])
+    cut_observations = int(shared_observations(problem, blocks).sum())
+    duplication_factor = 1.0 + cut_observations / len(problem.observations)
+    load_ratio = float(partition_loads.max() / partition_loads.mean())
+    return cut_observations, duplication_factor, load_ratio, partition_loads
+
+
+def choose_repartition(problem: BALProblem, count: int,
+                       previous_shared_variables: tuple[np.ndarray, np.ndarray],
+                       generation: int,
+                       args: argparse.Namespace) -> tuple[
+                           list[Block], np.ndarray,
+                           tuple[np.ndarray, np.ndarray]]:
+    candidates = []
+    for candidate_index in range(args.repartition_candidates):
+        seed = (args.partition_seed
+                + generation * args.repartition_candidates + candidate_index)
+        blocks = build_partitions(
+            problem, count, args.partitioner,
+            args.partition_refinement_passes, args.partition_balance_slack,
+            args.partition_swap_candidates, seed)
+        shared = shared_observations(problem, blocks)
+        candidate_shared_variables = shared_variables(problem, shared)
+        cut_count = int(shared.sum())
+        retained_count = sum(int(np.count_nonzero(previous & candidate))
+                             for previous, candidate in zip(
+                                 previous_shared_variables,
+                                 candidate_shared_variables))
+        load_ratio = max(len(block.observation_indices) for block in blocks) / (
+            sum(len(block.observation_indices) for block in blocks) / len(blocks))
+        candidates.append((blocks, shared, candidate_shared_variables, cut_count,
+                           retained_count, load_ratio, seed))
+
+    best_cut_count = min(candidate[3] for candidate in candidates)
+    cut_limit = math.ceil(best_cut_count * 1.05)
+    eligible = [candidate for candidate in candidates
+                if candidate[3] <= cut_limit]
+    selected = min(eligible, key=lambda candidate: (
+        candidate[4], candidate[3], candidate[5], candidate[6]))
+    return selected[0], selected[1], selected[2]
 
 
 def local_sparsity(camera_indices: np.ndarray, point_indices: np.ndarray,
@@ -655,11 +824,15 @@ def solve_block(problem: BALProblem, block: Block, snapshot: State,
                 inner_tolerance: float = 1e-2,
                 inner_min_iterations: int = 10,
                 inner_solver: str = "nesterov",
-                inner_jacobi: bool = False) -> LocalResult:
+                inner_jacobi: bool = False,
+                gpu_state: CudaStateMirror | None = None) -> LocalResult:
     start = time.monotonic()
     observation_indices = block.observation_indices
     camera_mask = block.local_camera_indices >= 0
     point_mask = block.local_point_indices >= 0
+    shared_inputs = (gpu_state.block_values(block.block_id)
+                     if local_solver == "bae" and gpu_state is not None
+                     else None)
     if local_solver == "bae" and np.all(camera_mask):
         fixed_cameras = np.empty((0, 9), dtype=snapshot.cameras.dtype)
     else:
@@ -703,8 +876,19 @@ def solve_block(problem: BALProblem, block: Block, snapshot: State,
         epsilon = 1e-4
         if local_solver == "bae":
             from bae_local_solver import solve_local_step
+            if shared_inputs is not None:
+                (initial_cameras, initial_points,
+                 observation_camera_indices,
+                 observation_point_indices) = shared_inputs
+                step_cameras = initial_cameras if attempts == 1 else local_cameras
+                step_points = initial_points if attempts == 1 else local_points
+            else:
+                step_cameras = local_cameras
+                step_points = local_points
+                observation_camera_indices = None
+                observation_point_indices = None
             gpu_step = solve_local_step(
-                local_cameras, local_points, cameras, points,
+                step_cameras, step_points, cameras, points,
                 problem.observations[observation_indices],
                 block.local_camera_indices, block.local_point_indices,
                 block.damping, epsilon=epsilon, device=device,
@@ -714,7 +898,13 @@ def solve_block(problem: BALProblem, block: Block, snapshot: State,
                 min_iterations=inner_min_iterations,
                 inner_solver=inner_solver,
                 jacobi_preconditioner=inner_jacobi,
-                check_interval=inner_check_interval)
+                check_interval=inner_check_interval,
+                shared_cameras=(gpu_state.cameras
+                                if observation_camera_indices is not None else None),
+                shared_points=(gpu_state.points
+                               if observation_point_indices is not None else None),
+                observation_camera_indices=observation_camera_indices,
+                observation_point_indices=observation_point_indices)
             total_inner_iterations += gpu_step.iterations
             delta_p = gpu_step.delta_p
             delta_l = gpu_step.delta_l
@@ -867,8 +1057,11 @@ def run_epoch(problem: BALProblem, blocks: list[Block], anchor: State,
               inner_jacobi: bool = False,
               block_overrelaxation: float = 1.0,
               block_backtracks: int = 3,
-              block_safeguard: bool = True) -> tuple[State, list[LocalResult]]:
+              block_safeguard: bool = True,
+              gpu_state: CudaStateMirror | None = None) -> tuple[State, list[LocalResult]]:
     state = anchor.copy()
+    if gpu_state is not None:
+        gpu_state.reset(anchor)
     if execution == "parallel":
         order = sorted(
             range(len(blocks)),
@@ -881,13 +1074,15 @@ def run_epoch(problem: BALProblem, blocks: list[Block], anchor: State,
                                 anchor, max_nfev, local_solver, device,
                                 inner_iterations, inner_check_interval,
                                 inner_tolerance, inner_min_iterations,
-                                inner_solver, inner_jacobi)
+                                inner_solver, inner_jacobi, gpu_state)
                 for block_id in order
             ]
             results = [future.result() for future in futures]
         for result in results:
             block = blocks[result.block_id]
             apply_local_result(state, block, result)
+            if gpu_state is not None:
+                gpu_state.apply(block, result)
             update_block_statistics(blocks, block, result)
             print(f"  block {block.block_id:3d}: gain={result.gain: .6e}, "
                 f"time={result.runtime_seconds:.2f}s, attempts={result.attempts}, "
@@ -904,13 +1099,15 @@ def run_epoch(problem: BALProblem, blocks: list[Block], anchor: State,
                              local_solver, device, inner_iterations,
                              inner_check_interval, inner_tolerance,
                              inner_min_iterations, inner_solver,
-                             inner_jacobi)
+                             inner_jacobi, gpu_state)
         overrelaxation_started = time.monotonic()
         overrelax_local_result(
             problem, state, block, result,
             block_overrelaxation, block_backtracks, block_safeguard)
         result.runtime_seconds += time.monotonic() - overrelaxation_started
         apply_local_result(state, block, result)
+        if gpu_state is not None:
+            gpu_state.apply(block, result)
         update_block_statistics(blocks, block, result)
         remaining.remove(block_id)
         results.append(result)
@@ -930,11 +1127,12 @@ def update_block_statistics(blocks: list[Block], block: Block,
     block.age = 0
 
 
-def safeguard(problem: BALProblem, nominal: State, candidate: State,
+def safeguard(evaluate_objective: ObjectiveEvaluator, nominal: State,
+              nominal_cost: float,
+              candidate: State,
               recent_costs: list[float], backtracks: int,
               nonmonotone_memory: int,
               max_acceleration_increase: float) -> tuple[State, float, float]:
-    nominal_cost = objective(problem, nominal)
     envelope = max(recent_costs[-nonmonotone_memory:]) if recent_costs else math.inf
     acceptance_limit = min(
         envelope, nominal_cost * (1.0 + max_acceleration_increase))
@@ -944,13 +1142,14 @@ def safeguard(problem: BALProblem, nominal: State, candidate: State,
     for backtrack in range(backtracks + 1):
         weight = 0.5**backtrack
         trial = State.from_vector(anchor_vector + weight * direction, n_cameras)
-        trial_cost = objective(problem, trial)
+        trial_cost = evaluate_objective(trial)
         if np.isfinite(trial_cost) and trial_cost <= acceptance_limit:
             return trial, trial_cost, weight
     return nominal, nominal_cost, 0.0
 
 
-def safeguard_nominal(problem: BALProblem, anchor: State, nominal: State,
+def safeguard_nominal(evaluate_objective: ObjectiveEvaluator, anchor: State,
+                      nominal: State,
                       anchor_cost: float,
                       backtracks: int) -> tuple[State, float, float]:
     anchor_vector = anchor.vector()
@@ -959,7 +1158,7 @@ def safeguard_nominal(problem: BALProblem, anchor: State, nominal: State,
     for backtrack in range(backtracks + 1):
         weight = 0.5**backtrack
         trial = State.from_vector(anchor_vector + weight * direction, n_cameras)
-        trial_cost = objective(problem, trial)
+        trial_cost = evaluate_objective(trial)
         if np.isfinite(trial_cost) and trial_cost <= anchor_cost:
             return trial, trial_cost, weight
     return anchor.copy(), anchor_cost, 0.0
@@ -979,6 +1178,12 @@ def parse_args() -> argparse.Namespace:
                         help="allowed increase over the load partitioner's largest block")
     parser.add_argument("--partition-swap-candidates", type=int, default=256,
                         help="strongest camera pairs scored per pass; 0 uses all pairs")
+    parser.add_argument("--repartition-every", type=int, default=0,
+                        help="replace blocks every N epochs; 0 keeps them fixed")
+    parser.add_argument("--repartition-candidates", type=int, default=4,
+                        help="candidate partitions scored for shared-variable turnover")
+    parser.add_argument("--partition-seed", type=int, default=0,
+                        help="base seed for reproducible repartition candidates")
     parser.add_argument("--execution", choices=("sequential", "parallel"), default="sequential")
     parser.add_argument("--workers", type=int, default=0,
                         help="parallel workers; 0 uses the partition count")
@@ -995,6 +1200,12 @@ def parse_args() -> argparse.Namespace:
                         help="Schur backend; bae requires the dedicated BAE environment")
     parser.add_argument("--device", default="cuda:0",
                         help="Torch device used by the BAE local solver")
+    parser.add_argument(
+        "--gpu-state-cache", action=argparse.BooleanOptionalAction,
+        default=False,
+        help="keep one authoritative state on CUDA for fixed-side block observations")
+    parser.add_argument("--objective-batch-size", type=int, default=250000,
+                        help="observations per cached GPU objective batch")
     parser.add_argument("--inner-iterations", type=int, default=200,
                         help="maximum iterations per Schur solve")
     parser.add_argument("--inner-solver", choices=("nesterov", "pcg"),
@@ -1053,7 +1264,8 @@ def main() -> None:
         raise ValueError("memory values must be positive and backtracks nonnegative")
     if args.max_accel_increase < 0.0 or args.restart_failures < 1:
         raise ValueError("max-accel-increase must be nonnegative and restart-failures positive")
-    if args.global_jacobi_batch_size < 1 or args.global_jacobi_floor <= 0.0:
+    if (args.global_jacobi_batch_size < 1 or args.objective_batch_size < 1
+            or args.global_jacobi_floor <= 0.0):
         raise ValueError("global Jacobi batch size and floor must be positive")
     if (args.inner_iterations < 1 or args.inner_check_interval < 1
             or args.inner_tolerance < 0.0 or args.inner_min_iterations < 1
@@ -1066,12 +1278,17 @@ def main() -> None:
     if args.execution != "sequential" and args.block_overrelaxation != 1.0:
         raise ValueError("block over-relaxation is available only for sequential execution")
     if (args.partition_refinement_passes < 0 or args.partition_balance_slack < 0.0
-            or args.partition_swap_candidates < 0):
+            or args.partition_swap_candidates < 0 or args.repartition_every < 0
+            or args.repartition_candidates < 1):
         raise ValueError("partition refinement controls must be nonnegative")
     if not 0.0 <= args.momentum < 1.0 or args.workers < 0:
         raise ValueError("momentum must be in [0, 1) and workers nonnegative")
     if args.local_solver == "bae" and args.workers not in (0, 1):
         raise ValueError("the BAE local solver requires --workers 1")
+    if (args.gpu_state_cache
+            and (args.local_solver != "bae"
+                 or torch.device(args.device).type != "cuda")):
+        raise ValueError("GPU state caching requires the BAE solver on CUDA")
     script_directory = Path(__file__).resolve().parent
     problem_path = ensure_problem(args.base_url, args.file_name, script_directory)
     problem = read_bal(problem_path)
@@ -1083,29 +1300,30 @@ def main() -> None:
         problem, args.partitions, args.partitioner,
         args.partition_refinement_passes, args.partition_balance_slack,
         args.partition_swap_candidates)
-    processed_observations = sum(len(block.observation_indices) for block in blocks)
-    partition_loads = np.array([len(block.observation_indices) for block in blocks])
-    cut_observations = processed_observations - len(problem.observations)
-    duplication_factor = processed_observations / len(problem.observations)
-    partition_load_ratio = partition_loads.max() / partition_loads.mean()
+    partition_shared = shared_observations(problem, blocks)
+    partition_shared_variables = shared_variables(problem, partition_shared)
+    (cut_observations, duplication_factor, partition_load_ratio,
+     partition_loads) = partition_metrics(problem, blocks)
     print(f"partitioner={args.partitioner}; cuts={cut_observations}; "
           f"duplication={duplication_factor:.4f}; "
           f"block observations={partition_loads.min()}..{partition_loads.max()}")
-    for block in blocks:
-        block.damping = args.initial_damping
-        block.damping_reject_multiplier = args.damping_reject_multiplier
-        block.local_acceptance = args.local_acceptance
+    configure_blocks(blocks, args)
     args.output.parent.mkdir(parents=True, exist_ok=True)
     accelerator = Accelerator(args.accelerator, args.memory,
                               args.regularization, args.max_step_ratio,
                               args.momentum, args.momentum_schedule)
-    current_cost = objective(problem, state)
+    objective_device = args.device if args.local_solver == "bae" else "cpu"
+    evaluate_objective = ObjectiveEvaluator(
+        problem, objective_device, args.objective_batch_size)
+    current_cost = evaluate_objective(state)
     best_state = state.copy()
     best_cost = current_cost
     recent_costs = [current_cost]
     failures = 0
     previous_residual = None
     previous_accepted = global_preconditioner.transform(state.vector())
+    acceleration_epoch = 0
+    repartition_generation = 0
     started = time.monotonic()
 
     print(f"BAL: {len(problem.cameras)} cameras, {len(problem.points)} points, "
@@ -1118,11 +1336,70 @@ def main() -> None:
     print(f"Block over-relaxation: {args.block_overrelaxation:.3f}, "
             f"safeguard={args.block_safeguard}, "
             f"backtracks={args.block_backtracks}")
+    print(f"Repartition every: {args.repartition_every or 'never'}, "
+          f"candidates={args.repartition_candidates}")
     print(f"Global Jacobi: {global_preconditioner.mode}, "
         f"scale=[{global_preconditioner.scale.min():.3e}, "
         f"{global_preconditioner.scale.max():.3e}]")
+    gpu_state = (CudaStateMirror(problem, blocks, state, args.device)
+                 if args.gpu_state_cache else None)
+    print(f"GPU state cache: {'enabled' if gpu_state is not None else 'disabled'}")
 
     for epoch in range(args.epochs):
+        repartitioned = False
+        released_shared = 0
+        newly_shared = 0
+        retained_shared = int(partition_shared.sum())
+        retained_shared_variables = sum(
+            int(shared.sum()) for shared in partition_shared_variables)
+        released_shared_variables = 0
+        new_shared_variables = 0
+        if (args.repartition_every > 0 and epoch > 0
+                and epoch % args.repartition_every == 0):
+            previous_shared = partition_shared
+            previous_shared_variables = partition_shared_variables
+            repartition_generation += 1
+            (blocks, partition_shared,
+             partition_shared_variables) = choose_repartition(
+                problem, args.partitions, previous_shared_variables,
+                repartition_generation, args)
+            configure_blocks(blocks, args)
+            if args.local_solver == "bae":
+                from bae_local_solver import clear_model_cache
+                clear_model_cache(args.device)
+            gpu_state = (CudaStateMirror(problem, blocks, state, args.device)
+                         if args.gpu_state_cache else None)
+            (cut_observations, duplication_factor, partition_load_ratio,
+             partition_loads) = partition_metrics(problem, blocks)
+            retained_shared = int(np.count_nonzero(
+                previous_shared & partition_shared))
+            released_shared = int(np.count_nonzero(
+                previous_shared & ~partition_shared))
+            newly_shared = int(np.count_nonzero(
+                ~previous_shared & partition_shared))
+            retained_shared_variables = sum(
+                int(np.count_nonzero(previous & current))
+                for previous, current in zip(
+                    previous_shared_variables, partition_shared_variables))
+            released_shared_variables = sum(
+                int(np.count_nonzero(previous & ~current))
+                for previous, current in zip(
+                    previous_shared_variables, partition_shared_variables))
+            new_shared_variables = sum(
+                int(np.count_nonzero(~previous & current))
+                for previous, current in zip(
+                    previous_shared_variables, partition_shared_variables))
+            accelerator.reset()
+            previous_residual = None
+            previous_accepted = global_preconditioner.transform(state.vector())
+            failures = 0
+            acceleration_epoch = 0
+            repartitioned = True
+            print(f"  repartition {repartition_generation}: "
+                f"shared variables retained={retained_shared_variables}, "
+                f"released={released_shared_variables}, "
+                f"new={new_shared_variables}; cuts={cut_observations}, "
+                  f"load_ratio={partition_load_ratio:.3f}")
         anchor = state.copy()
         anchor_vector = global_preconditioner.transform(anchor.vector())
         nominal, local_results = run_epoch(
@@ -1133,15 +1410,17 @@ def main() -> None:
             args.inner_check_interval, args.inner_tolerance,
             args.inner_min_iterations, args.inner_solver,
             args.inner_jacobi, args.block_overrelaxation,
-            args.block_backtracks, args.block_safeguard)
+            args.block_backtracks, args.block_safeguard, gpu_state)
         if len(blocks) == 1:
             nominal_cost = local_results[0].local_cost_after
             nominal_weight = 1.0
         else:
             nominal, nominal_cost, nominal_weight = safeguard_nominal(
-                problem, anchor, nominal, current_cost, args.backtracks)
+                evaluate_objective, anchor, nominal, current_cost,
+                args.backtracks)
         nominal_vector = global_preconditioner.transform(nominal.vector())
-        candidate_vector = accelerator.propose(anchor_vector, nominal_vector, epoch)
+        candidate_vector = accelerator.propose(
+            anchor_vector, nominal_vector, acceleration_epoch)
         candidate = State.from_vector(
             global_preconditioner.inverse_transform(candidate_vector),
             len(problem.cameras))
@@ -1149,7 +1428,8 @@ def main() -> None:
             state, current_cost, weight = nominal, nominal_cost, 1.0
         else:
             state, current_cost, weight = safeguard(
-                problem, nominal, candidate, recent_costs,
+                evaluate_objective, nominal, nominal_cost, candidate,
+                recent_costs,
                 args.backtracks, args.nonmonotone_memory,
                 args.max_accel_increase)
         recent_costs.append(current_cost)
@@ -1162,6 +1442,7 @@ def main() -> None:
             accelerator.reset()
             previous_residual = None
             failures = 0
+            acceleration_epoch = 0
             print("  acceleration history restarted")
 
         accepted_vector = global_preconditioner.transform(state.vector())
@@ -1183,6 +1464,7 @@ def main() -> None:
                 accelerator.lbfgs_differences[:] = accelerator.lbfgs_differences[-args.memory:]
         previous_residual = epoch_residual
         previous_accepted = accepted_vector.copy()
+        acceleration_epoch += 1
 
         if current_cost < best_cost:
             best_cost = current_cost
@@ -1208,6 +1490,9 @@ def main() -> None:
             "global_jacobi_floor": args.global_jacobi_floor,
             "local_solver": args.local_solver,
             "device": args.device,
+            "objective_device": objective_device,
+            "objective_batch_size": args.objective_batch_size,
+            "gpu_state_cache": args.gpu_state_cache,
             "inner_iterations": args.inner_iterations,
             "inner_solver": args.inner_solver,
             "inner_jacobi": args.inner_jacobi,
@@ -1226,6 +1511,17 @@ def main() -> None:
             "partition_refinement_passes": args.partition_refinement_passes,
             "partition_balance_slack": args.partition_balance_slack,
             "partition_swap_candidates": args.partition_swap_candidates,
+            "repartition_every": args.repartition_every,
+            "repartition_candidates": args.repartition_candidates,
+            "partition_seed": args.partition_seed,
+            "repartition_generation": repartition_generation,
+            "repartitioned": repartitioned,
+            "partition_retained_shared_observations": retained_shared,
+            "partition_released_shared_observations": released_shared,
+            "partition_new_shared_observations": newly_shared,
+            "partition_retained_shared_variables": retained_shared_variables,
+            "partition_released_shared_variables": released_shared_variables,
+            "partition_new_shared_variables": new_shared_variables,
             "partition_cut_observations": cut_observations,
             "partition_duplication_factor": duplication_factor,
             "partition_max_mean_load_ratio": partition_load_ratio,

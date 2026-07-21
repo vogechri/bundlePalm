@@ -149,18 +149,17 @@ struct SnavelyReprojectionErrorWeighted {
                     const T* const point,
                     const T* const cameraWeight,
                     const T* const pointWeight,
+                    const T* const cameraTransform,
                     T* residuals) const {
 
       T cameraW[9];
-      cameraW[0] = camera[0] * cameraWeight[0];
-      cameraW[1] = camera[1] * cameraWeight[1];
-      cameraW[2] = camera[2] * cameraWeight[2];
-      cameraW[3] = camera[3] * cameraWeight[3];
-      cameraW[4] = camera[4] * cameraWeight[4];
-      cameraW[5] = camera[5] * cameraWeight[5];
-      cameraW[6] = camera[6] * cameraWeight[6];
-      cameraW[7] = camera[7] * cameraWeight[7];
-      cameraW[8] = camera[8] * cameraWeight[8];
+      for (int row = 0; row < 9; ++row) {
+        cameraW[row] = T(0);
+        for (int col = 0; col < 9; ++col) {
+          cameraW[row] += cameraTransform[9 * row + col]
+                          * camera[col] * cameraWeight[col];
+        }
+      }
       T pointW[3];
       pointW[0] = point[0] * pointWeight[0];
       pointW[1] = point[1] * pointWeight[1];
@@ -202,7 +201,7 @@ struct SnavelyReprojectionErrorWeighted {
     // the client code.
     static ceres::CostFunction* Create(const double observed_x,
                                        const double observed_y) {
-      return (new ceres::AutoDiffCostFunction<SnavelyReprojectionErrorWeighted, 2, 9, 3, 9, 3>(
+      return (new ceres::AutoDiffCostFunction<SnavelyReprojectionErrorWeighted, 2, 9, 3, 9, 3, 81>(
           new SnavelyReprojectionErrorWeighted(observed_x, observed_y)));
     }
 
@@ -447,6 +446,11 @@ public:
       for (const auto &v : pro.unorm()) {
         unorm.push_back(v);
       }
+      cameraTransform.clear();
+      cameraTransform.reserve(81 * numCameras);
+      for (const auto &v : pro.camera_transform()) {
+        cameraTransform.push_back(v);
+      }
       //std::cout << "cameras.push_back\n";
       vnorm.clear();
       vnorm.reserve(3 * numLandmarks);
@@ -489,6 +493,11 @@ public:
         problem.AddParameterBlock(&vnorm[i], 3);
         problem.SetParameterBlockConstant(&vnorm[i]);
       }
+      THROW_IF(cameraTransform.size() != 81 * numCameras);
+      for (int i = 0; i < cameraTransform.size(); i += 81) {
+        problem.AddParameterBlock(&cameraTransform[i], 81);
+        problem.SetParameterBlockConstant(&cameraTransform[i]);
+      }
       //std::cout << "All Parameter blocks added\n";
 
 #ifdef __unweighted_system__
@@ -518,7 +527,8 @@ public:
                                  &(cameras[9 * pro.cam_id(i)]),
                                  &(landmarks[3 * pro.lm_id(i)]),
                                  &(unorm[9 * pro.cam_id(i)]),
-                                 &(vnorm[3 * pro.lm_id(i)]));
+                                 &(vnorm[3 * pro.lm_id(i)]),
+                                 &(cameraTransform[81 * pro.cam_id(i)]));
       }
 #endif
       std::cout << "Added " << pro.observations_size() / 2 << " Residual blocks\n";
@@ -719,6 +729,13 @@ public:
         std::cout << "Preconditioning update " << cluster_id << " " << unorm.size() << " " << vnorm.size() << "\n";
         for (const auto &v : preconditioningProto.unorm()) {
             unorm[id++] = v;
+        }
+        if (preconditioningProto.camera_transform_size() > 0) {
+          THROW_IF(preconditioningProto.camera_transform_size() != cameraTransform.size());
+          id = 0;
+          for (const auto &v : preconditioningProto.camera_transform()) {
+            cameraTransform[id++] = v;
+          }
         }
         // id = 0; // fill existing buffer
         // for (const float &v : preconditioningProto.vnorm()) {
@@ -1297,6 +1314,7 @@ private:
   std::vector<double> full_stepSize; // returned to compute s update in DRS.
   std::vector<double> unorm;
   std::vector<double> vnorm;
+  std::vector<double> cameraTransform;
   std::vector<int> cam_obs;
   std::vector<int> lm_obs;
   ceres::Problem problem;

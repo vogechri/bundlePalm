@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import json
 import math
+import os
+import sys
 import time
 from dataclasses import dataclass
 
@@ -19,6 +22,14 @@ from bae.sparse.py_ops import inv_op
 from bae.sparse.warp_wrappers import format_vec_for_bsr, torchbsr2wp, wp2torchbsr
 
 _MODEL_CACHE: dict[tuple[str, object], "LocalResidual"] = {}
+
+
+def clear_model_cache(device: str | None = None) -> None:
+    if device is None:
+        _MODEL_CACHE.clear()
+        return
+    for key in [key for key in _MODEL_CACHE if key[0] == device]:
+        del _MODEL_CACHE[key]
 
 
 @dataclass(frozen=True)
@@ -66,23 +77,52 @@ class LocalResidual(nn.Module):
                  observations: np.ndarray,
                  camera_indices: np.ndarray,
                  point_indices: np.ndarray,
-                 device: str):
+                 device: str,
+                 shared_cameras: torch.Tensor | None = None,
+                 shared_points: torch.Tensor | None = None,
+                 observation_camera_indices: torch.Tensor | None = None,
+                 observation_point_indices: torch.Tensor | None = None):
         super().__init__()
         dtype = torch.float64
         self.cameras = pp.Parameter(torch.as_tensor(
             local_cameras, dtype=dtype, device=device), sjac=True)
         self.points = pp.Parameter(torch.as_tensor(
             local_points, dtype=dtype, device=device), sjac=True)
+        self.shared_cameras = shared_cameras
+        self.shared_points = shared_points
+        self.observation_camera_indices = observation_camera_indices
+        self.observation_point_indices = observation_point_indices
+        if ((shared_cameras is None) != (shared_points is None)
+                or (shared_cameras is None) != (observation_camera_indices is None)
+                or (shared_cameras is None) != (observation_point_indices is None)):
+            raise ValueError("shared state and observation indices must be provided together")
+        stored_observation_cameras = (observation_cameras
+            if shared_cameras is None else np.empty((0, 9), dtype=np.float64))
+        stored_observation_points = (observation_points
+            if shared_points is None else np.empty((0, 3), dtype=np.float64))
         self.register_buffer("observation_cameras", torch.as_tensor(
-            observation_cameras, dtype=dtype, device=device))
+            stored_observation_cameras, dtype=dtype, device=device))
         self.register_buffer("observation_points", torch.as_tensor(
-            observation_points, dtype=dtype, device=device))
+            stored_observation_points, dtype=dtype, device=device))
         self.register_buffer("observations", torch.as_tensor(
             observations, dtype=dtype, device=device))
         self.register_buffer("camera_indices", torch.as_tensor(
             camera_indices, dtype=torch.long, device=device))
         self.register_buffer("point_indices", torch.as_tensor(
             point_indices, dtype=torch.long, device=device))
+        self._use_cached_groups = (
+            os.environ.get("BUNDLE_PALM_BAE_CACHED_GROUPS", "1") != "0")
+        camera_owned = camera_indices >= 0
+        point_owned = point_indices >= 0
+        self._cached_groups: list[tuple[str, bool, bool]] = []
+        for group_id, (mask, local_camera, local_point) in enumerate((
+                (camera_owned & point_owned, True, True),
+                (camera_owned & ~point_owned, True, False),
+                (~camera_owned & point_owned, False, True))):
+            name = f"ownership_group_{group_id}"
+            self.register_buffer(name, torch.as_tensor(
+                np.flatnonzero(mask), dtype=torch.long, device=device))
+            self._cached_groups.append((name, local_camera, local_point))
 
     @torch.no_grad()
     def update(self, local_cameras: np.ndarray, local_points: np.ndarray,
@@ -93,14 +133,41 @@ class LocalResidual(nn.Module):
             device=self.cameras.device))
         self.points.copy_(torch.as_tensor(
             local_points, dtype=self.points.dtype, device=self.points.device))
-        self.observation_cameras.copy_(torch.as_tensor(
-            observation_cameras, dtype=self.observation_cameras.dtype,
-            device=self.observation_cameras.device))
-        self.observation_points.copy_(torch.as_tensor(
-            observation_points, dtype=self.observation_points.dtype,
-            device=self.observation_points.device))
+        if self.shared_cameras is None:
+            self.observation_cameras.copy_(torch.as_tensor(
+                observation_cameras, dtype=self.observation_cameras.dtype,
+                device=self.observation_cameras.device))
+            self.observation_points.copy_(torch.as_tensor(
+                observation_points, dtype=self.observation_points.dtype,
+                device=self.observation_points.device))
+
+    def _fixed_cameras(self, indices: torch.Tensor) -> torch.Tensor:
+        if self.shared_cameras is None:
+            return self.observation_cameras[indices]
+        return self.shared_cameras[self.observation_camera_indices[indices]]
+
+    def _fixed_points(self, indices: torch.Tensor) -> torch.Tensor:
+        if self.shared_points is None:
+            return self.observation_points[indices]
+        return self.shared_points[self.observation_point_indices[indices]]
 
     def forward(self) -> torch.Tensor:
+        if not self._use_cached_groups:
+            return self._forward_dynamic()
+        groups = []
+        for name, local_camera, local_point in self._cached_groups:
+            indices = getattr(self, name)
+            if indices.numel() == 0:
+                continue
+            cameras = (self.cameras[self.camera_indices[indices]]
+                       if local_camera else self._fixed_cameras(indices))
+            points = (self.points[self.point_indices[indices]]
+                      if local_point else self._fixed_points(indices))
+            groups.append(project_angle_axis(points, cameras)
+                          - self.observations[indices])
+        return torch.cat(groups, dim=0)
+
+    def _forward_dynamic(self) -> torch.Tensor:
         camera_owned = self.camera_indices >= 0
         point_owned = self.point_indices >= 0
         groups = []
@@ -111,10 +178,10 @@ class LocalResidual(nn.Module):
                 continue
             cameras = (self.cameras[self.camera_indices[mask]]
                        if bool((self.camera_indices[mask] >= 0).all())
-                       else self.observation_cameras[mask])
+                       else self._fixed_cameras(mask))
             points = (self.points[self.point_indices[mask]]
                       if bool((self.point_indices[mask] >= 0).all())
-                      else self.observation_points[mask])
+                      else self._fixed_points(mask))
             groups.append(project_angle_axis(points, cameras)
                           - self.observations[mask])
         return torch.cat(groups, dim=0)
@@ -279,7 +346,12 @@ def solve_local_step(local_cameras: np.ndarray, local_points: np.ndarray,
                      jacobi_preconditioner: bool = False,
                      device: str = "cuda",
                      cache_key: object | None = None,
-                     profile: bool = False) -> BaeStep:
+                     profile: bool = False,
+                     shared_cameras: torch.Tensor | None = None,
+                     shared_points: torch.Tensor | None = None,
+                     observation_camera_indices: torch.Tensor | None = None,
+                     observation_point_indices: torch.Tensor | None = None) -> BaeStep:
+    profile = profile or os.environ.get("BUNDLE_PALM_PROFILE_LOCAL") == "1"
     timings: dict[str, float] = {}
     previous_time = time.perf_counter()
 
@@ -291,13 +363,16 @@ def solve_local_step(local_cameras: np.ndarray, local_points: np.ndarray,
             timings[name] = current_time - previous_time
             previous_time = current_time
 
-    key = (device, cache_key) if cache_key is not None else None
+    shared_state = shared_cameras is not None
+    key = ((device, cache_key, shared_state)
+           if cache_key is not None else None)
     model = _MODEL_CACHE.get(key) if key is not None else None
     if model is None:
         model = LocalResidual(
             local_cameras, local_points, observation_cameras,
             observation_points, observations, camera_indices,
-            point_indices, device)
+            point_indices, device, shared_cameras, shared_points,
+            observation_camera_indices, observation_point_indices)
         if key is not None:
             _MODEL_CACHE[key] = model
     else:
@@ -411,6 +486,12 @@ def solve_local_step(local_cameras: np.ndarray, local_points: np.ndarray,
     candidate_residual = model()
     cost_after = float(candidate_residual.tensor().square().sum())
     record_timing("backsub_penalty")
+
+    if profile:
+        print("BAE_PROFILE " + json.dumps({
+            "iterations": iterations,
+            "timings": timings,
+        }, separators=(",", ":")), file=sys.stderr, flush=True)
 
     return BaeStep(
         delta_camera_t.cpu().numpy().copy(),

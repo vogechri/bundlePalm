@@ -1,0 +1,224 @@
+\documentclass[11pt]{article}
+
+\usepackage[a4paper,margin=28mm]{geometry}
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs}
+\usepackage[hidelinks]{hyperref}
+
+\title{Preconditioning for Distributed Douglas--Rachford Bundle Adjustment}
+\author{}
+\date{}
+
+\begin{document}
+\maketitle
+
+\section{Purpose}
+
+This note summarizes the comparison of camera-coordinate preconditioners for
+the distributed Douglas--Rachford splitting (DRS) bundle-adjustment solver.
+The practical conclusion is that the implementation should support at least
+standard Jacobi scaling and symmetric Ruiz equilibration as selectable modes.
+Standard Jacobi remains the conservative default, while symmetric Ruiz is a
+competitive alternative that is marginally better in aggregate.
+
+\section{Coordinate scaling}
+
+Let $H$ denote the symmetric camera curvature matrix used to define the DRS
+metric.  A positive diagonal matrix $D$ defines scaled coordinates through
+\begin{equation}
+  x = D^{-1}z,
+  \qquad
+  \widehat H = D^{-1} H D^{-1}.
+\end{equation}
+All tested diagonal methods use the same coordinate-transport mechanism.  A
+final geometric-mean normalization removes the arbitrary common scale of $D$.
+
+\subsection{Standard Jacobi}
+
+Standard Jacobi scaling uses
+\begin{equation}
+  D_{jj} = \sqrt{\max(H_{jj},\tau)},
+\end{equation}
+where $\tau$ is a small relative numerical floor.  This directly equilibrates
+the diagonal of $\widehat H$.
+
+\subsection{Fractional Jacobi}
+
+The fractional variants use
+\begin{equation}
+  D_{jj} = \max(H_{jj},\tau)^q,
+  \qquad q\in\{0.25,0.375,0.625\}.
+\end{equation}
+They test whether weaker or stronger diagonal scaling improves the outer DRS
+trajectory.
+
+\subsection{Damped Jacobi}
+
+The tested damped variant uses
+\begin{equation}
+  D_{jj} = \sqrt{H_{jj} + \lambda},
+  \qquad
+  \lambda = 10^{-3}\operatorname{median}\{H_{kk}:H_{kk}>0\}.
+\end{equation}
+The damping protects small diagonal entries, but this particular damping level
+did not improve the final objective.
+
+\subsection{Symmetric Ruiz equilibration}
+
+Symmetric Ruiz equilibration iteratively balances the row and column infinity
+norms while preserving symmetry.  Starting with $D=I$, each sweep forms
+\begin{equation}
+  \widehat H = D^{-1}HD^{-1},
+  \qquad
+  r_i = \lVert \widehat H_{i,:}\rVert_\infty,
+\end{equation}
+and updates
+\begin{equation}
+  D \leftarrow D\,\operatorname{diag}(\sqrt{r_i}).
+\end{equation}
+The experiment used at most ten sweeps and stopped when
+$\max_i|\log(\sqrt{r_i})|<10^{-3}$.  Unlike Jacobi, Ruiz uses off-diagonal
+coupling information while retaining a diagonal coordinate transform.
+
+\subsection{Pock-inspired variants}
+
+Two additional diagonal variants were tested.  The first uses the square root
+of the absolute column sum, and the second uses the square root of the sum of
+squared absolute entries.  These are denoted Pock $\alpha=1$ and Pock
+$\alpha=0$, respectively, in the result summary.
+
+\section{Experimental protocol}
+
+Each complete cohort contains the same 29 BAL problems, uses 30 clusters, and
+runs 90 outer iterations.  Lower objective values are better.  Comparisons use
+matched problems and the best objective reached by iteration 90.  The reported
+aggregate delta is the geometric mean of the per-problem cost ratios relative
+to standard Jacobi.
+
+The explicitly labeled cohorts are stored in
+\texttt{serverTest/results\_server.json}.  The standard-Jacobi baseline is the
+complete 29-problem unlabeled batch immediately preceding the labeled
+\texttt{pock\_gmean} cohort.  Its problem order exactly matches the subsequent
+cohorts.  Timing data are available for the five most recent Jacobi and Ruiz
+cohorts through the corresponding \texttt{status.tsv} files.
+
+\subsection{Scene normalization by points}
+
+Scene normalization and landmark preconditioning are distinct operations.  At
+input, \texttt{normalize\_by\_points} subtracts the coordinate-wise median of
+the landmarks and scales the 95th-percentile landmark radius to 100.  Camera
+centers are transformed consistently.  This scene normalization is enabled in
+the current implementation and was enabled for the preconditioner comparison
+above.
+
+An earlier result section explicitly marked
+\texttt{normalize\_by\_points off} can be compared with the subsequent
+standard-Jacobi section on 28 matched problems.  Enabling normalization lowers
+the geometric-mean objective by $0.038\%$ at iteration 30, $0.186\%$ at
+iteration 60, and $0.126\%$ at the final checkpoint.  The final comparison has
+14 wins for normalization on, 13 wins for normalization off, and one tie.
+
+The large \texttt{problem-3068} instance shows the clearest practical reason to
+keep normalization enabled.  Its costs are
+\begin{center}
+\begin{tabular}{lrrr}
+  \toprule
+  Setting & Iteration 30 & Iteration 60 & Final \\
+  \midrule
+  Point normalization off & 3643889 & 3524489 & 3399644 \\
+  Point normalization on  & 3646996 & 3384186 & 3299301 \\
+  Relative change         & $+0.085\%$ & $-3.981\%$ & $-2.952\%$ \\
+  \bottomrule
+\end{tabular}
+\end{center}
+Normalization is initially neutral on this problem but substantially improves
+the later trajectory.  It should therefore remain on by default.
+
+Dynamic landmark metric scaling is currently off: the protocol sends unit
+\texttt{vnorm} values, so only camera coordinates receive the tested Jacobi or
+Ruiz preconditioner.  This setting should not be changed based on the scene
+normalization experiment; nontrivial landmark \texttt{vnorm} would require a
+separate controlled comparison.
+
+\section{Results}
+
+\begin{table}[ht]
+  \centering
+  \caption{Final objective relative to standard Jacobi.  A negative delta is
+  an improvement.  Runtime is the sum over all 29 problems when recorded.}
+  \begin{tabular}{lrrr}
+    \toprule
+    Method & Geometric cost delta & Cases beating Jacobi & Runtime (s) \\
+    \midrule
+    Symmetric Ruiz       & $-0.005\%$ & $6/29$ & 8192 \\
+    Standard Jacobi      & baseline   & ---    & ---  \\
+    Jacobi $q=0.625$     & $+0.563\%$ & $3/29$ & 8276 \\
+    Pock $\alpha=0$      & $+0.654\%$ & $2/29$ & ---  \\
+    Jacobi $q=0.375$     & $+0.891\%$ & $3/29$ & 8137 \\
+    Damped Jacobi        & $+1.167\%$ & $1/29$ & 7948 \\
+    Pock $\alpha=1$      & $+1.180\%$ & $3/29$ & ---  \\
+    Jacobi $q=0.25$      & $+2.019\%$ & $0/29$ & 7917 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+Symmetric Ruiz and standard Jacobi are nearly tied.  In their direct
+comparison, Ruiz wins six problems, Jacobi wins four, and 19 final costs are
+identical at the recorded precision.  Ruiz has a geometric-mean improvement of
+only $0.005\%$ and a median change of zero.  Its largest improvement is
+$0.111\%$ on \texttt{problem-3068}, while its largest regression is $0.043\%$
+on \texttt{problem-931}.
+
+At intermediate checkpoints, standard Jacobi has the better mean rank, while
+Ruiz records more per-problem wins.  By the final checkpoint, their aggregate
+costs have effectively converged.  Ruiz therefore does not replace Jacobi
+unconditionally, but it is the only tested alternative that matches or
+slightly improves the standard baseline across the complete suite.
+
+Damped Jacobi is about as fast as the other diagonal variants but is worse by
+$1.167\%$ in geometric mean and beats standard Jacobi on only one problem.
+The fractional and Pock-inspired variants also underperform standard Jacobi in
+aggregate.  Of these alternatives, $q=0.625$ is the strongest, but it remains
+$0.563\%$ worse geometrically.
+
+\section{Block-Jacobi experiment}
+
+A full $9\times9$ camera-block inverse-square-root transform was implemented as
+an optional protocol path.  The original implementation used a relative
+eigenvalue floor of $10^{-12}$.  Although the tested camera blocks were finite
+and positive definite, their effective condition number reached
+$3.65\times10^8$; inversion amplified the weak directions enough that the
+first local solve produced non-finite objective values.
+
+The block inverse square root now uses a relative eigenvalue floor of
+$10^{-6}$, limiting each regularized block condition number to $10^6$ and the
+inverse-square-root condition number to $10^3$.  Coordinate transport also
+uses a linear solve instead of explicitly forming the inverse transform.  The
+problem-49 smoke test now completes ten outer iterations with finite values.
+Its final checkpoint cost was 40660, compared with 37442 for standard Jacobi,
+so numerical stability does not yet establish a quality improvement.  A full
+block-Jacobi cohort has not been run and no block result is included in the
+comparison table.
+
+\section{Implementation conclusion}
+
+The solver should expose at least the following two runtime-selectable camera
+preconditioners:
+\begin{center}
+\begin{tabular}{ll}
+  \toprule
+  Setting & Meaning \\
+  \midrule
+  \texttt{jacobi\_gmean} & Standard diagonal Jacobi scaling \\
+  \texttt{symmetric\_ruiz\_gmean} & Symmetric Ruiz equilibration \\
+  \bottomrule
+\end{tabular}
+\end{center}
+They are currently selected through the environment variable
+\texttt{BUNDLE\_PALM\_DRS\_SCALING}.  Standard Jacobi should remain the default
+because it is simpler, cheaper to construct, and statistically indistinguishable
+from Ruiz on this suite.  Ruiz should remain available for problem-dependent
+selection and further experiments because it achieved the best aggregate final
+objective and uses coupling information ignored by Jacobi.
+
+\end{document}

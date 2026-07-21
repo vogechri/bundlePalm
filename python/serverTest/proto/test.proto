@@ -18,6 +18,7 @@ message program_proto {
   int32 num_clusters = 13;
   uint64 run_id = 14;
   uint64 phase_id = 15;
+  repeated double camera_transform = 16; // optional row-major 9x9 matrix per camera
 }
 
 // sent once
@@ -25,6 +26,7 @@ message preconditioning_proto {
   int32 cluster_id = 1;
   repeated double unorm = 2; // must be double
   repeated float vnorm = 3;
+  repeated double camera_transform = 4; // optional row-major 9x9 matrix per camera
 }
 
 // message solution_proto {
