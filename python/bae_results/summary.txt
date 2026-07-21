@@ -1,0 +1,8 @@
+CG summaries: 28/28 completed
+Nesterov summaries: 28/28 completed
+Each problem has a 60-entry trajectory and an individual execution log.
+CG reached a lower bestCost60 on 24 of 28 problems.
+Median CG/Nesterov cost ratio: 0.9994
+CG runtime: 473.23s
+Nesterov runtime: 411.56s
+CG was approximately 15% slower overall.
