@@ -1,3 +1,5 @@
+git clone https://github.com/pypose/bae
+
 CG summaries: 28/28 completed
 Nesterov summaries: 28/28 completed
 Each problem has a 60-entry trajectory and an individual execution log.
