@@ -22,6 +22,7 @@ import json
 import math
 import time
 import urllib.request
+import warnings
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -1277,6 +1278,13 @@ def main() -> None:
         raise ValueError("block over-relaxation must be at least one and backtracks nonnegative")
     if args.execution != "sequential" and args.block_overrelaxation != 1.0:
         raise ValueError("block over-relaxation is available only for sequential execution")
+    if args.partitions == 1 and args.block_overrelaxation > 1.0:
+        warnings.warn(
+            "single-part block over-relaxation above 1.0 can be unstable; "
+            "enable --block-safeguard or use --block-overrelaxation 1.0",
+            RuntimeWarning,
+            stacklevel=2,
+        )
     if (args.partition_refinement_passes < 0 or args.partition_balance_slack < 0.0
             or args.partition_swap_candidates < 0 or args.repartition_every < 0
             or args.repartition_candidates < 1):
