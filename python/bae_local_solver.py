@@ -32,6 +32,68 @@ def clear_model_cache(device: str | None = None) -> None:
         del _MODEL_CACHE[key]
 
 
+def schur_camera_edge_weights(
+        cameras: np.ndarray, points: np.ndarray,
+        camera_indices: np.ndarray, point_indices: np.ndarray,
+        observations: np.ndarray, device: str = "cuda:0") -> dict[tuple[int, int], float]:
+    """Build normalized camera couplings induced by eliminated landmarks."""
+    model = LocalResidual(
+        cameras, points, cameras[camera_indices], points[point_indices],
+        observations, camera_indices, point_indices, device)
+    residual = model()
+    camera_jacobian, point_jacobian = jacobian(
+        residual, [model.cameras, model.points])
+    camera_blocks = camera_jacobian.values().detach().cpu().numpy()
+    point_blocks = point_jacobian.values().detach().cpu().numpy()
+    camera_ids = camera_jacobian.col_indices().detach().cpu().numpy()
+    point_ids = point_jacobian.col_indices().detach().cpu().numpy()
+
+    order = np.lexsort((camera_ids, point_ids))
+    point_ids = point_ids[order]
+    camera_ids = camera_ids[order]
+    camera_blocks = camera_blocks[order]
+    point_blocks = point_blocks[order]
+    starts = np.r_[0, np.flatnonzero(np.diff(point_ids)) + 1]
+    stops = np.r_[starts[1:], len(point_ids)]
+    edge_weights: dict[tuple[int, int], float] = {}
+    for start, stop in zip(starts, stops):
+        local_cameras = camera_ids[start:stop]
+        local_camera_blocks = camera_blocks[start:stop]
+        local_point_blocks = point_blocks[start:stop]
+        unique_cameras, inverse = np.unique(
+            local_cameras, return_inverse=True)
+        if len(unique_cameras) < 2:
+            continue
+        point_hessian = np.einsum(
+            "ori,orj->ij", local_point_blocks, local_point_blocks)
+        point_inverse = np.linalg.pinv(point_hessian, hermitian=True)
+        camera_point = np.zeros(
+            (len(unique_cameras), camera_blocks.shape[2],
+             point_blocks.shape[2]), dtype=camera_blocks.dtype)
+        np.add.at(camera_point, inverse, np.einsum(
+            "ori,orj->oij", local_camera_blocks, local_point_blocks))
+        schur_blocks = np.einsum(
+            "aik,kl,bjl->abij",
+            camera_point, point_inverse, camera_point)
+        self_norms = np.linalg.norm(
+            schur_blocks[np.arange(len(unique_cameras)),
+                         np.arange(len(unique_cameras))], axis=(1, 2))
+        for first in range(len(unique_cameras)):
+            for second in range(first + 1, len(unique_cameras)):
+                denominator = math.sqrt(
+                    self_norms[first] * self_norms[second])
+                if denominator <= np.finfo(camera_blocks.dtype).eps:
+                    continue
+                weight = float(
+                    np.linalg.norm(schur_blocks[first, second]) / denominator)
+                if not math.isfinite(weight) or weight <= 0.0:
+                    continue
+                pair = (int(unique_cameras[first]),
+                        int(unique_cameras[second]))
+                edge_weights[pair] = edge_weights.get(pair, 0.0) + weight
+    return edge_weights
+
+
 @dataclass(frozen=True)
 class BaeStep:
     delta_p: np.ndarray

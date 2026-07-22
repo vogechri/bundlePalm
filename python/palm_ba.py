@@ -422,7 +422,10 @@ def _refine_partition_overlap(problem: BALProblem, camera_owner: np.ndarray,
                               point_owner: np.ndarray, count: int,
                               max_passes: int,
                               balance_slack: float,
-                              max_swap_candidates: int) -> tuple[np.ndarray, np.ndarray]:
+                              max_swap_candidates: int,
+                              objective: str = "overlap") -> tuple[np.ndarray, np.ndarray]:
+    if objective not in ("overlap", "analysis"):
+        raise ValueError(f"unknown overlap refinement objective: {objective}")
     camera_count = problem.cameras.shape[0]
     point_count = problem.points.shape[0]
     camera_load = np.bincount(problem.camera_indices, minlength=camera_count)
@@ -496,7 +499,20 @@ def _refine_partition_overlap(problem: BALProblem, camera_owner: np.ndarray,
             new_matched = trial_votes[
                 np.arange(len(affected_points)), new_point_owner]
             overlap_gain = int(new_matched.sum() - old_matched.sum())
-            if overlap_gain <= 0:
+            old_shared = (
+                votes[affected_points].max(axis=1)
+                < point_degree[affected_points])
+            new_shared = maxima < point_degree[affected_points]
+            inverse_degree_gain = float(np.sum(
+                (old_shared.astype(np.int8) - new_shared.astype(np.int8))
+                / point_degree[affected_points]))
+            shared_point_gain = int(old_shared.sum() - new_shared.sum())
+            if objective == "overlap" and overlap_gain <= 0:
+                continue
+            if (objective == "analysis"
+                    and inverse_degree_gain <= 1e-15
+                    and not (abs(inverse_degree_gain) <= 1e-15
+                             and overlap_gain > 0)):
                 continue
 
             trial_camera_load = camera_block_load.copy()
@@ -516,7 +532,134 @@ def _refine_partition_overlap(problem: BALProblem, camera_owner: np.ndarray,
                            - trial_matched_load)
             if trial_loads.max() > load_limit:
                 continue
-            key = (overlap_gain, -int(trial_loads.max()))
+            key = (
+                (overlap_gain, -int(trial_loads.max()))
+                if objective == "overlap" else
+                (inverse_degree_gain, shared_point_gain, overlap_gain,
+                 -int(trial_loads.max())))
+            if best is None or key > best[0]:
+                best = (key, first_camera, second_camera, first_block,
+                        second_block, affected_points, trial_votes,
+                        new_point_owner, trial_camera_load,
+                        trial_point_load, trial_matched_load)
+        if best is None:
+            break
+        (_, first_camera, second_camera, first_block, second_block,
+         affected_points, trial_votes, new_point_owner, camera_block_load,
+         point_block_load, matched_load) = best
+        camera_owner[first_camera] = second_block
+        camera_owner[second_camera] = first_block
+        votes[affected_points] = trial_votes
+        point_owner[affected_points] = new_point_owner
+    return camera_owner, point_owner
+
+
+def _refine_partition_schur(
+        problem: BALProblem, camera_owner: np.ndarray,
+        point_owner: np.ndarray, count: int, max_passes: int,
+        balance_slack: float, max_swap_candidates: int,
+        edge_weights: dict[tuple[int, int], float]) -> tuple[np.ndarray, np.ndarray]:
+    camera_count = problem.cameras.shape[0]
+    point_count = problem.points.shape[0]
+    camera_load = np.bincount(problem.camera_indices, minlength=camera_count)
+    point_degree = np.bincount(problem.point_indices, minlength=point_count)
+    votes = np.zeros((point_count, count), dtype=np.int32)
+    np.add.at(votes, (problem.point_indices,
+                      camera_owner[problem.camera_indices]), 1)
+
+    camera_points = []
+    camera_point_counts = []
+    for camera in range(camera_count):
+        mask = problem.camera_indices == camera
+        points, counts = np.unique(problem.point_indices[mask], return_counts=True)
+        camera_points.append(points)
+        camera_point_counts.append(counts)
+
+    edge_matrix = np.zeros((camera_count, camera_count), dtype=np.float64)
+    for (first, second), weight in edge_weights.items():
+        edge_matrix[first, second] = weight
+        edge_matrix[second, first] = weight
+    pair_first, pair_second = np.triu_indices(camera_count, 1)
+
+    camera_block_load = np.bincount(
+        camera_owner, weights=camera_load, minlength=count).astype(np.int64)
+    point_block_load = np.bincount(
+        point_owner, weights=point_degree, minlength=count).astype(np.int64)
+    matched_load = np.bincount(
+        point_owner,
+        weights=votes[np.arange(point_count), point_owner],
+        minlength=count).astype(np.int64)
+    baseline_loads = camera_block_load + point_block_load - matched_load
+    load_limit = int(math.ceil(baseline_loads.max() * (1.0 + balance_slack)))
+
+    for _ in range(max_passes):
+        block_weights = np.column_stack([
+            edge_matrix[:, camera_owner == block].sum(axis=1)
+            for block in range(count)
+        ])
+        move_gains = (block_weights
+                      - block_weights[np.arange(camera_count), camera_owner, None])
+        cross_block = camera_owner[pair_first] != camera_owner[pair_second]
+        first_candidates = pair_first[cross_block]
+        second_candidates = pair_second[cross_block]
+        gains = (
+            move_gains[first_candidates, camera_owner[second_candidates]]
+            + move_gains[second_candidates, camera_owner[first_candidates]]
+            - 2.0 * edge_matrix[first_candidates, second_candidates])
+        improving = gains > 0.0
+        first_candidates = first_candidates[improving]
+        second_candidates = second_candidates[improving]
+        gains = gains[improving]
+        candidate_order = np.argsort(-gains, kind="stable")
+        if max_swap_candidates:
+            candidate_order = candidate_order[:max_swap_candidates]
+        best = None
+        for candidate_index in candidate_order:
+            first_camera = int(first_candidates[candidate_index])
+            second_camera = int(second_candidates[candidate_index])
+            first_block = camera_owner[first_camera]
+            second_block = camera_owner[second_camera]
+            schur_gain = float(gains[candidate_index])
+
+            affected_points = np.union1d(
+                camera_points[first_camera], camera_points[second_camera])
+            trial_votes = votes[affected_points].copy()
+            first_rows = np.searchsorted(
+                affected_points, camera_points[first_camera])
+            second_rows = np.searchsorted(
+                affected_points, camera_points[second_camera])
+            trial_votes[first_rows, first_block] -= camera_point_counts[first_camera]
+            trial_votes[first_rows, second_block] += camera_point_counts[first_camera]
+            trial_votes[second_rows, second_block] -= camera_point_counts[second_camera]
+            trial_votes[second_rows, first_block] += camera_point_counts[second_camera]
+
+            old_point_owner = point_owner[affected_points]
+            maxima = trial_votes.max(axis=1)
+            keep_owner = (trial_votes[np.arange(len(affected_points)),
+                                      old_point_owner] == maxima)
+            new_point_owner = np.where(
+                keep_owner, old_point_owner, np.argmax(trial_votes, axis=1))
+            old_matched = votes[affected_points, old_point_owner]
+            new_matched = trial_votes[
+                np.arange(len(affected_points)), new_point_owner]
+            trial_camera_load = camera_block_load.copy()
+            trial_camera_load[first_block] += (
+                camera_load[second_camera] - camera_load[first_camera])
+            trial_camera_load[second_block] += (
+                camera_load[first_camera] - camera_load[second_camera])
+            trial_point_load = point_block_load.copy()
+            trial_matched_load = matched_load.copy()
+            np.add.at(trial_point_load, old_point_owner,
+                      -point_degree[affected_points])
+            np.add.at(trial_point_load, new_point_owner,
+                      point_degree[affected_points])
+            np.add.at(trial_matched_load, old_point_owner, -old_matched)
+            np.add.at(trial_matched_load, new_point_owner, new_matched)
+            trial_loads = (trial_camera_load + trial_point_load
+                           - trial_matched_load)
+            if trial_loads.max() > load_limit:
+                continue
+            key = (schur_gain, -int(trial_loads.max()))
             if best is None or key > best[0]:
                 best = (key, first_camera, second_camera, first_block,
                         second_block, affected_points, trial_votes,
@@ -538,13 +681,29 @@ def build_partitions(problem: BALProblem, count: int,
                      partitioner: str = "load", refinement_passes: int = 20,
                      balance_slack: float = 0.0,
                      max_swap_candidates: int = 256,
-                     seed: int | None = None) -> list[Block]:
+                     seed: int | None = None,
+                     device: str = "cuda:0") -> list[Block]:
     camera_owner, point_owner = _assign_partition_owners(problem, count, seed)
-    if partitioner == "overlap":
+    if partitioner in ("overlap", "analysis"):
         camera_owner, point_owner = _refine_partition_overlap(
             problem, camera_owner, point_owner, count,
-            refinement_passes, balance_slack, max_swap_candidates)
-    elif partitioner != "load":
+            refinement_passes, balance_slack, max_swap_candidates,
+            "overlap")
+        if partitioner == "analysis":
+            camera_owner, point_owner = _refine_partition_overlap(
+                problem, camera_owner, point_owner, count,
+                refinement_passes, balance_slack, max_swap_candidates,
+                "analysis")
+    elif partitioner == "schur" and refinement_passes:
+        from bae_local_solver import schur_camera_edge_weights
+        edge_weights = schur_camera_edge_weights(
+            problem.cameras, problem.points, problem.camera_indices,
+            problem.point_indices, problem.observations, device)
+        camera_owner, point_owner = _refine_partition_schur(
+            problem, camera_owner, point_owner, count,
+            refinement_passes, balance_slack, max_swap_candidates,
+            edge_weights)
+    elif partitioner not in ("load", "schur"):
         raise ValueError(f"unknown partitioner: {partitioner}")
 
     blocks = []
@@ -1171,8 +1330,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("file_name")
     parser.add_argument("epochs", nargs="?", type=int, default=30)
     parser.add_argument("partitions", nargs="?", type=int, default=6)
-    parser.add_argument("--partitioner", choices=("load", "overlap"), default="load",
-                        help="camera assignment: load balance or cut refinement")
+    parser.add_argument(
+        "--partitioner", choices=("load", "overlap", "analysis", "schur"),
+        default="load",
+        help="camera assignment: load balance, overlap, or Schur refinement")
     parser.add_argument("--partition-refinement-passes", type=int, default=20,
                         help="maximum accepted camera swaps for overlap partitioning")
     parser.add_argument("--partition-balance-slack", type=float, default=0.0,
@@ -1185,6 +1346,8 @@ def parse_args() -> argparse.Namespace:
                         help="candidate partitions scored for shared-variable turnover")
     parser.add_argument("--partition-seed", type=int, default=0,
                         help="base seed for reproducible repartition candidates")
+    parser.add_argument("--initial-partition-seed", type=int,
+                        help="seed for the initial camera assignment; default uses load order")
     parser.add_argument("--execution", choices=("sequential", "parallel"), default="sequential")
     parser.add_argument("--workers", type=int, default=0,
                         help="parallel workers; 0 uses the partition count")
@@ -1252,7 +1415,145 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output", type=Path, default=Path("palm_ba_results.jsonl"))
     parser.add_argument("--live-summary", type=Path,
                         help="single JSON object atomically refreshed each epoch")
+    parser.add_argument("--checkpoint-output", type=Path,
+                        help="save resumable solver state after the final requested epoch")
+    parser.add_argument("--resume-checkpoint", type=Path,
+                        help="resume a fixed-partition run from a saved checkpoint")
     return parser.parse_args()
+
+
+CHECKPOINT_ARGUMENTS = (
+    "file_name", "partitions", "partitioner", "partition_refinement_passes",
+    "partition_balance_slack", "partition_swap_candidates",
+    "initial_partition_seed", "execution", "workers", "local_solver",
+    "accelerator", "momentum", "momentum_schedule", "memory",
+    "regularization", "max_step_ratio", "local_nfev", "age_weight",
+    "runtime_weight", "inner_iterations", "inner_check_interval",
+    "inner_tolerance", "inner_min_iterations", "inner_solver",
+    "inner_jacobi", "initial_damping", "damping_reject_multiplier",
+    "local_acceptance", "block_overrelaxation", "block_backtracks",
+    "block_safeguard", "backtracks", "nonmonotone_memory",
+    "max_accel_increase", "restart_failures", "global_jacobi",
+    "global_jacobi_batch_size", "global_jacobi_floor", "device",
+    "objective_batch_size", "gpu_state_cache",
+)
+
+
+def checkpoint_configuration(args: argparse.Namespace) -> dict[str, object]:
+    return {name: getattr(args, name) for name in CHECKPOINT_ARGUMENTS}
+
+
+def stack_vectors(values: list[np.ndarray], vector_size: int) -> np.ndarray:
+    if not values:
+        return np.empty((0, vector_size), dtype=np.float64)
+    return np.stack(values)
+
+
+def optional_vector(value: np.ndarray | None) -> np.ndarray:
+    return (np.empty(0, dtype=np.float64) if value is None else value)
+
+
+def save_checkpoint(path: Path, args: argparse.Namespace, completed_epochs: int,
+                    state: State, current_cost: float, best_state: State,
+                    best_cost: float, recent_costs: list[float], failures: int,
+                    previous_residual: np.ndarray | None,
+                    previous_accepted: np.ndarray, acceleration_epoch: int,
+                    repartition_generation: int, accelerator: Accelerator,
+                    blocks: list[Block]) -> None:
+    vector_size = len(previous_accepted)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary_path = path.with_suffix(path.suffix + ".tmp")
+    try:
+        with temporary_path.open("wb") as handle:
+            np.savez_compressed(
+                handle,
+                configuration=json.dumps(
+                    checkpoint_configuration(args), sort_keys=True),
+                completed_epochs=completed_epochs,
+                current_cameras=state.cameras,
+                current_points=state.points,
+                current_cost=current_cost,
+                best_cameras=best_state.cameras,
+                best_points=best_state.points,
+                best_cost=best_cost,
+                recent_costs=np.asarray(recent_costs, dtype=np.float64),
+                failures=failures,
+                previous_residual=optional_vector(previous_residual),
+                previous_accepted=previous_accepted,
+                acceleration_epoch=acceleration_epoch,
+                repartition_generation=repartition_generation,
+                accelerator_previous_mapped=optional_vector(
+                    accelerator.previous_mapped),
+                accelerator_velocity=optional_vector(accelerator.velocity),
+                accelerator_states=stack_vectors(
+                    accelerator.states, vector_size),
+                accelerator_residuals=stack_vectors(
+                    accelerator.residuals, vector_size),
+                accelerator_lbfgs_steps=stack_vectors(
+                    accelerator.lbfgs_steps, vector_size),
+                accelerator_lbfgs_differences=stack_vectors(
+                    accelerator.lbfgs_differences, vector_size),
+                block_damping=np.asarray([block.damping for block in blocks]),
+            )
+        temporary_path.replace(path)
+    finally:
+        temporary_path.unlink(missing_ok=True)
+
+
+def load_checkpoint(path: Path, args: argparse.Namespace, blocks: list[Block],
+                    accelerator: Accelerator) -> dict[str, object]:
+    with np.load(path, allow_pickle=False) as checkpoint:
+        saved_configuration = json.loads(
+            str(checkpoint["configuration"].item()))
+        expected_configuration = checkpoint_configuration(args)
+        mismatches = [
+            name for name in CHECKPOINT_ARGUMENTS
+            if saved_configuration.get(name) != expected_configuration[name]
+        ]
+        if mismatches:
+            details = ", ".join(
+                f"{name}={saved_configuration.get(name)!r} -> "
+                f"{expected_configuration[name]!r}"
+                for name in mismatches)
+            raise ValueError(f"checkpoint configuration mismatch: {details}")
+
+        damping = checkpoint["block_damping"]
+        if len(damping) != len(blocks):
+            raise ValueError("checkpoint block count does not match partition")
+        for block, value in zip(blocks, damping):
+            block.damping = float(value)
+
+        def optional(name: str) -> np.ndarray | None:
+            value = checkpoint[name]
+            return None if value.size == 0 else value.copy()
+
+        def vectors(name: str) -> list[np.ndarray]:
+            return [value.copy() for value in checkpoint[name]]
+
+        accelerator.previous_mapped = optional("accelerator_previous_mapped")
+        accelerator.velocity = optional("accelerator_velocity")
+        accelerator.states = vectors("accelerator_states")
+        accelerator.residuals = vectors("accelerator_residuals")
+        accelerator.lbfgs_steps = vectors("accelerator_lbfgs_steps")
+        accelerator.lbfgs_differences = vectors(
+            "accelerator_lbfgs_differences")
+        previous_residual = optional("previous_residual")
+        return {
+            "completed_epochs": int(checkpoint["completed_epochs"]),
+            "state": State(checkpoint["current_cameras"].copy(),
+                           checkpoint["current_points"].copy()),
+            "current_cost": float(checkpoint["current_cost"]),
+            "best_state": State(checkpoint["best_cameras"].copy(),
+                                checkpoint["best_points"].copy()),
+            "best_cost": float(checkpoint["best_cost"]),
+            "recent_costs": checkpoint["recent_costs"].tolist(),
+            "failures": int(checkpoint["failures"]),
+            "previous_residual": previous_residual,
+            "previous_accepted": checkpoint["previous_accepted"].copy(),
+            "acceleration_epoch": int(checkpoint["acceleration_epoch"]),
+            "repartition_generation": int(
+                checkpoint["repartition_generation"]),
+        }
 
 
 def main() -> None:
@@ -1287,8 +1588,12 @@ def main() -> None:
         )
     if (args.partition_refinement_passes < 0 or args.partition_balance_slack < 0.0
             or args.partition_swap_candidates < 0 or args.repartition_every < 0
-            or args.repartition_candidates < 1):
+            or args.repartition_candidates < 1
+            or (args.initial_partition_seed is not None
+                and args.initial_partition_seed < 0)):
         raise ValueError("partition refinement controls must be nonnegative")
+    if args.resume_checkpoint is not None and args.repartition_every != 0:
+        raise ValueError("checkpoint resume currently requires fixed partitions")
     if not 0.0 <= args.momentum < 1.0 or args.workers < 0:
         raise ValueError("momentum must be in [0, 1) and workers nonnegative")
     if args.local_solver == "bae" and args.workers not in (0, 1):
@@ -1307,7 +1612,8 @@ def main() -> None:
     blocks = build_partitions(
         problem, args.partitions, args.partitioner,
         args.partition_refinement_passes, args.partition_balance_slack,
-        args.partition_swap_candidates)
+        args.partition_swap_candidates, args.initial_partition_seed,
+        args.device)
     partition_shared = shared_observations(problem, blocks)
     partition_shared_variables = shared_variables(problem, partition_shared)
     (cut_observations, duplication_factor, partition_load_ratio,
@@ -1323,15 +1629,43 @@ def main() -> None:
     objective_device = args.device if args.local_solver == "bae" else "cpu"
     evaluate_objective = ObjectiveEvaluator(
         problem, objective_device, args.objective_batch_size)
-    current_cost = evaluate_objective(state)
-    best_state = state.copy()
-    best_cost = current_cost
-    recent_costs = [current_cost]
-    failures = 0
-    previous_residual = None
-    previous_accepted = global_preconditioner.transform(state.vector())
-    acceleration_epoch = 0
-    repartition_generation = 0
+    if args.resume_checkpoint is None:
+        current_cost = evaluate_objective(state)
+        best_state = state.copy()
+        best_cost = current_cost
+        recent_costs = [current_cost]
+        failures = 0
+        previous_residual = None
+        previous_accepted = global_preconditioner.transform(state.vector())
+        acceleration_epoch = 0
+        repartition_generation = 0
+        start_epoch = 0
+    else:
+        progress = load_checkpoint(
+            args.resume_checkpoint, args, blocks, accelerator)
+        start_epoch = int(progress["completed_epochs"])
+        if start_epoch > args.epochs:
+            raise ValueError(
+                "requested epochs precede the checkpoint's completed epoch")
+        state = progress["state"]
+        current_cost = float(progress["current_cost"])
+        best_state = progress["best_state"]
+        best_cost = float(progress["best_cost"])
+        recent_costs = progress["recent_costs"]
+        failures = int(progress["failures"])
+        previous_residual = progress["previous_residual"]
+        previous_accepted = progress["previous_accepted"]
+        acceleration_epoch = int(progress["acceleration_epoch"])
+        repartition_generation = int(progress["repartition_generation"])
+        trajectory_epochs = 0
+        if args.output.exists():
+            with args.output.open(encoding="utf-8") as handle:
+                trajectory_epochs = sum(bool(line.strip()) for line in handle)
+        if trajectory_epochs != start_epoch:
+            raise ValueError(
+                f"trajectory has {trajectory_epochs} epochs; checkpoint has "
+                f"{start_epoch}")
+        print(f"Resuming {args.resume_checkpoint} at epoch {start_epoch}")
     started = time.monotonic()
 
     print(f"BAL: {len(problem.cameras)} cameras, {len(problem.points)} points, "
@@ -1353,7 +1687,7 @@ def main() -> None:
                  if args.gpu_state_cache else None)
     print(f"GPU state cache: {'enabled' if gpu_state is not None else 'disabled'}")
 
-    for epoch in range(args.epochs):
+    for epoch in range(start_epoch, args.epochs):
         repartitioned = False
         released_shared = 0
         newly_shared = 0
@@ -1522,6 +1856,7 @@ def main() -> None:
             "repartition_every": args.repartition_every,
             "repartition_candidates": args.repartition_candidates,
             "partition_seed": args.partition_seed,
+            "initial_partition_seed": args.initial_partition_seed,
             "repartition_generation": repartition_generation,
             "repartitioned": repartitioned,
             "partition_retained_shared_observations": retained_shared,
@@ -1561,6 +1896,14 @@ def main() -> None:
                 json.dump(live_record, handle, indent=2)
                 handle.write("\n")
             temporary_summary.replace(args.live_summary)
+
+    if args.checkpoint_output is not None:
+        save_checkpoint(
+            args.checkpoint_output, args, args.epochs, state, current_cost,
+            best_state, best_cost, recent_costs, failures, previous_residual,
+            previous_accepted, acceleration_epoch, repartition_generation,
+            accelerator, blocks)
+        print(f"checkpoint saved to {args.checkpoint_output}")
 
     state = best_state
     np.savez_compressed(

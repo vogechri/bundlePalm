@@ -1,0 +1,95 @@
+{
+  "epochs": 90,
+  "partitions": 2,
+  "results": [
+    {
+      "problem": 52,
+      "partitioner": "overlap",
+      "seed": 1,
+      "refinement_passes": 1,
+      "best_cost": 500007.4319304807,
+      "solver_seconds": 16.985505747994466,
+      "cut_observations": 128084,
+      "duplication_factor": 1.3689342201150434,
+      "max_mean_load_ratio": 1.0041682710617623,
+      "trajectory": "palm_runs/schur_partition_experiment/problem52/overlap/trajectory.jsonl"
+    },
+    {
+      "problem": 52,
+      "partitioner": "schur",
+      "seed": 1,
+      "refinement_passes": 1,
+      "best_cost": 508477.6628653775,
+      "solver_seconds": 15.539466321999498,
+      "cut_observations": 113972,
+      "duplication_factor": 1.3282858978088734,
+      "max_mean_load_ratio": 1.0114215702219476,
+      "trajectory": "palm_runs/schur_partition_experiment/problem52/schur/trajectory.jsonl"
+    },
+    {
+      "problem": 126,
+      "partitioner": "overlap",
+      "seed": 0,
+      "refinement_passes": 5,
+      "best_cost": 184977.66477018956,
+      "solver_seconds": 17.07651821499894,
+      "cut_observations": 44104,
+      "duplication_factor": 1.2973410279920177,
+      "max_mean_load_ratio": 1.027531803442255,
+      "trajectory": "palm_runs/schur_partition_experiment/problem126/overlap/trajectory.jsonl"
+    },
+    {
+      "problem": 126,
+      "partitioner": "schur",
+      "seed": 0,
+      "refinement_passes": 5,
+      "best_cost": 185237.65240430227,
+      "solver_seconds": 16.513198777007347,
+      "cut_observations": 34886,
+      "duplication_factor": 1.2351949733024108,
+      "max_mean_load_ratio": 1.0144421277849947,
+      "trajectory": "palm_runs/schur_partition_experiment/problem126/schur/trajectory.jsonl"
+    },
+    {
+      "problem": 356,
+      "partitioner": "overlap",
+      "seed": 1,
+      "refinement_passes": 5,
+      "best_cost": 1018750.2143619766,
+      "solver_seconds": 35.919589978999284,
+      "cut_observations": 413600,
+      "duplication_factor": 1.3294913914797477,
+      "max_mean_load_ratio": 1.0369316207153592,
+      "trajectory": "palm_runs/schur_partition_experiment/problem356/overlap/trajectory.jsonl"
+    },
+    {
+      "problem": 356,
+      "partitioner": "schur",
+      "seed": 1,
+      "refinement_passes": 5,
+      "best_cost": 1017535.4480846284,
+      "solver_seconds": 34.202493050004705,
+      "cut_observations": 385121,
+      "duplication_factor": 1.3068038060398257,
+      "max_mean_load_ratio": 1.0473357234168237,
+      "trajectory": "palm_runs/schur_partition_experiment/problem356/schur/trajectory.jsonl"
+    }
+  ],
+  "comparisons": [
+    {
+      "problem": 52,
+      "relative_cost_percent": 1.694021007286639,
+      "relative_solver_time_percent": -8.513372798250096
+    },
+    {
+      "problem": 126,
+      "relative_cost_percent": 0.14055082511486017,
+      "relative_solver_time_percent": -3.298795637958618
+    },
+    {
+      "problem": 356,
+      "relative_cost_percent": -0.11924083648993111,
+      "relative_solver_time_percent": -4.780391229405723
+    }
+  ]
+}

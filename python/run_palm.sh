@@ -256,7 +256,7 @@ run_problem http://grail.cs.washington.edu/projects/bal/data/dubrovnik/ problem-
 run_problem http://grail.cs.washington.edu/projects/bal/data/final/ problem-871-527480-pre.txt.bz2 871
 run_problem http://grail.cs.washington.edu/projects/bal/data/venice/ problem-1778-993923-pre.txt.bz2 1778
 run_problem http://grail.cs.washington.edu/projects/bal/data/venice/ problem-1490-935273-pre.txt.bz2 1490
-run_problem http://grail.cs.washington.edu/projects/bal/data/final/ problem-3068-310854-pre.txt.bz2 3068
+#run_problem http://grail.cs.washington.edu/projects/bal/data/final/ problem-3068-310854-pre.txt.bz2 3068
 
 if ((FAILURES > 0)); then
     echo "$FAILURES PALM problem(s) failed" >&2
