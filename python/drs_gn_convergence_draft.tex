@@ -1,0 +1,281 @@
+\section{Convergence of distributed DRS with inexact Gauss--Newton updates}
+\label{sec:drs-gn-convergence}
+
+This section separates the exact DRS statement, which follows from
+Themelis and Patrinos~\cite{themelis2020douglas}, from the finite
+Gauss--Newton (GN) implementation.  A finite number of GN iterations does
+not, in general, evaluate a proximal map.  Consequently, convergence of the
+implemented method requires an explicit inexactness condition in addition to
+the assumptions of exact DRS.
+
+\subsection{Reduced consensus formulation}
+
+Let $c_i$ denote the local copies of the cameras used by cluster $i$, and let
+$p_i$ contain the landmarks owned by that cluster.  Define
+\begin{equation}
+  f_i(c_i,p_i)
+  = \frac{1}{2}\sum_{(a,b)\in E_i}
+      \|r_{ab}(c_{i,a},p_{i,b})\|^2,
+  \qquad
+  \bar f_i(c_i) = \inf_{p_i} f_i(c_i,p_i).
+  \label{eq:reduced-cluster-objective}
+\end{equation}
+With $c=(c_1,\ldots,c_K)$ and the camera-consensus subspace
+\begin{equation}
+  \mathcal C=\{c: c_{i,a}=c_{j,a}
+  \text{ whenever camera }a\text{ occurs in clusters }i\text{ and }j\},
+\end{equation}
+the distributed problem is
+\begin{equation}
+  \min_c \;\Phi(c):=F(c)+G(c),
+  \qquad
+  F(c)=\sum_{i=1}^K \bar f_i(c_i),
+  \qquad
+  G(c)=\delta_{\mathcal C}(c).
+  \label{eq:reduced-consensus-problem}
+\end{equation}
+This reduction is valid when every observation and every landmark is assigned
+to exactly one owner.  Duplicating cameras only introduces the constraints in
+$\mathcal C$ and does not duplicate the objective.
+
+\paragraph{Standing assumptions.}
+The following conditions make the scope of the result explicit.
+\begin{enumerate}
+  \item[(A1)] The gauge is fixed.  The iterates remain in a compact admissible
+  set $\mathcal X$ on which all observed depths are bounded below by a positive
+  constant and the camera intrinsics are bounded.
+  \item[(A2)] For every $i$ and $c_i\in\mathcal X$, the minimizer
+  $p_i^\star(c_i)$ in~\eqref{eq:reduced-cluster-objective} is locally unique,
+  remains in a compact set, and satisfies a uniformly nonsingular second-order
+  sufficient condition.  Hence $p_i^\star$ is continuously differentiable and
+  $\bar f_i$ has an $L_i$-Lipschitz gradient on $\mathcal X$.
+  \item[(A3)] There is a globally $C^{1,1}$ function $F_{\rm ext}$ that agrees
+  with $F$ on a neighborhood of every point at which the algorithm evaluates
+  $F$, its gradient, or its proximal map.  The exact updates for
+  $F_{\rm ext}+G$ therefore coincide with those for~\eqref{eq:reduced-consensus-problem}.
+  The extended objective is proper, lower semicontinuous, level bounded, and
+  attains its minimum.
+  \item[(A4)] For the full-sequence conclusion, $F$ and $G$ are
+  semialgebraic, or more generally the Lyapunov function used below has the KL
+  property.  This holds for the rational BAL projection model restricted away
+  from zero depth, squared residuals, polynomial box/gauge constraints, and
+  the linear consensus set.  A non-semialgebraic robust loss requires a
+  separate definability or KL argument.
+\end{enumerate}
+Assumption (A2) is the substantive price of eliminating the landmarks.  If it
+cannot be justified, the theorem should instead be stated for the unreduced
+variables, or smoothness of the reduced functions should be assumed directly.
+Assumption (A3) is also stronger than boundedness of the observed iterates:
+Themelis and Patrinos assume a globally Lipschitz gradient.  A purely local BA
+argument without such an extension requires a localized DRS theorem and
+cannot be obtained by citing their Theorem~4.4 alone.
+
+\subsection{Exact fixed-metric DRS}
+
+Let $P\succ0$ be fixed and write $\|x\|_P^2=x^\top P x$.  The metric proximal
+map is
+\begin{equation}
+  \operatorname{prox}^{P}_{h}(s)
+  \in\arg\min_x\left\{h(x)+\frac12\|x-s\|_P^2\right\}.
+\end{equation}
+The exact relaxed DRS iteration is
+\begin{align}
+  u^k &\in \operatorname{prox}^{P}_{F}(s^k),
+  &v^k &\in \operatorname{prox}^{P}_{G}(2u^k-s^k),
+  &s^{k+1} &=s^k+\lambda(v^k-u^k).
+  \label{eq:metric-drs}
+\end{align}
+
+\begin{theorem}[Exact distributed DRS]
+\label{thm:exact-distributed-drs}
+Suppose (A1)--(A3) hold, $P$ is fixed, and the stepsize and relaxation satisfy
+the range in Themelis and Patrinos~\cite[Theorem~4.1]{themelis2020douglas}.
+Then the DRS envelope decreases sufficiently, the residuals are square
+summable,
+\begin{equation}
+  \sum_{k=0}^{\infty}\|u^k-v^k\|_P^2<\infty,
+  \qquad
+  \min_{0\le j\le k}\|u^j-v^j\|_P=o(k^{-1/2}),
+  \label{eq:exact-residual-rate}
+\end{equation}
+and every accumulation point of $(u^k)$ and $(v^k)$ is stationary for
+$\Phi$.  If (A4) also holds, both sequences converge to the same stationary
+point of~\eqref{eq:reduced-consensus-problem}.
+\end{theorem}
+
+\begin{proof}
+Set $y=P^{1/2}c$, $\widetilde F(y)=F_{\rm ext}(P^{-1/2}y)$, and
+$\widetilde G(y)=G(P^{-1/2}y)$.  Then
+\begin{equation}
+  P^{1/2}\operatorname{prox}^{P}_{h}(s)
+  =\operatorname{prox}_{h\circ P^{-1/2}}(P^{1/2}s),
+\end{equation}
+so~\eqref{eq:metric-drs} is Euclidean DRS applied to
+$\widetilde F+\widetilde G$.  Assumptions (A1)--(A3) imply Assumption I of
+Themelis and Patrinos: $\widetilde F$ is continuously differentiable with a
+Lipschitz gradient, $\widetilde G$ is proper and lower semicontinuous, and a
+minimizer exists.  Their Theorem~4.3 gives sufficient decrease,
+square-summability, the best-residual rate in~\eqref{eq:exact-residual-rate},
+and stationarity of every accumulation point.  Level boundedness gives
+boundedness of the iterates.  An invertible linear coordinate change preserves
+semialgebraicity; therefore (A4) permits direct application of their
+Theorem~4.4, which proves convergence of the entire primal sequence to one
+stationary point.  This concludes the exact version of the proof in
+Section~4.4.
+\end{proof}
+
+For the classical nonconvex choice $\lambda=1$, a simple conservative
+condition is $\gamma<1/(2L)$ in Euclidean coordinates.  Equivalently, for a
+scalar metric $P=\rho I$, one may take $\rho>2L$.  For a block metric, the
+condition must be imposed after the coordinate change; replacing it by the
+componentwise inequalities $\rho_i>2L_i$ is valid only when the transformed
+smoothness bound is indeed block separable.
+
+\subsection{Finite Gauss--Newton local solves}
+
+Let $\widehat u^k$ be the output of the finite local GN solve.  Its proximal
+optimality error is
+\begin{equation}
+  e^k=\nabla F(\widehat u^k)+P(\widehat u^k-s^k).
+  \label{eq:proximal-optimality-error}
+\end{equation}
+For the unreduced problem, the corresponding residual includes the landmark
+gradient and is evaluated before landmark elimination.  This is preferable in
+the implementation because it does not require differentiating
+$p_i^\star(c_i)$.
+
+\begin{assumption}[Relative inexactness]
+\label{ass:relative-inexactness}
+There is an $\eta\ge0$ such that every accepted local update satisfies
+\begin{equation}
+  \|e^k\|_{P^{-1}}
+  \le \eta\,\|\widehat u^k-\widehat v^k\|_P,
+  \label{eq:relative-inexactness}
+\end{equation}
+where $\widehat v^k=\operatorname{prox}^{P}_{G}(2\widehat u^k-s^k)$.
+Alternatively, it is sufficient to require
+$\sum_k\|e^k\|_{P^{-1}}<\infty$.
+\end{assumption}
+
+\begin{lemma}[Perturbed envelope decrease]
+\label{lem:perturbed-envelope}
+Let $a>0$ be the sufficient-decrease constant of exact DRS in the squared
+$P$-norm.  Suppose the inexact update obeys
+\begin{equation}
+  \mathcal E_P(s^{k+1})
+  \le \mathcal E_P(s^k)
+     -a\|\widehat u^k-\widehat v^k\|_P^2
+     +b\|e^k\|_{P^{-1}}\,
+       \|\widehat u^k-\widehat v^k\|_P
+     +d\|e^k\|_{P^{-1}}^2
+  \label{eq:perturbed-envelope-bound}
+\end{equation}
+for constants $b,d\ge0$.  If Assumption~\ref{ass:relative-inexactness} holds
+with
+\begin{equation}
+  \widehat a:=a-b\eta-d\eta^2>0,
+  \label{eq:accuracy-threshold}
+\end{equation}
+then
+\begin{equation}
+  \mathcal E_P(s^{k+1})
+  \le \mathcal E_P(s^k)
+     -\widehat a\|\widehat u^k-\widehat v^k\|_P^2.
+  \label{eq:certified-inexact-decrease}
+\end{equation}
+\end{lemma}
+
+\begin{proof}
+Insert~\eqref{eq:relative-inexactness} into
+\eqref{eq:perturbed-envelope-bound} and collect the coefficient of
+$\|\widehat u^k-\widehat v^k\|_P^2$.
+\end{proof}
+
+The role of Proposition~9 in the original analysis is now precise: its GN
+model bounds should be used to establish
+\eqref{eq:perturbed-envelope-bound} and to give a computable lower bound on
+$\rho_i$ for which~\eqref{eq:accuracy-threshold} holds.  A decrease bound for
+the augmented Lagrangian alone does not prove
+\eqref{eq:relative-inexactness}, nor does it make a finite GN update an exact
+proximal point.
+
+\begin{theorem}[Conditional convergence with finite GN]
+\label{thm:inexact-drs-gn}
+Suppose (A1)--(A3), Assumption~\ref{ass:relative-inexactness}, and
+Lemma~\ref{lem:perturbed-envelope} hold for a fixed $P$.  Suppose also that
+the stationarity residual is bounded by
+\begin{equation}
+  \operatorname{dist}(0,\widehat\partial\Phi(\widehat v^k))
+  \le q\|\widehat u^k-\widehat v^k\|_P
+      +r\|e^k\|_{P^{-1}}
+  \label{eq:stationarity-residual-bound}
+\end{equation}
+for constants $q,r$.  Then
+\begin{equation}
+  \sum_{k=0}^{\infty}
+    \|\widehat u^k-\widehat v^k\|_P^2<\infty,
+  \qquad
+  e^k\to0,
+\end{equation}
+and every accumulation point is stationary for $\Phi$.  If (A4) holds and the
+standard KL relative-error bound is satisfied, the entire primal sequence
+converges to one stationary point.
+\end{theorem}
+
+\begin{proof}
+The envelope is lower bounded under (A1)--(A3).  Telescoping
+\eqref{eq:certified-inexact-decrease} proves square-summability of the DRS
+residual, hence its convergence to zero.  Relative inexactness gives
+$e^k\to0$, and~\eqref{eq:stationarity-residual-bound} makes the limiting
+stationarity residual vanish.  Boundedness supplies accumulation points and
+outer semicontinuity of the limiting subdifferential proves their
+stationarity.  Under (A4), the usual uniformized KL argument applied to the
+perturbed envelope and its relative-error bound gives finite length and
+full-sequence convergence.
+\end{proof}
+
+The final KL sentence is a new inexact-DRS argument; it is not a direct
+application of Theorem~4.4 of Themelis and Patrinos.  Theorem~4.4 directly
+concludes only Theorem~\ref{thm:exact-distributed-drs}.  This distinction
+should remain explicit in the paper.
+
+\subsection{Safeguarded acceleration and changing metrics}
+
+An accelerated state $s_{\rm acc}^{k+1}$ is treated as a proposal.  Accept it
+only when the same metric, objective, and proximal residual used by the local
+step certify
+\begin{equation}
+  \mathcal E_P(s_{\rm acc}^{k+1})
+  \le \mathcal E_P(s^k)
+     -\widehat a\|\widehat u^k-\widehat v^k\|_P^2.
+  \label{eq:acceleration-safeguard}
+\end{equation}
+Otherwise execute the certified unaccelerated update.  Since every accepted
+or fallback step obeys the same decrease inequality, the telescoping and
+stationarity proof of Theorem~\ref{thm:inexact-drs-gn} is unchanged.  This
+covers Nesterov, Anderson, or quasi-Newton proposals without claiming that an
+unsafeguarded accelerated map is itself DRS.
+
+The preceding theorems assume a fixed metric.  They apply unchanged when a
+fixed full block metric is viewed as a linear coordinate transformation.  For
+iteration-dependent metrics $P_k$, one additionally needs uniform spectral
+bounds
+\begin{equation}
+  0<mI\preceq P_k\preceq MI
+\end{equation}
+and a controlled variation condition such as
+\begin{equation}
+  P_{k+1}\preceq(1+\xi_k)P_k,
+  \qquad \sum_k\xi_k<\infty.
+\end{equation}
+Without such a condition, Theorems~\ref{thm:exact-distributed-drs} and
+\ref{thm:inexact-drs-gn} justify the frozen-metric variant, but not arbitrary
+per-iteration updates of the $9\times9$ camera blocks.
+
+\paragraph{Quantities to report.}
+The convergence claim can be audited experimentally by logging
+$\|s^{k+1}-s^k\|_P$, $\|\widehat u^k-\widehat v^k\|_P$,
+$\|e^k\|_{P^{-1}}$, their ratio in~\eqref{eq:relative-inexactness}, the merit
+decrease in~\eqref{eq:certified-inexact-decrease}, and the metric eigenvalue
+and variation bounds.  Consensus error alone is not a fixed-point or
+stationarity certificate.
