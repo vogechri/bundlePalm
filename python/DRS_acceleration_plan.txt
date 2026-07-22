@@ -1,0 +1,306 @@
+DRS ACCELERATION PLAN
+=====================
+
+Parallelism model
+-----------------
+
+The current distributed DRS method is parallel at the local-prox level. The
+coordinator sends one request per landmark cluster before collecting cluster
+results out of order. Consequently, one prox round costs approximately
+
+  max_i(local solve time_i) + dispatch + communication + consensus.
+
+It does not cost the sum of all cluster solve times unless workers are
+serialized or oversubscribed. This is a major structural advantage over the
+current Gauss--Seidel PALM implementation.
+
+MegBA is also parallel. It partitions observation edges, computes local
+Jacobian/normal-equation contributions independently, and combines them with
+global reductions. Its Schur coupling application uses a parallel reduction
+for W^T x followed by parallel local W products and another reduction. The
+current schur_megba_edge_nesterov.py program simulates those shards
+sequentially on one GPU, but the algebra is designed for parallel workers or
+GPUs. MegBA has less nonlinear synchronization than DRS because its shards
+jointly solve one global linearized LM system, whereas DRS repeatedly solves
+independent nonlinear proximal subproblems and enforces camera consensus.
+
+Primary objective
+-----------------
+
+Drive a normal accepted DRS outer iteration toward:
+
+  one parallel prox round
+  + one compact all-reduce-style camera consensus
+  + no separate distributed cost round.
+
+The present accelerated implementation may execute two complete prox rounds
+per outer iteration for line-search candidates. Each candidate also launches a
+separate distributed cost phase for f(v). Rejections and best-state checks add
+more global barriers. Reducing synchronization rounds should precede low-level
+serialization optimization.
+
+Stage 0: establish an end-to-end timing baseline
+-----------------------------------------------
+
+Add structured JSON timing to the coordinator and every worker.
+
+Coordinator fields per phase and outer iteration:
+
+* request construction and protobuf serialization;
+* sequential REQ/ACK dispatch time;
+* time to first worker result and time to final worker result;
+* per-cluster result arrival latency;
+* protobuf parsing and NumPy materialization;
+* metric/consensus assembly;
+* DRE and formal residual evaluation;
+* distributed f(v) cost round;
+* acceleration proposal and safeguard;
+* best-state/revert traffic;
+* total prox rounds and cost rounds.
+
+Worker fields per request:
+
+* queue delay;
+* camera/reference update;
+* residual/Jacobian evaluation;
+* Jp^T Jp, Jl^T Jl, and W assembly;
+* block metric construction and inversion;
+* Schur/Nesterov or Ceres solve;
+* back-substitution and cost evaluation;
+* return-proto construction, serialization, and send;
+* worker CPU thread count and peak memory.
+
+Report p50, p90, maximum, and coefficient of variation across clusters. The
+maximum controls DRS wall time; averages alone hide stragglers.
+
+Stage 1: remove redundant global rounds
+---------------------------------------
+
+1. Return every scalar needed for the merit test with the prox result. A worker
+   already evaluates local residual costs while solving; avoid immediately
+   requesting the same cluster data again through primal_cost_push_pull.
+2. Derive the global f(v) safeguard from local sufficient statistics when
+   possible. Because v is a new consensus camera state, workers may need to
+   evaluate it, but this should be fused with the next prox request or returned
+   from a batched candidate evaluation rather than requiring a separate
+   request/ACK/result barrier.
+3. Remove the debug-only post-reset cost verification from production runs.
+   Retain it behind a validation flag.
+4. Replace the fixed two-candidate line search with propose-once/fallback:
+   evaluate an accelerated proposal only when a cheap residual/model test says
+   it is promising; otherwise execute the certified plain DRS map.
+5. Cache the already computed plain-map result as the fallback. Never solve
+   the same plain proximal subproblems again after rejecting acceleration.
+6. Track prox rounds and cost rounds explicitly. The target is one prox round
+   and zero standalone cost rounds for the common accepted path.
+
+This stage has the largest likely payoff. If the present method averages 1.5
+prox rounds and one cost round per accepted outer step, reducing it to one prox
+round can plausibly save 30--50% before any worker optimization.
+
+Stage 2: balance the critical path
+----------------------------------
+
+1. Record solve time, observations, cameras, landmarks, Schur nonzeros, Ceres
+   iterations, and rejection count for every cluster.
+2. Extend clustering/refinement to minimize predicted maximum runtime, not only
+   residual count and camera overlap.
+3. Split persistent stragglers and merge very small clusters while preserving
+   unique landmark ownership.
+4. Penalize cameras that create expensive dense local Schur coupling, rather
+   than treating all observations as equal work.
+5. Rebalance only when the predicted reduction in maximum worker time exceeds
+   migration/setup cost. Keep the partition fixed for the convergence theorem,
+   or treat repartitioning as a finite setup phase before the certified run.
+6. Compare 8, 16, 30, and 60 clusters under fixed total CPU cores and memory.
+   More clusters improve balance only until communication, duplicated cameras,
+   and thread oversubscription dominate.
+
+The correct performance metric is max worker latency per prox round. A 2x
+speedup of average workers gives no gain when one cluster remains unchanged.
+
+Stage 3: fix CPU-thread and worker scheduling
+---------------------------------------------
+
+1. Replace the compile-time _num_threads_machine_=31 policy with runtime CPU
+   topology and affinity settings.
+2. Avoid nested oversubscription among detached worker threads, Ceres, Eigen,
+   and OpenMP. Enforce
+
+     active clusters * threads per cluster <= allocated physical cores.
+
+3. Pin cluster workers to core sets and keep their memory NUMA-local.
+4. Use one persistent worker task per cluster instead of creating a detached
+   std::thread for every request.
+5. Add an explicit per-cluster queue and reject overlapping phases for the same
+   CeresProgram. The current detached-thread model relies on the coordinator's
+   barriers and is fragile if transport becomes more asynchronous.
+6. Tune Ceres ITERATIVE_SCHUR iteration limits, tolerances, and preconditioner
+   from measured outer progress. One fixed inner iteration is inexpensive but
+   may increase the number of DRS rounds; optimize time to an outer residual,
+   not time per local solve alone.
+
+Stage 4: persistent worker algebra and warm starts
+-------------------------------------------------
+
+1. Keep each cluster's Ceres problem, parameter buffers, residual ordering,
+   elimination ordering, and sparse topology persistent.
+2. Reuse symbolic Schur structure, scratch buffers, and preconditioner storage.
+3. Warm-start cameras, landmarks, trust-region radius, and iterative linear
+   solver state when the proximal reference changes moderately.
+4. Update only numeric Jacobian/Hessian values after relinearization.
+5. Profile UpdateStepSize and UpdateStepSizeAndSolve separately. They currently
+   form Jacobians and normal blocks around every prox update and may duplicate
+   Ceres work.
+6. Investigate computing the full 9x9 camera metric as part of the same
+   linearization used for the local GN step rather than through an additional
+   Jacobian path.
+7. Use a forcing sequence for local solve accuracy. Allow cheap inexact solves
+   early, then tighten until the measured proximal optimality error satisfies
+   the relative inexactness condition in drs_gn_convergence_draft.tex.
+
+Stage 5: replace the serialized coordinator protocol
+----------------------------------------------------
+
+The current coordinator sends all cluster requests through one ZeroMQ REQ
+socket and waits for an immediate ACK after each send. Solves overlap after
+dispatch, but dispatch itself is serialized.
+
+1. Replace REQ/ACK dispatch with ROUTER/DEALER, PUSH/PULL, or one persistent
+   socket per worker so all requests can be queued without per-message ACK
+   round trips.
+2. Keep run_id, phase_id, and cluster_id correlation and add explicit status
+   and timing fields to every reply.
+3. Send cluster topology, observations, and ownership only once. Subsequent
+   messages should contain only changed camera/reference values, penalty data,
+   and control flags.
+4. Replace repeated-field element insertion with packed contiguous arrays or a
+   zero-copy/shared-memory transport for local workers.
+5. Avoid converting repeated protobuf fields through Python lists. Decode into
+   preallocated contiguous NumPy buffers.
+6. For same-host workers, benchmark shared memory plus small control messages.
+   For multi-node workers, benchmark compressed contiguous buffers and overlap
+   serialization/network transfer with local preparation.
+7. Do not quantize cameras or metrics until an accuracy study establishes the
+   effect on consensus, DRE decrease, and fixed-point residuals.
+
+The return message currently contains all local cameras, all landmarks, and 81
+step-size values per local camera on every prox round. Landmark ownership is
+unique, so accepted landmarks can remain resident on their worker unless a
+checkpoint or repartition requires them. This can substantially reduce result
+traffic. Full metric blocks should also remain distributed when consensus is
+implemented as a reduction.
+
+Stage 6: distributed consensus as reductions
+--------------------------------------------
+
+1. Precompute, for every shared camera, the list of owning clusters and local
+   offsets.
+2. Have workers contribute only the local 9-vector and 9x9 weighted terms
+   required for consensus.
+3. Compute
+
+     sum_i P_i and sum_i P_i(2u_i-s_i)
+
+   with an all-reduce or hierarchical reduce-scatter/all-gather, then solve the
+   independent 9x9 camera systems in parallel.
+4. Return each worker only the consensus cameras it uses, not the complete
+   global camera array.
+5. Keep full metric blocks distributed; the Python coordinator should not
+   reconstruct large SciPy sparse matrices merely to perform blockwise 9x9
+   operations.
+6. Fuse metric residual norms and consensus diagnostics into the same
+   reductions.
+
+For one host, a C++ coordinator with shared buffers may be simplest. For
+multiple GPUs/nodes, NCCL/MPI collectives are the natural implementation.
+
+Stage 7: GPU local proximal workers
+-----------------------------------
+
+1. Port one cluster worker to the validated BAE/Warp Schur implementation.
+2. Preserve landmark ownership and camera consensus exactly; only replace the
+   local proximal solver.
+3. Keep cluster data, Jacobian topology, normal blocks, and local state
+   persistent on one GPU.
+4. Assign multiple clusters per GPU and schedule them on separate streams only
+   if memory bandwidth and sparse kernels benefit. Concurrent clusters that
+   saturate one GPU can be slower than sequential execution.
+5. On multiple GPUs, overlap local proximal solves and perform camera consensus
+   with NCCL reductions.
+6. Compare CPU-Ceres and GPU-BAE workers using the same proximal optimality
+   residual, outer fixed-point residual, and objective definition.
+
+GPU workers are likely the largest long-term speed opportunity, but they should
+follow round reduction and load balancing. Accelerating every worker does not
+help if redundant line-search rounds or one pathological cluster dominate.
+
+Stage 8: algorithmic acceleration under a safeguard
+----------------------------------------------------
+
+1. Establish plain fixed-metric DRS as the certified fallback.
+2. Treat Nesterov, Anderson, or L-BFGS states only as proposals.
+3. Use the same metric and local proximal residual in the worker update, DRE
+   merit, and acceptance test.
+4. Accept a proposal only when it satisfies the certified sufficient-decrease
+   inequality. Otherwise use the already computed plain result.
+5. Prefer accelerators that need one new prox evaluation per outer iteration.
+   Multi-candidate line searches are expensive in a distributed setting.
+6. Adapt the penalty only finitely or through the Themelis adaptive rule. Freeze
+   it for the final certified phase unless the variable-metric assumptions are
+   verified.
+7. Stop on the formal metric fixed-point residual and local proximal error,
+   not a fixed iteration count or consensus error alone.
+
+Expected speedup envelope
+-------------------------
+
+No reliable DRS speedup number can be given from current problem-3068 logs
+because they lack phase and worker latency timing. The following are planning
+ranges to test, not reported results:
+
+* eliminating redundant prox/cost rounds: 1.3x--2.0x;
+* critical-path balancing and thread control: 1.2x--2.0x;
+* persistent algebra and transport cleanup: 1.2x--1.8x;
+* GPU local workers: hardware/problem dependent, plausibly 2x--10x for local
+  solves, but less end-to-end after consensus and synchronization;
+* combined end-to-end gain: potentially 3x--8x if local solves dominate and
+  the stages attack independent costs. These factors must not simply be
+  multiplied without new profiles because their savings overlap.
+
+Execution order
+---------------
+
+1. Add timing and round counters.
+2. Run a plain-DRS and accelerated-DRS baseline on problems 52, 356, and 3068.
+3. Remove redundant cost and line-search rounds while preserving outputs.
+4. Tune clustering for maximum measured worker latency.
+5. Fix thread affinity and persistent worker scheduling.
+6. Move consensus to distributed block reductions and shrink messages.
+7. Optimize or replace the local solver, beginning with one GPU worker.
+8. Re-run the complete objective/time/residual benchmark after every stage.
+
+Acceptance criteria
+-------------------
+
+Every performance result must report:
+
+* objective versus wall time;
+* fixed-point and consensus residual versus wall time;
+* local proximal optimality error versus wall time;
+* prox rounds, cost rounds, and rejected proposals;
+* per-cluster p50/p90/max solve and communication latency;
+* coordinator consensus/merit time;
+* bytes sent and received per outer iteration;
+* CPU cores, worker threads, GPU count, and peak memory;
+* final objective and residual under matched time and matched-work budgets.
+
+Correctness gates:
+
+* Exact transport/consensus changes must reproduce the reference plain DRS map
+  within floating-point tolerance.
+* Inexact local-solve changes must satisfy the logged relative proximal-error
+  condition.
+* Acceleration must always retain a certified plain-map fallback.
+* Asynchronous stale updates are a separate algorithm and require a separate
+  convergence argument; they are not part of this initial acceleration plan.

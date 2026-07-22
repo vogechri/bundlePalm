@@ -1,0 +1,173 @@
+PALM ACCELERATION PLAN
+======================
+
+Baseline and target
+-------------------
+
+Problem: final/problem-3068-310854-pre
+Configuration: 3 sequential overlap blocks, BAE CUDA local solver,
+GPU state cache, Nesterov acceleration, block over-relaxation 1.2.
+
+Measured milestones:
+
+* MegBA-Nesterov reaches 3,294,490.74 at iteration 10 in 5.30 s.
+* PALM first passes that objective at epoch 43 with 3,293,873.80 in 24.14 s.
+* PALM reaches its best value 3,222,247.68 at epoch 86 in 46.66 s.
+* PALM therefore takes 4.55x longer to reach comparable quality, but reaches
+  an objective 2.19% below the 20-iteration MegBA result.
+
+The measured PALM epoch model is approximately
+
+  t_epoch = 0.238 + 0.000434 * inner_iterations
+                    + 0.0593 * local_attempts seconds.
+
+Normal epochs with three attempts and 30--60 inner iterations take about
+0.38--0.45 s. This establishes a substantial orchestration and data-movement
+floor independent of the Nesterov iteration count.
+
+Expected gains
+--------------
+
+* Straightforward GPU cleanup: 1.4x--1.8x.
+* Persistent-device PALM: 1.8x--2.5x.
+* Aggressive workspace reuse, fusion, and CUDA graphs: 2.5x--3.2x.
+* Closing the full 4.55x gap by implementation work alone is unlikely because
+  PALM still performs three sequential overlapping block linearizations.
+
+Projected persistent-device times are 10--14 s to reach about 3.294M and
+19--27 s to reach about 3.222M. An aggressive implementation may reduce these
+to roughly 7--10 s and 14--19 s, respectively.
+
+Stage 0: establish profiles
+---------------------------
+
+1. Enable BUNDLE_PALM_PROFILE_LOCAL=1 on representative early, normal, and
+   rejection-heavy epochs.
+2. Aggregate model update, residual, Jacobian, sparse conversion, U/V/W
+   assembly, damping/inversion, inner solve, back-substitution, and acceptance
+   timings.
+3. Add separate timers for full-objective safeguards, CPU/GPU transfers,
+   block scatter, acceleration, and Python orchestration.
+4. Record both torch.cuda.max_memory_allocated() and peak process memory from
+   nvidia-smi/NVML.
+5. Preserve the current trajectory as the numerical reference. Every stage
+   must reproduce accepted costs and block decisions within floating-point
+   tolerance before speed claims are accepted.
+
+Stage 1: remove unnecessary transfers
+-------------------------------------
+
+1. Stop returning the full local residual from solve_local_step. The BAE PALM
+   acceptance path uses scalar costs, predicted reduction, penalties, deltas,
+   and iteration count; it does not need a CPU residual vector.
+2. Avoid copying rejected local deltas to CPU. Return scalar acceptance data
+   first, or perform the accept/reject decision on the device.
+3. Keep accepted deltas as torch tensors and scatter them directly into the
+   CUDA state mirror.
+4. Copy a final state to CPU only for checkpoints, output, or code paths that
+   genuinely require NumPy.
+5. Make the objective evaluator consume device-resident state instead of
+   rebuilding camera and landmark tensors from NumPy for each trial.
+
+Stage 2: make the CUDA state authoritative
+------------------------------------------
+
+1. Store current, nominal, candidate, best, previous-accepted, acceleration
+   history, and temporary trial states on the GPU.
+2. Give every block permanent device-resident camera, landmark, observation,
+   ownership, and scatter indices.
+3. Gather each block directly from the authoritative global state.
+4. Apply accepted block updates directly on the device. Preserve a compact
+   change log or snapshot buffer for rejection/backtracking.
+5. Implement Nesterov and safeguard interpolation with torch operations on
+   device-resident vectors.
+6. Transfer only scalar costs, status, and logging fields to the coordinator.
+
+Stage 3: persistent local solver workspaces
+-------------------------------------------
+
+1. Cache sparse topology and allocate U, V, W, transposes, reduced right-hand
+   sides, scratch vectors, solutions, and back-substitution buffers once per
+   block.
+2. Update sparse values after relinearization instead of rebuilding and
+   converting BSR containers on every local attempt.
+3. Reuse damping and block-inverse buffers.
+4. Keep PyTorch/Warp views stable and avoid repeated torchbsr2wp/wp2torchbsr
+   conversions where the topology and ownership remain fixed.
+5. Audit every wp.synchronize(), tensor .item(), and CPU conversion. Retain a
+   synchronization only when the host immediately needs the result.
+
+Stage 4: reduce safeguard cost
+------------------------------
+
+1. Evaluate nominal and accelerated candidates from persistent GPU buffers.
+2. Batch objective evaluation for all backtracking weights when memory allows,
+   or evaluate successive candidates without rebuilding state tensors.
+3. Investigate an incremental objective update using only observations
+   incident to changed cameras/landmarks. Validate it against a periodic full
+   objective before using it for acceptance.
+4. Avoid evaluating an accelerated candidate when it is identical to the
+   nominal state or violates a cheap step-norm/model bound.
+5. Keep the final acceptance criterion numerically identical until a separate
+   experiment establishes that a cheaper safeguard preserves solution quality.
+
+Stage 5: launch and kernel optimization
+---------------------------------------
+
+1. Capture stable per-block residual/Jacobian/Schur/inner-solve sequences with
+   CUDA graphs if PyTorch/Warp interoperability permits stable addresses.
+2. Fuse small vector operations in the Nesterov loop and check convergence at
+   a moderate interval to avoid host synchronization.
+3. Consider a persistent inner solver kernel only after profiling shows launch
+   overhead dominates sparse matrix-vector products.
+4. Tune objective batch size and block ordering using measured runtime, not GPU
+   utilization alone.
+
+Stage 6: algorithmic reductions in epochs
+-----------------------------------------
+
+Implementation acceleration alone will probably not reach MegBA's 5.30 s
+milestone. Reducing the required PALM epochs is therefore equally important.
+
+1. Compare over-relaxation factors around 1.2 with a cheap device safeguard.
+2. Test adaptive block ordering based on predicted gain per measured runtime.
+3. Warm-start damping and inner Nesterov state across neighboring epochs when
+   the block model changes moderately.
+4. Use a forcing sequence for inner accuracy: loose solves early, tighter
+   solves when outer progress or model quality demands them.
+5. Test whether a small number of initial global MegBA steps followed by PALM
+   reaches PALM's lower basin faster. Report this as a hybrid method rather
+   than attributing the result to PALM alone.
+
+Structural limitation and paper position
+----------------------------------------
+
+PALM updates overlapping blocks sequentially, so later blocks see earlier
+accepted updates. This dependency is part of its Gauss--Seidel behavior and
+prevents straightforward parallel execution without changing the algorithm.
+It also processes observations with a measured duplication factor of 1.483 on
+problem 3068. MegBA instead partitions observation edges and forms one exact
+global linearized system through parallel reductions.
+
+The realistic goal is therefore not to promise that PALM beats MegBA whenever
+the global problem fits. The goal is to make PALM competitive while retaining
+bounded memory, sequential/streaming operation, changing-graph support, and its
+observed ability to reach a lower objective basin on selected problems.
+
+Acceptance criteria
+-------------------
+
+Each stage should report:
+
+* objective versus wall time;
+* objective versus residual/Jacobian evaluations;
+* time to a matched objective threshold;
+* final/best objective under a matched time budget;
+* median and tail epoch latency;
+* transfer bytes and synchronization count;
+* PyTorch peak allocation and peak process GPU memory;
+* agreement of accepted states, costs, and block decisions with the reference.
+
+Stop after each stage and re-profile. Do not proceed to fusion or CUDA graphs
+until the measurements show that state transfer and sparse-workspace reuse are
+no longer the dominant removable costs.
