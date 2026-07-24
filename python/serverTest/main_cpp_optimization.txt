@@ -190,7 +190,9 @@ shows that it becomes significant after larger changes.
 11. Reduce weighted autodiff from 105 variables to 12
 ------------------------------------------------------
 
-SnavelyReprojectionErrorWeighted is currently declared with parameter block
+Status: implemented and retained.
+
+SnavelyReprojectionErrorWeighted was declared with parameter block
 dimensions:
 
   9 + 3 + 9 + 3 + 81 = 105
@@ -207,12 +209,23 @@ expose only camera and landmark to AutoDiffCostFunction:
 The referenced arrays remain at stable addresses after ResetProgram;
 preconditioning updates overwrite their values in place. This should reduce
 the Jet dimension and arithmetic performed during every Jacobian evaluation.
-Benchmark this independently. It is the strongest next candidate.
+
+Focused 30-iteration checks reproduced the established trajectories exactly:
+
+  problem 52:  9.78 s, bestCost 485348, bestIt 29
+  problem 744: 94.82 s, bestCost 3093408, bestIt 26
+
+These were approximately twice as fast as the previous checks. A partial
+full-suite run recorded 13 additional 90-iteration problems before it was
+stopped intentionally because quality remained identical and the speedup was
+already decisive. Keep this optimization.
 
 12. Fuse CRS extraction and normal-equation assembly
 -----------------------------------------------------
 
-The current path performs the following separate operations:
+Status: implemented and retained.
+
+The previous path performed the following separate operations:
 
   1. Ceres produces a CRS Jacobian.
   2. GetJacobianAndResidual reconstructs sparse Jp and Jl.
@@ -238,8 +251,24 @@ The predicted quadratic cost can then be evaluated without Jp and Jl:
 This removes sparse Jp/Jl construction and several downstream sparse products,
 rather than optimizing only U and V as item 10 did.
 
+The fused path now consumes each Ceres CRS row directly to build U, V, W, bp,
+and bl. The trust-region predicted cost uses the equivalent normal-equation
+quadratic, so Jp and Jl are no longer needed by the active local solve.
+
+Focused 30-iteration checks reproduced the established trajectories exactly:
+
+  problem 52:  9.58 s versus 9.78 s (2.1 percent faster)
+  problem 744: 94.46 s versus 94.82 s (0.4 percent faster)
+
+For problem 744, excluding partitioning, solve time improved from about 78.27 s
+to 77.81 s (0.6 percent). The gain is modest but consistent, and the fused
+representation is the required foundation for item 13's block-edge Schur
+operator. Keep this optimization.
+
 13. Use a block-edge Schur operator
 -----------------------------------
+
+Status: implemented and retained after expanded validation.
 
 W has a natural 9x3 camera-landmark block structure. Store it as a list of
 camera-landmark edges and implement blockwise products for:
@@ -252,6 +281,36 @@ camera-landmark edges and implement blockwise products for:
 These products execute in every Nesterov iteration, up to 100 times per solve.
 A block-edge operator avoids repeated generic Eigen sparse traversal and fits
 naturally with the fused assembly in item 12.
+
+Three block-edge traversal variants were implemented and benchmarked. All
+reproduced the stored problem 52 and problem 744 endpoints, but performance
+depended strongly on the traversal and problem.
+
+The best problem 52 run improved from 9.58 s with sparse W to 8.05 s, about
+16 percent. On problem 744, however, fused sparse W took 94.46 s overall and
+77.81 s excluding partitioning. The block-edge variants took:
+
+  camera-row traversal: 100.13 s overall, 83.48 s solve-only
+  scalar edge traversal: 98.49 s overall, 81.80 s solve-only
+  fixed-size Eigen edge traversal: 99.45 s overall, 82.38 s solve-only
+
+The initial two-problem result was not representative enough to reject the
+optimization. Additional matching 90-iteration comparisons produced exact
+bestCost30, bestCost60, final cost, and best iteration values:
+
+  problem 394:  solve-only 42.26 s -> 36.26 s (14.2 percent faster)
+  problem 1064: solve-only 44.01 s -> 36.22 s (17.7 percent faster)
+
+Across problems 52, 394, 744, and 1064, the scalar edge traversal wins three
+of four comparisons. Its geometric-mean speedup is 10.5 percent overall and
+11.4 percent solve-only. Aggregate elapsed time improves 5.6 percent and
+aggregate solve-only time improves 6.5 percent.
+
+Retain the scalar edge traversal. Problem 744 remains an important exception:
+it regresses 4.3 percent overall and 5.1 percent solve-only. A future layout
+should target that case with contiguous structure-of-arrays storage or
+landmark-oriented adjacency rather than the slower camera-row or fixed-size
+Eigen traversals tested here.
 
 14. Avoid unused residual output in GetCost
 -------------------------------------------
@@ -348,9 +407,9 @@ Revised implementation order
 1. Add scoped timing for Ceres Jacobian evaluation, assembly, Nesterov,
    nonlinear GetCost, protobuf construction, and serialization.
 2. Remove unused residual output from GetCost.
-3. Reduce weighted autodiff from 105 variables to 12 and benchmark it.
-4. Fuse CRS extraction and normal-equation assembly.
-5. Replace sparse W, U, and V operations with block operators.
+3. [done, retained] Reduce weighted autodiff from 105 variables to 12.
+4. [done, retained] Fuse CRS extraction and normal-equation assembly.
+5. [done, retained for W] Replace sparse W operations with a block-edge operator.
 6. Reuse evaluation workspaces.
 7. Reduce protobuf and thread-management overhead.
 8. Benchmark -march=native and link-time optimization.
