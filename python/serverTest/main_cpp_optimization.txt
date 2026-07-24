@@ -104,6 +104,9 @@ Eigen::setNbThreads receives the unclamped integer division. If numClusters is
 greater than 31, Eigen receives zero and may restore its default thread count.
 Pass threads_per_cluster to both Eigen and Ceres.
 
+Fixed 2026-07-24: Eigen and Ceres now both receive the clamped
+threads_per_cluster value.
+
 8. Cache sparse Jacobian structure
 
 GetJacobianAndResidual reconstructs the Jp and Jl sparse structures on every

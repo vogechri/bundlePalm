@@ -4,7 +4,6 @@
 // synchronization before allowing multiple clients or overlapping phases.
 
 // #define _ceres_num_threads_ 1
-// #define __unweighted_system__
 #define _num_threads_machine_ 31
 // #define _const_diag_
 // #define __ceresVersion__
@@ -1411,7 +1410,7 @@ private:
       // options.linear_solver_type = ceres::DENSE_QR; // SHIT
       // options.max_linear_solver_iterations = 100;
       const int threads_per_cluster = std::max(1, _num_threads_machine_ / numClusters);
-      Eigen::setNbThreads(_num_threads_machine_ / numClusters);
+      Eigen::setNbThreads(threads_per_cluster);
       options.num_threads = threads_per_cluster; // _ceres_num_threads_; // single cpu -> still slow / bottleneck.
       // options.preconditioner_type = ceres::IDENTITY; // Sucks if CGNR of course. 
       // options.preconditioner_type = ceres::JACOBI; // CGNR -> jacobi anyway.
