@@ -471,6 +471,42 @@ void blockMult(const std::vector<double>& blockMat, const Eigen::VectorXd& vec, 
   }
 }
 
+template<int N>
+SparseMatrix<double, RowMajor> BlockDiagonalJtJ(
+    const SparseMatrix<double, RowMajor>& jacobian, int num_blocks) {
+  std::vector<double> blocks(num_blocks * N * N, 0.);
+  for (int row = 0; row < jacobian.rows(); ++row) {
+    const int begin = jacobian.outerIndexPtr()[row];
+    const int end = jacobian.outerIndexPtr()[row + 1];
+    THROW_IF(begin == end);
+    const int block = jacobian.innerIndexPtr()[begin] / N;
+    THROW_IF(block < 0 || block >= num_blocks);
+    for (int left = begin; left < end; ++left) {
+      THROW_IF(jacobian.innerIndexPtr()[left] / N != block);
+      const int block_row = jacobian.innerIndexPtr()[left] % N;
+      const double left_value = jacobian.valuePtr()[left];
+      for (int right = begin; right < end; ++right) {
+        const int block_col = jacobian.innerIndexPtr()[right] % N;
+        blocks[(block * N + block_row) * N + block_col] +=
+            left_value * jacobian.valuePtr()[right];
+      }
+    }
+  }
+
+  SparseMatrix<double, RowMajor> result(N * num_blocks, N * num_blocks);
+  result.reserve(VectorXi::Constant(N * num_blocks, N));
+  for (int block = 0; block < num_blocks; ++block) {
+    for (int row = 0; row < N; ++row) {
+      for (int col = 0; col < N; ++col) {
+        result.insert(block * N + row, block * N + col) =
+            blocks[(block * N + row) * N + col];
+      }
+    }
+  }
+  result.makeCompressed();
+  return result;
+}
+
 
 // template<int N>
 // void blockAdd(std::vector<double>& dest, std::vector<double>& add) {
@@ -808,9 +844,8 @@ public:
     void UpdateStepSize() { // Recompute.
       const auto [Jp, Jl] = GetJacobian();
       if (firstIteration) {
-        SparseMatrix<double, RowMajor> JlJ(3 * numLandmarks, 3 * numLandmarks);
-        JlJ.reserve(VectorXi::Constant(3 * numLandmarks, 3));
-        JlJ = Jl.transpose() * Jl;
+        const SparseMatrix<double, RowMajor> JlJ =
+            BlockDiagonalJtJ<3>(Jl, numLandmarks);
         const auto diag = JlJ.diagonal().array().cwiseAbs().cwiseSqrt().cwiseMax(1e-10);
         WORKER_LOG(" Update vnorm " << cluster_id << " " << diag.size() << " == " << vnorm.size() << "\n");
         THROW_IF(diag.size() != vnorm.size());
@@ -1010,9 +1045,7 @@ void UpdateStepSizeAndSolve() {//bool keep_cameras_fixed = false) { // Recompute
   THROW_IF(Jp.nonZeros() != 9 * Jp.rows());
 
   const Matrix<double, Eigen::Dynamic, 1> residual = Map<Matrix<double, Eigen::Dynamic, 1> >(res.data(), 2 * numResiduals);
-  SparseMatrix<double, RowMajor> Vl(3 * numLandmarks, 3 * numLandmarks);
-  Vl.reserve(VectorXi::Constant(3 * numLandmarks, 3));
-  Vl = Jl.transpose() * Jl;
+  SparseMatrix<double, RowMajor> Vl = BlockDiagonalJtJ<3>(Jl, numLandmarks);
   if (firstIteration) { // preconditioning
       // diag is a reference .. why? i do stuff on it.
       const auto diag = Vl.diagonal().array().cwiseMax(1e-24).cwiseSqrt().cwiseInverse().eval();
@@ -1033,9 +1066,7 @@ void UpdateStepSizeAndSolve() {//bool keep_cameras_fixed = false) { // Recompute
   // std::cout << " diagVL " << diagVL.diagonal() << "\n"; // 1's
   
   // JpJ, StepSize, diag JpJ
-  SparseMatrix<double, RowMajor> Ul(9 * numCameras, 9 * numCameras);
-  Ul.reserve(VectorXi::Constant(9 * numCameras, 9));
-  Ul = Jp.transpose() * Jp;
+  SparseMatrix<double, RowMajor> Ul = BlockDiagonalJtJ<9>(Jp, numCameras);
   if (firstIteration) { // also handled setting be = 0 in 1st step.
     UpdatePreconditioningCameras(Ul);
     // Debug: write cost
@@ -1207,10 +1238,7 @@ private:
     if(Jp.nonZeros() != 9 * Jp.rows())
         std::cout << "Jp " << cluster_id << " | " << Jp.nonZeros() << " =? " << Jp.rows() * 9 << "\n";
     THROW_IF(Jp.nonZeros() != 9 * Jp.rows());
-    SparseMatrix<double, RowMajor> JpJ(9 * numCameras, 9 * numCameras);
-    JpJ.reserve(VectorXi::Constant(9 * numCameras, 9));
-    JpJ = Jp.transpose() * Jp;
-    JpJ.makeCompressed();
+    SparseMatrix<double, RowMajor> JpJ = BlockDiagonalJtJ<9>(Jp, numCameras);
 
     // SparseMatrix<double, RowMajor> JlJ(3 * numLandmarks, 3 * numLandmarks);
     // JlJ.reserve(VectorXi::Constant(3 * numLandmarks, 3));
