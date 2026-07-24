@@ -169,3 +169,188 @@ For each optimization, compare:
 
 OpenMP and thread-count changes should be benchmarked at representative cluster
 counts to detect oversubscription.
+
+Second performance review (2026-07-24)
+======================================
+
+Item 10 result
+--------------
+
+Direct accumulation of the 9x9 camera and 3x3 landmark Hessian blocks was
+implemented and reproduced the established problem 52 and problem 744
+trajectories. The partial full-suite benchmark showed no meaningful runtime
+change, so the experiment was stopped.
+
+This implementation optimized only Jp^T Jp and Jl^T Jl. It still constructed
+sparse Jp and Jl, used Ceres to evaluate the full Jacobian, and separately
+formed W, bp, and bl. Optimizing these two products alone is too narrow. Do not
+invest further in the standalone BlockDiagonalJtJ approach unless profiling
+shows that it becomes significant after larger changes.
+
+11. Reduce weighted autodiff from 105 variables to 12
+------------------------------------------------------
+
+SnavelyReprojectionErrorWeighted is currently declared with parameter block
+dimensions:
+
+  9 + 3 + 9 + 3 + 81 = 105
+
+Only the camera and landmark blocks, with 12 values in total, are variables.
+cameraWeight, pointWeight, and cameraTransform are registered as constant
+parameter blocks.
+
+Store pointers to the weight and transform arrays in each residual functor and
+expose only camera and landmark to AutoDiffCostFunction:
+
+  AutoDiffCostFunction<..., 2, 9, 3>
+
+The referenced arrays remain at stable addresses after ResetProgram;
+preconditioning updates overwrite their values in place. This should reduce
+the Jet dimension and arithmetic performed during every Jacobian evaluation.
+Benchmark this independently. It is the strongest next candidate.
+
+12. Fuse CRS extraction and normal-equation assembly
+-----------------------------------------------------
+
+The current path performs the following separate operations:
+
+  1. Ceres produces a CRS Jacobian.
+  2. GetJacobianAndResidual reconstructs sparse Jp and Jl.
+  3. Ul and Vl are formed from Jp and Jl.
+  4. Eigen separately forms W, bp, and bl.
+  5. Jp and Jl are retained for the predicted quadratic cost.
+
+Consume each Ceres CRS row once and accumulate all retry-invariant quantities:
+
+  U  = Jp^T Jp
+  V  = Jl^T Jl
+  W  = Jp^T Jl
+  bp = Jp^T residual
+  bl = Jl^T residual
+
+The predicted quadratic cost can then be evaluated without Jp and Jl:
+
+  ||r + Jp*dp + Jl*dl||^2
+    = ||r||^2
+      + 2*bp^T*dp + 2*bl^T*dl
+      + dp^T*U*dp + 2*dp^T*W*dl + dl^T*V*dl
+
+This removes sparse Jp/Jl construction and several downstream sparse products,
+rather than optimizing only U and V as item 10 did.
+
+13. Use a block-edge Schur operator
+-----------------------------------
+
+W has a natural 9x3 camera-landmark block structure. Store it as a list of
+camera-landmark edges and implement blockwise products for:
+
+  W^T*x
+  V^-1*W^T*x
+  W*V^-1*W^T*x
+  U^-1*W*V^-1*W^T*x
+
+These products execute in every Nesterov iteration, up to 100 times per solve.
+A block-edge operator avoids repeated generic Eigen sparse traversal and fits
+naturally with the fused assembly in item 12.
+
+14. Avoid unused residual output in GetCost
+-------------------------------------------
+
+GetCost currently allocates a std::vector<double> and asks Ceres to fill all
+residual values, but only the scalar cost is read. Pass nullptr for residuals:
+
+  problem.Evaluate(evalOptions, &cost, nullptr, nullptr, nullptr)
+
+This is behavior-preserving and applies to every trust-region attempt,
+including rejected attempts, as well as explicit cost requests. This is the
+lowest-risk remaining runtime change.
+
+15. Reuse Ceres evaluation workspaces
+-------------------------------------
+
+Each Jacobian or cost call reconstructs EvaluateOptions, copies
+function_residual_blocks, and creates new CRS and residual containers. Keep
+per-program members for:
+
+  - ceres::Problem::EvaluateOptions,
+  - ceres::CRSMatrix,
+  - residual storage,
+  - Jacobian conversion and normal-equation buffers.
+
+Retaining capacity should reduce repeated allocation even when Ceres rewrites
+the numerical values.
+
+16. Represent U, V, and their inverses as dense blocks
+------------------------------------------------------
+
+U and V are always block diagonal, but SolveByGDNesterov copies them as sparse
+matrices before replacing each block with its inverse. Store contiguous
+std::vector<Eigen::Matrix<double, 9, 9>> and 3x3 equivalents instead.
+
+Perform damping, inversion, and matvecs directly on these blocks. Benchmark
+LDLT.solve(I) against the current general matrix inverse for speed and numerical
+agreement.
+
+17. Reduce protobuf copies and allocations
+------------------------------------------
+
+Use const references for request submessages while request_p remains alive:
+
+  const auto& update = request_p.update();
+  const auto& pro = request_p.program();
+
+All data required by detached workers is already copied into CeresProgram
+before request_p leaves scope; worker lambdas receive only IDs.
+
+In FillReturnProto, reserve repeated-field capacity before appending cameras,
+landmarks, and full_stepSize. Use range insertion for cameras and full_stepSize
+where supported. full_stepSize contains 81*numCameras doubles on every return,
+so avoiding repeated protobuf growth may be measurable.
+
+18. Replace detached request threads with a fixed worker pool
+-------------------------------------------------------------
+
+The 30-cluster, 90-iteration configuration creates thousands of detached OS
+threads. A fixed pool would remove thread creation/destruction overhead, make
+the concurrency limit explicit, and provide safer shutdown and object
+ownership. This is expected to be secondary to Jacobian and Schur work but may
+reduce timing variance.
+
+19. Remove inactive custom-path Ceres setup
+-------------------------------------------
+
+In the active custom solver path, function_residual_blocks is captured before
+ProxStepPrior residual blocks are added. GetJacobianAndResidual and GetCost
+evaluate only function_residual_blocks, so the ProxStepPrior blocks and their
+81-value stepSize parameter blocks are setup and memory overhead but do not
+participate in these evaluations.
+
+Condition their construction on the Ceres solver path, or remove them from the
+custom path after confirming that no request mode depends on them. Expected
+runtime benefit is small because this primarily affects program setup.
+
+20. Benchmark native CPU and link-time optimization
+---------------------------------------------------
+
+The current server uses -O3 -DNDEBUG and targets generic x86-64. On a fixed
+deployment machine, benchmark:
+
+  -march=native
+  -flto
+
+These flags may improve fixed-size Eigen and autodiff code. Keep this as a
+separate benchmark because the resulting binary may not be portable to older
+CPUs.
+
+Revised implementation order
+----------------------------
+
+1. Add scoped timing for Ceres Jacobian evaluation, assembly, Nesterov,
+   nonlinear GetCost, protobuf construction, and serialization.
+2. Remove unused residual output from GetCost.
+3. Reduce weighted autodiff from 105 variables to 12 and benchmark it.
+4. Fuse CRS extraction and normal-equation assembly.
+5. Replace sparse W, U, and V operations with block operators.
+6. Reuse evaluation workspaces.
+7. Reduce protobuf and thread-management overhead.
+8. Benchmark -march=native and link-time optimization.

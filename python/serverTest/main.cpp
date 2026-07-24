@@ -17,7 +17,7 @@
 #include <thread>
 #include <mutex>
 #include <omp.h>
-//#include <chrono>
+#include <chrono>
 #include "proto/test.pb.h"
 #include <google/protobuf/message_lite.h>
 
@@ -102,6 +102,12 @@ void EmitLocalSolveMetric(const std::string& metric) {
   const std::lock_guard<std::mutex> lock(mutex);
   std::cerr.write(metric.data(), metric.size());
   std::cerr.flush();
+}
+
+using TimingClock = std::chrono::steady_clock;
+
+double ElapsedSeconds(const TimingClock::time_point& start) {
+  return std::chrono::duration<double>(TimingClock::now() - start).count();
 }
 
 template <typename Proto>
@@ -195,29 +201,31 @@ struct SnavelyReprojectionError {
 };
 #else
 struct SnavelyReprojectionErrorWeighted {
-    SnavelyReprojectionErrorWeighted(double observed_x, double observed_y)
-        : observed_x(observed_x), observed_y(observed_y) {}
+    SnavelyReprojectionErrorWeighted(
+        double observed_x, double observed_y,
+        const double* camera_weight, const double* point_weight,
+        const double* camera_transform)
+        : observed_x(observed_x), observed_y(observed_y),
+          camera_weight(camera_weight), point_weight(point_weight),
+          camera_transform(camera_transform) {}
 
     template <typename T>
     bool operator()(const T* const camera,
                     const T* const point,
-                    const T* const cameraWeight,
-                    const T* const pointWeight,
-                    const T* const cameraTransform,
                     T* residuals) const {
 
       T cameraW[9];
       for (int row = 0; row < 9; ++row) {
         cameraW[row] = T(0);
         for (int col = 0; col < 9; ++col) {
-          cameraW[row] += cameraTransform[9 * row + col]
-                          * camera[col] * cameraWeight[col];
+          cameraW[row] += T(camera_transform[9 * row + col])
+                          * camera[col] * T(camera_weight[col]);
         }
       }
       T pointW[3];
-      pointW[0] = point[0] * pointWeight[0];
-      pointW[1] = point[1] * pointWeight[1];
-      pointW[2] = point[2] * pointWeight[2];
+      pointW[0] = point[0] * T(point_weight[0]);
+      pointW[1] = point[1] * T(point_weight[1]);
+      pointW[2] = point[2] * T(point_weight[2]);
       // camera[0,1,2] are the angle-axis rotation.
       T p[3];
       ceres::AngleAxisRotatePoint(cameraW, pointW, p);
@@ -254,13 +262,21 @@ struct SnavelyReprojectionErrorWeighted {
     // Factory to hide the construction of the CostFunction object from
     // the client code.
     static ceres::CostFunction* Create(const double observed_x,
-                                       const double observed_y) {
-      return (new ceres::AutoDiffCostFunction<SnavelyReprojectionErrorWeighted, 2, 9, 3, 9, 3, 81>(
-          new SnavelyReprojectionErrorWeighted(observed_x, observed_y)));
+                       const double observed_y,
+                       const double* camera_weight,
+                       const double* point_weight,
+                       const double* camera_transform) {
+      return (new ceres::AutoDiffCostFunction<SnavelyReprojectionErrorWeighted, 2, 9, 3>(
+        new SnavelyReprojectionErrorWeighted(
+          observed_x, observed_y, camera_weight, point_weight,
+          camera_transform)));
     }
 
     double observed_x;
     double observed_y;
+    const double* camera_weight;
+    const double* point_weight;
+    const double* camera_transform;
   };
 #endif
 
@@ -624,19 +640,9 @@ public:
         problem.SetParameterBlockConstant(&stepSize[i]);
       }
 
-      for (int i = 0; i < unorm.size(); i += 9) {
-        problem.AddParameterBlock(&unorm[i], 9);
-        problem.SetParameterBlockConstant(&unorm[i]);
-      }
-      for (int i = 0; i < vnorm.size(); i += 3) {
-        problem.AddParameterBlock(&vnorm[i], 3);
-        problem.SetParameterBlockConstant(&vnorm[i]);
-      }
+      THROW_IF(unorm.size() != 9 * numCameras);
+      THROW_IF(vnorm.size() != 3 * numLandmarks);
       THROW_IF(cameraTransform.size() != 81 * numCameras);
-      for (int i = 0; i < cameraTransform.size(); i += 81) {
-        problem.AddParameterBlock(&cameraTransform[i], 81);
-        problem.SetParameterBlockConstant(&cameraTransform[i]);
-      }
       //std::cout << "All Parameter blocks added\n";
 
 #ifdef __unweighted_system__
@@ -660,14 +666,15 @@ public:
       }
 #else
       for (int i = 0; i < pro.observations_size() / 2; ++i) {
+        const int camera_id = pro.cam_id(i);
+        const int landmark_id = pro.lm_id(i);
         ceres::CostFunction *cost_function = SnavelyReprojectionErrorWeighted::Create(
-            pro.observations(2 * i + 0), pro.observations(2 * i + 1));
+          pro.observations(2 * i + 0), pro.observations(2 * i + 1),
+          &(unorm[9 * camera_id]), &(vnorm[3 * landmark_id]),
+          &(cameraTransform[81 * camera_id]));
         problem.AddResidualBlock(cost_function, nullptr /* squared loss */,
-                                 &(cameras[9 * pro.cam_id(i)]),
-                                 &(landmarks[3 * pro.lm_id(i)]),
-                                 &(unorm[9 * pro.cam_id(i)]),
-                                 &(vnorm[3 * pro.lm_id(i)]),
-                                 &(cameraTransform[81 * pro.cam_id(i)]));
+                     &(cameras[9 * camera_id]),
+                     &(landmarks[3 * landmark_id]));
       }
 #endif
       WORKER_LOG("Added " << pro.observations_size() / 2 << " Residual blocks\n");
@@ -1039,7 +1046,12 @@ void UpdateStepSizeAndSolve() {//bool keep_cameras_fixed = false) { // Recompute
   //   keep_cameras_fixed = new_best_cost;
   // }
 
+  const bool collectTiming = LocalSolveMetricsEnabled();
+  const auto localSolveStart = collectTiming ? TimingClock::now() : TimingClock::time_point{};
+  double nesterovSeconds = 0.;
+  double costEvaluationSeconds = 0.;
   auto [Jp, Jl, res] = GetJacobianAndResidual(); // also return sorted! residuals.
+  const auto assemblyStart = collectTiming ? TimingClock::now() : TimingClock::time_point{};
   if(Jp.nonZeros() != 9 * Jp.rows())
   std::cout << "Jp " << cluster_id << " | " << Jp.nonZeros() << " =? " << Jp.rows() * 9 << "\n";
   THROW_IF(Jp.nonZeros() != 9 * Jp.rows());
@@ -1070,9 +1082,26 @@ void UpdateStepSizeAndSolve() {//bool keep_cameras_fixed = false) { // Recompute
   if (firstIteration) { // also handled setting be = 0 in 1st step.
     UpdatePreconditioningCameras(Ul);
     // Debug: write cost
+    const auto costEvaluationStart = collectTiming ? TimingClock::now() : TimingClock::time_point{};
     const double costEnd = 2 * GetCost(); // demands cameras , landmarks already updated.
+    if (collectTiming) {
+      costEvaluationSeconds += ElapsedSeconds(costEvaluationStart);
+    }
     cost = costEnd;
     WORKER_LOG(cluster_id << ". Sending no update but pcg. costStart == costend: " << residual.squaredNorm() << " == "  << costEnd << "\n");
+    if (collectTiming) {
+      std::ostringstream metric;
+      metric << "LOCAL_SOLVE_TIMING cluster=" << cluster_id
+         << " initial=1"
+         << " jacobian_evaluate=" << last_jacobian_evaluate_seconds
+         << " jacobian_conversion=" << last_jacobian_conversion_seconds
+         << " assembly=" << ElapsedSeconds(assemblyStart) - costEvaluationSeconds
+         << " nesterov=0"
+         << " cost_evaluate=" << costEvaluationSeconds
+         << " total=" << ElapsedSeconds(localSolveStart)
+         << " attempts=0\n";
+      EmitLocalSolveMetric(metric.str());
+    }
     return; // 1st step only preconditioning as it can go very wrong?
   }
   const Eigen::DiagonalMatrix<double, Eigen::Dynamic> diagVL = Diagonal<3>(Vl); // Vl = VL + L * diagVL
@@ -1114,6 +1143,7 @@ void UpdateStepSizeAndSolve() {//bool keep_cameras_fixed = false) { // Recompute
   blockMult<9>(full_stepSize, proximalOffset, proximalGradient);
   const double penaltyStart = proximalOffset.dot(proximalGradient);
   Matrix<double, Eigen::Dynamic, 1> proximalStep(9 * numCameras);
+  const double assemblySeconds = collectTiming ? ElapsedSeconds(assemblyStart) : 0.;
   int trust_region_attempts = 0;
   int trust_region_rejections = 0;
   // options.max_num_iterations 
@@ -1138,8 +1168,12 @@ void UpdateStepSizeAndSolve() {//bool keep_cameras_fixed = false) { // Recompute
 
     //std::cout << " VL " << Vl.diagonal() << "\n";
 
+    const auto nesterovStart = collectTiming ? TimingClock::now() : TimingClock::time_point{};
     const auto [delta_p, delta_l] = SolveByGDNesterov(
         Ul, Vl, Jp, Jl, residual, W, bp, bl, proximalGradient, power_iterations);
+    if (collectTiming) {
+      nesterovSeconds += ElapsedSeconds(nesterovStart);
+    }
     // compute cost / tr_check
     //fx0_new = fx0 + (J_pose * delta_p + J_land * delta_l)
     const double costQuad  = (residual + Jp * delta_p + Jl * delta_l).squaredNorm();
@@ -1172,7 +1206,11 @@ void UpdateStepSizeAndSolve() {//bool keep_cameras_fixed = false) { // Recompute
     for (int id = 0; id < delta_l.size(); ++id) {
         landmarks[id] += delta_l[id];
     }
+    const auto costEvaluationStart = collectTiming ? TimingClock::now() : TimingClock::time_point{};
     const double costEnd = 2 * GetCost(); // demands cameras , landmarks already updated.
+    if (collectTiming) {
+      costEvaluationSeconds += ElapsedSeconds(costEvaluationStart);
+    }
     WORKER_LOG("==Costs start/quad/end: " << costStart << " " << costQuad << " " << costEnd << "\n");
     WORKER_LOG("==Penalties start/end: " << penaltyStart << " " << penaltyEnd << "\n");
 
@@ -1217,6 +1255,17 @@ void UpdateStepSizeAndSolve() {//bool keep_cameras_fixed = false) { // Recompute
          << " diagonal_floor=" << CameraDiagonalRelativeFloor()
          << " acceptance_ratio=" << LocalAcceptanceRatio() << "\n";
       EmitLocalSolveMetric(metric.str());
+      std::ostringstream timingMetric;
+      timingMetric << "LOCAL_SOLVE_TIMING cluster=" << cluster_id
+        << " initial=0"
+        << " jacobian_evaluate=" << last_jacobian_evaluate_seconds
+        << " jacobian_conversion=" << last_jacobian_conversion_seconds
+        << " assembly=" << assemblySeconds
+        << " nesterov=" << nesterovSeconds
+        << " cost_evaluate=" << costEvaluationSeconds
+        << " total=" << ElapsedSeconds(localSolveStart)
+        << " attempts=" << trust_region_attempts << "\n";
+      EmitLocalSolveMetric(timingMetric.str());
     }
 
     // if (keep_cameras_fixed) {
@@ -1322,7 +1371,11 @@ private:
     ceres::CRSMatrix jacobian;
     std::vector<double> residuals;
     // std::cout << "GetJacobian: Evaluate " << cluster_id << "\n"; 
+    const bool collectTiming = LocalSolveMetricsEnabled();
+    const auto evaluateStart = collectTiming ? TimingClock::now() : TimingClock::time_point{};
     problem.Evaluate(evalOptions, &startCost, &residuals, nullptr, &jacobian);
+    last_jacobian_evaluate_seconds = collectTiming ? ElapsedSeconds(evaluateStart) : 0.;
+    const auto conversionStart = collectTiming ? TimingClock::now() : TimingClock::time_point{};
     const size_t numUnknowns = jacobian.num_cols;
     //   std::cout << "GetJacobian: " << cluster_id << " Finished eval problem "
     //             << jacobian.num_rows << "-" << 9 * numCameras << "\n";
@@ -1360,6 +1413,7 @@ private:
     // std::cout << " Cam 543: " << std::sqrt(JpJ_cam[0]) << " " << std::sqrt(JpJ_cam[1]) << " " << std::sqrt(JpJ_cam[2]) << " " << std::sqrt(JpJ_cam[3]) << " " << std::sqrt(JpJ_cam[4]) << " " << std::sqrt(JpJ_cam[5]) << " " << std::sqrt(JpJ_cam[6]) << " " << std::sqrt(JpJ_cam[7]) << " " << std::sqrt(JpJ_cam[8]) << "\n";
     Jp.makeCompressed();
     Jl.makeCompressed();
+    last_jacobian_conversion_seconds = collectTiming ? ElapsedSeconds(conversionStart) : 0.;
     return std::make_tuple(Jp, Jl, residuals);
   }
 
@@ -1429,6 +1483,8 @@ private:
       startCost = 1e20;
       cost = 1e20;
       best_cost = cost;
+      last_jacobian_evaluate_seconds = 0.;
+      last_jacobian_conversion_seconds = 0.;
       cluster_id = -1;
       function_residual_blocks.clear();
       // Solve
@@ -1464,6 +1520,8 @@ private:
   double startCost;
   double cost;
   double best_cost;
+  double last_jacobian_evaluate_seconds = 0.;
+  double last_jacobian_conversion_seconds = 0.;
   bool firstIteration = true; // full step is wo. diag part to acc.
   //bool new_best_cost = false;
   std::vector<ceres::ResidualBlockId> function_residual_blocks;
