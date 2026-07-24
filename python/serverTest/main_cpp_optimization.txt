@@ -447,6 +447,60 @@ These flags may improve fixed-size Eigen and autodiff code. Keep this as a
 separate benchmark because the resulting binary may not be portable to older
 CPUs.
 
+21. Batch weighted cost evaluation
+----------------------------------
+
+Status: implemented and retained after ten-problem and full-suite validation.
+
+GetCost previously dispatched every observation through Ceres even though it
+requested only the scalar cost. The weighted path now transforms each camera
+and landmark once, evaluates all observations directly, and accumulates the
+same half squared residual cost expected from Ceres.
+
+On the fixed ten-problem subset, bestCost30, bestCost60, final cost, and best
+iteration matched exactly. Relative to the retained workspace-reuse baseline,
+performance improved by:
+
+  geometric-mean overall:     8.60 percent
+  aggregate overall:         10.68 percent
+  geometric-mean solve-only:  9.35 percent
+  aggregate solve-only:      11.81 percent
+
+22. Batch weighted normal-equation evaluation
+---------------------------------------------
+
+Status: implemented and retained after ten-problem and full-suite validation.
+
+The active weighted normal-equation path no longer dispatches residual blocks
+through ceres::Problem::Evaluate or constructs a CRS Jacobian. It transforms
+each camera and landmark once, evaluates observations in a direct loop, and
+accumulates U, V, W, bp, and bl into the existing persistent buffers.
+
+The implementation still uses ceres::Jet<double, 12> for the nonlinear BAL
+projection derivatives. The weighted camera and landmark chain-rule seeds are
+inserted directly, preserving Ceres derivative behavior while removing the
+general residual graph and CRS machinery.
+
+On the fixed ten-problem subset, all four quality fields matched exactly.
+Relative to the retained batched-cost implementation, performance improved by:
+
+  geometric-mean overall:    15.76 percent
+  aggregate overall:         19.10 percent
+  geometric-mean solve-only: 17.56 percent
+  aggregate solve-only:      21.36 percent
+
+The combined batched evaluators were then run on the canonical 29-problem
+suite at 90 iterations and 30 clusters. Every problem matched its latest
+pre-experiment bestCost30, bestCost60, final cost, and best iteration exactly.
+Relative to those pre-experiment records, performance improved by:
+
+  geometric-mean overall:    44.14 percent
+  aggregate overall:         62.65 percent
+  geometric-mean solve-only: 50.40 percent
+  aggregate solve-only:      76.45 percent
+
+The full-suite runner is run_optimization_full.sh. Keep both optimizations.
+
 Revised implementation order
 ----------------------------
 
@@ -457,5 +511,7 @@ Revised implementation order
 4. [done, retained] Fuse CRS extraction and normal-equation assembly.
 5. [done, retained for W] Replace sparse W operations with a block-edge operator.
 6. [done, retained] Reuse evaluation workspaces.
-7. Reduce protobuf and thread-management overhead.
-8. Benchmark -march=native and link-time optimization.
+7. [done, retained] Batch weighted cost evaluation.
+8. [done, retained] Batch weighted normal-equation evaluation.
+9. Reduce protobuf and thread-management overhead.
+10. Benchmark -march=native and link-time optimization.

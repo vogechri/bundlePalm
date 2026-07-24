@@ -202,6 +202,33 @@ struct SnavelyReprojectionError {
   double observed_y;
 };
 #else
+template <typename T>
+bool EvaluateWeightedProjection(const T* const camera,
+                                const T* const point,
+                                double observed_x, double observed_y,
+                                T* residuals) {
+  T p[3];
+  ceres::AngleAxisRotatePoint(camera, point, p);
+
+  p[0] += camera[3];
+  p[1] += camera[4];
+  p[2] += camera[5];
+
+  T xp = -p[0] / p[2];
+  T yp = -p[1] / p[2];
+  const T& l1 = camera[7];
+  const T& l2 = camera[8];
+  T r2 = xp * xp + yp * yp;
+  T distortion = 1.0 + r2 * (l1 + l2 * r2);
+  const T& focal = camera[6];
+  T predicted_x = focal * distortion * xp;
+  T predicted_y = focal * distortion * yp;
+
+  residuals[0] = predicted_x - observed_x;
+  residuals[1] = predicted_y - observed_y;
+  return true;
+}
+
 struct SnavelyReprojectionErrorWeighted {
     SnavelyReprojectionErrorWeighted(
         double observed_x, double observed_y,
@@ -228,37 +255,8 @@ struct SnavelyReprojectionErrorWeighted {
       pointW[0] = point[0] * T(point_weight[0]);
       pointW[1] = point[1] * T(point_weight[1]);
       pointW[2] = point[2] * T(point_weight[2]);
-      // camera[0,1,2] are the angle-axis rotation.
-      T p[3];
-      ceres::AngleAxisRotatePoint(cameraW, pointW, p);
-
-      // camera[3,4,5] are the translation.
-      p[0] += cameraW[3];
-      p[1] += cameraW[4];
-      p[2] += cameraW[5];
-
-      // Compute the center of distortion. The sign change comes from
-      // the camera model that Noah Snavely's Bundler assumes, whereby
-      // the camera coordinate system has a negative z axis.
-      T xp = -p[0] / p[2]; // that means focal length is flipped.
-      T yp = -p[1] / p[2];
-
-      // Apply second and fourth order radial distortion.
-      const T& l1 = cameraW[7];
-      const T& l2 = cameraW[8];
-      T r2 = xp * xp + yp * yp;
-      T distortion = 1.0 + r2 * (l1 + l2 * r2);
-
-      // Compute final projected point position.
-      const T& focal = cameraW[6];
-      T predicted_x = focal * distortion * xp;
-      T predicted_y = focal * distortion * yp;
-
-      // The error is the difference between the predicted and observed position.
-      residuals[0] = predicted_x - observed_x;
-      residuals[1] = predicted_y - observed_y;
-
-      return true;
+        return EvaluateWeightedProjection(
+          cameraW, pointW, observed_x, observed_y, residuals);
     }
 
     // Factory to hide the construction of the CostFunction object from
@@ -702,6 +700,14 @@ public:
       for (const int &id : pro.cam_id()) {
         cam_obs.push_back(id);
       }
+      observed_x.resize(numResiduals);
+      observed_y.resize(numResiduals);
+      for (int observation = 0; observation < numResiduals; ++observation) {
+        observed_x[observation] = pro.observations(2 * observation);
+        observed_y[observation] = pro.observations(2 * observation + 1);
+      }
+      weighted_cameras.resize(9 * numCameras);
+      weighted_landmarks.resize(3 * numLandmarks);
       camera_landmark_hessian.Initialize(
           numCameras, numLandmarks, cam_obs, lm_obs);
       unorm.clear();
@@ -816,6 +822,16 @@ public:
     }
 
     double GetCost(bool revert_lm = false) {
+#ifndef __unweighted_system__
+      if (revert_lm) {
+        std::vector<double> temp_landmarks = landmarks;
+        landmarks = best_landmarks;
+        const double result = GetBatchedCost();
+        landmarks = temp_landmarks;
+        return result;
+      }
+      return GetBatchedCost();
+#else
       // 1st get Jacobian(s):
       ceres::Problem::EvaluateOptions evalOptions;
       evalOptions.apply_loss_function = true;
@@ -852,7 +868,49 @@ public:
       // }
 
       return cost;
+#endif
     }
+
+#ifndef __unweighted_system__
+  void UpdateWeightedParameters() {
+      for (int camera = 0; camera < numCameras; ++camera) {
+        const int cameraOffset = 9 * camera;
+        const int transformOffset = 81 * camera;
+        for (int row = 0; row < 9; ++row) {
+          double value = 0.;
+          for (int col = 0; col < 9; ++col) {
+            value += cameraTransform[transformOffset + 9 * row + col]
+                     * cameras[cameraOffset + col]
+                     * unorm[cameraOffset + col];
+          }
+          weighted_cameras[cameraOffset + row] = value;
+        }
+      }
+      for (int landmark = 0; landmark < numLandmarks; ++landmark) {
+        const int offset = 3 * landmark;
+        weighted_landmarks[offset] = landmarks[offset] * vnorm[offset];
+        weighted_landmarks[offset + 1] =
+            landmarks[offset + 1] * vnorm[offset + 1];
+        weighted_landmarks[offset + 2] =
+            landmarks[offset + 2] * vnorm[offset + 2];
+      }
+    }
+
+    double GetBatchedCost() {
+      UpdateWeightedParameters();
+      double result = 0.;
+      for (int observation = 0; observation < numResiduals; ++observation) {
+        double residuals[2];
+        EvaluateWeightedProjection(
+            &weighted_cameras[9 * cam_obs[observation]],
+            &weighted_landmarks[3 * lm_obs[observation]],
+            observed_x[observation], observed_y[observation], residuals);
+        result += 0.5 * (residuals[0] * residuals[0]
+                        + residuals[1] * residuals[1]);
+      }
+      return result;
+    }
+#endif
 
     //void SetBe(double be) { be = be; }
     
@@ -1435,7 +1493,119 @@ private:
     std::copy(values, values + stepSize.size(), stepSize.data());
   }
 
+#ifndef __unweighted_system__
+  NormalEquations GetBatchedNormalEquations() {
+    using ObservationJet = ceres::Jet<double, 12>;
+    const bool collectTiming = LocalSolveMetricsEnabled();
+    const auto evaluateStart = collectTiming ? TimingClock::now() : TimingClock::time_point{};
+    UpdateWeightedParameters();
+    std::fill(normal_equation_camera_blocks.begin(),
+              normal_equation_camera_blocks.end(), 0.);
+    std::fill(normal_equation_landmark_blocks.begin(),
+              normal_equation_landmark_blocks.end(), 0.);
+    camera_landmark_hessian.ClearValues();
+    normal_equation_residuals.resize(2 * numResiduals);
+
+    NormalEquations result;
+    result.camera_gradient = Eigen::VectorXd::Zero(9 * numCameras);
+    result.landmark_gradient = Eigen::VectorXd::Zero(3 * numLandmarks);
+    double squaredResidualNorm = 0.;
+
+    for (int observation = 0; observation < numResiduals; ++observation) {
+      const int cameraId = cam_obs[observation];
+      const int landmarkId = lm_obs[observation];
+      const int cameraOffset = 9 * cameraId;
+      const int landmarkOffset = 3 * landmarkId;
+      const int transformOffset = 81 * cameraId;
+      ObservationJet camera[9];
+      ObservationJet landmark[3];
+      for (int row = 0; row < 9; ++row) {
+        camera[row].a = weighted_cameras[cameraOffset + row];
+        camera[row].v.setZero();
+        for (int col = 0; col < 9; ++col) {
+          camera[row].v[col] =
+              cameraTransform[transformOffset + 9 * row + col]
+              * unorm[cameraOffset + col];
+        }
+      }
+      for (int row = 0; row < 3; ++row) {
+        landmark[row].a = weighted_landmarks[landmarkOffset + row];
+        landmark[row].v.setZero();
+        landmark[row].v[9 + row] = vnorm[landmarkOffset + row];
+      }
+
+      ObservationJet residuals[2];
+      EvaluateWeightedProjection(camera, landmark, observed_x[observation],
+                                 observed_y[observation], residuals);
+      std::array<double, 27>& edgeValues =
+          camera_landmark_hessian.ObservationValues(observation);
+      for (int component = 0; component < 2; ++component) {
+        const double residual = residuals[component].a;
+        normal_equation_residuals[2 * observation + component] = residual;
+        squaredResidualNorm += residual * residual;
+        for (int row = 0; row < 9; ++row) {
+          const double cameraValue = residuals[component].v[row];
+          result.camera_gradient[cameraOffset + row] += cameraValue * residual;
+          for (int col = 0; col < 9; ++col) {
+            normal_equation_camera_blocks[81 * cameraId + 9 * row + col] +=
+                cameraValue * residuals[component].v[col];
+          }
+          for (int col = 0; col < 3; ++col) {
+            edgeValues[3 * row + col] +=
+                cameraValue * residuals[component].v[9 + col];
+          }
+        }
+        for (int row = 0; row < 3; ++row) {
+          const double landmarkValue = residuals[component].v[9 + row];
+          result.landmark_gradient[landmarkOffset + row] +=
+              landmarkValue * residual;
+          for (int col = 0; col < 3; ++col) {
+            normal_equation_landmark_blocks[9 * landmarkId + 3 * row + col] +=
+                landmarkValue * residuals[component].v[9 + col];
+          }
+        }
+      }
+    }
+    startCost = 0.5 * squaredResidualNorm;
+    last_jacobian_evaluate_seconds = collectTiming ? ElapsedSeconds(evaluateStart) : 0.;
+    const auto conversionStart = collectTiming ? TimingClock::now() : TimingClock::time_point{};
+    result.residual = Eigen::Map<Eigen::VectorXd>(normal_equation_residuals.data(),
+                                                  normal_equation_residuals.size());
+
+    result.camera_hessian.resize(9 * numCameras, 9 * numCameras);
+    result.camera_hessian.reserve(VectorXi::Constant(9 * numCameras, 9));
+    for (int cameraId = 0; cameraId < numCameras; ++cameraId) {
+      for (int row = 0; row < 9; ++row) {
+        for (int col = 0; col < 9; ++col) {
+          result.camera_hessian.insert(9 * cameraId + row, 9 * cameraId + col) =
+              normal_equation_camera_blocks[81 * cameraId + 9 * row + col];
+        }
+      }
+    }
+    result.camera_hessian.makeCompressed();
+
+    result.landmark_hessian.resize(3 * numLandmarks, 3 * numLandmarks);
+    result.landmark_hessian.reserve(VectorXi::Constant(3 * numLandmarks, 3));
+    for (int landmarkId = 0; landmarkId < numLandmarks; ++landmarkId) {
+      for (int row = 0; row < 3; ++row) {
+        for (int col = 0; col < 3; ++col) {
+          result.landmark_hessian.insert(3 * landmarkId + row,
+                                         3 * landmarkId + col) =
+              normal_equation_landmark_blocks[9 * landmarkId + 3 * row + col];
+        }
+      }
+    }
+    result.landmark_hessian.makeCompressed();
+    last_jacobian_conversion_seconds =
+        collectTiming ? ElapsedSeconds(conversionStart) : 0.;
+    return result;
+  }
+#endif
+
   NormalEquations GetNormalEquations() {
+#ifndef __unweighted_system__
+    return GetBatchedNormalEquations();
+#endif
     // 1st get Jacobian(s):
     // std::cout << "GetJacobian: Evaluate " << cluster_id << "\n"; 
     const bool collectTiming = LocalSolveMetricsEnabled();
@@ -1641,6 +1811,10 @@ private:
   std::vector<double> cameraTransform;
   std::vector<int> cam_obs;
   std::vector<int> lm_obs;
+  std::vector<double> observed_x;
+  std::vector<double> observed_y;
+  std::vector<double> weighted_cameras;
+  std::vector<double> weighted_landmarks;
   BlockEdgeMatrix camera_landmark_hessian;
   ceres::Problem::EvaluateOptions normal_equation_evaluate_options;
   ceres::CRSMatrix normal_equation_jacobian;
