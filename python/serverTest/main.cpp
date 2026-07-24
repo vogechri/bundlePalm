@@ -99,6 +99,14 @@ bool LocalSolveMetricsEnabled() {
   return enabled;
 }
 
+bool BatchedEvaluationEnabled() {
+  static const bool enabled = [] {
+    const char* value = std::getenv("BUNDLE_PALM_BATCHED_EVALUATION");
+    return value == nullptr || std::string(value) != "0";
+  }();
+  return enabled;
+}
+
 void EmitLocalSolveMetric(const std::string& metric) {
   static std::mutex mutex;
   const std::lock_guard<std::mutex> lock(mutex);
@@ -823,15 +831,17 @@ public:
 
     double GetCost(bool revert_lm = false) {
 #ifndef __unweighted_system__
-      if (revert_lm) {
-        std::vector<double> temp_landmarks = landmarks;
-        landmarks = best_landmarks;
-        const double result = GetBatchedCost();
-        landmarks = temp_landmarks;
-        return result;
+      if (BatchedEvaluationEnabled()) {
+        if (revert_lm) {
+          std::vector<double> temp_landmarks = landmarks;
+          landmarks = best_landmarks;
+          const double result = GetBatchedCost();
+          landmarks = temp_landmarks;
+          return result;
+        }
+        return GetBatchedCost();
       }
-      return GetBatchedCost();
-#else
+#endif
       // 1st get Jacobian(s):
       ceres::Problem::EvaluateOptions evalOptions;
       evalOptions.apply_loss_function = true;
@@ -868,7 +878,6 @@ public:
       // }
 
       return cost;
-#endif
     }
 
 #ifndef __unweighted_system__
@@ -1570,7 +1579,7 @@ private:
     last_jacobian_evaluate_seconds = collectTiming ? ElapsedSeconds(evaluateStart) : 0.;
     const auto conversionStart = collectTiming ? TimingClock::now() : TimingClock::time_point{};
     result.residual = Eigen::Map<Eigen::VectorXd>(normal_equation_residuals.data(),
-                                                  normal_equation_residuals.size());
+                            normal_equation_residuals.size());
 
     result.camera_hessian.resize(9 * numCameras, 9 * numCameras);
     result.camera_hessian.reserve(VectorXi::Constant(9 * numCameras, 9));
@@ -1604,7 +1613,9 @@ private:
 
   NormalEquations GetNormalEquations() {
 #ifndef __unweighted_system__
-    return GetBatchedNormalEquations();
+    if (BatchedEvaluationEnabled()) {
+      return GetBatchedNormalEquations();
+    }
 #endif
     // 1st get Jacobian(s):
     // std::cout << "GetJacobian: Evaluate " << cluster_id << "\n"; 

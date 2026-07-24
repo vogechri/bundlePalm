@@ -501,6 +501,96 @@ Relative to those pre-experiment records, performance improved by:
 
 The full-suite runner is run_optimization_full.sh. Keep both optimizations.
 
+23. Preserve the generic evaluator and test batched-loop cleanup
+---------------------------------------------------------------
+
+Status: generic fallback retained; three performance experiments rejected.
+
+The specialized weighted L2 evaluator remains the default, but setting:
+
+  BUNDLE_PALM_BATCHED_EVALUATION=0
+
+routes both cost and normal-equation evaluation through the existing generic
+Ceres residual-block path. A 30-iteration problem 52 check reproduced the
+established best cost 485348 at iteration 29. This keeps the implementation
+open to other residual models and loss functions without requiring the
+specialized evaluator to support them first.
+
+Three independent batched-loop optimizations were tested on the fixed
+ten-problem subset. Every experiment reproduced bestCost30, bestCost60, final
+cost, and best iteration exactly, but none passed the timing gate:
+
+  cached camera derivative seeds: 0.9875x geometric-mean solve-only
+  triangular Hessian accumulation: 0.9885x geometric-mean solve-only
+  scalar residual norm only:       0.9860x geometric-mean solve-only
+
+All three performance changes were removed. Their extra passes, storage, or
+bookkeeping cost more than the arithmetic they eliminated on this workload.
+Retain only the runtime evaluator selector.
+
+24. Index scalable-partitioner evacuation backfill candidates
+--------------------------------------------------------------
+
+Status: implemented and retained after exact partition and end-to-end checks.
+
+The scalable landmark partitioner's evacuation phase searched for balancing
+backfill by scanning the global landmark order and discarding landmarks not in
+the target cluster. On large balanced problems this inspected roughly thirty
+times more order entries than candidate landmarks. The scan is repeated for
+many camera-cluster pairs and dominated partition time for problems 961 and
+3068.
+
+State now maintains one dynamic landmark-rank bitset per cluster. ApplyMove
+updates two bits in constant time, and evacuation enumerates set ranks in the
+same global order. Candidate scoring, the 4096-candidate limit, move ordering,
+and all partition objectives remain unchanged.
+
+A std::set prototype preserved assignments but was 3.4 percent slower on
+problem 961 and was removed. The bitset implementation produced byte-identical
+landmark assignments and identical partition metrics:
+
+  problem 961 native partition:  55.18 s -> 45.61 s (1.210x)
+  problem 3068 native partition: 101.86 s -> 79.83 s (1.276x)
+
+End-to-end 90-iteration, 30-cluster validation reproduced bestCost30,
+bestCost60, final cost, and best iteration exactly:
+
+  problem 961 partition: 54.38 s -> 45.43 s; overall 131.42 s -> 122.66 s
+  problem 3068 partition: 101.88 s -> 79.23 s; overall 204.64 s -> 183.63 s
+
+Keep this optimization.
+
+25. Compile the local clustering library for the host CPU
+-----------------------------------------------------------
+
+Status: implemented and retained after exact partition checks.
+
+The standalone clustering library built by build_local.sh now uses
+-march=native. This enables the host instruction set for the evacuation and
+scoring loops. It makes the generated shared library specific to CPUs
+compatible with the build host; rebuilding on the deployment host remains
+required.
+
+Against the retained dynamic-bitset implementation, complete landmark
+assignment hashes remained identical:
+
+  problem 961 partition:  45.05 s -> 36.78 s (1.225x)
+  problem 3068 partition: 79.56 s -> 62.72 s (1.268x)
+
+The established ten-problem subset also reproduced every complete assignment
+array. Its aggregate partition time improved from 39.85 s to 38.34 s (1.039x),
+with all ten individual timings improving in the measured run.
+
+An independent attempt to replace the backfill camera-membership std::find
+with a dense landmark stamp was rejected. It preserved assignments but changed
+961 by 0.982x and 3068 by only 1.012x, so it was not a consistent improvement.
+
+Adding -flto on top of -march=native was also rejected. Reversed-order tests
+were mixed: it slightly helped 961 but slightly slowed 3068, so there was no
+reliable incremental benefit.
+
+Keep the native build flag for local builds. Do not add the membership stamp.
+
 Revised implementation order
 ----------------------------
 
@@ -513,5 +603,8 @@ Revised implementation order
 6. [done, retained] Reuse evaluation workspaces.
 7. [done, retained] Batch weighted cost evaluation.
 8. [done, retained] Batch weighted normal-equation evaluation.
-9. Reduce protobuf and thread-management overhead.
-10. Benchmark -march=native and link-time optimization.
+9. [done, retained] Preserve a runtime generic Ceres evaluator fallback.
+10. [done, retained] Index scalable evacuation backfill candidates.
+11. [done, retained] Compile the local clustering library with -march=native.
+12. [done, rejected] Benchmark link-time optimization.
+13. Reduce protobuf and thread-management overhead.
