@@ -10,6 +10,9 @@
 // #define __ceresVersion__
 
 #include <zmq.hpp>
+#include <cerrno>
+#include <cmath>
+#include <cstdlib>
 #include <string>
 #include <iostream>
 #include <thread>
@@ -55,6 +58,52 @@ using Eigen::Map;
       throw std::runtime_error(error.str());                              \
     }                                                                     \
   } while (false)
+
+double EnvironmentDouble(const char* name, double default_value,
+                          double minimum, double maximum) {
+  const char* text = std::getenv(name);
+  if (text == nullptr || *text == '\0') {
+    return default_value;
+  }
+  char* end = nullptr;
+  errno = 0;
+  const double value = std::strtod(text, &end);
+  if (errno != 0 || end == text || *end != '\0' || !std::isfinite(value) ||
+      value < minimum || value > maximum) {
+    std::ostringstream error;
+    error << name << " must be a finite value in [" << minimum << ", "
+          << maximum << "]";
+    throw std::runtime_error(error.str());
+  }
+  return value;
+}
+
+double CameraDiagonalRelativeFloor() {
+  static const double value = EnvironmentDouble(
+      "BUNDLE_PALM_CAMERA_DIAGONAL_FLOOR", 1e-48, 0.0, 1.0);
+  return value;
+}
+
+double LocalAcceptanceRatio() {
+  static const double value = EnvironmentDouble(
+      "BUNDLE_PALM_LOCAL_ACCEPTANCE_RATIO", 0.9999, 0.0, 1.0);
+  return value;
+}
+
+bool LocalSolveMetricsEnabled() {
+  static const bool enabled = [] {
+    const char* value = std::getenv("BUNDLE_PALM_LOCAL_SOLVE_METRICS");
+    return value != nullptr && std::string(value) == "1";
+  }();
+  return enabled;
+}
+
+void EmitLocalSolveMetric(const std::string& metric) {
+  static std::mutex mutex;
+  const std::lock_guard<std::mutex> lock(mutex);
+  std::cerr.write(metric.data(), metric.size());
+  std::cerr.flush();
+}
 
 template <typename Proto>
 Proto ParseProto(const std::string& serialized) {
@@ -287,7 +336,7 @@ void WriteJacobian(ceres::Problem& problem, int numCameras, int numLandmarks) {
 // Not sure if this copies or not.
 template<int N>
 Eigen::DiagonalMatrix<double, Eigen::Dynamic>
-Diagonal(SparseMatrix<double, RowMajor>& mat) {
+Diagonal(SparseMatrix<double, RowMajor>& mat, int cluster_id = -1) {
   Eigen::DiagonalMatrix<double, Eigen::Dynamic> diag = mat.diagonal().asDiagonal(); // ?
 #ifdef _const_diag_
   if (N == 9) {
@@ -334,16 +383,42 @@ Diagonal(SparseMatrix<double, RowMajor>& mat) {
 #else
   if (N == 9) {
     auto& blockDiagonal = diag.diagonal();
-#pragma omp parallel for num_threads(options.num_threads)
+    const bool collectMetrics = LocalSolveMetricsEnabled();
+    int flooredEntries = 0;
+    int zeroEntries = 0;
+    double minimumRelativeDiagonal = 1.0;
+#pragma omp parallel for num_threads(options.num_threads) \
+    reduction(+:flooredEntries, zeroEntries) reduction(min:minimumRelativeDiagonal)
     for (int block = 0; block < mat.rows() / N; ++block) {
       const auto cameraDiagonal = blockDiagonal.template segment<N>(N * block);
       const double maxDiagonal = std::max(1e-32, cameraDiagonal.maxCoeff());
+      const double floor = CameraDiagonalRelativeFloor() * maxDiagonal;
+      if (collectMetrics) {
+        for (int coordinate = 0; coordinate < N; ++coordinate) {
+          zeroEntries += cameraDiagonal[coordinate] == 0.0;
+          flooredEntries += cameraDiagonal[coordinate] < floor;
+          minimumRelativeDiagonal = std::min(
+              minimumRelativeDiagonal,
+              cameraDiagonal[coordinate] / maxDiagonal);
+        }
+      }
       blockDiagonal.template segment<N>(N * block) = 
-        cameraDiagonal.cwiseMax(1e-48 * maxDiagonal);
+        cameraDiagonal.cwiseMax(floor);
       // if (cameraDiagonal.minCoeff() < 1e-24 * maxDiagonal) {
       //   blockDiagonal.template segment<N>(N * block) =
       //       cameraDiagonal.cwiseMax(1e-24 * maxDiagonal);
       // }
+    }
+    if (collectMetrics) {
+      std::ostringstream metric;
+      metric << "CAMERA_DIAGONAL cluster=" << cluster_id
+         << " blocks=" << mat.rows() / N
+         << " entries=" << blockDiagonal.size()
+         << " floored=" << flooredEntries
+         << " zeros=" << zeroEntries
+         << " min_relative=" << minimumRelativeDiagonal
+         << " floor=" << CameraDiagonalRelativeFloor() << "\n";
+      EmitLocalSolveMetric(metric.str());
     }
   }
 #endif
@@ -940,7 +1015,8 @@ void UpdateStepSizeAndSolve() {//bool keep_cameras_fixed = false) { // Recompute
     return; // 1st step only preconditioning as it can go very wrong?
   }
   const Eigen::DiagonalMatrix<double, Eigen::Dynamic> diagVL = Diagonal<3>(Vl); // Vl = VL + L * diagVL
-  const Eigen::DiagonalMatrix<double, Eigen::Dynamic> diagUP = 1e1 * Diagonal<9>(Ul); // Vp = Vp + L * diagVp
+  const Eigen::DiagonalMatrix<double, Eigen::Dynamic> diagUP = 1e1 * Diagonal<9>(Ul, cluster_id); // Vp = Vp + L * diagVp
+  const SparseMatrix<double, RowMajor> landmarkHessian = Vl;
 
   //const double scale = 1e-1; // 1e0: @29: 501k, no jump. 1e1 many jumps. 473k
   // TODO
@@ -965,8 +1041,11 @@ void UpdateStepSizeAndSolve() {//bool keep_cameras_fixed = false) { // Recompute
 
   const int power_iterations = 100; //keep_cameras_fixed ? 0 : 100;
   const double costStart = residual.squaredNorm();
+  int trust_region_attempts = 0;
+  int trust_region_rejections = 0;
   // options.max_num_iterations 
   while ( true ) { // if costStart + penaltyStart < costEnd + penaltyP
+    ++trust_region_attempts;
 
     //   std::cout << " diagUP " << Ul.diagonal()[0] << " " << Ul.diagonal()[1] << " " << Ul.diagonal()[2] << "\n";
     //   std::cout << " diagVL " << Vl.diagonal()[0] << " " << Vl.diagonal()[1] << " " << Vl.diagonal()[2] << "\n";// TOTALLY OFF after tr_check fails.
@@ -978,24 +1057,11 @@ void UpdateStepSizeAndSolve() {//bool keep_cameras_fixed = false) { // Recompute
     temp_p = Jp.transpose() * Jp * (1. / tr_radius - inv_tr_radius);
     Ul += temp_p;
 
-//#define _slow_
-#ifdef _slow_
-    ///// Here we should do not recompute Vl al the time as Jl^T Jl = Vl. 
-    Vl += (1. / tr_radius - inv_tr_radius) * (diagVL);// + Jl.transpose() * Jl);
-    SparseMatrix<double, RowMajor> temp_l(3 * numLandmarks, 3 * numLandmarks);
-    temp_l.reserve(VectorXi::Constant(3 * numLandmarks, 3));
-    temp_l = Jl.transpose() * Jl * (1. / tr_radius - inv_tr_radius);
-    Vl += temp_l;
-#else
-    // 1. inverse
-    if ( inv_tr_radius != 0 ) {
-      Vl -= inv_tr_radius * diagVL;
-      Vl *= 1. / (1. + inv_tr_radius);
+    if (inv_tr_radius != 0) {
+      Vl = landmarkHessian;
     }
-    // 2. multiply orig JlJl by 1/tr_radius. add diagonal part 1/tr * diagL
-    Vl *= (1. + 1. / tr_radius);
+    Vl *= 1. + 1. / tr_radius;
     Vl += (1. / tr_radius) * diagVL;
-#endif
     inv_tr_radius = 1. / tr_radius;
     //   std::cout << " diagUp " << Ul.diagonal()[0] << " " << Ul.diagonal()[1] << " " << Ul.diagonal()[2] << "\n";
     //   std::cout << " diagVL " << Vl.diagonal()[0] << " " << Vl.diagonal()[1] << " " << Vl.diagonal()[2] << "\n";
@@ -1058,7 +1124,9 @@ void UpdateStepSizeAndSolve() {//bool keep_cameras_fixed = false) { // Recompute
     if (costStart + penaltyStart > costQuad + penaltyEnd)
       WORKER_LOG("==Start Cost < estimated cost: " << costStart + penaltyStart << " < " << costQuad + penaltyEnd << "\n");
 
-    if (costStart + penaltyStart < (costEnd + penaltyEnd) * 0.9999) { // revert if cost does not improve
+    if (costStart + penaltyStart <
+        (costEnd + penaltyEnd) * LocalAcceptanceRatio()) { // revert if cost does not improve
+      ++trust_region_rejections;
       WORKER_LOG("Reject Start Cost < end cost: "<< costStart + penaltyStart << " < " << costEnd + penaltyEnd << "\n");
       for (int id = 0; id < delta_p.size(); ++id) {
           cameras[id] -= delta_p[id];
@@ -1070,6 +1138,21 @@ void UpdateStepSizeAndSolve() {//bool keep_cameras_fixed = false) { // Recompute
     }
     cost = costEnd;
     WORKER_LOG("Accept Start Cost > end cost: "<< costStart + penaltyStart << " > " << costEnd + penaltyEnd << "\n");
+    if (LocalSolveMetricsEnabled()) {
+      std::ostringstream metric;
+      metric << "LOCAL_SOLVE cluster=" << cluster_id
+         << " be=" << current_be
+         << " attempts=" << trust_region_attempts
+         << " rejections=" << trust_region_rejections
+         << " start=" << costStart + penaltyStart
+         << " end=" << costEnd + penaltyEnd
+         << " predicted=" << costStart - costQuad + penaltyStart - penaltyEnd
+         << " rho=" << tr_check
+         << " radius=" << tr_radius
+         << " diagonal_floor=" << CameraDiagonalRelativeFloor()
+         << " acceptance_ratio=" << LocalAcceptanceRatio() << "\n";
+      EmitLocalSolveMetric(metric.str());
+    }
 
     // if (keep_cameras_fixed) {
     //   best_landmarks = landmarks; // landmarks optimal for fixed cameras.
