@@ -486,10 +486,13 @@ void blockMult(const std::vector<double>& blockMat, const Eigen::VectorXd& vec, 
 //   }
 // }
 
-bool stop_criterion(double delta, double delta_i, int i) {
+bool stop_criterion(double x_squared_norm, double gradient_squared_norm, double lip, int i) {
   // lower (1e-4) can be worse? maybe just the parts / how parts are.
   const double eps = 1e-2; //#1e-2 used in paper, tune. might allow smaller as faster?
-  return (i+1) * delta_i < eps * delta;
+  const double iterations = i + 1.;
+  const double scaled_eps = eps * lip;
+  return iterations * iterations * gradient_squared_norm
+      < scaled_eps * scaled_eps * x_squared_norm;
 }
 
 // Ensure we can have a vector of programs. by id. maybe just a map : clusterid-> program.
@@ -987,7 +990,7 @@ SolveByGDNesterov(SparseMatrix<double, RowMajor> Uli, SparseMatrix<double, RowMa
       }
       //std::cout << i << ". xk :" << xk.squaredNorm() << "\n";
 
-      if (stop_criterion(xk.norm(), 1. / Lip * g.norm(), i)) { // array().real().norm();?
+        if (stop_criterion(xk.squaredNorm(), g.squaredNorm(), Lip, i)) {
           break;
       }
   }

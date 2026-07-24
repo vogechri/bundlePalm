@@ -94,6 +94,9 @@ The reductions remain, but this removes two square roots. Unlike on GPU,
 checking only every k iterations is less important because no device-host
 synchronization is involved.
 
+Implemented 2026-07-24: the stopping helper now compares xk.squaredNorm() and
+g.squaredNorm() using the algebraically equivalent squared inequality.
+
 Priority 3: thread and data-management cleanup
 ----------------------------------------------
 
