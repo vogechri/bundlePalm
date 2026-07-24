@@ -8,6 +8,7 @@
 #include <iostream>
 #include <limits>
 #include <numeric>
+#include <cstdint>
 #include <stdexcept>
 #include <utility>
 
@@ -51,9 +52,33 @@ struct State {
         residuals_per_cluster(cluster_count, 0),
         cameras_per_cluster(cluster_count, 0) {}
 
+  void SetLandmarkOrder(const std::vector<int>& order) {
+    landmark_by_rank = order;
+    rank_by_landmark.resize(order.size());
+    for (int rank = 0; rank < static_cast<int>(order.size()); ++rank) {
+      rank_by_landmark[order[rank]] = rank;
+    }
+    const std::size_t word_count = (order.size() + 63) / 64;
+    landmark_rank_bits.assign(
+        residuals_per_cluster.size(), std::vector<std::uint64_t>(word_count));
+  }
+
+  void MoveLandmarkRank(int landmark, int source, int target) {
+    const int rank = rank_by_landmark[landmark];
+    const std::size_t word = static_cast<std::size_t>(rank) / 64;
+    const std::uint64_t bit = std::uint64_t{1} << (rank % 64);
+    if (source >= 0) {
+      landmark_rank_bits[source][word] &= ~bit;
+    }
+    landmark_rank_bits[target][word] |= bit;
+  }
+
   std::vector<int> camera_cluster_degree;
   std::vector<int> residuals_per_cluster;
   std::vector<int> cameras_per_cluster;
+  std::vector<int> landmark_by_rank;
+  std::vector<int> rank_by_landmark;
+  std::vector<std::vector<std::uint64_t>> landmark_rank_bits;
 };
 
 struct MoveDelta {
@@ -379,6 +404,7 @@ void ApplyMove(const BipartiteCameraPointGraph& graph,
     state.residuals_per_cluster[source] -= weight;
   }
   state.residuals_per_cluster[target] += weight;
+  state.MoveLandmarkRank(landmark, source, target);
   landmark_to_cluster[landmark] = target;
 }
 
@@ -541,6 +567,7 @@ LandmarkPartition ScalableLandmarkPartitioner::Partition(
     return graph.cameras_from_point[left].size() >
            graph.cameras_from_point[right].size();
   });
+  state.SetLandmarkOrder(order);
 
   progress.Begin("initialization");
   for (int landmark : order) {
@@ -830,30 +857,41 @@ LandmarkPartition ScalableLandmarkPartitioner::Partition(
             int best_landmark = -1;
             MoveDelta best_delta;
             int inspected = 0;
-            for (int landmark : order) {
-              if (assignment[landmark] != target ||
-                  std::find(graph.cameras_from_point[landmark].begin(),
-                            graph.cameras_from_point[landmark].end(),
-                            camera) != graph.cameras_from_point[landmark].end()) {
-                continue;
-              }
-              if (++inspected > 4096) {
-                break;
-              }
-              const int weight = LandmarkWeight(graph, landmark);
-              if (state.residuals_per_cluster[source] + weight >
-                      maximum_residuals ||
-                  state.residuals_per_cluster[target] - weight <
-                      minimum_residuals) {
-                continue;
-              }
-              const MoveDelta candidate = ScoreMove(
-                  graph, options_, state, landmark, target, source,
-                  objective_);
+            const auto& rank_bits = state.landmark_rank_bits[target];
+            bool inspection_limit_reached = false;
+            for (std::size_t word_index = 0;
+                 word_index < rank_bits.size() && !inspection_limit_reached;
+                 ++word_index) {
+              std::uint64_t bits = rank_bits[word_index];
+              while (bits != 0) {
+                const int bit = __builtin_ctzll(bits);
+                bits &= bits - 1;
+                const int rank = static_cast<int>(64 * word_index) + bit;
+                const int landmark = state.landmark_by_rank[rank];
+                if (std::find(graph.cameras_from_point[landmark].begin(),
+                              graph.cameras_from_point[landmark].end(),
+                              camera) != graph.cameras_from_point[landmark].end()) {
+                  continue;
+                }
+                if (++inspected > 4096) {
+                  inspection_limit_reached = true;
+                  break;
+                }
+                const int weight = LandmarkWeight(graph, landmark);
+                if (state.residuals_per_cluster[source] + weight >
+                        maximum_residuals ||
+                    state.residuals_per_cluster[target] - weight <
+                        minimum_residuals) {
+                  continue;
+                }
+                const MoveDelta candidate = ScoreMove(
+                    graph, options_, state, landmark, target, source,
+                    objective_);
                 if (best_landmark < 0 ||
-                  BetterDelta(candidate, best_delta, objective_)) {
-                best_landmark = landmark;
-                best_delta = candidate;
+                    BetterDelta(candidate, best_delta, objective_)) {
+                  best_landmark = landmark;
+                  best_delta = candidate;
+                }
               }
             }
             if (best_landmark < 0) {
