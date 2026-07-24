@@ -800,16 +800,15 @@ public:
       // evalOpt.parameter_blocks = {};
       evalOptions.residual_blocks = function_residual_blocks;
       evalOptions.num_threads = options.num_threads;
-      std::vector<double> residuals;
       double cost;
       if (revert_lm) {
         std::vector<double> temp_landmarks = landmarks;
         landmarks = best_landmarks;
-        problem.Evaluate(evalOptions, &cost, &residuals, nullptr, nullptr);
+        problem.Evaluate(evalOptions, &cost, nullptr, nullptr, nullptr);
         landmarks = temp_landmarks;
         WORKER_LOG(cluster_id << ". Eval cost with best landmarks: " << 2 * cost << "\n");
       } else {
-        problem.Evaluate(evalOptions, &cost, &residuals, nullptr, nullptr);
+        problem.Evaluate(evalOptions, &cost, nullptr, nullptr, nullptr);
         WORKER_LOG(cluster_id << ". Eval cost: " << 2 * cost << "\n");
       }
 
@@ -1669,7 +1668,7 @@ int main() {
     switch (request_p.options_case()) {
 
     case request_proto::OptionsCase::kUpdate: {
-      const prox_cluster_proto update =
+      const prox_cluster_proto& update =
           request_p.update(); // we get an update for the cameras only -- update
                               // buffer, run its iterations.
       const int cluster_id = update.cluster_id();
@@ -1732,7 +1731,7 @@ int main() {
     // if we get program we setup new program. if we get cam & prox we update
     // cams (?) and prox term only! do one more it, etc.
     case request_proto::OptionsCase::kProgram: {
-      const program_proto pro = request_p.program();
+      const program_proto& pro = request_p.program();
       const int cluster_id = pro.cluster_id();
       WORKER_LOG("request_proto::OptionsCase::kProgram " << cluster_id
             << std::endl);
@@ -1776,7 +1775,7 @@ int main() {
     }
 
     case request_proto::OptionsCase::kCostUpdate: {
-      const cost_proto costUpdate = request_p.cost_update();
+      const cost_proto& costUpdate = request_p.cost_update();
       const int cluster_id = costUpdate.cluster_id();
       WORKER_LOG("request_proto::OptionsCase::kCostUpdate " << cluster_id
             << std::endl);
@@ -1814,7 +1813,7 @@ int main() {
     case request_proto::OptionsCase::kPreconditioningUpdate: {
       WORKER_LOG("request_proto::OptionsCase::kPreconditioningUpdate"
             << std::endl);
-      const preconditioning_proto ppro = request_p.preconditioning_update();
+      const preconditioning_proto& ppro = request_p.preconditioning_update();
       // Define a Lambda Expression
       CeresProgram &program = cluster_to_program[ppro.cluster_id()];
       program.UpdatePreconditioning(ppro);
@@ -1823,7 +1822,7 @@ int main() {
 
     case request_proto::OptionsCase::kBestCost: {
       WORKER_LOG("request_proto::OptionsCase::kBestCost" << std::endl);
-      const best_cost_proto ppro = request_p.best_cost();
+      const best_cost_proto& ppro = request_p.best_cost();
       // Define a Lambda Expression
       CeresProgram &program = cluster_to_program[ppro.cluster_id()];
       program.UpdateBestCost(ppro);
