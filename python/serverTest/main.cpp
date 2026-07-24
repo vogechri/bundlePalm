@@ -533,31 +533,45 @@ struct CameraLandmarkEdge {
 
 class BlockEdgeMatrix {
  public:
-  void SetEdges(int num_cameras, int num_landmarks,
-                std::vector<CameraLandmarkEdge> edges) {
+  void Initialize(int num_cameras, int num_landmarks,
+                  const std::vector<int>& cameras,
+                  const std::vector<int>& landmarks) {
+    THROW_IF(cameras.size() != landmarks.size());
     num_cameras_ = num_cameras;
     num_landmarks_ = num_landmarks;
-    std::stable_sort(edges.begin(), edges.end(),
-        [](const CameraLandmarkEdge& left, const CameraLandmarkEdge& right) {
-          return left.camera < right.camera ||
-              (left.camera == right.camera && left.landmark < right.landmark);
+    std::vector<int> observation_order(cameras.size());
+    std::iota(observation_order.begin(), observation_order.end(), 0);
+    std::stable_sort(observation_order.begin(), observation_order.end(),
+        [&cameras, &landmarks](int left, int right) {
+          return cameras[left] < cameras[right] ||
+              (cameras[left] == cameras[right] &&
+               landmarks[left] < landmarks[right]);
         });
     edges_.clear();
-    edges_.reserve(edges.size());
-    for (const CameraLandmarkEdge& edge : edges) {
-      if (!edges_.empty() && edges_.back().camera == edge.camera &&
-          edges_.back().landmark == edge.landmark) {
-        for (int index = 0; index < 27; ++index) {
-          edges_.back().values[index] += edge.values[index];
-        }
-      } else {
-        edges_.push_back(edge);
+    edges_.reserve(cameras.size());
+    observation_edges_.resize(cameras.size());
+    for (int observation : observation_order) {
+      if (edges_.empty() || edges_.back().camera != cameras[observation] ||
+          edges_.back().landmark != landmarks[observation]) {
+        edges_.push_back(
+            CameraLandmarkEdge{cameras[observation], landmarks[observation], {}});
       }
+      observation_edges_[observation] = edges_.size() - 1;
     }
     for (const CameraLandmarkEdge& edge : edges_) {
       THROW_IF(edge.camera < 0 || edge.camera >= num_cameras_ ||
                edge.landmark < 0 || edge.landmark >= num_landmarks_);
     }
+  }
+
+  void ClearValues() {
+    for (CameraLandmarkEdge& edge : edges_) {
+      edge.values.fill(0.);
+    }
+  }
+
+  std::array<double, 27>& ObservationValues(int observation) {
+    return edges_[observation_edges_[observation]].values;
   }
 
   int rows() const { return 9 * num_cameras_; }
@@ -604,12 +618,12 @@ class BlockEdgeMatrix {
   int num_cameras_ = 0;
   int num_landmarks_ = 0;
   std::vector<CameraLandmarkEdge> edges_;
+  std::vector<int> observation_edges_;
 };
 
 struct NormalEquations {
   SparseMatrix<double, RowMajor> camera_hessian;
   SparseMatrix<double, RowMajor> landmark_hessian;
-  BlockEdgeMatrix camera_landmark_hessian;
   Eigen::VectorXd camera_gradient;
   Eigen::VectorXd landmark_gradient;
   Eigen::VectorXd residual;
@@ -688,6 +702,8 @@ public:
       for (const int &id : pro.cam_id()) {
         cam_obs.push_back(id);
       }
+      camera_landmark_hessian.Initialize(
+          numCameras, numLandmarks, cam_obs, lm_obs);
       unorm.clear();
       unorm.reserve(9 * numCameras);
       for (const auto &v : pro.unorm()) {
@@ -772,6 +788,12 @@ public:
       WORKER_LOG("Added " << pro.observations_size() / 2 << " Residual blocks\n");
       function_residual_blocks.clear();
       problem.GetResidualBlocks(&function_residual_blocks);
+      normal_equation_evaluate_options.apply_loss_function = true;
+      normal_equation_evaluate_options.residual_blocks = function_residual_blocks;
+      normal_equation_evaluate_options.num_threads = options.num_threads;
+      normal_equation_residuals.reserve(2 * numResiduals);
+      normal_equation_camera_blocks.resize(numCameras * 81);
+      normal_equation_landmark_blocks.resize(numLandmarks * 9);
 
       for (int cam_id = 0; cam_id < numCameras; ++cam_id) {
         // double* values = JpJ.valuePtr();
@@ -1179,7 +1201,7 @@ void UpdateStepSizeAndSolve() {//bool keep_cameras_fixed = false) { // Recompute
 
   const int power_iterations = 100; //keep_cameras_fixed ? 0 : 100;
   const double costStart = residual.squaredNorm();
-  const BlockEdgeMatrix& W = normalEquations.camera_landmark_hessian;
+  const BlockEdgeMatrix& W = camera_landmark_hessian;
   const Eigen::VectorXd& bp = normalEquations.camera_gradient;
   const Eigen::VectorXd& bl = normalEquations.landmark_gradient;
   Matrix<double, Eigen::Dynamic, 1> proximalOffset(9 * numCameras);
@@ -1415,62 +1437,59 @@ private:
 
   NormalEquations GetNormalEquations() {
     // 1st get Jacobian(s):
-    ceres::Problem::EvaluateOptions evalOptions;
-    evalOptions.apply_loss_function = true;
-    // evalOpt.parameter_blocks = {}; // TODO only poses.
-    evalOptions.residual_blocks = function_residual_blocks;
-    evalOptions.num_threads = options.num_threads;
-    ceres::CRSMatrix jacobian;
-    std::vector<double> residuals;
     // std::cout << "GetJacobian: Evaluate " << cluster_id << "\n"; 
     const bool collectTiming = LocalSolveMetricsEnabled();
     const auto evaluateStart = collectTiming ? TimingClock::now() : TimingClock::time_point{};
-    problem.Evaluate(evalOptions, &startCost, &residuals, nullptr, &jacobian);
+    problem.Evaluate(normal_equation_evaluate_options, &startCost,
+                     &normal_equation_residuals, nullptr,
+                     &normal_equation_jacobian);
     last_jacobian_evaluate_seconds = collectTiming ? ElapsedSeconds(evaluateStart) : 0.;
     const auto conversionStart = collectTiming ? TimingClock::now() : TimingClock::time_point{};
-    THROW_IF(jacobian.num_rows != 2 * numResiduals);
-    THROW_IF(residuals.size() != jacobian.num_rows);
-    std::vector<double> cameraBlocks(numCameras * 81, 0.);
-    std::vector<double> landmarkBlocks(numLandmarks * 9, 0.);
-    std::vector<CameraLandmarkEdge> edges;
-    edges.reserve(numResiduals);
+    THROW_IF(normal_equation_jacobian.num_rows != 2 * numResiduals);
+    THROW_IF(normal_equation_residuals.size() != normal_equation_jacobian.num_rows);
+    std::fill(normal_equation_camera_blocks.begin(),
+              normal_equation_camera_blocks.end(), 0.);
+    std::fill(normal_equation_landmark_blocks.begin(),
+              normal_equation_landmark_blocks.end(), 0.);
+    camera_landmark_hessian.ClearValues();
     NormalEquations result;
     result.camera_gradient = Eigen::VectorXd::Zero(9 * numCameras);
     result.landmark_gradient = Eigen::VectorXd::Zero(3 * numLandmarks);
-    result.residual = Eigen::Map<Eigen::VectorXd>(residuals.data(), residuals.size());
+    result.residual = Eigen::Map<Eigen::VectorXd>(normal_equation_residuals.data(),
+                                                  normal_equation_residuals.size());
 
     for (int observation = 0; observation < numResiduals; ++observation) {
       const int lm_id = lm_obs[observation];
       const int cam_id = cam_obs[observation];
-      CameraLandmarkEdge edge{cam_id, lm_id, {}};
+        std::array<double, 27>& edgeValues =
+          camera_landmark_hessian.ObservationValues(observation);
       for (int component = 0; component < 2; ++component) {
         const Eigen::Index row = 2 * observation + component;
-        const Eigen::Index begin = jacobian.rows[row];
-        const Eigen::Index end = jacobian.rows[row + 1];
+        const Eigen::Index begin = normal_equation_jacobian.rows[row];
+        const Eigen::Index end = normal_equation_jacobian.rows[row + 1];
         THROW_IF(end - begin != 12);
-        const double residual = residuals[row];
+        const double residual = normal_equation_residuals[row];
         for (int i = 0; i < 9; ++i) {
-          const double cameraValue = jacobian.values[begin + i];
+          const double cameraValue = normal_equation_jacobian.values[begin + i];
           result.camera_gradient[9 * cam_id + i] += cameraValue * residual;
           for (int j = 0; j < 9; ++j) {
-            cameraBlocks[81 * cam_id + 9 * i + j] +=
-                cameraValue * jacobian.values[begin + j];
+            normal_equation_camera_blocks[81 * cam_id + 9 * i + j] +=
+                cameraValue * normal_equation_jacobian.values[begin + j];
           }
           for (int j = 0; j < 3; ++j) {
-            edge.values[3 * i + j] +=
-                cameraValue * jacobian.values[begin + 9 + j];
+            edgeValues[3 * i + j] +=
+                cameraValue * normal_equation_jacobian.values[begin + 9 + j];
           }
         }
         for (int i = 0; i < 3; ++i) {
-          const double landmarkValue = jacobian.values[begin + 9 + i];
+          const double landmarkValue = normal_equation_jacobian.values[begin + 9 + i];
           result.landmark_gradient[3 * lm_id + i] += landmarkValue * residual;
           for (int j = 0; j < 3; ++j) {
-            landmarkBlocks[9 * lm_id + 3 * i + j] +=
-                landmarkValue * jacobian.values[begin + 9 + j];
+            normal_equation_landmark_blocks[9 * lm_id + 3 * i + j] +=
+                landmarkValue * normal_equation_jacobian.values[begin + 9 + j];
           }
         }
       }
-      edges.push_back(edge);
     }
 
     result.camera_hessian.resize(9 * numCameras, 9 * numCameras);
@@ -1479,7 +1498,7 @@ private:
       for (int row = 0; row < 9; ++row) {
         for (int col = 0; col < 9; ++col) {
           result.camera_hessian.insert(9 * camera + row, 9 * camera + col) =
-              cameraBlocks[81 * camera + 9 * row + col];
+              normal_equation_camera_blocks[81 * camera + 9 * row + col];
         }
       }
     }
@@ -1491,14 +1510,12 @@ private:
       for (int row = 0; row < 3; ++row) {
         for (int col = 0; col < 3; ++col) {
           result.landmark_hessian.insert(3 * landmark + row, 3 * landmark + col) =
-              landmarkBlocks[9 * landmark + 3 * row + col];
+              normal_equation_landmark_blocks[9 * landmark + 3 * row + col];
         }
       }
     }
     result.landmark_hessian.makeCompressed();
 
-    result.camera_landmark_hessian.SetEdges(numCameras, numLandmarks,
-                        std::move(edges));
     last_jacobian_conversion_seconds = collectTiming ? ElapsedSeconds(conversionStart) : 0.;
     return result;
   }
@@ -1624,6 +1641,12 @@ private:
   std::vector<double> cameraTransform;
   std::vector<int> cam_obs;
   std::vector<int> lm_obs;
+  BlockEdgeMatrix camera_landmark_hessian;
+  ceres::Problem::EvaluateOptions normal_equation_evaluate_options;
+  ceres::CRSMatrix normal_equation_jacobian;
+  std::vector<double> normal_equation_residuals;
+  std::vector<double> normal_equation_camera_blocks;
+  std::vector<double> normal_equation_landmark_blocks;
   ceres::Problem problem;
   ceres::Solver::Options options;
 };

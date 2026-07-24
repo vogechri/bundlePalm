@@ -327,6 +327,8 @@ lowest-risk remaining runtime change.
 15. Reuse Ceres evaluation workspaces
 -------------------------------------
 
+Status: implemented and retained after a fixed ten-problem benchmark.
+
 Each Jacobian or cost call reconstructs EvaluateOptions, copies
 function_residual_blocks, and creates new CRS and residual containers. Keep
 per-program members for:
@@ -336,11 +338,24 @@ per-program members for:
   - residual storage,
   - Jacobian conversion and normal-equation buffers.
 
-Retaining capacity should reduce repeated allocation even when Ceres rewrites
-the numerical values.
+The normal-equation path now initializes EvaluateOptions once per program and
+reuses the CRS matrix, residual vector, and dense camera/landmark block
+buffers. Numeric buffers are cleared in place before each assembly. Relative
+to the retained persistent-edge implementation, all ten problems reproduced
+bestCost30, bestCost60, final cost, and best iteration exactly. Performance
+improved by:
+
+  geometric-mean overall:    2.58 percent
+  aggregate overall:         2.15 percent
+  geometric-mean solve-only: 2.75 percent
+  aggregate solve-only:      2.54 percent
+
+Keep this optimization.
 
 16. Represent U, V, and their inverses as dense blocks
 ------------------------------------------------------
+
+Status: tested and rejected.
 
 U and V are always block diagonal, but SolveByGDNesterov copies them as sparse
 matrices before replacing each block with its inverse. Store contiguous
@@ -349,6 +364,37 @@ std::vector<Eigen::Matrix<double, 9, 9>> and 3x3 equivalents instead.
 Perform damping, inversion, and matvecs directly on these blocks. Benchmark
 LDLT.solve(I) against the current general matrix inverse for speed and numerical
 agreement.
+
+The dense-block experiment produced mixed timing with no reliable
+geometric-mean improvement. It also changed the exact quality tuples for
+problems 245, 287, and 931 in the fixed ten-problem subset. The implementation
+was removed; retain the sparse block-diagonal representation.
+
+Persistent block-edge topology follow-up
+----------------------------------------
+
+Status: implemented and retained after a fixed ten-problem benchmark.
+
+The scalar block-edge Schur operator retained in item 13 previously rebuilt,
+sorted, and merged camera-landmark edges for every normal-equation evaluation.
+The program now constructs the unique sorted topology and observation-to-edge
+mapping once in ResetProgram. Every evaluation clears the persistent 9x3 edge
+values and accumulates directly into the mapped edge.
+
+All ten problems reproduced bestCost30, bestCost60, final cost, and best
+iteration exactly. Relative to the fresh block-edge baseline, performance
+improved by:
+
+  geometric-mean overall:    11.88 percent
+  aggregate overall:         19.53 percent
+  geometric-mean solve-only: 13.12 percent
+  aggregate solve-only:      21.54 percent
+
+Keep this optimization.
+
+The fixed benchmark subset is problems 52, 142, 245, 287, 394, 646, 744, 931,
+1064, and 1266, each run for 90 iterations with 30 clusters. The reusable
+runner is run_optimization_subset.sh.
 
 17. Reduce protobuf copies and allocations
 ------------------------------------------
@@ -410,6 +456,6 @@ Revised implementation order
 3. [done, retained] Reduce weighted autodiff from 105 variables to 12.
 4. [done, retained] Fuse CRS extraction and normal-equation assembly.
 5. [done, retained for W] Replace sparse W operations with a block-edge operator.
-6. Reuse evaluation workspaces.
+6. [done, retained] Reuse evaluation workspaces.
 7. Reduce protobuf and thread-management overhead.
 8. Benchmark -march=native and link-time optimization.
