@@ -27,6 +27,7 @@ from scipy.sparse import bsr_matrix, csr_array, csr_matrix
 from scipy.sparse import diags as diag_sparse
 
 faulthandler.enable(all_threads=True)
+client_started_at = time.perf_counter()
 SCRIPT_DIRECTORY = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPT_DIRECTORY / "build" / "generated" / "proto"))
 test_pb2 = importlib.import_module("test_pb2")
@@ -259,17 +260,11 @@ def recv_message(socket_, operation):
         raise TimeoutError(f"timed out while {operation}") from error
 
 def send_request(push_socket_, request_serialized, operation):
-    """Send one server request and verify its immediate acceptance ACK."""
+    """Send one asynchronous server request."""
     try:
         push_socket_.send(request_serialized)
     except zmq.Again as error:
         raise TimeoutError(f"timed out while {operation}") from error
-    acknowledgement = recv_message(
-        push_socket_, f"waiting for acknowledgement while {operation}")
-    if acknowledgement != b"Ok":
-        raise RuntimeError(
-            f"unexpected acknowledgement while {operation}: "
-            f"{acknowledgement!r}")
 
 def consume_cluster_reply(pending_cluster_ids, cluster_id, operation):
     """Ensure each asynchronous batch contains exactly one reply per cluster."""
@@ -1126,7 +1121,7 @@ print("Connecting to cpp server…")
 #socket.connect("tcp://localhost:5555")
 
 # new idea.
-push_socket = context.socket(zmq.REQ)#PUSH)
+push_socket = context.socket(zmq.PUSH)
 #pull_socket = context.socket(zmq.REP)#.PULL)
 pull_socket = context.socket(zmq.PULL)
 
@@ -1144,7 +1139,7 @@ pull_socket.connect("tcp://localhost:5557")
 
 #lib = ctypes.CDLL("./libprocess_clusters.so")
 # init_lib() # ?
-start = time.time() # this is not working at all. Slower then iteratively
+partition_started_at = time.perf_counter()
 clustering_mode = os.environ.get("BUNDLE_PALM_CLUSTERING", "landmark")
 if clustering_mode == "landmark":
     (
@@ -1220,8 +1215,8 @@ else:
     raise ValueError(
         "BUNDLE_PALM_CLUSTERING must be 'landmark', 'landmark_clean', "
         "'landmark_scalable', or 'landmark_scalable_stable'")
-end = time.time() # this is not working at all. Slower then iteratively
-print("==========", clustering_mode, "clustering took", end - start,
+partition_seconds = time.perf_counter() - partition_started_at
+print("==========", clustering_mode, "clustering took", partition_seconds,
       "s ===========")
 
 nonempty_cluster_ids = [
@@ -1695,10 +1690,13 @@ for global_iteration in range(global_iterations):
 
                 break # next full iteration
 
+overall_seconds = time.perf_counter() - client_started_at
 result_dict = {"base_url": BASE_URL, "file_name": FILE_NAME, "iterations" : global_iterations, \
             "bestCost" : round(bestCost), "bestIt": bestIt, "kClusters" : kClusters, \
             "bestCost60" : round(bestCost60), "bestCost30" : round(bestCost30), \
-            "drsScaling": DRS_SCALING_METHOD }
+            "drsScaling": DRS_SCALING_METHOD, \
+            "partitionSeconds": partition_seconds, \
+            "overallSeconds": overall_seconds }
 with open('results_server.json', 'a') as json_file:
     json.dump(result_dict, json_file)
     json_file.write('\n')

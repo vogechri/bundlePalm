@@ -48,6 +48,11 @@ protobuf_generate(
 # Add your source files
 add_executable(${PROJECT_NAME} main.cpp)
 
+option(BUNDLE_PALM_VERBOSE_LOGGING "Enable verbose C++ worker logging" OFF)
+if(BUNDLE_PALM_VERBOSE_LOGGING)
+    target_compile_definitions(${PROJECT_NAME} PRIVATE BUNDLE_PALM_VERBOSE_LOGGING)
+endif()
+
 # Include directories
 include_directories(${Protobuf_INCLUDE_DIR})
 target_include_directories(${PROJECT_NAME} PRIVATE ${ZeroMQ_INCLUDE_DIR}) # ${CMAKE_CURRENT_LIST_DIR}/proto)

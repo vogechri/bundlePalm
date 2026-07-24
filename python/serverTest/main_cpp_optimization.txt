@@ -1,0 +1,148 @@
+main.cpp optimization opportunities
+===================================
+
+Priority 1: low-risk, high-impact changes
+-----------------------------------------
+
+1. Enable OpenMP for the server target
+
+The numerical helper loops use OpenMP pragmas, but the CMake server target is
+currently compiled with only -O3 -DNDEBUG. Add find_package(OpenMP REQUIRED)
+and link OpenMP::OpenMP_CXX to zeromq_cpp_server_ex.
+
+Benchmark thread settings after enabling it because clusters already run in
+parallel. Parallelizing both across clusters and within each cluster can
+oversubscribe the machine.
+
+2. Cache Jp^T Jp across trust-region retries
+
+UpdateStepSizeAndSolve computes Jp^T Jp before the retry loop and then computes
+it again inside every retry. Jp does not change during these retries. Keep the
+original block-diagonal matrix and derive each retry's Ul from the cached
+matrix.
+
+Expected benefit: substantial when trust-region steps are rejected.
+
+3. Cache retry-invariant Schur quantities
+
+SolveByGDNesterov currently recomputes the following on every trust-region
+retry:
+
+  W = Jp^T Jl
+  bp = Jp^T residual
+  bl = Jl^T residual
+  proximal products involving cameras and cameras_s
+
+These quantities are constant during the retry loop. Compute them once before
+while (true) and pass them into SolveByGDNesterov.
+
+Priority 2: reduce allocations and repeated arithmetic
+-------------------------------------------------------
+
+4. Reuse Nesterov workspace vectors
+
+The Nesterov iteration creates dynamic intermediate vectors for:
+
+  W^T x
+  V^-1 W^T x
+  W V^-1 W^T x
+  U^-1 W V^-1 W^T x
+
+Preallocate these vectors once per solve and fill them with Eigen noalias()
+assignments. Reuse buffers for g, yk, and y0 as well. This avoids repeated heap
+allocations in a loop that can execute up to 100 times.
+
+5. Avoid redundant proximal block products
+
+Instead of computing S*c and S*c_s separately, compute S*(c-c_s) once. Cache
+this value for the retry loop.
+
+The end penalty can also be evaluated as:
+
+  P(c + delta) = P(c)
+                 + 2 * delta^T * S * (c-c_s)
+                 + delta^T * S * delta
+
+This can reduce two block products per retry to one. Change blockMult to write
+into a reusable output vector rather than allocating and returning a new one.
+
+6. Make the stopping test cheaper
+
+The CPU stopping test computes xk.norm() and g.norm() every iteration. Compare
+squared norms instead to avoid square roots:
+
+  (i+1)^2 * ||g||^2 < (eps * Lip)^2 * ||xk||^2
+
+The reductions remain, but this removes two square roots. Unlike on GPU,
+checking only every k iterations is less important because no device-host
+synchronization is involved.
+
+Priority 3: thread and data-management cleanup
+----------------------------------------------
+
+7. Fix the Eigen thread-count edge case
+
+threads_per_cluster is clamped to at least one for Ceres, but
+Eigen::setNbThreads receives the unclamped integer division. If numClusters is
+greater than 31, Eigen receives zero and may restore its default thread count.
+Pass threads_per_cluster to both Eigen and Ceres.
+
+8. Cache sparse Jacobian structure
+
+GetJacobianAndResidual reconstructs the Jp and Jl sparse structures on every
+update even though observation-to-camera and observation-to-landmark mappings
+are fixed after ResetProgram. Cache the compressed row/column structure and
+only overwrite numerical values.
+
+9. Reduce request and thread overhead
+
+Use const references for protobuf submessages where their lifetime permits it,
+for example request_p.program(), to avoid copying large messages.
+
+Detached OS threads are also created for every request. A fixed worker pool
+would reduce thread creation overhead and make concurrency limits explicit.
+This is probably secondary to the numerical work for large problems.
+
+Priority 4: larger algorithm-preserving representation change
+--------------------------------------------------------------
+
+10. Accumulate block Hessians directly
+
+Jp^T Jp and Jl^T Jl are block diagonal because each observation depends on one
+camera and one landmark. Generic Eigen sparse multiplication performs symbolic
+processing and allocations that are unnecessary for this structure.
+
+Accumulate 9x9 camera blocks and 3x3 landmark blocks directly from Jacobian
+rows. This likely has the largest long-term CPU potential, but it is a larger
+change and requires numerical equivalence tests.
+
+Build-level options
+-------------------
+
+The build already uses -O3. For a server deployed on fixed hardware, benchmark
+-march=native and link-time optimization. These are expected to provide modest
+wins compared with removing repeated sparse products and allocations.
+
+Recommended implementation order
+--------------------------------
+
+1. Enable OpenMP and fix the Eigen thread count.
+2. Cache Jp^T Jp and retry-invariant Schur quantities.
+3. Reuse Nesterov buffers and remove redundant proximal products.
+4. Profile the updated code.
+5. Implement direct block-Hessian accumulation only if profiling still shows
+   sparse Hessian construction as a major cost.
+
+Validation
+----------
+
+For each optimization, compare:
+
+  - total and solver-only runtime,
+  - final cost, bestCost30, and bestCost60,
+  - trust-region rejection count,
+  - average Nesterov iterations,
+  - numerical agreement of accepted delta_p and delta_l steps.
+
+OpenMP and thread-count changes should be benchmarked at representative cluster
+counts to detect oversubscription.

@@ -69,28 +69,147 @@ regret. It is suitable for shortlisting, not final selection.
 
 | Selection horizon | Epoch-30 oracle hits | Mean epoch-30 regret | Worst epoch-30 regret | 90-epoch audit hits | Mean audit regret | Worst audit regret |
 |---:|---:|---:|---:|---:|---:|---:|
-| 1 | 3/10 | 0.743% | 4.791% | 0/3 | 0.202% | 0.483% |
-| 3 | 5/10 | 0.198% | 0.857% | 0/3 | 0.147% | 0.361% |
-| 5 | 4/10 | 0.282% | 0.893% | 1/3 | 0.026% | 0.053% |
-| 10 | 4/10 | 0.140% | 0.857% | 1/3 | 0.032% | 0.071% |
-| 20 | 8/10 | 0.019% | 0.174% | 2/3 | 0.018% | 0.053% |
+| 1 | 4/10 | 0.731% | 4.791% | 0/3 | 0.299% | 0.483% |
+| 3 | 3/10 | 0.295% | 0.893% | 0/3 | 0.147% | 0.361% |
+| 5 | 3/10 | 0.289% | 0.893% | 1/3 | 0.027% | 0.053% |
+| 10 | 3/10 | 0.262% | 1.250% | 0/3 | 0.050% | 0.071% |
+| 20 | 8/10 | 0.022% | 0.201% | 1/3 | 0.027% | 0.053% |
 | 30 | 10/10 | 0% | 0% | 2/3 | 0.018% | 0.053% |
 
 Twenty epochs is the first consistently strong solver signal. Thirty epochs
 does not improve the available 90-epoch audit regret because problem 135 still
 changes winner after epoch 30.
 
+These horizons count completed PALM updates. An earlier analysis accidentally
+treated trajectory record zero, which stores the initial objective and the
+first update's diagnostics, as the result of one completed epoch. The table
+above uses record $h$ as the result after $h$ updates.
+
+## Cheap Solver-Informed Score
+
+Exact winner recovery is not the engineering objective. For a selected
+candidate $j$ and the best observed candidate in the pool, use
+
+$$
+R_j = 100\frac{F_j-\min_i F_i}{\min_i F_i},
+$$
+
+and provisionally accept $R_j \le 0.5\%$. Retrospective results at epoch 30 are:
+
+| Selector | Within 0.5% | Mean regret | Worst regret |
+|---|---:|---:|---:|
+| Static topology: shared points and shared-point degree | 8/10 | 0.205% | 0.893% |
+| Static topology plus Schur concentration | 8/9 | 0.059% | 0.531% |
+| One-update objective reduction | 7/10 | 0.710% | 4.791% |
+| One-update reduction plus model quality | 8/10 | 0.706% | 4.791% |
+| Static topology plus one-update reduction | 8/10 | 0.229% | 0.893% |
+| Three-update objective | 7/10 | 0.295% | 0.893% |
+| Five-update objective | 8/10 | 0.289% | 0.893% |
+| Twenty-update objective | 10/10 | 0.022% | 0.201% |
+
+The available solver diagnostics do not improve the cheap decision. A single
+update can introduce a 4.791% miss, and combining it with static topology does
+not change which problems exceed the 0.5% target. Static-score margin is not a
+useful uncertainty trigger either: problem 427 has a strong apparent static
+margin but still misses the Schur-composite oracle by 0.531%. The 90-epoch
+candidate audit contains only three complete pools; every tested selector stays
+within 0.5% there, which is reassuring but not discriminating.
+
+## One-Part Reference
+
+A one-part result is useful only when the numerical solver configuration is
+matched. In particular, compare one-part PCG with partitioned PCG, and one-part
+Nesterov with partitioned Nesterov, using the same outer accelerator, damping,
+preconditioner, inner tolerance and iteration cap, and outer-iteration budget.
+The archived frozen candidate pools use inner Nesterov, so they cannot be
+bounded by the available standalone CG results. No CG-to-CG one-versus-many
+partition conclusion is reported here yet.
+
+The separate standalone full-problem experiment is informative for tuning, not
+partition evaluation. It used 400 inner iterations with tolerance $10^{-4}$ for
+CG but tolerance $10^{-2}$ for Nesterov. Nesterov was about 15% faster, while CG
+reached a lower final cost on 24/28 problems. Median Nesterov excess was only
+0.075%, but 7/28 problems exceeded 0.5% and the worst excess was 1.886%. Because
+the stopping tolerances differ, these results do not isolate an inherent
+CG-versus-Nesterov quality gap.
+
+For the seven cases above 0.5%, all Nesterov runs reached their best value at
+the final outer iteration. Problems 89 and 1778 still improved by 0.150% and
+0.171%, respectively, from iterations 50 to 60, so a larger outer budget may
+help those cases. The other five improved by at most 0.071% over the same
+interval. Tightening the Nesterov inner tolerance is therefore the first
+controlled test; increase the inner cap only if the tighter runs hit 400, and
+increase outer iterations only where the late objective slope remains material.
+
 ## Recommended Policy
 
 1. Enforce the existing maximum-load cap; do not continue optimizing balance
    once all candidates are feasible.
 2. Generate candidates from multiple seeds and shallow refinement checkpoints.
-3. Prefer a shortlist with fewer shared landmarks and a less concentrated
-   Schur boundary, while retaining at least one ownership-diverse candidate.
-4. Include at most one Schur-refined candidate. Total Schur cut alone is too
-   weak and exact construction is expensive on high-degree graphs.
-5. Run shortlisted candidates for 20 epochs and let the solver choose the
-   continuation winner.
+3. When approximately 0.5% regret is acceptable, select one candidate directly
+   with the static composite. Fall back to shared-point count and degree when
+   exact Schur concentration is unavailable.
+4. Include at most one Schur-refined candidate in research portfolios. Total
+   Schur cut alone is too weak and exact construction is expensive on
+   high-degree graphs.
+5. Do not run one- to five-update probes by default; they did not improve the
+   0.5% success rate. Reserve the 20-update portfolio for audits or cases where
+   the tighter observed 0.201% worst regret justifies its compute cost.
+6. Report regret against the candidate-pool oracle. Add a one-part quality bound
+   only when the one- and many-part numerical solver configurations match. Do
+   not use exact winner count as the primary success criterion.
+
+## Direct BAE Baseline
+
+The broader systems claim is different from partition-oracle recovery: a fixed,
+cheap partitioning policy should preserve the quality of the direct solver at
+acceptable overhead. The clean archived comparison uses one predetermined
+two-part overlap partition per problem, with 20 refinement passes and no
+portfolio-search cost. Partitioned PALM uses outer Nesterov acceleration and
+inner Nesterov local solves; direct BAE solves the full problem without PALM.
+
+Against direct BAE CG after 60 iterations, on 10 matched problems:
+
+| PALM budget | Better or equal | Within 0.5% or better | Worse by more than 1% | Median cost change | Aggregate runtime change |
+|---:|---:|---:|---:|---:|---:|
+| 60 epochs | 5/10 | 8/10 | 1/10 | +0.014% | +52.8% |
+| 90 epochs | 7/10 | 8/10 | 1/10 | -0.122% | +124.0% |
+
+The median supports the quality-preservation claim, but the tail does not yet:
+problem 356 is 4.433% worse at epoch 60 and 4.085% worse at epoch 90. Problem
+126 is the other case above 0.5%, at 0.946% and 0.707%, respectively. Reporting
+only a mean would hide this. The defensible statement is therefore:
+
+> Fixed two-part accelerated PALM stayed within 0.5% of direct BAE CG on 8/10
+> problems at 60 epochs, with a +0.014% median objective change and +52.8%
+> aggregate sequential wall time. One problem exceeded 1%, reaching 4.433%.
+
+The extra 30 PALM epochs improve the median and the number of wins but do not
+remove the outlier, while more than doubling aggregate runtime relative to the
+direct baseline. A larger outer budget is therefore not a general remedy.
+
+This does not establish a best partitioning algorithm. At the 30-update
+horizon, even the best observed candidate from each frozen pool remains more
+than 0.5% behind direct CG on 4/10 problems, with problem 356 still 3.724%
+behind. That separates two questions: the static selector is often close to the
+best candidate generated, but the current candidate family itself does not
+always preserve direct-solver quality. Future partition objectives should be
+judged first by baseline-relative tail loss, not only cut statistics or regret
+within the candidate pool.
+
+Wall times are archived elapsed times and assume the runs were made on the same
+workstation. They measure sequential execution; parallel block execution is a
+separate scalability result. `analyze_partitioned_baseline.py` regenerates the
+full per-problem comparison in `baseline_comparison.json`.
+
+The same claim is desirable for DRS, but the current DRS archive is not suitable
+for it. `results_drs.json` contains duplicate exploratory configurations, and
+the runs wrote free-form logs rather than machine-readable trajectories with
+elapsed time and complete solver metadata. A valid DRS audit needs one frozen
+configuration, one result per problem, objective checkpoints, cumulative wall
+time, partition ownership, and an explicitly named direct BAE baseline. It
+should report the same threshold counts, median and worst objective changes,
+and aggregate runtime change as the PALM table above.
 
 ## Early Selection Deployment
 
