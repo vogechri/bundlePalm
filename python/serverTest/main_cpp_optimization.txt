@@ -66,6 +66,23 @@ The end penalty can also be evaluated as:
 This can reduce two block products per retry to one. Change blockMult to write
 into a reusable output vector rather than allocating and returning a new one.
 
+Implementation status (2026-07-24)
+----------------------------------
+
+Items 2-5 are implemented cumulatively in main.cpp:
+
+  - Jp^T Jp is cached across trust-region retries.
+  - W, Jp^T residual, Jl^T residual, and the proximal gradient are cached.
+  - Nesterov Schur-product and iteration vectors are reused.
+  - S*(c-c_s), the starting penalty, and a reusable S*delta buffer replace
+    redundant proximal block products.
+
+The server builds successfully. Thirty-iteration checks preserve the stored
+rounded trajectories for problems 52 and 744. Problem 52 single-run timings
+varied by about 2.3 percent across near-identical builds, so performance should
+be judged from the complete 30-part benchmark rather than individual short
+runs. Results are stored under the "# optimized 2-5" section.
+
 6. Make the stopping test cheaper
 
 The CPU stopping test computes xk.norm() and g.norm() every iteration. Compare

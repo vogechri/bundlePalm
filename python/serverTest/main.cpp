@@ -460,6 +460,18 @@ Eigen::VectorXd blockMult(const std::vector<double>& blockMat, const Eigen::Vect
   return res;
 }
 
+template<int N>
+void blockMult(const std::vector<double>& blockMat, const Eigen::VectorXd& vec, Eigen::VectorXd& res) {
+  const int num = blockMat.size() / N;
+  res.setZero(num);
+#pragma omp parallel for num_threads(options.num_threads)
+  for (int id = 0; id < res.size(); ++id) {
+    for (int k = 0; k < N; ++k) {
+      res[id] += blockMat[id * N + k] * vec[(id / N ) * N + k];
+    }
+  }
+}
+
 
 // template<int N>
 // void blockAdd(std::vector<double>& dest, std::vector<double>& add) {
@@ -862,15 +874,20 @@ void UpdatePreconditioningCameras(SparseMatrix<double, RowMajor> JpJ) {
 std::pair<Matrix<double, Eigen::Dynamic, 1>, Matrix<double, Eigen::Dynamic, 1>>
 SolveByGDNesterov(SparseMatrix<double, RowMajor> Uli, SparseMatrix<double, RowMajor> Vli, 
                 const SparseMatrix<double, RowMajor>& Jp, const SparseMatrix<double, RowMajor>& Jl, 
-                const Matrix<double, Eigen::Dynamic, 1>& res, int power_iterations) {
+                const Matrix<double, Eigen::Dynamic, 1>& res,
+                const SparseMatrix<double, RowMajor>& W,
+                const Matrix<double, Eigen::Dynamic, 1>& bp,
+                const Matrix<double, Eigen::Dynamic, 1>& bl,
+                const Matrix<double, Eigen::Dynamic, 1>& proximalGradient,
+                int power_iterations) {
 
   // compute bS, Vli, W
   BlockInverse<3>(Vli);
 
   if (power_iterations == 0) {  // quick hack: xk = delta_p = 0
-    Matrix<double, Eigen::Dynamic, 1> ubs = Uli * (Jp.transpose() * res);
+    Matrix<double, Eigen::Dynamic, 1> ubs = Uli * bp;
     Matrix<double, Eigen::Dynamic, 1> xk = 0 * ubs;
-    Matrix<double, Eigen::Dynamic, 1> delta_l = Vli * (-Jl.transpose() * res);
+    Matrix<double, Eigen::Dynamic, 1> delta_l = Vli * (-bl);
     return {xk, delta_l};
    }
 
@@ -891,14 +908,12 @@ SolveByGDNesterov(SparseMatrix<double, RowMajor> Uli, SparseMatrix<double, RowMa
   BlockInverse<9>(Uli);
   const double Lip = 0.9;
   double lambda0 = (1. + std::sqrt(5.)) / 2.;
-  const SparseMatrix<double, RowMajor> W = (Jp.transpose() * Jl);//.eval();
-  Matrix<double, Eigen::Dynamic, 1> bS = Jp.transpose() * res;
+  Matrix<double, Eigen::Dynamic, 1> bS = bp;
   // bS = (bp_s                     - W * Vli * bl).flatten() # see XX equals 2 * (bp - W * Vli * bl)
   //       bp_s = bp + stepSize * prox_rhs
   // bS = (bp + stepSize * prox_rhs - W * Vli * bl).flatten() # see XX equals 2 * (bp - W * Vli * bl)
-  bS += Map<Matrix<double, Eigen::Dynamic, 1> >(blockMult<9>(full_stepSize, cameras).data(), 9 * numCameras);
-  bS -= Map<Matrix<double, Eigen::Dynamic, 1> >(blockMult<9>(full_stepSize, cameras_s).data(), 9 * numCameras);
-  bS -= W * (Vli * (Jl.transpose() * res));
+  bS += proximalGradient;
+  bS -= W * (Vli * bl);
 
   // std::cout << " Jl " << Jl.valuePtr()[0] << " " << Jl.valuePtr()[1] << " " << Jl.valuePtr()[2] << "\n";
   // std::cout << "bS :" << bS.array() << "\n";
@@ -910,11 +925,17 @@ SolveByGDNesterov(SparseMatrix<double, RowMajor> Uli, SparseMatrix<double, RowMa
   // Todo : * 1. / Lip ? or not
   Matrix<double, Eigen::Dynamic, 1> xk = - 1. / Lip * ubs; // xk =0, g = ubs, yk = -1. / Lip * g = - 1. / Lip * ubs; xk = (1-gamma) yk + gamma y0, gamma = 0
   Matrix<double, Eigen::Dynamic, 1> y0 = - 1. / Lip * ubs; // xk =0, g = ubs, yk = -1. / Lip * g = - 1. / Lip * ubs; y0 = yk.
+  Matrix<double, Eigen::Dynamic, 1> wtX(W.cols());
+  Matrix<double, Eigen::Dynamic, 1> vinvWtX(W.cols());
+  Matrix<double, Eigen::Dynamic, 1> wVinvWtX(W.rows());
+  Matrix<double, Eigen::Dynamic, 1> uinvWVinvWtX(W.rows());
+  Matrix<double, Eigen::Dynamic, 1> g(W.rows());
+  Matrix<double, Eigen::Dynamic, 1> yk(W.rows());
   // Lip = 0.9 # 100 -> 1. # TODO: play, find out how to progress over time.
   // lambda0 = (1.+np.sqrt(5.)) / 2. # l=0 g=1, 0, .. L0=1 g = 0,..
 
   if (print_cost) {
-    Matrix<double, Eigen::Dynamic, 1> delta_l = Vli * ((W.transpose() * xk) - (Jl.transpose() * res));
+    Matrix<double, Eigen::Dynamic, 1> delta_l = Vli * ((W.transpose() * xk) - bl);
     double cost = (res - Jp * xk + Jl * delta_l).squaredNorm();
     prox_rhs -= xk;
     const double penaltyEnd = prox_rhs.dot( blockMult<9>(full_stepSize, prox_rhs) );
@@ -934,8 +955,15 @@ SolveByGDNesterov(SparseMatrix<double, RowMajor> Uli, SparseMatrix<double, RowMa
       //     xk = (1-gamma) * yk + gamma * y0
       //     y0 = yk
       // const Matrix<double, Eigen::Dynamic, 1> g = (xk - Uli * (W * (Vli * (W.transpose() * xk).eval()).eval()).eval() + ubs).eval();
-      const Matrix<double, Eigen::Dynamic, 1> g = (xk - Uli * (W * (Vli * (W.transpose() * xk))) + ubs);
-      const Matrix<double, Eigen::Dynamic, 1> yk = xk - 1. / Lip * g;
+      wtX.noalias() = W.transpose() * xk;
+      vinvWtX.noalias() = Vli * wtX;
+      wVinvWtX.noalias() = W * vinvWtX;
+      uinvWVinvWtX.noalias() = Uli * wVinvWtX;
+      g = xk;
+      g -= uinvWVinvWtX;
+      g += ubs;
+      yk = xk;
+      yk -= 1. / Lip * g;
       xk = (1. - gamma) * yk + gamma * y0;
       y0 = yk;
 
@@ -948,7 +976,7 @@ SolveByGDNesterov(SparseMatrix<double, RowMajor> Uli, SparseMatrix<double, RowMa
         // double cost = (Ul * xk - W * (Vli * (W.transpose() * xk)) - bS).squaredNorm();
 
         // costQuad  = (residual + Jp * delta_p + Jl * delta_l).squaredNorm();
-        Matrix<double, Eigen::Dynamic, 1> delta_l = Vli * ((W.transpose() * xk) - (Jl.transpose() * res));
+        Matrix<double, Eigen::Dynamic, 1> delta_l = Vli * ((W.transpose() * xk) - bl);
         double cost = (res - Jp * xk + Jl * delta_l).squaredNorm();
 
         prox_rhs -= xk;
@@ -965,7 +993,7 @@ SolveByGDNesterov(SparseMatrix<double, RowMajor> Uli, SparseMatrix<double, RowMa
       }
   }
 
-  Matrix<double, Eigen::Dynamic, 1> delta_l = Vli * ((W.transpose() * xk) - (Jl.transpose() * res));
+  Matrix<double, Eigen::Dynamic, 1> delta_l = Vli * ((W.transpose() * xk) - bl);
   return {-xk, delta_l};
 }
 
@@ -1016,6 +1044,7 @@ void UpdateStepSizeAndSolve() {//bool keep_cameras_fixed = false) { // Recompute
   }
   const Eigen::DiagonalMatrix<double, Eigen::Dynamic> diagVL = Diagonal<3>(Vl); // Vl = VL + L * diagVL
   const Eigen::DiagonalMatrix<double, Eigen::Dynamic> diagUP = 1e1 * Diagonal<9>(Ul, cluster_id); // Vp = Vp + L * diagVp
+  const SparseMatrix<double, RowMajor> cameraHessian = Ul;
   const SparseMatrix<double, RowMajor> landmarkHessian = Vl;
 
   //const double scale = 1e-1; // 1e0: @29: 501k, no jump. 1e1 many jumps. 473k
@@ -1041,6 +1070,17 @@ void UpdateStepSizeAndSolve() {//bool keep_cameras_fixed = false) { // Recompute
 
   const int power_iterations = 100; //keep_cameras_fixed ? 0 : 100;
   const double costStart = residual.squaredNorm();
+  const SparseMatrix<double, RowMajor> W = Jp.transpose() * Jl;
+  const Matrix<double, Eigen::Dynamic, 1> bp = Jp.transpose() * residual;
+  const Matrix<double, Eigen::Dynamic, 1> bl = Jl.transpose() * residual;
+  Matrix<double, Eigen::Dynamic, 1> proximalOffset(9 * numCameras);
+  for (int id = 0; id < proximalOffset.size(); ++id) {
+    proximalOffset[id] = cameras[id] - cameras_s[id];
+  }
+  Matrix<double, Eigen::Dynamic, 1> proximalGradient(9 * numCameras);
+  blockMult<9>(full_stepSize, proximalOffset, proximalGradient);
+  const double penaltyStart = proximalOffset.dot(proximalGradient);
+  Matrix<double, Eigen::Dynamic, 1> proximalStep(9 * numCameras);
   int trust_region_attempts = 0;
   int trust_region_rejections = 0;
   // options.max_num_iterations 
@@ -1052,10 +1092,7 @@ void UpdateStepSizeAndSolve() {//bool keep_cameras_fixed = false) { // Recompute
 
     // if not complicated this will lead to total chaos, likely the 
     Ul += (1. / tr_radius - inv_tr_radius) * (1e-4 * diagUP);// + Jp.transpose() * Jp);
-    SparseMatrix<double, RowMajor> temp_p(9 * numCameras, 9 * numCameras);
-    temp_p.reserve(VectorXi::Constant(9 * numCameras, 9));
-    temp_p = Jp.transpose() * Jp * (1. / tr_radius - inv_tr_radius);
-    Ul += temp_p;
+    Ul += cameraHessian * (1. / tr_radius - inv_tr_radius);
 
     if (inv_tr_radius != 0) {
       Vl = landmarkHessian;
@@ -1068,7 +1105,8 @@ void UpdateStepSizeAndSolve() {//bool keep_cameras_fixed = false) { // Recompute
 
     //std::cout << " VL " << Vl.diagonal() << "\n";
 
-    const auto [delta_p, delta_l] = SolveByGDNesterov(Ul, Vl, Jp, Jl, residual, power_iterations);
+    const auto [delta_p, delta_l] = SolveByGDNesterov(
+        Ul, Vl, Jp, Jl, residual, W, bp, bl, proximalGradient, power_iterations);
     // compute cost / tr_check
     //fx0_new = fx0 + (J_pose * delta_p + J_land * delta_l)
     const double costQuad  = (residual + Jp * delta_p + Jl * delta_l).squaredNorm();
@@ -1082,16 +1120,10 @@ void UpdateStepSizeAndSolve() {//bool keep_cameras_fixed = false) { // Recompute
     // std::cout << "res/dl/dp :" << residual.squaredNorm() << " " << delta_p.squaredNorm() << " " << delta_l.squaredNorm() << "\n";
     // Map<Matrix<double, Eigen::Dynamic, 1> >(blockMult<9>(full_stepSize, cameras).data());
 
-    std::vector<double> temp(9 * numCameras, 0.); // same size as camera vector
-    for (int i=0; i < cameras.size(); ++i ) {
-      temp[i] = cameras[i] - cameras_s[i];
-      // if (i < 10)
-      //   std::cout << "outside temp " << i << " " << temp[i] << "\n";   // OK
-    }
-    Eigen::VectorXd prox_rhs = Map<Eigen::VectorXd> (temp.data(), 9 * numCameras);
-    const double penaltyStart = prox_rhs.dot( blockMult<9>(full_stepSize, prox_rhs) );
-    prox_rhs += delta_p; // this does not add to temp.
-    const double penaltyEnd = prox_rhs.dot( blockMult<9>(full_stepSize, prox_rhs) );
+    blockMult<9>(full_stepSize, delta_p, proximalStep);
+    const double penaltyEnd = penaltyStart
+        + 2. * delta_p.dot(proximalGradient)
+        + delta_p.dot(proximalStep);
     //const double penaltyEnd2 = (Jp * prox_rhs).squaredNorm();
 
     //SparseMatrix<double, RowMajor> Ul_(9 * numCameras, 9 * numCameras);
