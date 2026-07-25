@@ -591,6 +591,120 @@ reliable incremental benefit.
 
 Keep the native build flag for local builds. Do not add the membership stamp.
 
+26. Score evacuation backfill candidates deterministically in parallel
+-----------------------------------------------------------------------
+
+Status: implemented and retained after exact partition checks.
+
+Each evacuation backfill step scores up to 4096 independent landmarks against
+an immutable partition state. The implementation now enumerates exactly the
+same candidates in global rank order, scores them with a static OpenMP loop,
+then reduces the completed scores serially in the original order. This keeps
+the serial first-winner tie rule and produced byte-identical assignments.
+
+Unrestricted use of all 32 available workers was rejected because repeated
+small parallel regions made runtime unstable, including one large regression
+on problem 3068. The retained implementation uses at most eight workers and
+respects a lower OMP_NUM_THREADS limit. Parallel scoring is bypassed below 256
+candidates.
+
+Order-controlled native partition timings were:
+
+  problem 961 serial: 37.12-38.49 s; parallel: 22.17-22.85 s
+  problem 3068 serial: 62.72-63.19 s; parallel: 37.20-37.36 s
+
+The corresponding speedups were 1.62x-1.67x on problem 961 and
+1.68x-1.70x on problem 3068. Complete assignment hashes remained unchanged.
+
+End-to-end 90-iteration, 30-cluster validation reproduced bestCost30,
+bestCost60, final cost, and best iteration exactly:
+
+  problem 961 partition: 45.43 s -> 22.69 s (2.003x)
+              overall: 122.66 s -> 101.36 s (1.210x)
+  problem 3068 partition: 79.23 s -> 36.87 s (2.149x)
+               overall: 183.63 s -> 183.10 s (1.003x)
+
+The 3068 overall measurement was effectively flat despite removing 42.36 s
+from partitioning, indicating unrelated solver/runtime variance in that run.
+
+Caching landmark multiplicities/weights and per-degree objective contributions
+on top of parallel scoring was also tested. Assignment hashes remained exact,
+but reversed-order timings were effectively tied and the first order regressed
+problem 961 by 4.0 percent. The extra cache storage and memory traffic were
+removed.
+
+Keep bounded deterministic parallel scoring. Do not add the contribution
+cache.
+
+27. Full benchmark after bounded parallel partitioning
+-------------------------------------------------------
+
+Status: completed on the canonical 29-problem, 90-iteration, 30-cluster suite.
+
+All 29 runs completed without logged errors. Every problem reproduced
+bestCost30, bestCost60, final cost, and best iteration exactly against the
+previous contiguous canonical suite.
+
+  total partition time: 323.99 s -> 224.58 s (1.443x, 99.41 s saved)
+  partition geometric-mean speedup: 1.161x
+  partition time improved on 17 of 29 problems
+
+Total wall time changed from 1786.06 s to 1830.84 s (0.976x). This was driven
+by unrelated solver-time variance on the largest late-suite cases: overall time
+increased by about 55 s on problem 1778, 39 s on problem 1490, and 8 s on
+problem 871 despite similar partition times and exact quality. Excluding those
+three outliers, overall time improved from 1246.91 s to 1189.77 s (1.048x).
+The median overall speedup across all 29 problems was 1.002x.
+
+The two original partition hotspots in this full suite were:
+
+  problem 961 partition: 54.38 s -> 22.16 s; overall 131.42 s -> 99.22 s
+  problem 3068 partition: 101.88 s -> 40.15 s; overall 204.64 s -> 180.18 s
+
+Retain bounded deterministic parallel scoring.
+
+28. Controlled solver-time variance investigation
+-------------------------------------------------
+
+The late-suite wall-time outliers were rerun against one fresh worker with
+BUNDLE_PALM_LOCAL_SOLVE_METRICS=1. Runs alternated 1778, 1490, 1778, 1490,
+followed by two runs of 871. All used the canonical 90-iteration, 30-cluster
+configuration.
+
+  problem 1778 overall: 216.31 s, 214.70 s; partition: 28.84 s, 28.64 s
+  problem 1490 overall: 197.32 s, 197.96 s; partition: 26.64 s, 26.69 s
+  problem 871 overall: 136.62 s, 138.20 s; partition: 15.50 s, 15.92 s
+
+Each pair reproduced bestCost30, bestCost60, final cost, best iteration, and
+client-level revert counts exactly. Per-local-solve control flow was also
+identical within each pair:
+
+  problem 1778: 3518 attempts, 158 rejections
+  problem 1490: 3385 attempts, 25 rejections
+  problem 871: 3721 attempts, 181 rejections
+
+Summed local-solve time differed by 1.2 percent on 1778, 0.7 percent on 1490,
+and 0.1 percent on 871. The sum of the slowest local solve in each synchronized
+30-cluster phase was similarly stable. No stale replies or errors occurred.
+
+The prior slow full-suite measurements therefore did not reproduce. Relative
+to the controlled means, they were 24.2 percent slower on 1778, 17.0 percent
+slower on 1490, and 3.5 percent slower on 871. The three outliers were
+consecutive late-suite jobs, while the following and larger problem 3068 did
+not retain the slowdown. This rules out changed convergence, extra trust-region
+work, partitioning, stale messages, and monotonic persistent-worker degradation
+as explanations for the controlled runs.
+
+The remaining evidence is most consistent with a transient host scheduling,
+CPU-frequency, or competing-load interval during the original suite. The
+worker launches 30 detached single-threaded solves on 16 physical cores and
+the client waits for all 30 replies at every phase. A delayed cluster therefore
+extends the whole phase, and this straggler cost can accumulate over 113-119
+synchronized phases. The exact historical cause cannot be distinguished
+because worker metrics and host telemetry were not enabled during the slow
+suite. Future canonical benchmarks should capture local-solve metrics and host
+load/frequency telemetry when a run exceeds a fixed timing threshold.
+
 Revised implementation order
 ----------------------------
 
@@ -607,4 +721,6 @@ Revised implementation order
 10. [done, retained] Index scalable evacuation backfill candidates.
 11. [done, retained] Compile the local clustering library with -march=native.
 12. [done, rejected] Benchmark link-time optimization.
-13. Reduce protobuf and thread-management overhead.
+13. [done, retained] Score evacuation backfill with at most eight workers.
+14. [done, rejected] Cache landmark and degree objective contributions.
+15. Reduce protobuf and thread-management overhead.

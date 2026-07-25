@@ -9,6 +9,7 @@
 #include <limits>
 #include <numeric>
 #include <cstdint>
+#include <omp.h>
 #include <stdexcept>
 #include <utility>
 
@@ -722,6 +723,7 @@ LandmarkPartition ScalableLandmarkPartitioner::Partition(
     int landmark;
     int source;
   };
+  const int backfill_thread_count = std::min(8, omp_get_max_threads());
   const int severe_degree_limit = options_.weak_camera_degree_limit / 2;
   for (int recovery_round = 0; recovery_round < 3; ++recovery_round) {
   for (int repair_pass = 0; repair_pass < 8; ++repair_pass) {
@@ -851,12 +853,17 @@ LandmarkPartition ScalableLandmarkPartitioner::Partition(
           }
 
           std::vector<int> backfill;
+          std::vector<int> backfill_candidates;
+          std::vector<MoveDelta> backfill_candidate_deltas;
+          backfill_candidates.reserve(4096);
+          backfill_candidate_deltas.reserve(4096);
           while ((state.residuals_per_cluster[source] < minimum_residuals ||
                   state.residuals_per_cluster[target] > maximum_residuals) &&
                  backfill.size() < 32) {
             int best_landmark = -1;
             MoveDelta best_delta;
             int inspected = 0;
+            backfill_candidates.clear();
             const auto& rank_bits = state.landmark_rank_bits[target];
             bool inspection_limit_reached = false;
             for (std::size_t word_index = 0;
@@ -884,14 +891,29 @@ LandmarkPartition ScalableLandmarkPartitioner::Partition(
                         minimum_residuals) {
                   continue;
                 }
-                const MoveDelta candidate = ScoreMove(
-                    graph, options_, state, landmark, target, source,
-                    objective_);
-                if (best_landmark < 0 ||
-                    BetterDelta(candidate, best_delta, objective_)) {
-                  best_landmark = landmark;
-                  best_delta = candidate;
-                }
+                backfill_candidates.push_back(landmark);
+              }
+            }
+            backfill_candidate_deltas.resize(backfill_candidates.size());
+#pragma omp parallel for schedule(static) num_threads(backfill_thread_count) \
+  if(backfill_candidates.size() >= 256 && backfill_thread_count > 1)
+            for (std::size_t candidate_index = 0;
+                 candidate_index < backfill_candidates.size();
+                 ++candidate_index) {
+              backfill_candidate_deltas[candidate_index] = ScoreMove(
+                  graph, options_, state, backfill_candidates[candidate_index],
+                  target, source, objective_);
+            }
+            for (std::size_t candidate_index = 0;
+                 candidate_index < backfill_candidates.size();
+                 ++candidate_index) {
+              const int landmark = backfill_candidates[candidate_index];
+              const MoveDelta& candidate =
+                  backfill_candidate_deltas[candidate_index];
+              if (best_landmark < 0 ||
+                  BetterDelta(candidate, best_delta, objective_)) {
+                best_landmark = landmark;
+                best_delta = candidate;
               }
             }
             if (best_landmark < 0) {
