@@ -1694,9 +1694,11 @@ overall_seconds = time.perf_counter() - client_started_at
 result_dict = {"base_url": BASE_URL, "file_name": FILE_NAME, "iterations" : global_iterations, \
             "bestCost" : round(bestCost), "bestIt": bestIt, "kClusters" : kClusters, \
             "bestCost60" : round(bestCost60), "bestCost30" : round(bestCost30), \
+            "status": "completed", "accelerator": "nesterov", \
             "drsScaling": DRS_SCALING_METHOD, \
             "partitionSeconds": partition_seconds, \
             "overallSeconds": overall_seconds }
-with open('results_server.json', 'a') as json_file:
+results_file = os.environ.get("BUNDLE_PALM_RESULTS_FILE", "results_server.json")
+with open(results_file, 'a') as json_file:
     json.dump(result_dict, json_file)
     json_file.write('\n')
