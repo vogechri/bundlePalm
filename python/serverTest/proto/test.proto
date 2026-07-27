@@ -29,6 +29,9 @@ message program_proto {
   bool persistent_trust_region = 24;
   int32 objective_model = 25; // 0=standard Snavely pixels, 1=DABA regularized ray
   repeated double initial_focal = 26;
+  double block_curvature_multiplier = 27; // 0=legacy be-dependent schedule, >0=fixed JtJ multiplier
+  int32 metric_diagnostic_iterations = 28;
+  int32 landmark_refinement_steps = 29;
 }
 
 // sent once
@@ -69,6 +72,9 @@ message prox_cluster_proto {
   bool persistent_trust_region = 15;
   double trust_region_recovery_ratio = 16;
   repeated double landmarks = 17; // optional physical landmarks for coherent recovery
+  double block_curvature_multiplier = 18;
+  int32 metric_diagnostic_iterations = 19;
+  int32 landmark_refinement_steps = 20;
   // clustering: lms by cam. # lms that can fill up cam in cl.
 }
 
@@ -78,13 +84,19 @@ message return_cluster_proto {
   // repeated float landmarks = 2; // temporary
   // repeated float step_size = 3;
   repeated double cameras  = 1; // 3d, must be double
-  repeated float landmarks = 2; // temporary turn off should still work
+  repeated double landmarks = 2;
   repeated float step_size = 3; // can be float -- actually same perf .. haeh? compress to 2048 or float16
   int32 cluster_id = 4;
   float cost = 5;
   uint64 run_id = 6;
   uint64 phase_id = 7;
   int32 objective_model = 8;
+  double transformed_lipschitz_estimate = 9;
+  double transformed_lipschitz_residual = 10;
+  int32 metric_diagnostic_iterations = 11;
+  double camera_proximal_defect_squared = 12;
+  double landmark_proximal_defect_squared = 13;
+  double proximal_defect_squared = 14;
 }
 
 // send to get cost
@@ -95,6 +107,7 @@ message cost_proto {
   uint64 run_id = 4;
   uint64 phase_id = 5;
   repeated double landmarks = 6; // explicit physical landmark state for reproducible cost evaluation
+  int32 landmark_refinement_steps = 7;
 }
 
 message return_cost_proto {

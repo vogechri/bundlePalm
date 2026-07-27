@@ -725,6 +725,131 @@ struct NormalEquations {
   Eigen::VectorXd residual;
 };
 
+struct MetricDiagnostic {
+  double transformed_lipschitz = std::numeric_limits<double>::quiet_NaN();
+  double relative_residual = std::numeric_limits<double>::quiet_NaN();
+  double camera_proximal_defect_squared =
+      std::numeric_limits<double>::quiet_NaN();
+  double landmark_proximal_defect_squared =
+      std::numeric_limits<double>::quiet_NaN();
+  double proximal_defect_squared = std::numeric_limits<double>::quiet_NaN();
+  int iterations = 0;
+};
+
+void EstimateProximalDefect(
+    const NormalEquations& normal_equations,
+    const std::vector<double>& metric_blocks,
+    const std::vector<double>& cameras,
+    const std::vector<double>& centers,
+    MetricDiagnostic& diagnostic) {
+  THROW_IF(cameras.size() != centers.size());
+  THROW_IF(metric_blocks.size() != 9 * cameras.size());
+  Eigen::VectorXd offset(cameras.size());
+  for (int index = 0; index < offset.size(); ++index) {
+    offset[index] = cameras[index] - centers[index];
+  }
+  Eigen::VectorXd camera_defect = normal_equations.camera_gradient;
+  Eigen::VectorXd proximal_gradient(camera_defect.size());
+  blockMult<9>(metric_blocks, offset, proximal_gradient);
+  camera_defect += proximal_gradient;
+
+  std::vector<double> metric_inverse = metric_blocks;
+#pragma omp parallel for num_threads(options.num_threads)
+  for (int block = 0; block < camera_defect.size() / 9; ++block) {
+    auto inverse_block = Map<Matrix<double, 9, 9>>(
+        &(metric_inverse[81 * block]));
+    inverse_block = inverse_block.inverse().eval();
+  }
+  Eigen::VectorXd preconditioned_camera(camera_defect.size());
+  blockMult<9>(metric_inverse, camera_defect, preconditioned_camera);
+  diagnostic.camera_proximal_defect_squared = std::max(
+      0., camera_defect.dot(preconditioned_camera));
+
+  SparseMatrix<double, RowMajor> landmark_inverse =
+      normal_equations.landmark_hessian;
+  BlockInverse<3>(landmark_inverse);
+  diagnostic.landmark_proximal_defect_squared = std::max(
+      0., normal_equations.landmark_gradient.dot(
+          landmark_inverse * normal_equations.landmark_gradient));
+  diagnostic.proximal_defect_squared =
+      diagnostic.camera_proximal_defect_squared
+      + diagnostic.landmark_proximal_defect_squared;
+}
+
+MetricDiagnostic EstimateTransformedLipschitz(
+    const SparseMatrix<double, RowMajor>& camera_hessian,
+    const SparseMatrix<double, RowMajor>& landmark_hessian,
+    const BlockEdgeMatrix& cross_hessian,
+    const std::vector<double>& metric_blocks,
+    int iterations) {
+  MetricDiagnostic diagnostic;
+  if (iterations <= 0) {
+    return diagnostic;
+  }
+  THROW_IF(camera_hessian.rows() != cross_hessian.rows());
+  THROW_IF(landmark_hessian.rows() != cross_hessian.cols());
+  THROW_IF(metric_blocks.size() !=
+           static_cast<std::size_t>(9 * camera_hessian.rows()));
+
+  SparseMatrix<double, RowMajor> landmark_inverse = landmark_hessian;
+  BlockInverse<3>(landmark_inverse);
+  std::vector<double> metric_inverse = metric_blocks;
+#pragma omp parallel for num_threads(options.num_threads)
+  for (int block = 0; block < camera_hessian.rows() / 9; ++block) {
+    auto inverse_block = Map<Matrix<double, 9, 9>>(
+        &(metric_inverse[81 * block]));
+    inverse_block = inverse_block.inverse().eval();
+  }
+
+  Eigen::VectorXd vector(camera_hessian.rows());
+  for (int index = 0; index < vector.size(); ++index) {
+    vector[index] = std::sin(0.5 + static_cast<double>(index + 1));
+  }
+  Eigen::VectorXd metric_vector(vector.size());
+  blockMult<9>(metric_blocks, vector, metric_vector);
+  const double initial_norm_squared = vector.dot(metric_vector);
+  if (!(initial_norm_squared > 0.) || !std::isfinite(initial_norm_squared)) {
+    return diagnostic;
+  }
+  vector /= std::sqrt(initial_norm_squared);
+
+  Eigen::VectorXd landmark_workspace(cross_hessian.cols());
+  Eigen::VectorXd camera_workspace(cross_hessian.rows());
+  Eigen::VectorXd schur_vector(camera_hessian.rows());
+  Eigen::VectorXd next_vector(camera_hessian.rows());
+  for (int iteration = 0; iteration < iterations; ++iteration) {
+    cross_hessian.TransposeMultiply(vector, landmark_workspace);
+    landmark_workspace = landmark_inverse * landmark_workspace;
+    cross_hessian.Multiply(landmark_workspace, camera_workspace);
+    schur_vector.noalias() = camera_hessian * vector;
+    schur_vector -= camera_workspace;
+    blockMult<9>(metric_inverse, schur_vector, next_vector);
+    blockMult<9>(metric_blocks, next_vector, metric_vector);
+    const double norm_squared = next_vector.dot(metric_vector);
+    if (!(norm_squared > 0.) || !std::isfinite(norm_squared)) {
+      return diagnostic;
+    }
+    vector = next_vector / std::sqrt(norm_squared);
+    diagnostic.iterations = iteration + 1;
+  }
+
+  cross_hessian.TransposeMultiply(vector, landmark_workspace);
+  landmark_workspace = landmark_inverse * landmark_workspace;
+  cross_hessian.Multiply(landmark_workspace, camera_workspace);
+  schur_vector.noalias() = camera_hessian * vector;
+  schur_vector -= camera_workspace;
+  blockMult<9>(metric_blocks, vector, metric_vector);
+  const double denominator = vector.dot(metric_vector);
+  if (!(denominator > 0.) || !std::isfinite(denominator)) {
+    return diagnostic;
+  }
+  diagnostic.transformed_lipschitz = vector.dot(schur_vector) / denominator;
+  const Eigen::VectorXd residual =
+      schur_vector - diagnostic.transformed_lipschitz * metric_vector;
+  diagnostic.relative_residual = residual.norm() /
+      std::max(schur_vector.norm(), std::numeric_limits<double>::min());
+  return diagnostic;
+}
 
 // template<int N>
 // void blockAdd(std::vector<double>& dest, std::vector<double>& add) {
@@ -766,13 +891,22 @@ public:
       numResiduals =  pro.observations_size() / 2;
       local_iterations = std::max(1, std::min(20, pro.iterations()));
       scalar_proximal_prior = pro.scalar_proximal_prior();
+      block_curvature_multiplier = pro.block_curvature_multiplier();
+      metric_diagnostic_iterations = pro.metric_diagnostic_iterations();
+      landmark_refinement_steps = pro.landmark_refinement_steps();
+      THROW_IF(metric_diagnostic_iterations < 0 ||
+           metric_diagnostic_iterations > 100);
+      THROW_IF(landmark_refinement_steps < 0 ||
+           landmark_refinement_steps > 20);
+      THROW_IF(block_curvature_multiplier < 0. ||
+           !std::isfinite(block_curvature_multiplier));
       proximal_rho = pro.proximal_rho();
       split_camera_penalty = pro.split_camera_penalty();
       proximal_rho_intrinsics = pro.proximal_rho_intrinsics();
       local_linear_solver = pro.local_linear_solver();
       trust_region_policy = pro.trust_region_policy();
       persistent_trust_region = pro.persistent_trust_region();
-      persistent_trust_region_active = false;
+      persistent_trust_region_active = persistent_trust_region;
       if (trust_region_policy == 1 && persistent_trust_region) {
         tr_radius = std::min(100., max_trust_region_radius);
       }
@@ -1028,6 +1162,18 @@ public:
       }
     }
 
+    double EvaluateRefinedLandmarkCost(
+        int refinement_steps, return_cost_proto& return_proto) {
+      const std::vector<double> local_landmarks = landmarks;
+      const double local_cost = cost;
+      RefineLandmarksWithFixedCameras(refinement_steps);
+      const double refined_cost = 2. * GetCost();
+      AddPhysicalLandmarks(return_proto);
+      landmarks = local_landmarks;
+      cost = local_cost;
+      return refined_cost;
+    }
+
 #ifndef __unweighted_system__
   void UpdateWeightedParameters() {
       for (int camera = 0; camera < numCameras; ++camera) {
@@ -1090,6 +1236,18 @@ public:
       return_proto.set_cluster_id(cluster_id);
       return_proto.set_cost(cost);
       return_proto.set_objective_model(objective_model);
+        return_proto.set_transformed_lipschitz_estimate(
+          metric_diagnostic.transformed_lipschitz);
+        return_proto.set_transformed_lipschitz_residual(
+          metric_diagnostic.relative_residual);
+        return_proto.set_metric_diagnostic_iterations(
+          metric_diagnostic.iterations);
+          return_proto.set_camera_proximal_defect_squared(
+            metric_diagnostic.camera_proximal_defect_squared);
+          return_proto.set_landmark_proximal_defect_squared(
+            metric_diagnostic.landmark_proximal_defect_squared);
+          return_proto.set_proximal_defect_squared(
+            metric_diagnostic.proximal_defect_squared);
       return return_proto;
     }
 
@@ -1154,6 +1312,15 @@ public:
       }
       current_be = update.be();
       scalar_proximal_prior = update.scalar_proximal_prior();
+      block_curvature_multiplier = update.block_curvature_multiplier();
+      metric_diagnostic_iterations = update.metric_diagnostic_iterations();
+      landmark_refinement_steps = update.landmark_refinement_steps();
+      THROW_IF(metric_diagnostic_iterations < 0 ||
+           metric_diagnostic_iterations > 100);
+      THROW_IF(landmark_refinement_steps < 0 ||
+           landmark_refinement_steps > 20);
+      THROW_IF(block_curvature_multiplier < 0. ||
+           !std::isfinite(block_curvature_multiplier));
       proximal_rho = update.proximal_rho();
       split_camera_penalty = update.split_camera_penalty();
       proximal_rho_intrinsics = update.proximal_rho_intrinsics();
@@ -1187,6 +1354,13 @@ public:
         }
       } else if (update.revert_lm() == 2) {
         WORKER_LOG(cluster_id << ". Revert landmarks to best cost lms\n");
+        if (persistent_trust_region) {
+          persistent_trust_region_active = true;
+          tr_radius = last_tr_radius * update.trust_region_recovery_ratio();
+          tr_radius = std::max(1e-4, std::min(
+              max_trust_region_radius, tr_radius));
+          last_tr_radius = tr_radius;
+        }
         if (update.landmarks_size() == 0) {
           landmarks = best_landmarks;
         }
@@ -1476,6 +1650,40 @@ void UpdateStepSizeAndSolve() {//bool keep_cameras_fixed = false) { // Recompute
   // }
 
   const bool collectTiming = LocalSolveMetricsEnabled();
+  if (collectTiming) {
+    const auto summarize = [](const std::vector<double>& values) {
+      std::pair<double, double> summary{0., 0.};
+      for (const double value : values) {
+        summary.first += value;
+        summary.second += value * value;
+      }
+      return summary;
+    };
+    const auto camera_summary = summarize(cameras);
+    const auto center_summary = summarize(cameras_s);
+    const auto landmark_summary = summarize(landmarks);
+    const auto camera_scale_summary = summarize(unorm);
+    const auto landmark_scale_summary = summarize(vnorm);
+    std::ostringstream metric;
+    metric << "PROX_INPUT cluster=" << cluster_id
+           << " sequence=" << local_solve_sequence++
+           << " first=" << firstIteration
+           << " cameras_sum=" << camera_summary.first
+           << " cameras_squared=" << camera_summary.second
+           << " centers_sum=" << center_summary.first
+           << " centers_squared=" << center_summary.second
+           << " landmarks_sum=" << landmark_summary.first
+           << " landmarks_squared=" << landmark_summary.second
+           << " unorm_sum=" << camera_scale_summary.first
+           << " unorm_squared=" << camera_scale_summary.second
+           << " vnorm_sum=" << landmark_scale_summary.first
+           << " vnorm_squared=" << landmark_scale_summary.second
+           << " be=" << current_be
+           << " curvature=" << block_curvature_multiplier
+           << " trust=" << trust_region_policy << "\n";
+    EmitLocalSolveMetric(metric.str());
+  }
+  metric_diagnostic = MetricDiagnostic();
   const auto localSolveStart = collectTiming ? TimingClock::now() : TimingClock::time_point{};
   double nesterovSeconds = 0.;
   double costEvaluationSeconds = 0.;
@@ -1536,7 +1744,11 @@ void UpdateStepSizeAndSolve() {//bool keep_cameras_fixed = false) { // Recompute
 
   //const double scale = 1e-1; // 1e0: @29: 501k, no jump. 1e1 many jumps. 473k
   // TODO
-  const double scale = std::min(1.005, 1e-1 * std::sqrt(current_be / start_be));
+    const double legacy_scale =
+      std::min(1.005, 1e-1 * std::sqrt(current_be / start_be));
+    const double scale = block_curvature_multiplier > 0.
+      ? block_curvature_multiplier
+      : legacy_scale;
 
   if (!firstIteration) { // also handled setting be = 0 in 1st step.
     SparseMatrix<double, RowMajor> stepSize;
@@ -1582,6 +1794,23 @@ void UpdateStepSizeAndSolve() {//bool keep_cameras_fixed = false) { // Recompute
     // let full_Stepsize define setpsize always. else confusing to debug: cost optimized differs from cost evaluated.
     // const SparseMatrix<double, RowMajor> stepSize = Ul;
     // Ul += stepSize;
+  }
+  if (!scalar_proximal_prior && metric_diagnostic_iterations > 0) {
+    metric_diagnostic = EstimateTransformedLipschitz(
+        normalEquations.camera_hessian,
+        normalEquations.landmark_hessian,
+        camera_landmark_hessian,
+        full_stepSize,
+        metric_diagnostic_iterations);
+    if (collectTiming) {
+      std::ostringstream metric;
+      metric << "METRIC_DIAGNOSTIC cluster=" << cluster_id
+             << " transformed_lipschitz="
+             << metric_diagnostic.transformed_lipschitz
+             << " relative_residual=" << metric_diagnostic.relative_residual
+             << " iterations=" << metric_diagnostic.iterations << "\n";
+      EmitLocalSolveMetric(metric.str());
+    }
   }
   // Loop until ok or adjust tr_region
   if (trust_region_policy == 1 && !persistent_trust_region_active) {
@@ -1782,6 +2011,76 @@ void UpdateStepSizeAndSolve() {//bool keep_cameras_fixed = false) { // Recompute
     // }
   
     break;
+  }
+  if (landmark_refinement_steps > 0) {
+    RefineLandmarksWithFixedCameras(landmark_refinement_steps);
+  }
+  if (!scalar_proximal_prior && metric_diagnostic_iterations > 0) {
+    const NormalEquations final_normal_equations = GetNormalEquations();
+    EstimateProximalDefect(
+        final_normal_equations,
+        full_stepSize,
+        cameras,
+        cameras_s,
+        metric_diagnostic);
+    if (collectTiming) {
+      std::ostringstream metric;
+      metric << "PROXIMAL_DEFECT cluster=" << cluster_id
+             << " camera_squared="
+             << metric_diagnostic.camera_proximal_defect_squared
+             << " landmark_squared="
+             << metric_diagnostic.landmark_proximal_defect_squared
+             << " total_squared="
+             << metric_diagnostic.proximal_defect_squared << "\n";
+      EmitLocalSolveMetric(metric.str());
+    }
+  }
+}
+
+void RefineLandmarksWithFixedCameras(int refinement_steps) {
+  for (int refinement = 0; refinement < refinement_steps;
+       ++refinement) {
+    const NormalEquations normal_equations = GetNormalEquations();
+    SparseMatrix<double, RowMajor> landmark_inverse =
+        normal_equations.landmark_hessian;
+    BlockInverse<3>(landmark_inverse);
+    const Eigen::VectorXd direction =
+        -landmark_inverse * normal_equations.landmark_gradient;
+    if (!direction.allFinite() || direction.squaredNorm() == 0.) {
+      break;
+    }
+
+    const double cost_before = 2. * GetCost();
+    double step_length = 1.;
+    bool accepted = false;
+    for (int backtrack = 0; backtrack < 8; ++backtrack) {
+      for (int index = 0; index < direction.size(); ++index) {
+        landmarks[index] += step_length * direction[index];
+      }
+      const double cost_after = 2. * GetCost();
+      if (std::isfinite(cost_after) && cost_after < cost_before) {
+        cost = cost_after;
+        accepted = true;
+        if (LocalSolveMetricsEnabled()) {
+          std::ostringstream metric;
+          metric << "LANDMARK_REFINEMENT cluster=" << cluster_id
+                 << " refinement=" << refinement
+                 << " backtracks=" << backtrack
+                 << " step_length=" << step_length
+                 << " before=" << cost_before
+                 << " after=" << cost_after << "\n";
+          EmitLocalSolveMetric(metric.str());
+        }
+        break;
+      }
+      for (int index = 0; index < direction.size(); ++index) {
+        landmarks[index] -= step_length * direction[index];
+      }
+      step_length *= 0.5;
+    }
+    if (!accepted) {
+      break;
+    }
   }
 }
 ///////////////////////////////////
@@ -2164,10 +2463,15 @@ private:
 
   int cluster_id;
   int numCameras = 0;
+  int local_solve_sequence = 0;
   int numLandmarks = 0;
   int numResiduals = 0;
   const double init_be = 1e-4;
   double current_be = init_be;
+  double block_curvature_multiplier = 0.;
+  int metric_diagnostic_iterations = 0;
+  int landmark_refinement_steps = 0;
+  MetricDiagnostic metric_diagnostic;
   bool scalar_proximal_prior = false;
   double proximal_rho = 1.;
   bool split_camera_penalty = false;
@@ -2400,20 +2704,30 @@ int main() {
         program.UpdateCostState(
           costUpdate); // update is local, we need to fill data in main thread.
       bool revert_lms = costUpdate.revert_lm() == 2 ? true : false;
+        const int landmark_refinement_steps =
+          costUpdate.landmark_refinement_steps();
+        THROW_IF(landmark_refinement_steps < 0 ||
+             landmark_refinement_steps > 20);
       // Define a Lambda Expression
       auto cost_lambda = [&push_socket, &cluster_to_program,
               &mtx](int cluster_id, bool revert_lms,
+                int landmark_refinement_steps,
                 std::uint64_t run_id,
                 std::uint64_t phase_id) {
         CeresProgram &program = cluster_to_program[cluster_id];
-        const double cost = 2 * program.GetCost(revert_lms);
-        WORKER_LOG(cluster_id << ". Cost from cost: " << cost << "\n");
         return_cost_proto return_proto;
+        const double cost = landmark_refinement_steps > 0 && !revert_lms
+          ? program.EvaluateRefinedLandmarkCost(
+            landmark_refinement_steps, return_proto)
+          : 2 * program.GetCost(revert_lms);
+        WORKER_LOG(cluster_id << ". Cost from cost: " << cost << "\n");
         return_proto.set_cost(cost);
         return_proto.set_cluster_id(cluster_id);
         return_proto.set_run_id(run_id);
         return_proto.set_phase_id(phase_id);
-        program.AddPhysicalLandmarks(return_proto);
+        if (landmark_refinement_steps == 0 || revert_lms) {
+          program.AddPhysicalLandmarks(return_proto);
+        }
         // SerializeToArray saves memory and time?
         const size_t bytes = return_proto.ByteSizeLong();
         zmq::message_t reply(bytes);
@@ -2421,7 +2735,8 @@ int main() {
         std::lock_guard<std::mutex> lock(mtx);
         push_socket.send(reply, zmq::send_flags::none);
       };
-      std::thread cost_thread(cost_lambda, cluster_id, revert_lms,
+            std::thread cost_thread(cost_lambda, cluster_id, revert_lms,
+              landmark_refinement_steps,
               costUpdate.run_id(), costUpdate.phase_id());
       cost_thread.detach();
       break;

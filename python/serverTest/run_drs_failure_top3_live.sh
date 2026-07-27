@@ -16,10 +16,22 @@ LOCAL_STEPS=${LOCAL_STEPS:-1}
 THREADS_PER_CLUSTER=${THREADS_PER_CLUSTER:-1}
 LOCAL_SOLVER=${LOCAL_SOLVER:-nesterov}
 TRUST_REGION_POLICY=${TRUST_REGION_POLICY:-daba}
+PERSISTENT_TRUST_REGION=${PERSISTENT_TRUST_REGION:-0}
+TRUST_REGION_RECOVERY_RATIO=${TRUST_REGION_RECOVERY_RATIO:-0.5}
 CAMERA_SCALING=${CAMERA_SCALING:-jacobi_initial}
 PROXIMAL_METRIC=${PROXIMAL_METRIC:-block}
 CONSENSUS_METRIC=${CONSENSUS_METRIC:-${BUNDLE_PALM_DRS_CONSENSUS_METRIC:-full}}
 BLOCK_REGULARIZATION=${BLOCK_REGULARIZATION:-5e-5}
+BLOCK_CURVATURE_MULTIPLIER=${BLOCK_CURVATURE_MULTIPLIER:-0}
+BLOCK_RECOVERY_MODE=${BLOCK_RECOVERY_MODE:-regularization}
+MAXIMUM_BLOCK_CURVATURE_MULTIPLIER=${MAXIMUM_BLOCK_CURVATURE_MULTIPLIER:-16.0}
+CURVATURE_DECAY_AFTER=${CURVATURE_DECAY_AFTER:-0}
+CURVATURE_DECAY_RATIO=${CURVATURE_DECAY_RATIO:-0.5}
+METRIC_DIAGNOSTIC_ITERATIONS=${METRIC_DIAGNOSTIC_ITERATIONS:-0}
+LANDMARK_REFINEMENT_STEPS=${LANDMARK_REFINEMENT_STEPS:-0}
+CONSENSUS_LANDMARK_REFINEMENT_STEPS=${CONSENSUS_LANDMARK_REFINEMENT_STEPS:-0}
+CONSENSUS_LANDMARK_REFINEMENT_POLICY=${CONSENSUS_LANDMARK_REFINEMENT_POLICY:-safeguard}
+TARGET_TRANSFORMED_LIPSCHITZ=${TARGET_TRANSFORMED_LIPSCHITZ:-0.475}
 MAXIMUM_BLOCK_REGULARIZATION=${MAXIMUM_BLOCK_REGULARIZATION:-0.5}
 RELAXATION=${RELAXATION:-1.0}
 PENALTY_MULTIPLIER=${PENALTY_MULTIPLIER:-1.0}
@@ -35,11 +47,35 @@ OVERWRITE=${OVERWRITE:-0}
 REQUEST_PORT=${BUNDLE_PALM_REQUEST_PORT:-6656}
 RESULT_PORT=${BUNDLE_PALM_RESULT_PORT:-6657}
 VARIANT_NAME="plain_drs_${PROXIMAL_METRIC}_${CONSENSUS_METRIC}"
+if [[ "$BLOCK_CURVATURE_MULTIPLIER" != "0" && "$BLOCK_CURVATURE_MULTIPLIER" != "0.0" ]]; then
+  VARIANT_NAME="${VARIANT_NAME}_lip${BLOCK_CURVATURE_MULTIPLIER}"
+fi
+if [[ "$BLOCK_RECOVERY_MODE" != "regularization" ]]; then
+  VARIANT_NAME="${VARIANT_NAME}_${BLOCK_RECOVERY_MODE}"
+fi
+if [[ "$PERSISTENT_TRUST_REGION" == "1" ]]; then
+  VARIANT_NAME="${VARIANT_NAME}_persistent_tr"
+fi
+if [[ "$CURVATURE_DECAY_AFTER" != "0" ]]; then
+  VARIANT_NAME="${VARIANT_NAME}_decay${CURVATURE_DECAY_AFTER}"
+fi
+if [[ "$METRIC_DIAGNOSTIC_ITERATIONS" != "0" ]]; then
+  VARIANT_NAME="${VARIANT_NAME}_metricdiag${METRIC_DIAGNOSTIC_ITERATIONS}"
+fi
+if [[ "$LANDMARK_REFINEMENT_STEPS" != "0" ]]; then
+  VARIANT_NAME="${VARIANT_NAME}_lmref${LANDMARK_REFINEMENT_STEPS}"
+fi
+if [[ "$CONSENSUS_LANDMARK_REFINEMENT_STEPS" != "0" ]]; then
+  VARIANT_NAME="${VARIANT_NAME}_vlmref${CONSENSUS_LANDMARK_REFINEMENT_STEPS}"
+fi
+if [[ "$CONSENSUS_LANDMARK_REFINEMENT_POLICY" != "safeguard" ]]; then
+  VARIANT_NAME="${VARIANT_NAME}_${CONSENSUS_LANDMARK_REFINEMENT_POLICY}"
+fi
 RESULT_FILE="$OUTPUT_DIR/${VARIANT_NAME}.jsonl"
 STATUS_FILE="$OUTPUT_DIR/status.tsv"
 WORKER_PID=""
 
-for flag in LIVE_OUTPUT DEBUG_OUTPUT OVERWRITE; do
+for flag in LIVE_OUTPUT DEBUG_OUTPUT OVERWRITE PERSISTENT_TRUST_REGION; do
   value=${!flag}
   if [[ "$value" != "0" && "$value" != "1" ]]; then
     echo "$flag must be 0 or 1" >&2
@@ -49,9 +85,17 @@ done
 
 PROBLEMS=(
   "52|problem-52-64053-pre.txt"
+  "89|problem-89-110973-pre.txt"
+  "142|problem-142-93602-pre.txt"
+  "245|problem-245-198739-pre.txt"
+  "287|problem-287-182023-pre.txt"
+  "394|problem-394-100368-pre.txt"
   "646|problem-646-73584-pre.txt"
+  "783|problem-783-84444-pre.txt"
   "931|problem-931-102699-pre.txt"
+  "1064|problem-1064-113655-pre.txt"
   "1266|problem-1266-132593-pre.txt"
+  "1723|problem-1723-156502-pre.txt"
 )
 
 mkdir -p "$OUTPUT_DIR/logs" "$OUTPUT_DIR/states" "$OUTPUT_DIR/memory"
@@ -177,6 +221,8 @@ for problem in "${PROBLEMS[@]}"; do
 
     debug_args=()
     [[ "$DEBUG_OUTPUT" == "1" ]] && debug_args+=(--debug-output)
+    trust_args=()
+    [[ "$PERSISTENT_TRUST_REGION" == "1" ]] && trust_args+=(--persistent-trust-region)
     start_seconds=$SECONDS
     set +e
     if [[ "$LIVE_OUTPUT" == "1" ]]; then
@@ -192,10 +238,21 @@ for problem in "${PROBLEMS[@]}"; do
             --threads-per-cluster "$THREADS_PER_CLUSTER" \
             --local-solver "$LOCAL_SOLVER" \
             --trust-region-policy "$TRUST_REGION_POLICY" \
+            --trust-region-recovery-ratio "$TRUST_REGION_RECOVERY_RATIO" \
             --camera-scaling "$CAMERA_SCALING" \
             --proximal-metric "$PROXIMAL_METRIC" \
             --consensus-metric "$CONSENSUS_METRIC" \
             --block-regularization "$BLOCK_REGULARIZATION" \
+            --block-curvature-multiplier "$BLOCK_CURVATURE_MULTIPLIER" \
+            --block-recovery-mode "$BLOCK_RECOVERY_MODE" \
+            --maximum-block-curvature-multiplier "$MAXIMUM_BLOCK_CURVATURE_MULTIPLIER" \
+            --curvature-decay-after "$CURVATURE_DECAY_AFTER" \
+            --curvature-decay-ratio "$CURVATURE_DECAY_RATIO" \
+            --metric-diagnostic-iterations "$METRIC_DIAGNOSTIC_ITERATIONS" \
+            --landmark-refinement-steps "$LANDMARK_REFINEMENT_STEPS" \
+            --consensus-landmark-refinement-steps "$CONSENSUS_LANDMARK_REFINEMENT_STEPS" \
+            --consensus-landmark-refinement-policy "$CONSENSUS_LANDMARK_REFINEMENT_POLICY" \
+            --target-transformed-lipschitz "$TARGET_TRANSFORMED_LIPSCHITZ" \
             --maximum-block-regularization "$MAXIMUM_BLOCK_REGULARIZATION" \
             --relaxation "$RELAXATION" \
             --penalty-multiplier "$PENALTY_MULTIPLIER" \
@@ -205,7 +262,7 @@ for problem in "${PROBLEMS[@]}"; do
             --catastrophic-ratio "$CATASTROPHIC_RATIO" \
             --recovery-penalty-ratio "$RECOVERY_PENALTY_RATIO" \
             --results "$RESULT_FILE" --state "$state_file" \
-            "${debug_args[@]}") 2>&1 | tee "$log_file"
+            "${debug_args[@]}" "${trust_args[@]}") 2>&1 | tee "$log_file"
       exit_code=${PIPESTATUS[0]}
     else
       (cd "$SCRIPT_DIR" && /usr/bin/time -v -o "$coordinator_time" \
@@ -220,10 +277,21 @@ for problem in "${PROBLEMS[@]}"; do
             --threads-per-cluster "$THREADS_PER_CLUSTER" \
             --local-solver "$LOCAL_SOLVER" \
             --trust-region-policy "$TRUST_REGION_POLICY" \
+            --trust-region-recovery-ratio "$TRUST_REGION_RECOVERY_RATIO" \
             --camera-scaling "$CAMERA_SCALING" \
             --proximal-metric "$PROXIMAL_METRIC" \
             --consensus-metric "$CONSENSUS_METRIC" \
             --block-regularization "$BLOCK_REGULARIZATION" \
+            --block-curvature-multiplier "$BLOCK_CURVATURE_MULTIPLIER" \
+            --block-recovery-mode "$BLOCK_RECOVERY_MODE" \
+            --maximum-block-curvature-multiplier "$MAXIMUM_BLOCK_CURVATURE_MULTIPLIER" \
+            --curvature-decay-after "$CURVATURE_DECAY_AFTER" \
+            --curvature-decay-ratio "$CURVATURE_DECAY_RATIO" \
+            --metric-diagnostic-iterations "$METRIC_DIAGNOSTIC_ITERATIONS" \
+            --landmark-refinement-steps "$LANDMARK_REFINEMENT_STEPS" \
+            --consensus-landmark-refinement-steps "$CONSENSUS_LANDMARK_REFINEMENT_STEPS" \
+            --consensus-landmark-refinement-policy "$CONSENSUS_LANDMARK_REFINEMENT_POLICY" \
+            --target-transformed-lipschitz "$TARGET_TRANSFORMED_LIPSCHITZ" \
             --maximum-block-regularization "$MAXIMUM_BLOCK_REGULARIZATION" \
             --relaxation "$RELAXATION" \
             --penalty-multiplier "$PENALTY_MULTIPLIER" \
@@ -233,7 +301,7 @@ for problem in "${PROBLEMS[@]}"; do
             --catastrophic-ratio "$CATASTROPHIC_RATIO" \
             --recovery-penalty-ratio "$RECOVERY_PENALTY_RATIO" \
             --results "$RESULT_FILE" --state "$state_file" \
-            "${debug_args[@]}") > "$log_file" 2>&1
+            "${debug_args[@]}" "${trust_args[@]}") > "$log_file" 2>&1
       exit_code=$?
     fi
     set -e

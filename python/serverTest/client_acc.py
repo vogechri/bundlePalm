@@ -1265,6 +1265,11 @@ globalBlockEigUpperLimit = 5e-1 # 1e-1, 1e-3?
 blockEig_in_cluster = 5e-5 * np.ones(kClusters) # 1e-4 or 1e-5, 5e-5?
 failedNesterovAcceleration = 0
 maxFailedNesterovAcceleration = 3 # TODO: 2 or 3?
+outer_acceleration = os.environ.get(
+    "BUNDLE_PALM_DRS_ACCELERATION", "nesterov").lower()
+if outer_acceleration not in {"none", "nesterov"}:
+    raise ValueError(
+        "BUNDLE_PALM_DRS_ACCELERATION must be 'none' or 'nesterov'")
 print("input blockEig_in_cluster[ci] ", blockEig_in_cluster[0])
 print("DRS camera scaling:", DRS_SCALING_METHOD)
 print("DRS consensus projection metric:", DRS_CONSENSUS_METRIC)
@@ -1616,7 +1621,7 @@ for global_iteration in range(global_iterations):
     s_prev = s_cur.copy() # access to old s.
 
     #line_search_iterations = 1 # is pure DRS (forced, see below set tk == 1)
-    line_search_iterations = 2 # 3 appears ok
+    line_search_iterations = 2 if outer_acceleration == "nesterov" else 1
     if global_iteration <= resetIt + 1:
         line_search_iterations = 1
 
@@ -1716,14 +1721,22 @@ for global_iteration in range(global_iterations):
                 candidate_cameras = physical_cameras_from_preconditioned(
                     poses_v_bfgs, unorm, camera_transforms, kClusters)
                 if DRS_OBJECTIVE_MODEL == "daba_ray":
-                    candidate_metrics = evaluate_encoded_daba_ray_state(
+                    prox_candidate_metrics = evaluate_encoded_daba_ray_state(
                         cameras, candidate_cameras, landmarks_bfgs,
+                        camera_indices, point_indices, points_2d)
+                    candidate_metrics = evaluate_encoded_daba_ray_state(
+                        cameras, candidate_cameras, primal_cost_landmarks_v,
                         camera_indices, point_indices, points_2d)
                     candidate_metrics["sumSquaredError"] = (
                         2.0 * candidate_metrics["ceresCost"])
+                    prox_candidate_metrics["sumSquaredError"] = (
+                        2.0 * prox_candidate_metrics["ceresCost"])
                 else:
-                    candidate_metrics = evaluate_bal_state(
+                    prox_candidate_metrics = evaluate_bal_state(
                         candidate_cameras, landmarks_bfgs,
+                        camera_indices, point_indices, points_2d)
+                    candidate_metrics = evaluate_bal_state(
+                        candidate_cameras, primal_cost_landmarks_v,
                         camera_indices, point_indices, points_2d)
                 candidate_relative_error = abs(
                     candidate_metrics["sumSquaredError"] - primal_cost_v
@@ -1734,7 +1747,8 @@ for global_iteration in range(global_iterations):
                         f"iteration {global_iteration}: "
                         f'{candidate_metrics["sumSquaredError"]} versus '
                         f"{primal_cost_v} (relative error "
-                        f"{candidate_relative_error})")
+                        f"{candidate_relative_error}; prox landmarks give "
+                        f'{prox_candidate_metrics["sumSquaredError"]})')
             best_poses_v = poses_v_bfgs.copy()
             best_landmarks = primal_cost_landmarks_v.copy()
             bestCost = primal_cost_v

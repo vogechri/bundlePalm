@@ -158,7 +158,11 @@ class AdmmWorkerClient:
         trust_region_recovery_ratio,
         scalar_proximal_prior=True,
         block_regularization=5e-5,
+        block_curvature_multiplier=0.0,
+        metric_diagnostic_iterations=0,
+        landmark_refinement_steps=0,
         return_metric_blocks=False,
+        return_metric_diagnostics=False,
     ):
         self.phase_id += 1
         phase_id = self.phase_id
@@ -176,6 +180,9 @@ class AdmmWorkerClient:
                 program.lm_id[:] = local_point_indices[cluster_id]
                 program.iterations = local_steps
                 program.be = block_regularization
+                program.block_curvature_multiplier = block_curvature_multiplier
+                program.metric_diagnostic_iterations = metric_diagnostic_iterations
+                program.landmark_refinement_steps = landmark_refinement_steps
                 program.cluster_id = cluster_id
                 program.num_clusters = cluster_count
                 program.run_id = self.run_id
@@ -205,6 +212,9 @@ class AdmmWorkerClient:
                 update.run_id = self.run_id
                 update.phase_id = phase_id
                 update.be = block_regularization
+                update.block_curvature_multiplier = block_curvature_multiplier
+                update.metric_diagnostic_iterations = metric_diagnostic_iterations
+                update.landmark_refinement_steps = landmark_refinement_steps
                 update.scalar_proximal_prior = scalar_proximal_prior
                 update.proximal_rho = extrinsics_penalty
                 update.split_camera_penalty = split_camera_penalty
@@ -228,6 +238,12 @@ class AdmmWorkerClient:
             (cluster_count, local_cameras.shape[1], 9, 9),
             dtype=np.float64,
         )
+        transformed_lipschitz = np.full(cluster_count, np.nan)
+        transformed_lipschitz_residual = np.full(cluster_count, np.nan)
+        metric_iterations = np.zeros(cluster_count, dtype=np.int32)
+        camera_proximal_defect_squared = np.full(cluster_count, np.nan)
+        landmark_proximal_defect_squared = np.full(cluster_count, np.nan)
+        proximal_defect_squared = np.full(cluster_count, np.nan)
         while pending:
             payload = self.pull_socket.recv()
             self.received_bytes += len(payload)
@@ -262,9 +278,118 @@ class AdmmWorkerClient:
                     reply.step_size, dtype=np.float64
                 ).reshape((-1, 9, 9))
             costs[cluster_id] = reply.cost
+            transformed_lipschitz[cluster_id] = (
+                reply.transformed_lipschitz_estimate
+            )
+            transformed_lipschitz_residual[cluster_id] = (
+                reply.transformed_lipschitz_residual
+            )
+            metric_iterations[cluster_id] = reply.metric_diagnostic_iterations
+            camera_proximal_defect_squared[cluster_id] = (
+                reply.camera_proximal_defect_squared
+            )
+            landmark_proximal_defect_squared[cluster_id] = (
+                reply.landmark_proximal_defect_squared
+            )
+            proximal_defect_squared[cluster_id] = (
+                reply.proximal_defect_squared
+            )
+        if return_metric_blocks and return_metric_diagnostics:
+            return costs, metric_blocks, {
+                "transformedLipschitz": transformed_lipschitz,
+                "relativeResidual": transformed_lipschitz_residual,
+                "iterations": metric_iterations,
+                "cameraProximalDefectSquared": (
+                    camera_proximal_defect_squared
+                ),
+                "landmarkProximalDefectSquared": (
+                    landmark_proximal_defect_squared
+                ),
+                "proximalDefectSquared": proximal_defect_squared,
+            }
         if return_metric_blocks:
             return costs, metric_blocks
+        if return_metric_diagnostics:
+            return costs, {
+                "transformedLipschitz": transformed_lipschitz,
+                "relativeResidual": transformed_lipschitz_residual,
+                "iterations": metric_iterations,
+                "cameraProximalDefectSquared": (
+                    camera_proximal_defect_squared
+                ),
+                "landmarkProximalDefectSquared": (
+                    landmark_proximal_defect_squared
+                ),
+                "proximalDefectSquared": proximal_defect_squared,
+            }
         return costs
+
+    def update_preconditioning(
+        self,
+        camera_indices_in_cluster,
+        point_indices_in_cluster,
+        camera_scaling,
+        cluster_count,
+    ):
+        for cluster_id in range(cluster_count):
+            unique_cameras = np.unique(camera_indices_in_cluster[cluster_id])
+            unique_points = np.unique(point_indices_in_cluster[cluster_id])
+            request = test_pb2.request_proto()
+            update = request.preconditioning_update
+            update.unorm[:] = (1.0 / camera_scaling[unique_cameras]).ravel()
+            update.vnorm[:] = np.ones(3 * unique_points.size)
+            update.cluster_id = cluster_id
+            self._send(request)
+
+    def refine_landmarks_at_consensus(
+        self,
+        camera_indices_in_cluster,
+        point_indices_in_cluster,
+        consensus,
+        landmarks,
+        cluster_count,
+        refinement_steps,
+    ):
+        self.phase_id += 1
+        phase_id = self.phase_id
+        for cluster_id in range(cluster_count):
+            unique_cameras = np.unique(camera_indices_in_cluster[cluster_id])
+            unique_points = np.unique(point_indices_in_cluster[cluster_id])
+            request = test_pb2.request_proto()
+            update = request.cost_update
+            update.cameras[:] = consensus[unique_cameras].ravel()
+            update.cluster_id = cluster_id
+            update.run_id = self.run_id
+            update.phase_id = phase_id
+            update.landmark_refinement_steps = refinement_steps
+            self._send(request)
+
+        pending = set(range(cluster_count))
+        costs = np.zeros(cluster_count)
+        refined_landmarks = landmarks.copy()
+        while pending:
+            payload = self.pull_socket.recv()
+            self.received_bytes += len(payload)
+            reply = test_pb2.return_cost_proto()
+            reply.ParseFromString(payload)
+            if reply.run_id != self.run_id or reply.phase_id != phase_id:
+                continue
+            cluster_id = reply.cluster_id
+            if cluster_id not in pending:
+                raise RuntimeError(
+                    f"duplicate refinement reply for cluster {cluster_id}"
+                )
+            pending.remove(cluster_id)
+            unique_points = np.unique(point_indices_in_cluster[cluster_id])
+            if len(reply.landmarks) != 3 * unique_points.size:
+                raise RuntimeError(
+                    "worker returned an invalid refined landmark state"
+                )
+            refined_landmarks[unique_points] = np.asarray(
+                reply.landmarks, dtype=np.float64
+            ).reshape((-1, 3))
+            costs[cluster_id] = reply.cost
+        return costs, refined_landmarks
 
 
 def parse_arguments():

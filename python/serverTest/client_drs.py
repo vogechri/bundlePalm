@@ -52,6 +52,8 @@ def parse_arguments():
     parser.add_argument(
         "--trust-region-policy", choices=("ceres", "drs", "daba"), default="daba"
     )
+    parser.add_argument("--persistent-trust-region", action="store_true")
+    parser.add_argument("--trust-region-recovery-ratio", type=float, default=0.5)
     parser.add_argument(
         "--camera-scaling", choices=("none", "jacobi_initial"), default="jacobi_initial"
     )
@@ -68,6 +70,30 @@ def parse_arguments():
         default="arithmetic",
     )
     parser.add_argument("--block-regularization", type=float, default=5e-5)
+    parser.add_argument("--block-curvature-multiplier", type=float, default=0.0)
+    parser.add_argument(
+        "--block-recovery-mode",
+        choices=("regularization", "curvature", "measured_curvature"),
+        default="regularization",
+    )
+    parser.add_argument(
+        "--maximum-block-curvature-multiplier", type=float, default=16.0
+    )
+    parser.add_argument("--curvature-decay-after", type=int, default=0)
+    parser.add_argument("--curvature-decay-ratio", type=float, default=0.5)
+    parser.add_argument("--metric-diagnostic-iterations", type=int, default=0)
+    parser.add_argument("--landmark-refinement-steps", type=int, default=0)
+    parser.add_argument(
+        "--consensus-landmark-refinement-steps", type=int, default=0
+    )
+    parser.add_argument(
+        "--consensus-landmark-refinement-policy",
+        choices=("safeguard", "reporting"),
+        default="safeguard",
+    )
+    parser.add_argument(
+        "--target-transformed-lipschitz", type=float, default=0.475
+    )
     parser.add_argument(
         "--maximum-block-regularization", type=float, default=0.5
     )
@@ -102,6 +128,57 @@ def validate_arguments(arguments):
         raise ValueError("penalty multiplier must be positive")
     if arguments.block_regularization <= 0.0:
         raise ValueError("block regularization must be positive")
+    if (
+        not np.isfinite(arguments.block_curvature_multiplier)
+        or arguments.block_curvature_multiplier < 0.0
+    ):
+        raise ValueError("block curvature multiplier must be nonnegative")
+    if (
+        not np.isfinite(arguments.maximum_block_curvature_multiplier)
+        or arguments.maximum_block_curvature_multiplier <= 0.0
+    ):
+        raise ValueError("maximum block curvature multiplier must be positive")
+    if arguments.block_recovery_mode in ("curvature", "measured_curvature"):
+        if arguments.proximal_metric != "block":
+            raise ValueError("curvature recovery requires block proximal mode")
+        if arguments.block_curvature_multiplier <= 0.0:
+            raise ValueError(
+                "curvature recovery requires a positive block curvature multiplier"
+            )
+        if (
+            arguments.maximum_block_curvature_multiplier
+            < arguments.block_curvature_multiplier
+        ):
+            raise ValueError(
+                "maximum block curvature multiplier must not be below its initial value"
+            )
+    if arguments.curvature_decay_after < 0:
+        raise ValueError("curvature decay wait must be nonnegative")
+    if not 0 <= arguments.metric_diagnostic_iterations <= 100:
+        raise ValueError("metric diagnostic iterations must be in [0, 100]")
+    if not 0 <= arguments.landmark_refinement_steps <= 20:
+        raise ValueError("landmark refinement steps must be in [0, 20]")
+    if not 0 <= arguments.consensus_landmark_refinement_steps <= 20:
+        raise ValueError(
+            "consensus landmark refinement steps must be in [0, 20]"
+        )
+    if not np.isfinite(arguments.target_transformed_lipschitz) or not (
+        0.0 < arguments.target_transformed_lipschitz < 1.0
+    ):
+        raise ValueError("target transformed Lipschitz must be in (0, 1)")
+    if (
+        arguments.block_recovery_mode == "measured_curvature"
+        and arguments.metric_diagnostic_iterations <= 0
+    ):
+        raise ValueError(
+            "measured curvature recovery requires metric diagnostics"
+        )
+    if not 0.0 < arguments.curvature_decay_ratio < 1.0:
+        raise ValueError("curvature decay ratio must be in (0, 1)")
+    if arguments.curvature_decay_after > 0 and (
+        arguments.block_recovery_mode not in ("curvature", "measured_curvature")
+    ):
+        raise ValueError("curvature decay requires curvature recovery mode")
     if arguments.maximum_block_regularization < arguments.block_regularization:
         raise ValueError(
             "maximum block regularization must not be below its initial value"
@@ -124,6 +201,8 @@ def validate_arguments(arguments):
         raise ValueError("recovery penalty ratio must exceed one")
     if arguments.maximum_penalty <= 0.0:
         raise ValueError("maximum penalty must be positive")
+    if not 0.0 < arguments.trust_region_recovery_ratio <= 1.0:
+        raise ValueError("trust region recovery ratio must be in (0, 1]")
     if arguments.local_solver == "ceres_pcg":
         if arguments.trust_region_policy != "ceres":
             raise ValueError("ceres_pcg requires the ceres trust policy")
@@ -141,10 +220,23 @@ def print_setup(arguments, camera_count, point_count, observation_count, metrics
         f"iteration: u=prox_F(s), v=P_C(2u-s), "
         f"s_next=s+lambda(v-u)\n"
         f"lambda={arguments.relaxation:g} local_solver={arguments.local_solver} "
-        f"trust={arguments.trust_region_policy} local_steps={arguments.local_steps}\n"
+        f"trust={arguments.trust_region_policy} "
+        f"persistent_trust={arguments.persistent_trust_region} "
+        f"local_steps={arguments.local_steps}\n"
         f"proximal_metric={arguments.proximal_metric} "
         f"consensus_metric={arguments.consensus_metric} "
-        f"block_regularization={arguments.block_regularization:g}\n"
+        f"block_regularization={arguments.block_regularization:g} "
+        f"block_curvature_multiplier="
+        f"{arguments.block_curvature_multiplier:g} "
+        f"block_recovery={arguments.block_recovery_mode} "
+        f"metric_diagnostic_iterations="
+        f"{arguments.metric_diagnostic_iterations} "
+        f"landmark_refinement_steps="
+        f"{arguments.landmark_refinement_steps} "
+        f"consensus_landmark_refinement_steps="
+        f"{arguments.consensus_landmark_refinement_steps} "
+        f"consensus_landmark_refinement_policy="
+        f"{arguments.consensus_landmark_refinement_policy}\n"
         f"safeguard={arguments.safeguard_mode} "
         f"dre_increase_at_k5={arguments.dre_relative_increase:g} "
         f"minimum_primal_ratio={arguments.minimum_primal_ratio:g}\n"
@@ -192,6 +284,8 @@ def print_iteration(row, best_sse, best_iteration, prox_costs):
         f"rho_next={row['nextPenalty']:.6g} "
         f"be={row['blockRegularization']:.6g}->"
         f"{row['nextBlockRegularization']:.6g} "
+        f"lip={row['blockCurvatureMultiplier']:.6g}->"
+        f"{row['nextBlockCurvatureMultiplier']:.6g} "
         f"lambda={row['relaxation']:.6g} "
         f"rejections={row['rejections']} "
         f"thresholds=(DRE {row['dreRatio']:.6g}x, "
@@ -200,6 +294,12 @@ def print_iteration(row, best_sse, best_iteration, prox_costs):
         f"primal {row['primalThresholdExceeded']}) "
         f"recovery={row['recoveryAction']} "
         f"recovery_exhausted={row['recoveryExhausted']} "
+        f"L_M(max/median)={row['transformedLipschitzMaximum']:.6g}/"
+        f"{row['transformedLipschitzMedian']:.6g} "
+        f"L_M_residual_max={row['transformedLipschitzResidualMaximum']:.3g} "
+        f"themelis=(metric {row['themelisMetricAdmissible']}, "
+        f"decrease {row['themelisDecreasePassed']}) "
+        f"prox_defect/fp={row['proximalDefectToFixedPointRatio']:.6g} "
         f"transport={row['transportBytesSent'] + row['transportBytesReceived']}B",
         file=sys.stderr,
         flush=True,
@@ -287,6 +387,7 @@ def main():
             maximum_ratio=arguments.camera_scaling_maximum_ratio,
             clipping_percentile=arguments.camera_scaling_clipping_percentile,
         )
+        camera_scaling *= 2.0 / np.sqrt(cluster_count)
     else:
         camera_scaling = np.ones_like(cameras)
     scaling_seconds = time.perf_counter() - scaling_started
@@ -300,28 +401,70 @@ def main():
         arguments.penalty_multiplier * 2.5 * len(observations) / camera_count
     )
     block_regularization = arguments.block_regularization
+    block_curvature_multiplier = arguments.block_curvature_multiplier
     best_sse = initial_metrics["sumSquaredError"]
     best_iteration = -1
     best_cameras = cameras.copy()
     best_points = points.copy()
     accepted_metrics = initial_metrics
     accepted_dre = initial_metrics["sumSquaredError"]
+    accepted_model_dre = initial_metrics["sumSquaredError"]
+    accepted_fixed_point_squared = 0.0
     accepted_consensus = consensus.copy()
     accepted_landmarks = landmarks.copy()
     rejected_count = 0
+    accepted_since_curvature_change = 0
     revert_landmark_mode = 0
+    trust_region_recovery_ratio = 1.0
     trajectory = []
     termination_reason = "iteration_limit"
 
     worker = DrsWorkerClient()
     try:
-        initialized = False
+        bootstrap_cameras = np.repeat(
+            cameras[None, :, :], cluster_count, axis=0
+        )
+        worker.solve_batch(
+            camera_indices_in_cluster,
+            point_indices_in_cluster,
+            points_2d_in_cluster,
+            local_camera_indices,
+            local_point_indices,
+            bootstrap_cameras,
+            landmarks,
+            bootstrap_cameras.copy(),
+            penalty,
+            penalty,
+            False,
+            initialize=True,
+            cluster_count=cluster_count,
+            local_steps=arguments.local_steps,
+            local_solver=arguments.local_solver,
+            trust_region_policy=arguments.trust_region_policy,
+            camera_scaling=np.ones_like(cameras),
+            revert_landmarks=0,
+            persistent_trust_region=arguments.persistent_trust_region,
+            trust_region_recovery_ratio=1.0,
+            scalar_proximal_prior=(arguments.proximal_metric == "scalar"),
+            block_regularization=block_regularization,
+            block_curvature_multiplier=block_curvature_multiplier,
+            return_metric_blocks=(arguments.proximal_metric == "block"),
+        )
+        worker.update_preconditioning(
+            camera_indices_in_cluster,
+            point_indices_in_cluster,
+            camera_scaling,
+            cluster_count,
+        )
+        accepted_landmarks = landmarks.copy()
         for iteration in range(arguments.iterations):
             reference_sse = accepted_metrics["sumSquaredError"]
             reference_dre = accepted_dre
             proximal_penalty = penalty
             proximal_block_regularization = block_regularization
+            proximal_block_curvature_multiplier = block_curvature_multiplier
             recovery_exhausted = False
+            curvature_decay_applied = False
 
             prox_result = worker.solve_batch(
                 camera_indices_in_cluster,
@@ -335,26 +478,45 @@ def main():
                 proximal_penalty,
                 proximal_penalty,
                 False,
-                initialize=not initialized,
+                initialize=False,
                 cluster_count=cluster_count,
                 local_steps=arguments.local_steps,
                 local_solver=arguments.local_solver,
                 trust_region_policy=arguments.trust_region_policy,
                 camera_scaling=camera_scaling,
                 revert_landmarks=revert_landmark_mode,
-                persistent_trust_region=False,
-                trust_region_recovery_ratio=1.0,
+                persistent_trust_region=arguments.persistent_trust_region,
+                trust_region_recovery_ratio=trust_region_recovery_ratio,
                 scalar_proximal_prior=(arguments.proximal_metric == "scalar"),
                 block_regularization=proximal_block_regularization,
+                block_curvature_multiplier=(
+                    proximal_block_curvature_multiplier
+                ),
+                metric_diagnostic_iterations=(
+                    arguments.metric_diagnostic_iterations
+                ),
+                landmark_refinement_steps=(
+                    arguments.landmark_refinement_steps
+                ),
                 return_metric_blocks=(arguments.proximal_metric == "block"),
+                return_metric_diagnostics=(
+                    arguments.metric_diagnostic_iterations > 0
+                ),
             )
-            if arguments.proximal_metric == "block":
+            if (
+                arguments.proximal_metric == "block"
+                and arguments.metric_diagnostic_iterations > 0
+            ):
+                prox_costs, raw_metric_blocks, metric_diagnostics = prox_result
+            elif arguments.proximal_metric == "block":
                 prox_costs, raw_metric_blocks = prox_result
+                metric_diagnostics = None
             else:
                 prox_costs = prox_result
                 raw_metric_blocks = None
-            initialized = True
+                metric_diagnostics = None
             revert_landmark_mode = 0
+            trust_region_recovery_ratio = 1.0
 
             (
                 candidate_consensus,
@@ -374,12 +536,42 @@ def main():
             physical_candidate = to_physical_cameras(
                 candidate_consensus, camera_scaling
             )
-            candidate_metrics = evaluate_bal_state(
+            unrefined_candidate_metrics = evaluate_bal_state(
                 physical_candidate,
                 landmarks,
                 camera_indices,
                 point_indices,
                 observations,
+            )
+            candidate_landmarks = landmarks
+            refined_candidate_metrics = None
+            if arguments.consensus_landmark_refinement_steps > 0:
+                _, candidate_landmarks = worker.refine_landmarks_at_consensus(
+                    camera_indices_in_cluster,
+                    point_indices_in_cluster,
+                    candidate_consensus,
+                    landmarks,
+                    cluster_count,
+                    arguments.consensus_landmark_refinement_steps,
+                )
+                refined_candidate_metrics = evaluate_bal_state(
+                    physical_candidate,
+                    candidate_landmarks,
+                    camera_indices,
+                    point_indices,
+                    observations,
+                )
+            candidate_metrics = (
+                refined_candidate_metrics
+                if refined_candidate_metrics is not None
+                and arguments.consensus_landmark_refinement_policy
+                == "safeguard"
+                else unrefined_candidate_metrics
+            )
+            reporting_candidate_metrics = (
+                refined_candidate_metrics
+                if refined_candidate_metrics is not None
+                else candidate_metrics
             )
             candidate_sse = candidate_metrics["sumSquaredError"]
             if arguments.proximal_metric == "scalar":
@@ -415,6 +607,37 @@ def main():
                     candidate_sse,
                 )
             )
+            transformed_lipschitz_maximum = (
+                float(np.nanmax(metric_diagnostics["transformedLipschitz"]))
+                if metric_diagnostics is not None
+                and np.any(np.isfinite(
+                    metric_diagnostics["transformedLipschitz"]
+                ))
+                else float("nan")
+            )
+            themelis_margin = (2.0 - arguments.relaxation) / 2.0
+            themelis_metric_admissible = (
+                np.isfinite(transformed_lipschitz_maximum)
+                and transformed_lipschitz_maximum < themelis_margin
+            )
+            if themelis_metric_admissible:
+                themelis_decrease_constant = 0.5 * (
+                    arguments.relaxation
+                    / (1.0 + transformed_lipschitz_maximum) ** 2
+                    * (themelis_margin - transformed_lipschitz_maximum)
+                )
+                themelis_model_threshold = (
+                    accepted_model_dre
+                    - themelis_decrease_constant
+                    * accepted_fixed_point_squared
+                )
+                themelis_decrease_passed = (
+                    dre_model_envelope <= themelis_model_threshold
+                )
+            else:
+                themelis_decrease_constant = float("nan")
+                themelis_model_threshold = float("nan")
+                themelis_decrease_passed = False
             dre_ratio, primal_ratio = relative_safeguard_ratios(
                 iteration,
                 arguments.iterations,
@@ -453,6 +676,7 @@ def main():
                 )
             if rejected:
                 rejected_count += 1
+                accepted_since_curvature_change = 0
                 (
                     local_cameras,
                     centers,
@@ -466,33 +690,113 @@ def main():
                         arguments.recovery_penalty_ratio,
                     )
                 else:
-                    (
-                        block_regularization,
-                        proximal_metric_changed,
-                    ) = increase_recovery_parameter(
-                        proximal_block_regularization,
-                        arguments.maximum_block_regularization,
-                        arguments.recovery_penalty_ratio,
-                    )
+                    if arguments.block_recovery_mode in (
+                        "curvature", "measured_curvature"
+                    ):
+                        minimum_next_multiplier = (
+                            proximal_block_curvature_multiplier
+                            * arguments.recovery_penalty_ratio
+                        )
+                        if (
+                            arguments.block_recovery_mode
+                            == "measured_curvature"
+                            and np.isfinite(transformed_lipschitz_maximum)
+                        ):
+                            minimum_next_multiplier = max(
+                                minimum_next_multiplier,
+                                proximal_block_curvature_multiplier
+                                * transformed_lipschitz_maximum
+                                / arguments.target_transformed_lipschitz,
+                            )
+                        block_curvature_multiplier = min(
+                            arguments.maximum_block_curvature_multiplier,
+                            minimum_next_multiplier,
+                        )
+                        proximal_metric_changed = (
+                            block_curvature_multiplier
+                            > proximal_block_curvature_multiplier
+                        )
+                    else:
+                        (
+                            block_regularization,
+                            proximal_metric_changed,
+                        ) = increase_recovery_parameter(
+                            proximal_block_regularization,
+                            arguments.maximum_block_regularization,
+                            arguments.recovery_penalty_ratio,
+                        )
                 recovery_exhausted = not proximal_metric_changed
                 metrics = accepted_metrics
                 revert_landmark_mode = 2
+                if arguments.persistent_trust_region:
+                    trust_region_recovery_ratio = (
+                        arguments.trust_region_recovery_ratio
+                    )
                 recovery_action = "accepted_consensus_reset"
             else:
                 centers = candidate_centers
                 consensus = candidate_consensus
                 accepted_metrics = candidate_metrics
                 accepted_dre = douglas_rachford_envelope
+                accepted_model_dre = dre_model_envelope
+                accepted_fixed_point_squared = residuals.fixed_point_squared
                 accepted_consensus = consensus.copy()
                 accepted_landmarks = landmarks.copy()
                 metrics = candidate_metrics
                 recovery_action = "none"
+                accepted_since_curvature_change += 1
+                if (
+                    arguments.curvature_decay_after > 0
+                    and accepted_since_curvature_change
+                    >= arguments.curvature_decay_after
+                    and block_curvature_multiplier
+                    > arguments.block_curvature_multiplier
+                ):
+                    block_curvature_multiplier = max(
+                        arguments.block_curvature_multiplier,
+                        block_curvature_multiplier
+                        * arguments.curvature_decay_ratio,
+                    )
+                    accepted_since_curvature_change = 0
+                    curvature_decay_applied = True
+
+            if metric_diagnostics is not None and np.any(np.isfinite(
+                metric_diagnostics["proximalDefectSquared"]
+            )):
+                camera_defect_squared = float(np.nansum(
+                    metric_diagnostics["cameraProximalDefectSquared"]
+                ))
+                landmark_defect_squared = float(np.nansum(
+                    metric_diagnostics["landmarkProximalDefectSquared"]
+                ))
+                proximal_defect_squared = float(np.nansum(
+                    metric_diagnostics["proximalDefectSquared"]
+                ))
+                proximal_defect_maximum_squared = float(np.nanmax(
+                    metric_diagnostics["proximalDefectSquared"]
+                ))
+                proximal_defect_to_fixed_point_ratio = float(np.sqrt(
+                    proximal_defect_squared
+                    / max(
+                        residuals.fixed_point_squared,
+                        np.finfo(np.float64).tiny,
+                    )
+                ))
+            else:
+                camera_defect_squared = float("nan")
+                landmark_defect_squared = float("nan")
+                proximal_defect_squared = float("nan")
+                proximal_defect_maximum_squared = float("nan")
+                proximal_defect_to_fixed_point_ratio = float("nan")
 
             row = {
                 "iteration": iteration,
                 "overallSeconds": time.perf_counter() - started_at,
                 "sumSquaredError": metrics["sumSquaredError"],
                 "candidateSumSquaredError": candidate_sse,
+                "refinedCandidateSumSquaredError": (
+                    reporting_candidate_metrics["sumSquaredError"]
+                ),
                 "referenceSumSquaredError": reference_sse,
                 "meanReprojectionError": metrics["meanReprojectionError"],
                 "rejected": rejected,
@@ -534,16 +838,66 @@ def main():
                 "proximalMetric": arguments.proximal_metric,
                 "consensusMetric": arguments.consensus_metric,
                 "blockRegularization": proximal_block_regularization,
+                "blockCurvatureMultiplier": (
+                    proximal_block_curvature_multiplier
+                ),
+                "nextBlockCurvatureMultiplier": block_curvature_multiplier,
+                "curvatureDecayApplied": curvature_decay_applied,
+                "transformedLipschitzEstimates": (
+                    metric_diagnostics["transformedLipschitz"].tolist()
+                    if metric_diagnostics is not None
+                    else []
+                ),
+                "transformedLipschitzResiduals": (
+                    metric_diagnostics["relativeResidual"].tolist()
+                    if metric_diagnostics is not None
+                    else []
+                ),
+                "transformedLipschitzMaximum": (
+                    transformed_lipschitz_maximum
+                ),
+                "transformedLipschitzMedian": (
+                    float(np.nanmedian(metric_diagnostics["transformedLipschitz"]))
+                    if metric_diagnostics is not None
+                    and np.any(np.isfinite(
+                        metric_diagnostics["transformedLipschitz"]
+                    ))
+                    else float("nan")
+                ),
+                "transformedLipschitzResidualMaximum": (
+                    float(np.nanmax(metric_diagnostics["relativeResidual"]))
+                    if metric_diagnostics is not None
+                    and np.any(np.isfinite(metric_diagnostics["relativeResidual"]))
+                    else float("nan")
+                ),
+                "themelisMetricAdmissible": bool(
+                    themelis_metric_admissible
+                ),
+                "themelisDecreaseConstant": themelis_decrease_constant,
+                "themelisModelThreshold": themelis_model_threshold,
+                "themelisDecreasePassed": bool(themelis_decrease_passed),
+                "cameraProximalDefectSquared": camera_defect_squared,
+                "landmarkProximalDefectSquared": landmark_defect_squared,
+                "proximalDefectSquared": proximal_defect_squared,
+                "proximalDefectMaximumSquared": (
+                    proximal_defect_maximum_squared
+                ),
+                "proximalDefectToFixedPointRatio": (
+                    proximal_defect_to_fixed_point_ratio
+                ),
                 "nextBlockRegularization": block_regularization,
                 "transportBytesSent": worker.sent_bytes,
                 "transportBytesReceived": worker.received_bytes,
             }
             trajectory.append(row)
-            if metrics["sumSquaredError"] < best_sse:
-                best_sse = metrics["sumSquaredError"]
+            if (
+                not rejected
+                and reporting_candidate_metrics["sumSquaredError"] < best_sse
+            ):
+                best_sse = reporting_candidate_metrics["sumSquaredError"]
                 best_iteration = iteration
                 best_cameras = to_physical_cameras(consensus, camera_scaling).copy()
-                best_points = landmarks.copy()
+                best_points = candidate_landmarks.copy()
             if arguments.debug_output:
                 print_iteration(row, best_sse, best_iteration, prox_costs)
             if recovery_exhausted:
@@ -567,6 +921,8 @@ def main():
         "threadsPerCluster": arguments.threads_per_cluster,
         "localSolver": arguments.local_solver,
         "trustRegionPolicy": arguments.trust_region_policy,
+        "persistentTrustRegion": arguments.persistent_trust_region,
+        "trustRegionRecoveryRatio": arguments.trust_region_recovery_ratio,
         "cameraScaling": arguments.camera_scaling,
         "scalingSeconds": scaling_seconds,
         "relaxation": arguments.relaxation,
@@ -574,6 +930,27 @@ def main():
         "consensusMetric": arguments.consensus_metric,
         "initialBlockRegularization": arguments.block_regularization,
         "finalBlockRegularization": block_regularization,
+        "initialBlockCurvatureMultiplier": (
+            arguments.block_curvature_multiplier
+        ),
+        "finalBlockCurvatureMultiplier": block_curvature_multiplier,
+        "maximumBlockCurvatureMultiplier": (
+            arguments.maximum_block_curvature_multiplier
+        ),
+        "blockRecoveryMode": arguments.block_recovery_mode,
+        "curvatureDecayAfter": arguments.curvature_decay_after,
+        "curvatureDecayRatio": arguments.curvature_decay_ratio,
+        "metricDiagnosticIterations": arguments.metric_diagnostic_iterations,
+        "landmarkRefinementSteps": arguments.landmark_refinement_steps,
+        "consensusLandmarkRefinementSteps": (
+            arguments.consensus_landmark_refinement_steps
+        ),
+        "consensusLandmarkRefinementPolicy": (
+            arguments.consensus_landmark_refinement_policy
+        ),
+        "targetTransformedLipschitz": (
+            arguments.target_transformed_lipschitz
+        ),
         "initialPenalty": (
             arguments.penalty_multiplier * 2.5 * len(observations) / camera_count
         ),
@@ -613,6 +990,7 @@ def main():
             f"rejections={rejected_count} rho={penalty:.6g} "
             f"gamma={result['gamma']:.6g} "
             f"be={block_regularization:.6g} "
+            f"lip={block_curvature_multiplier:.6g} "
             f"termination={termination_reason} "
             f"overall={result['overallSeconds']:.3f}s\n"
             f"result={output_path} state={arguments.state or '-'}",

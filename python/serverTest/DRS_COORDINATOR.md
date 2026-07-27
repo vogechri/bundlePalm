@@ -33,6 +33,42 @@ dense Gauss-Newton `9x9` camera blocks. The regularization floor is controlled
 by `--block-regularization`; recovery multiplies it by
 `--recovery-penalty-ratio` up to `--maximum-block-regularization`.
 
+The curvature coefficient and weak-direction floor can be separated with
+`--block-curvature-multiplier`. Its default value `0` preserves the legacy
+coefficient `min(1.005, 0.1*sqrt(be/be_initial))`; a positive value fixes the
+coefficient of the camera Gauss-Newton block directly. Recovery defaults to
+increasing `block_regularization`. The opt-in
+`--block-recovery-mode curvature` instead keeps `block_regularization` fixed
+and increases the curvature multiplier up to
+`--maximum-block-curvature-multiplier`.
+
+Curvature recovery can optionally use hysteresis: after
+`--curvature-decay-after N` accepted iterations without a curvature change,
+the multiplier is reduced by `--curvature-decay-ratio`, but never below its
+initial value. The default wait `0` disables decay.
+
+The custom DABA trust policy normally starts every local solve with radius 100.
+`--persistent-trust-region` instead carries each cluster's accepted radius to
+the next solve. A global rejection restores the last accepted radius and
+multiplies it by `--trust-region-recovery-ratio`. This is experimental and not
+a default: it improved scene 646 but substantially degraded scene 931.
+
+`--metric-diagnostic-iterations N` enables diagnostic-only generalized power
+iteration for the transformed reduced-camera smoothness constant, plus a
+returned-state proximal defect evaluation. Each trajectory row stores all
+per-cluster estimates, eigen-residuals, camera/landmark defect components, the
+defect-to-fixed-point ratio, and the official Themelis metric/decrease checks.
+These values do not alter acceptance. Sixty iterations gave approximately 2%
+eigen-residual on the first validation scene; 30 is a cheaper exploratory
+setting.
+
+`--block-recovery-mode measured_curvature` uses the measured maximum to jump
+toward `--target-transformed-lipschitz` (default 0.475), with geometric recovery
+as fallback. This mode is experimental and performed worse than ordinary
+curvature doubling on scenes 646 and 931. The diagnostics showed that once the
+camera metric became admissible, the remaining proximal defect on scene 931
+was dominated by unregularized landmark stationarity.
+
 ## Consensus metric
 
 Block proximal mode supports four reductions of each active camera-copy block
@@ -154,6 +190,25 @@ for metric in arithmetic scalar diagonal full; do
     LOCAL_SOLVER=nesterov TRUST_REGION_POLICY=daba \
     ./serverTest/run_drs_failure_top3_live.sh
 done
+```
+
+A curvature-only recovery run is:
+
+```bash
+BLOCK_CURVATURE_MULTIPLIER=0.1 \
+BLOCK_RECOVERY_MODE=curvature \
+MAXIMUM_BLOCK_CURVATURE_MULTIPLIER=128 \
+BLOCK_REGULARIZATION=5e-5 \
+TRUST_REGION_POLICY=daba \
+  ./serverTest/run_drs_failure_top3_live.sh
+```
+
+The current two-scene continuation candidate additionally uses:
+
+```bash
+CURVATURE_DECAY_AFTER=10 CURVATURE_DECAY_RATIO=0.5 \
+MINIMUM_PRIMAL_RATIO=1.0 \
+  ./serverTest/run_drs_failure_top3_live.sh
 ```
 
 For compatibility with `client_acc.py`, the runner also accepts
