@@ -1,0 +1,431 @@
+\documentclass[11pt]{article}
+
+\usepackage[a4paper,margin=28mm]{geometry}
+\usepackage{amsmath,amssymb,amsthm}
+\usepackage{booktabs}
+\usepackage[hidelinks]{hyperref}
+
+\newtheorem{assumption}{Assumption}
+\newtheorem{theorem}{Theorem}
+\newtheorem{proposition}{Proposition}
+\newtheorem{remark}{Remark}
+\newcommand{\Cset}{\mathcal{C}}
+\newcommand{\Edr}{\mathcal{E}_{\mathrm{DR}}}
+\newcommand{\normM}[1]{\lVert #1\rVert_M}
+\newcommand{\normMi}[1]{\lVert #1\rVert_{M^{-1}}}
+
+\title{Convergence Boundary for Variable-Metric DRS with Finite Gauss--Newton Local Solves}
+\author{}
+\date{}
+
+\begin{document}
+\maketitle
+
+\section{Purpose and status}
+
+This note separates three statements that must not be conflated:
+\begin{enumerate}
+  \item an exact, fixed-metric nonconvex Douglas--Rachford splitting (DRS)
+        result inherited through a linear change of coordinates;
+  \item a conditional perturbation result for inexact local solves; and
+  \item practical heuristics---finite Gauss--Newton (GN) or
+        Levenberg--Marquardt (LM) solves, refreshed curvature metrics, and
+        Nesterov-like proposals---whose compliance with the conditional result
+        remains to be proved or measured.
+\end{enumerate}
+
+Only the first result is currently unconditional under its stated assumptions.
+The second result identifies a sufficient proof target.  It does not by itself
+show that a fixed number of GN steps satisfies that target.
+
+\section{Landmark-owned consensus formulation}
+
+Let cluster $i\in\{1,\ldots,K\}$ own a disjoint set of complete landmark
+tracks.  Its local variables are camera copies $u_i$ and owned landmarks
+$\ell_i$, and its reprojection objective is $f_i(u_i,\ell_i)$.  Define the
+reduced camera objective
+\begin{equation}
+  \bar f_i(u_i)=\inf_{\ell_i} f_i(u_i,\ell_i),
+  \label{eq:reduced-objective}
+\end{equation}
+and stack all local camera copies into $u=(u_1,\ldots,u_K)$.  The consensus
+subspace is
+\begin{equation}
+  \Cset=\{u:\ u_{i,c}=u_{j,c}\text{ whenever camera }c
+  \text{ occurs in clusters }i\text{ and }j\}.
+\end{equation}
+The decomposed problem is
+\begin{equation}
+  \min_u\ \Phi(u):=F(u)+G(u),
+  \qquad
+  F(u)=\sum_{i=1}^K\bar f_i(u_i),
+  \qquad
+  G(u)=\iota_{\Cset}(u).
+  \label{eq:split-problem}
+\end{equation}
+
+Equation~\eqref{eq:reduced-objective} is mathematically convenient but places
+real requirements on landmark elimination.  Smoothness of $\bar f_i$ is local,
+not automatic: it follows near a selected landmark minimizer when the landmark
+first-order condition is regular and the relevant landmark Hessian is
+nonsingular.  Gauge freedoms, degeneracy, robust losses, and changes between
+local minimizer branches can violate these conditions.  A theorem may instead
+retain $(u_i,\ell_i)$ explicitly, but then the consensus split and its prox must
+be restated in that larger space.
+
+\section{Fixed block metric as a coordinate transform}
+
+Let $M\succ0$ be a \emph{constant} block-diagonal camera metric.  For the
+implementation, each active camera block is $9\times9$.  Introduce
+\begin{equation}
+  z=M^{1/2}u,
+  \qquad
+  \widetilde F(z)=F(M^{-1/2}z),
+  \qquad
+  \widetilde G(z)=G(M^{-1/2}z).
+  \label{eq:metric-transform}
+\end{equation}
+Then
+\begin{equation}
+  \operatorname{prox}^{M}_{\gamma F}(s)
+  =M^{-1/2}\operatorname{prox}_{\gamma\widetilde F}(M^{1/2}s),
+\end{equation}
+and similarly for $G$.  Thus fixed-metric DRS in $u$ is Euclidean DRS in
+$z$.  The metric projection of a reflected state $r=(r_i)_i$ onto consensus
+is separable by camera:
+\begin{equation}
+  v_c=
+  \left(\sum_{i:c\in i}M_{i,c}\right)^{-1}
+  \sum_{i:c\in i}M_{i,c}r_{i,c}.
+  \label{eq:metric-consensus}
+\end{equation}
+With $r_i=2u_i-s_i$, this is the block-metric consensus used by the solver.
+
+\section{Exact fixed-metric DRS}
+
+For clarity, use the convention
+\begin{align}
+  u_k &\in \operatorname{prox}^{M}_{\gamma F}(s_k),
+  \\
+  v_k &\in \operatorname{prox}^{M}_{\gamma G}(2u_k-s_k),
+  \\
+  s_{k+1} &= s_k+\lambda(v_k-u_k),
+  \qquad \lambda\in(0,2),
+  \label{eq:exact-drs}
+\end{align}
+and define the fixed-point residual $r_k=u_k-v_k$.
+
+\begin{assumption}[Exact fixed-metric setting]
+\label{ass:exact}
+The following hold in the transformed coordinates of
+Equation~\eqref{eq:metric-transform}.
+\begin{enumerate}
+  \item $\widetilde F$ has an $L$-Lipschitz continuous gradient on a set
+        containing the generated level set.
+  \item $\widetilde G$ is proper and lower semicontinuous.
+  \item Problem~\eqref{eq:split-problem} admits a solution.
+  \item The proximal points in Equation~\eqref{eq:exact-drs} are computed
+        exactly, and the same metric $M$ and stepsize $\gamma$ are used at
+        every iteration.
+  \item The stepsize satisfies $\gamma<(2-\lambda)/(2L)$ in the nonconvex
+        case.  For $\lambda=1$, this reduces to $\gamma<1/(2L)$.
+\end{enumerate}
+\end{assumption}
+
+The last bound is the simplified nonconvex range in the DRE analysis of
+Themelis, Stella, and Patrinos; a sharper range can be stated if a
+hypoconvexity modulus is available.
+
+\begin{theorem}[Exact fixed-metric subsequential convergence]
+\label{thm:exact}
+Under Assumption~\ref{ass:exact}, the metric DRS iterates satisfy
+\begin{equation}
+  \sum_{k=0}^{\infty}\normM{r_k}^2<\infty,
+  \qquad
+  \normM{r_k}\to0.
+  \label{eq:residual-summable}
+\end{equation}
+Every accumulation point shared by $(u_k)$ and $(v_k)$ is stationary for
+$F+G$.  If the objective is level bounded, the transformed DRS sequence is
+bounded.  Moreover,
+\begin{equation}
+  \min_{0\leq j<k}\normM{r_j}
+  =O(k^{-1/2}).
+  \label{eq:best-residual-rate}
+\end{equation}
+\end{theorem}
+
+\begin{proof}
+Apply the linear transformation in Equation~\eqref{eq:metric-transform}.
+Assumption~\ref{ass:exact} becomes the smooth-first-term setting for Euclidean
+nonconvex DRS.  Sufficient decrease of the Douglas--Rachford envelope gives
+for some $c>0$
+\begin{equation}
+  \Edr(z_{k+1})
+  \leq \Edr(z_k)-c\lVert \widetilde r_k\rVert^2,
+\end{equation}
+where $\widetilde r_k=M^{1/2}r_k$.  The envelope is bounded below by the
+problem infimum.  Telescoping proves
+Equation~\eqref{eq:residual-summable}; the stationary-cluster-point statement
+then follows from closedness of the limiting subdifferential under the exact
+proximal inclusions.  Finally,
+\begin{equation}
+  \min_{0\leq j<k}\lVert\widetilde r_j\rVert^2
+  \leq \frac{1}{k}\sum_{j=0}^{k-1}
+  \lVert\widetilde r_j\rVert^2=O(k^{-1}),
+\end{equation}
+which yields Equation~\eqref{eq:best-residual-rate}.
+\end{proof}
+
+\begin{remark}[What the rate does not say]
+Theorem~\ref{thm:exact} gives a best-iterate fixed-point residual rate.  It
+does not establish an $O(1/k)$ objective rate, an accelerated complexity
+bound, or superiority of Nesterov proposals over plain DRS.
+\end{remark}
+
+\section{A conditional inexact result}
+
+Let $\widehat u_k$ be the result of a finite local nonlinear solve and let
+$\widehat v_k$ be its exact metric consensus projection.  Define
+\begin{equation}
+  \widehat r_k=\widehat u_k-\widehat v_k.
+\end{equation}
+For differentiable local objectives, a computable proximal optimality defect
+is
+\begin{equation}
+  e_k=\nabla F(\widehat u_k)
+      +\frac{1}{\gamma}M(\widehat u_k-s_k).
+  \label{eq:prox-defect}
+\end{equation}
+When landmarks are retained explicitly, $e_k$ must include both camera and
+landmark stationarity defects, with no proximal term on unregularized
+landmark coordinates.
+
+\begin{assumption}[Perturbed envelope decrease]
+\label{ass:inexact}
+There exist $c>0$ and a nonnegative summable sequence $(\epsilon_k)$ such that
+the inexact iterates admit an envelope-like potential $\widehat{\Edr}_k$
+bounded below and
+\begin{equation}
+  \widehat{\Edr}_{k+1}
+  \leq \widehat{\Edr}_k
+  -c\normM{\widehat r_k}^2+\epsilon_k,
+  \qquad
+  \sum_{k=0}^{\infty}\epsilon_k<\infty.
+  \label{eq:perturbed-descent}
+\end{equation}
+In addition, $\normMi{e_k}\to0$, and the generated sequence has an
+accumulation point.
+\end{assumption}
+
+\begin{theorem}[Conditional convergence with inexact local solves]
+\label{thm:inexact}
+Under Assumption~\ref{ass:inexact},
+\begin{equation}
+  \sum_{k=0}^{\infty}\normM{\widehat r_k}^2<\infty,
+  \qquad
+  \normM{\widehat r_k}\to0.
+\end{equation}
+If the consensus projection is exact and the limiting subdifferential is
+closed along the convergent subsequence, every accumulation point is
+consensus feasible and stationary for $F+G$.
+\end{theorem}
+
+\begin{proof}
+Sum Equation~\eqref{eq:perturbed-descent} from $k=0$ to $N$.  Lower
+boundedness of $\widehat{\Edr}_{N+1}$ and summability of $\epsilon_k$ bound
+$\sum_{k=0}^N\normM{\widehat r_k}^2$ uniformly in $N$.  Hence the residual
+vanishes.  Along any convergent subsequence, exact projection and
+$\widehat r_k\to0$ give consensus feasibility.  Passing to the limit in the
+inexact proximal inclusion, using $e_k\to0$ in the dual metric and closedness
+of the limiting subdifferential, gives stationarity.
+\end{proof}
+
+\begin{remark}[This theorem is a target, not yet an implementation theorem]
+The main unresolved step is deriving Equation~\eqref{eq:perturbed-descent}
+and $e_k\to0$ from the actual finite GN/LM policy.  A fixed number of local
+iterations with a fixed termination tolerance generally gives bounded error,
+not summable or vanishing error.  Theorem~\ref{thm:inexact} must therefore not
+be cited as proving the current implementation until that bridge is supplied.
+\end{remark}
+
+\section{Candidate checkable forcing conditions}
+
+The following alternatives should be investigated.  Any one is useful only
+after proving that it implies Assumption~\ref{ass:inexact} under the stated
+smoothness and regularity conditions.
+
+\subsection{Summable local defects}
+
+Require
+\begin{equation}
+  \sum_{k=0}^{\infty}\normMi{e_k}<\infty.
+  \label{eq:summable-defect}
+\end{equation}
+This is clean but usually requires increasingly accurate local solves.
+
+\subsection{Relative error forcing}
+
+Require, for a sufficiently small $\eta$,
+\begin{equation}
+  \normMi{e_k}\leq\eta\normM{\widehat r_k}.
+  \label{eq:relative-error}
+\end{equation}
+This is more compatible with adaptive local stopping because early outer
+iterations permit coarse local solves.  The admissible upper bound on $\eta$
+must be derived from the exact DRE decrease constant; it cannot be chosen only
+empirically.
+
+\subsection{Direct sufficient-decrease test}
+
+Accept a finite local solve only if a computable merit satisfies
+\begin{equation}
+  \widehat{\Edr}_{k+1}
+  \leq\widehat{\Edr}_k-c\normM{\widehat r_k}^2.
+  \label{eq:direct-decrease}
+\end{equation}
+This moves work from an a priori GN iteration count to an outer acceptance
+condition.  It still requires the computed merit to be the same potential
+used in the proof.
+
+\subsection{Summable forcing sequence}
+
+Choose local tolerances $\delta_k$ with $\sum_k\delta_k<\infty$ and stop when
+\begin{equation}
+  \normMi{e_k}\leq\delta_k.
+\end{equation}
+A practical schedule such as $\delta_k=\delta_0/(k+1)^{1+q}$, $q>0$, is easy
+to state but may oversolve late iterations.  Relative forcing is likely more
+efficient if it can be proved.
+
+\section{Finite GN/LM proof obligations}
+
+For cluster $i$, the implemented local problem is
+\begin{equation}
+  q_{i,k}(u_i,\ell_i)=f_i(u_i,\ell_i)
+  +\frac{1}{2\gamma}\normM{u_i-s_{i,k}}^2.
+\end{equation}
+A damped GN/LM step solves a quadratic model, not the proximal problem itself.
+To connect finite steps to Equation~\eqref{eq:prox-defect}, the paper must:
+\begin{enumerate}
+  \item specify the robust loss and whether the model is true GN,
+        iteratively reweighted least squares, or another approximation;
+  \item bound the difference between the model gradient/Hessian and those of
+        $q_{i,k}$ on the relevant level set;
+  \item use the LM acceptance ratio or a line search to guarantee decrease in
+        the nonlinear local objective;
+  \item show how local step norms or gradients control $\lVert e_{i,k}\rVert$;
+  \item choose an inner stopping rule that makes the resulting outer error
+        relative, summable, or directly decreasing; and
+  \item account for switching between landmark minimizer branches and for
+        singular local geometry.
+\end{enumerate}
+
+The earlier ADMM--GN derivation suggests that sufficiently large proximal
+regularization can dominate finite-step model errors.  Its one-step bound is a
+useful starting point, but the multi-step cross terms and the exact connection
+to the implemented block metric require a fresh proof.  It should not be
+imported as a finished theorem.
+
+\section{Changing metrics}
+
+The coordinate argument in Section 3 applies to one fixed $M$.  If $M_k$
+changes every outer iteration, then the transformed objective and DRE also
+change.  Uniform spectral bounds
+\begin{equation}
+  mI\preceq M_k\preceq \overline m I
+\end{equation}
+are useful but do not alone give a common Lyapunov function.  Plausible routes
+are:
+\begin{enumerate}
+  \item freeze $M$ after initialization for the proved algorithm;
+  \item allow only finitely many metric updates;
+  \item require summable variation
+        $\sum_k\lVert M_{k+1}-M_k\rVert<\infty$ and absorb the induced
+        potential change into $\epsilon_k$; or
+  \item construct a metric-independent merit with uniform descent.
+\end{enumerate}
+Until one route is completed, refreshed metrics are an empirical
+variable-metric heuristic, while fixed Jacobi or fixed block metrics are the
+theoretically covered variants.
+
+\section{Safeguarded acceleration}
+
+Let $s_k^{\mathrm{trial}}$ be any accelerated proposal, including the
+implemented Nesterov-like recurrence.  A convergence-safe abstraction is:
+\begin{enumerate}
+  \item evaluate the proposal through the same exact or controlled-inexact DRS
+        oracle used by the theorem;
+  \item accept it only if the proved potential satisfies sufficient decrease;
+  \item otherwise take the nominal plain DRS step; and
+  \item restart proposal history after rejection if desired.
+\end{enumerate}
+Under this abstraction, convergence comes from accepted potential decrease
+and the plain fallback, not from a general nonconvex Nesterov rate.
+
+The implementation additionally checks the primal objective, restores the
+best primal state, changes regularization, and may refresh metrics.  These are
+reasonable safeguards, but they are outside Theorem~\ref{thm:exact} unless
+their effect is incorporated into a common potential or occurs only finitely
+often.
+
+\section{Required diagnostics}
+
+The implementation should record per cluster and outer trial:
+\begin{enumerate}
+  \item $\lVert e_{i,k}\rVert_{M_i^{-1}}$ from
+        Equation~\eqref{eq:prox-defect};
+  \item camera and landmark gradient norms;
+  \item local nonlinear objective before and after the solve;
+  \item GN/LM step norm, damping, acceptance ratio, and iteration count;
+  \item $\normM{\widehat r_k}$ and the exact metric-consensus residual;
+  \item the candidate proof potential before and after the outer step;
+  \item metric eigenvalue bounds and $\lVert M_{k+1}-M_k\rVert$; and
+  \item whether acceleration, fallback, restoration, or regularization change
+        occurred.
+\end{enumerate}
+
+Plots should test Equations~\eqref{eq:summable-defect},
+\eqref{eq:relative-error}, and \eqref{eq:perturbed-descent} directly.  These
+measurements determine which theorem is realistic; they should not be selected
+after the proof for cosmetic agreement.
+
+\section{Claim table for the manuscript}
+
+\begin{center}
+\begin{tabular}{p{0.29\linewidth}p{0.28\linewidth}p{0.33\linewidth}}
+\toprule
+Statement & Current status & Required qualification \\
+\midrule
+Exact fixed-metric DRS has stationary accumulation points
+& Supported by Theorem~\ref{thm:exact}
+& Requires exact prox, fixed metric, smooth first term, admissible stepsize \\
+Finite GN local solves converge
+& Conditional only
+& Must verify a defect or perturbed-descent condition \\
+Changing block metrics converge
+& Not established
+& Freeze, finitely update, or prove controlled variation \\
+Safeguarded proposals preserve convergence
+& Established only for a matching proved merit and fallback abstraction
+& Current mixed merit and restoration need separate treatment \\
+Acceleration improves asymptotic rate
+& Not established
+& Report empirical time-to-quality only \\
+Best fixed-point residual is $O(k^{-1/2})$
+& Supported in the exact setting
+& This is not an objective-gap rate \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\section{Next proof step}
+
+The next useful theoretical action is not another abstract convergence
+statement.  It is to instrument the local proximal defect and determine whether
+finite LM solves empirically satisfy relative forcing
+Equation~\eqref{eq:relative-error}.  If they do, derive the perturbed DRE bound
+and its admissible $\eta$.  If they do not, implement an adaptive inner stopping
+rule or retain finite local solves as a clearly identified heuristic.
+
+\end{document}

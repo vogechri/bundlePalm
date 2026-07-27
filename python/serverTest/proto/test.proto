@@ -19,6 +19,16 @@ message program_proto {
   uint64 run_id = 14;
   uint64 phase_id = 15;
   repeated double camera_transform = 16; // optional row-major 9x9 matrix per camera
+  bool scalar_proximal_prior = 17; // use rho * I instead of a Hessian-derived DRS metric
+  double proximal_rho = 18;
+  bool ceres_local_solver = 19;
+  bool split_camera_penalty = 20;
+  double proximal_rho_intrinsics = 21;
+  int32 local_linear_solver = 22; // 0=nesterov, 1=schur_pcg
+  int32 trust_region_policy = 23; // 0=drs, 1=daba
+  bool persistent_trust_region = 24;
+  int32 objective_model = 25; // 0=standard Snavely pixels, 1=DABA regularized ray
+  repeated double initial_focal = 26;
 }
 
 // sent once
@@ -49,6 +59,16 @@ message prox_cluster_proto {
   int32 revert_lm = 5; // if acc. stepsize is reverted, revert lm as well: 1. Also revert to best solution: 2.
   uint64 run_id = 6;
   uint64 phase_id = 7;
+  bool scalar_proximal_prior = 8;
+  double proximal_rho = 9;
+  bool ceres_local_solver = 10;
+  bool split_camera_penalty = 11;
+  double proximal_rho_intrinsics = 12;
+  int32 local_linear_solver = 13;
+  int32 trust_region_policy = 14;
+  bool persistent_trust_region = 15;
+  double trust_region_recovery_ratio = 16;
+  repeated double landmarks = 17; // optional physical landmarks for coherent recovery
   // clustering: lms by cam. # lms that can fill up cam in cl.
 }
 
@@ -64,6 +84,7 @@ message return_cluster_proto {
   float cost = 5;
   uint64 run_id = 6;
   uint64 phase_id = 7;
+  int32 objective_model = 8;
 }
 
 // send to get cost
@@ -73,6 +94,7 @@ message cost_proto {
   int32 revert_lm = 3; // only for cost, revert back after.
   uint64 run_id = 4;
   uint64 phase_id = 5;
+  repeated double landmarks = 6; // explicit physical landmark state for reproducible cost evaluation
 }
 
 message return_cost_proto {
@@ -80,11 +102,13 @@ message return_cost_proto {
   int32 cluster_id = 2;
   uint64 run_id = 3;
   uint64 phase_id = 4;
+  repeated double landmarks = 5; // physical landmarks used for this cost
 }
 
 message best_cost_proto {
   float cost = 1;
   int32 cluster_id = 2;
+  repeated double landmarks = 3; // exact physical landmarks associated with cost
 }
 
 // can be one of messages. so proto converts to correct message. client messages server messages

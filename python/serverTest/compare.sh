@@ -1,0 +1,10 @@
+BUNDLE_PALM_CLUSTERING=landmark_clean BUNDLE_PALM_RESIDUAL_BALANCE_SLACK=0.01 BUNDLE_PALM_MIN_CAMERA_LANDMARKS=20 python -u client_acc.py   http://grail.cs.washington.edu/projects/bal/data/dubrovnik/ problem-173-111908-pre.txt.bz2 90 30 2> lm173_new.txt
+BUNDLE_PALM_CLUSTERING=landmark_clean BUNDLE_PALM_RESIDUAL_BALANCE_SLACK=0.01 BUNDLE_PALM_MIN_CAMERA_LANDMARKS=20 python -u client_acc.py   http://grail.cs.washington.edu/projects/bal/data/dubrovnik/ problem-142-93602-pre.txt.bz2 90 30 2> lm142_new.txt
+BUNDLE_PALM_CLUSTERING=landmark_clean BUNDLE_PALM_RESIDUAL_BALANCE_SLACK=0.01 BUNDLE_PALM_MIN_CAMERA_LANDMARKS=20 python -u client_acc.py   http://grail.cs.washington.edu/projects/bal/data/ladybug/ problem-646-73584-pre.txt.bz2 90 30 2> lm646_new.txt
+BUNDLE_PALM_CLUSTERING=landmark_clean BUNDLE_PALM_RESIDUAL_BALANCE_SLACK=0.01 BUNDLE_PALM_MIN_CAMERA_LANDMARKS=20 python -u client_acc.py   http://grail.cs.washington.edu/projects/bal/data/dubrovnik/ problem-135-90642-pre.txt.bz2 90 30 2> lm135_new.txt
+BUNDLE_PALM_CLUSTERING=landmark_clean BUNDLE_PALM_RESIDUAL_BALANCE_SLACK=0.01 BUNDLE_PALM_MIN_CAMERA_LANDMARKS=20 python -u client_acc.py   http://grail.cs.washington.edu/projects/bal/data/venice/ problem-52-64053-pre.txt.bz2 90 30 2> lm52_new.txt
+#BUNDLE_PALM_CLUSTERING=landmark python -u client_acc.py   http://grail.cs.washington.edu/projects/bal/data/dubrovnik/ problem-142-93602-pre.txt.bz2 90 30 2> lm142_old.txt
+#BUNDLE_PALM_CLUSTERING=landmark python -u client_acc.py   http://grail.cs.washington.edu/projects/bal/data/ladybug/ problem-646-73584-pre.txt.bz2 90 30 2> lm646_old.txt
+#BUNDLE_PALM_CLUSTERING=landmark python -u client_acc.py   http://grail.cs.washington.edu/projects/bal/data/dubrovnik/ problem-135-90642-pre.txt.bz2 90 30 2> lm135_old.txt
+#BUNDLE_PALM_CLUSTERING=landmark python -u client_acc.py   http://grail.cs.washington.edu/projects/bal/data/venice/ problem-52-64053-pre.txt.bz2 90 30 2> lm52_old.txt
+BUNDLE_PALM_CLUSTERING=landmark python -u client_acc.py   http://grail.cs.washington.edu/projects/bal/data/dubrovnik/ problem-173-111908-pre.txt.bz2 90 30 2> lm173_old.txt

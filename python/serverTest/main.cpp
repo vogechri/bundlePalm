@@ -79,7 +79,20 @@ double EnvironmentDouble(const char* name, double default_value,
   return value;
 }
 
-double CameraDiagonalRelativeFloor() {
+int EnvironmentInteger(const char* name, int default_value,
+                       int minimum, int maximum) {
+  const double value = EnvironmentDouble(
+      name, static_cast<double>(default_value),
+      static_cast<double>(minimum), static_cast<double>(maximum));
+  if (value != std::floor(value)) {
+    std::ostringstream error;
+    error << name << " must be an integer";
+    throw std::runtime_error(error.str());
+  }
+  return static_cast<int>(value);
+}
+
+double CameraDiagonalRelativeFloor() { // 1e-48 worked well, lower maybe more stable for different cluster sizes, example problem 1723. 40 already delivered inferior costs for 30 clusters 
   static const double value = EnvironmentDouble(
       "BUNDLE_PALM_CAMERA_DIAGONAL_FLOOR", 1e-48, 0.0, 1.0);
   return value;
@@ -286,6 +299,83 @@ struct SnavelyReprojectionErrorWeighted {
     const double* point_weight;
     const double* camera_transform;
   };
+
+struct DabaRayErrorWeighted {
+  DabaRayErrorWeighted(
+      double observed_x, double observed_y, double initial_focal,
+      const double* camera_weight, const double* point_weight,
+      const double* camera_transform)
+      : observed_x(observed_x), observed_y(observed_y),
+        initial_focal(initial_focal), camera_weight(camera_weight),
+        point_weight(point_weight), camera_transform(camera_transform) {}
+
+  template <typename T>
+  bool operator()(const T* const camera, const T* const point,
+                  T* residuals) const {
+    T physical_camera[9];
+    for (int row = 0; row < 9; ++row) {
+      physical_camera[row] = T(0);
+      for (int col = 0; col < 9; ++col) {
+        physical_camera[row] += T(camera_transform[9 * row + col])
+                                * camera[col] * T(camera_weight[col]);
+      }
+    }
+    T physical_point[3] = {
+        point[0] * T(point_weight[0]),
+        point[1] * T(point_weight[1]),
+        point[2] * T(point_weight[2])};
+    T camera_point[3];
+    ceres::AngleAxisRotatePoint(physical_camera, physical_point, camera_point);
+    for (int coordinate = 0; coordinate < 3; ++coordinate) {
+      camera_point[coordinate] += physical_camera[3 + coordinate];
+    }
+    const T normalized_x = T(observed_x / -initial_focal);
+    const T normalized_y = T(observed_y / -initial_focal);
+    const T radius_squared =
+        normalized_x * normalized_x + normalized_y * normalized_y;
+    T ray[3] = {
+        normalized_x,
+        normalized_y,
+        physical_camera[6] / T(initial_focal)
+            + physical_camera[7] * T(initial_focal * initial_focal)
+                * radius_squared
+            + physical_camera[8]
+                * T(initial_focal * initial_focal * initial_focal
+                    * initial_focal)
+                * radius_squared * radius_squared};
+    T distance[3] = {
+        -camera_point[0], -camera_point[1], -camera_point[2]};
+    const T distance_squared = distance[0] * distance[0]
+        + distance[1] * distance[1] + distance[2] * distance[2] + T(1e-12);
+    const T denominator =
+        distance_squared + T(1e-6) * sqrt(distance_squared);
+    const T projection = (distance[0] * ray[0] + distance[1] * ray[1]
+                          + distance[2] * ray[2]) / denominator;
+    const T sqrt_weight = T(initial_focal) * sqrt(radius_squared + T(1));
+    for (int coordinate = 0; coordinate < 3; ++coordinate) {
+      residuals[coordinate] =
+          sqrt_weight * (ray[coordinate] - projection * distance[coordinate]);
+    }
+    return true;
+  }
+
+  static ceres::CostFunction* Create(
+      double observed_x, double observed_y, double initial_focal,
+      const double* camera_weight, const double* point_weight,
+      const double* camera_transform) {
+    return new ceres::AutoDiffCostFunction<DabaRayErrorWeighted, 3, 9, 3>(
+        new DabaRayErrorWeighted(
+            observed_x, observed_y, initial_focal, camera_weight,
+            point_weight, camera_transform));
+  }
+
+  double observed_x;
+  double observed_y;
+  double initial_focal;
+  const double* camera_weight;
+  const double* point_weight;
+  const double* camera_transform;
+};
 #endif
 
 template<int N>
@@ -674,6 +764,36 @@ public:
       numCameras = pro.cameras_size() / 9;
       numLandmarks = pro.landmarks_size() / 3;
       numResiduals =  pro.observations_size() / 2;
+      local_iterations = std::max(1, std::min(20, pro.iterations()));
+      scalar_proximal_prior = pro.scalar_proximal_prior();
+      proximal_rho = pro.proximal_rho();
+      split_camera_penalty = pro.split_camera_penalty();
+      proximal_rho_intrinsics = pro.proximal_rho_intrinsics();
+      local_linear_solver = pro.local_linear_solver();
+      trust_region_policy = pro.trust_region_policy();
+      persistent_trust_region = pro.persistent_trust_region();
+      persistent_trust_region_active = false;
+      if (trust_region_policy == 1 && persistent_trust_region) {
+        tr_radius = std::min(100., max_trust_region_radius);
+      }
+      ceres_local_solver = pro.ceres_local_solver();
+      objective_model = pro.objective_model();
+      residual_dimension = objective_model == 1 ? 3 : 2;
+      THROW_IF(objective_model != 0 && objective_model != 1);
+      if (LocalSolveMetricsEnabled()) {
+        std::ostringstream metric;
+        metric << "WORKER_OBJECTIVE cluster=" << pro.cluster_id()
+               << " model=" << objective_model
+               << " focals=" << pro.initial_focal_size() << "\n";
+        EmitLocalSolveMetric(metric.str());
+      }
+      if (scalar_proximal_prior) {
+        THROW_IF(!(proximal_rho > 0.) || !std::isfinite(proximal_rho));
+        if (split_camera_penalty) {
+          THROW_IF(!(proximal_rho_intrinsics > 0.) ||
+                   !std::isfinite(proximal_rho_intrinsics));
+        }
+      }
       //std::cout << numCameras << " " << numLandmarks << "\n";
       cameras.clear();
       cameras.reserve(9 * numCameras);
@@ -687,6 +807,7 @@ public:
         landmarks.push_back(v);
       }
       last_landmarks = landmarks;
+      last_tr_radius = tr_radius;
       //std::cout << "landmarks.push_back\n";
       cameras_s.clear();
       cameras_s.reserve(9 * numCameras);
@@ -728,6 +849,19 @@ public:
       for (const auto &v : pro.camera_transform()) {
         cameraTransform.push_back(v);
       }
+      initial_focal.assign(pro.initial_focal().begin(), pro.initial_focal().end());
+      if (initial_focal.empty()) {
+        initial_focal.resize(numCameras);
+        for (int camera = 0; camera < numCameras; ++camera) {
+          double focal = 0.;
+          for (int col = 0; col < 9; ++col) {
+            focal += cameraTransform[81 * camera + 9 * 6 + col]
+                     * cameras[9 * camera + col] * unorm[9 * camera + col];
+          }
+          initial_focal[camera] = focal;
+        }
+      }
+      THROW_IF(initial_focal.size() != numCameras);
       //std::cout << "cameras.push_back\n";
       vnorm.clear();
       vnorm.reserve(3 * numLandmarks);
@@ -736,7 +870,7 @@ public:
       }
       //std::cout << "data updated\n";
 
-      options.max_num_iterations = std::max(0, std::min(10, pro.iterations()));
+      options.max_num_iterations = std::max(0, std::min(20, pro.iterations()));
       options.initial_trust_region_radius = tr_radius;
       problem = ceres::Problem();
       cluster_id = pro.cluster_id();
@@ -790,10 +924,15 @@ public:
       for (int i = 0; i < pro.observations_size() / 2; ++i) {
         const int camera_id = pro.cam_id(i);
         const int landmark_id = pro.lm_id(i);
-        ceres::CostFunction *cost_function = SnavelyReprojectionErrorWeighted::Create(
-          pro.observations(2 * i + 0), pro.observations(2 * i + 1),
-          &(unorm[9 * camera_id]), &(vnorm[3 * landmark_id]),
-          &(cameraTransform[81 * camera_id]));
+        ceres::CostFunction *cost_function = objective_model == 1
+          ? DabaRayErrorWeighted::Create(
+              pro.observations(2 * i + 0), pro.observations(2 * i + 1),
+              initial_focal[camera_id], &(unorm[9 * camera_id]),
+              &(vnorm[3 * landmark_id]), &(cameraTransform[81 * camera_id]))
+          : SnavelyReprojectionErrorWeighted::Create(
+              pro.observations(2 * i + 0), pro.observations(2 * i + 1),
+              &(unorm[9 * camera_id]), &(vnorm[3 * landmark_id]),
+              &(cameraTransform[81 * camera_id]));
         problem.AddResidualBlock(cost_function, nullptr /* squared loss */,
                      &(cameras[9 * camera_id]),
                      &(landmarks[3 * landmark_id]));
@@ -805,7 +944,7 @@ public:
       normal_equation_evaluate_options.apply_loss_function = true;
       normal_equation_evaluate_options.residual_blocks = function_residual_blocks;
       normal_equation_evaluate_options.num_threads = options.num_threads;
-      normal_equation_residuals.reserve(2 * numResiduals);
+      normal_equation_residuals.reserve(residual_dimension * numResiduals);
       normal_equation_camera_blocks.resize(numCameras * 81);
       normal_equation_landmark_blocks.resize(numLandmarks * 9);
 
@@ -831,7 +970,7 @@ public:
 
     double GetCost(bool revert_lm = false) {
 #ifndef __unweighted_system__
-      if (BatchedEvaluationEnabled()) {
+      if (objective_model == 0 && BatchedEvaluationEnabled()) {
         if (revert_lm) {
           std::vector<double> temp_landmarks = landmarks;
           landmarks = best_landmarks;
@@ -878,6 +1017,15 @@ public:
       // }
 
       return cost;
+    }
+
+    void AddPhysicalLandmarks(return_cost_proto &return_proto) const {
+      THROW_IF(landmarks.size() != vnorm.size());
+      for (int landmark_value = 0; landmark_value < landmarks.size();
+           ++landmark_value) {
+        return_proto.add_landmarks(
+            landmarks[landmark_value] * vnorm[landmark_value]);
+      }
     }
 
 #ifndef __unweighted_system__
@@ -941,6 +1089,7 @@ public:
       }
       return_proto.set_cluster_id(cluster_id);
       return_proto.set_cost(cost);
+      return_proto.set_objective_model(objective_model);
       return return_proto;
     }
 
@@ -955,10 +1104,22 @@ public:
       cost = summary.final_cost * 2;
       WORKER_LOG(cluster_id << ". Update TR: " << tr_radius << ". be: " << current_be
             << ". Mycost: " << summary.final_cost * 2 << "\n");
+      if (LocalSolveMetricsEnabled()) {
+        std::ostringstream metric;
+        metric << "CERES_LOCAL_SOLVE cluster=" << cluster_id
+               << " initial=" << 2 * summary.initial_cost
+               << " final=" << 2 * summary.final_cost
+               << " successful=" << summary.num_successful_steps
+               << " unsuccessful=" << summary.num_unsuccessful_steps
+               << " iterations=" << summary.iterations.size()
+               << " termination=" << summary.termination_type
+               << " radius=" << tr_radius << "\n";
+        EmitLocalSolveMetric(metric.str());
+      }
       return cost;
     }
 
-    void UpdateCameras(const cost_proto& costProto) {
+    void UpdateCostState(const cost_proto& costProto) {
       // std::cout << "Update cluster " << cluster_id << " update proto id:" << update.cluster_id() << "\n";
       THROW_IF(costProto.cameras_size() != cameras.size());
       THROW_IF(costProto.cluster_id() != cluster_id);
@@ -966,6 +1127,14 @@ public:
       int id = 0; // fill existing buffer
       for (const auto &v : costProto.cameras()) {
         cameras[id++] = v;
+      }
+      if (costProto.landmarks_size() > 0) {
+        THROW_IF(costProto.landmarks_size() != landmarks.size());
+        id = 0;
+        for (const auto &v : costProto.landmarks()) {
+          landmarks[id] = v / vnorm[id];
+          ++id;
+        }
       }
     }
 
@@ -984,15 +1153,43 @@ public:
         cameras_s[id++] = v;
       }
       current_be = update.be();
-      options.initial_trust_region_radius = tr_radius; // use from last solve.
+      scalar_proximal_prior = update.scalar_proximal_prior();
+      proximal_rho = update.proximal_rho();
+      split_camera_penalty = update.split_camera_penalty();
+      proximal_rho_intrinsics = update.proximal_rho_intrinsics();
+      local_linear_solver = update.local_linear_solver();
+      trust_region_policy = update.trust_region_policy();
+      persistent_trust_region = update.persistent_trust_region();
+      ceres_local_solver = update.ceres_local_solver();
+      if (update.landmarks_size() > 0) {
+        THROW_IF(update.landmarks_size() != landmarks.size());
+        for (int id = 0; id < update.landmarks_size(); ++id) {
+          landmarks[id] = update.landmarks(id) / vnorm[id];
+        }
+      }
+      if (scalar_proximal_prior) {
+        THROW_IF(!(proximal_rho > 0.) || !std::isfinite(proximal_rho));
+        if (split_camera_penalty) {
+          THROW_IF(!(proximal_rho_intrinsics > 0.) ||
+                   !std::isfinite(proximal_rho_intrinsics));
+        }
+      }
       firstIteration = false;
 
       if (update.revert_lm() == 1) {
         WORKER_LOG(cluster_id << ". Revert landmarks\n");
         landmarks = last_landmarks;
+        tr_radius = last_tr_radius;
+        if (persistent_trust_region) {
+          persistent_trust_region_active = true;
+          tr_radius *= update.trust_region_recovery_ratio();
+          last_tr_radius = tr_radius;
+        }
       } else if (update.revert_lm() == 2) {
         WORKER_LOG(cluster_id << ". Revert landmarks to best cost lms\n");
-        landmarks = best_landmarks; // hmm could be same as last_landmarks.
+        if (update.landmarks_size() == 0) {
+          landmarks = best_landmarks;
+        }
         //cameras = best_poses;
         //cameras_s = best_poses;
 
@@ -1024,7 +1221,9 @@ public:
       }
       else {
         last_landmarks = landmarks;
+        last_tr_radius = tr_radius;
       }
+      options.initial_trust_region_radius = tr_radius;
     }
 
     // With that Jl changes but it does not matter.
@@ -1045,6 +1244,25 @@ public:
       stepSize.resize(81 * numCameras, 0);
       SetStepSize(Jp);
     }
+
+    double CameraPenalty(int parameter) const {
+      return split_camera_penalty && parameter >= 6
+          ? proximal_rho_intrinsics : proximal_rho;
+    }
+
+    void PrepareScalarCeresPrior() {
+      THROW_IF(!scalar_proximal_prior || !(proximal_rho > 0.));
+      stepSize.assign(81 * numCameras, 0.);
+      for (int camera = 0; camera < numCameras; ++camera) {
+        for (int parameter = 0; parameter < 9; ++parameter) {
+          stepSize[81 * camera + 10 * parameter] =
+              std::sqrt(CameraPenalty(parameter));
+        }
+      }
+    }
+
+    bool UsesCeresLocalSolver() const { return ceres_local_solver; }
+    int LocalIterations() const { return local_iterations; }
 
     void UpdatePreconditioning(const preconditioning_proto& preconditioningProto) {
         // std::cout << "Update cluster " << cluster_id << " update proto id:" << update.cluster_id() << "\n";
@@ -1072,10 +1290,13 @@ public:
 
     void UpdateBestCost(best_cost_proto ppro) {
       THROW_IF(ppro.cluster_id() != cluster_id);
+      THROW_IF(ppro.landmarks_size() != landmarks.size());
       WORKER_LOG("Best cost update " << cluster_id << " " << ppro.cost() << " < " << best_cost << "\n");
 //      if (ppro.cost() < best_cost) {
         best_cost = ppro.cost();
-        best_landmarks = landmarks;
+        for (int id = 0; id < ppro.landmarks_size(); ++id) {
+          best_landmarks[id] = ppro.landmarks(id) / vnorm[id];
+        }
         //new_best_cost = true;
 //      }
     }
@@ -1181,6 +1402,74 @@ SolveByGDNesterov(SparseMatrix<double, RowMajor> Uli, SparseMatrix<double, RowMa
   return {-xk, delta_l};
 }
 
+std::pair<Matrix<double, Eigen::Dynamic, 1>, Matrix<double, Eigen::Dynamic, 1>>
+SolveBySchurPCG(
+    SparseMatrix<double, RowMajor> Uli,
+    SparseMatrix<double, RowMajor> Vli,
+    const BlockEdgeMatrix& W,
+    const Matrix<double, Eigen::Dynamic, 1>& bp,
+    const Matrix<double, Eigen::Dynamic, 1>& bl,
+    const Matrix<double, Eigen::Dynamic, 1>& proximalGradient,
+    int* iterations_out) {
+  SparseMatrix<double, RowMajor> Vinv = Vli;
+  SparseMatrix<double, RowMajor> Uinv = Uli;
+  BlockInverse<3>(Vinv);
+  BlockInverse<9>(Uinv);
+
+  Eigen::VectorXd vinvBl = Vinv * bl;
+  Eigen::VectorXd wVinvBl(W.rows());
+  W.Multiply(vinvBl, wVinvBl);
+  Eigen::VectorXd right_hand_side = -bp - proximalGradient + wVinvBl;
+
+  Eigen::VectorXd solution = Eigen::VectorXd::Zero(W.rows());
+  Eigen::VectorXd residual = right_hand_side;
+  Eigen::VectorXd preconditioned = Uinv * residual;
+  Eigen::VectorXd direction = preconditioned;
+  Eigen::VectorXd wtDirection(W.cols());
+  Eigen::VectorXd vinvWtDirection(W.cols());
+  Eigen::VectorXd wVinvWtDirection(W.rows());
+  Eigen::VectorXd schurDirection(W.rows());
+  double residual_preconditioned = residual.dot(preconditioned);
+  const double initial_residual_norm = std::max(
+      residual.norm(), std::numeric_limits<double>::min());
+  int iterations = 0;
+
+  for (; iterations < 400; ++iterations) {
+    W.TransposeMultiply(direction, wtDirection);
+    vinvWtDirection.noalias() = Vinv * wtDirection;
+    W.Multiply(vinvWtDirection, wVinvWtDirection);
+    schurDirection.noalias() = Uli * direction;
+    schurDirection -= wVinvWtDirection;
+    const double denominator = direction.dot(schurDirection);
+    if (!(denominator > 0.) || !std::isfinite(denominator)) {
+      break;
+    }
+    const double alpha = residual_preconditioned / denominator;
+    solution += alpha * direction;
+    residual -= alpha * schurDirection;
+    if (residual.norm() <= 1e-2 * initial_residual_norm) {
+      ++iterations;
+      break;
+    }
+    preconditioned.noalias() = Uinv * residual;
+    const double next_residual_preconditioned = residual.dot(preconditioned);
+    if (!(next_residual_preconditioned >= 0.) ||
+        !std::isfinite(next_residual_preconditioned)) {
+      break;
+    }
+    const double beta = next_residual_preconditioned /
+        std::max(residual_preconditioned, std::numeric_limits<double>::min());
+    direction = preconditioned + beta * direction;
+    residual_preconditioned = next_residual_preconditioned;
+  }
+  *iterations_out = iterations;
+
+  Eigen::VectorXd wtSolution(W.cols());
+  W.TransposeMultiply(solution, wtSolution);
+  Eigen::VectorXd delta_l = Vinv * (wtSolution - bl);
+  return {solution, delta_l};
+}
+
 void UpdateStepSizeAndSolve() {//bool keep_cameras_fixed = false) { // Recompute.
   // if (keep_cameras_fixed) {
   //   keep_cameras_fixed = new_best_cost;
@@ -1215,7 +1504,7 @@ void UpdateStepSizeAndSolve() {//bool keep_cameras_fixed = false) { // Recompute
   
   // JpJ, StepSize, diag JpJ
   SparseMatrix<double, RowMajor> Ul = normalEquations.camera_hessian;
-  if (firstIteration) { // also handled setting be = 0 in 1st step.
+  if (firstIteration && !scalar_proximal_prior) { // also handled setting be = 0 in 1st step.
     UpdatePreconditioningCameras(Ul);
     // Debug: write cost
     const auto costEvaluationStart = collectTiming ? TimingClock::now() : TimingClock::time_point{};
@@ -1250,20 +1539,57 @@ void UpdateStepSizeAndSolve() {//bool keep_cameras_fixed = false) { // Recompute
   const double scale = std::min(1.005, 1e-1 * std::sqrt(current_be / start_be));
 
   if (!firstIteration) { // also handled setting be = 0 in 1st step.
-    SparseMatrix<double, RowMajor> stepSize = scale * Ul;
-    stepSize += diagUP * current_be;
+    SparseMatrix<double, RowMajor> stepSize;
+    if (scalar_proximal_prior) {
+      stepSize = SparseMatrix<double, RowMajor>(9 * numCameras, 9 * numCameras);
+      stepSize.reserve(Eigen::VectorXi::Constant(9 * numCameras, 1));
+      for (int parameter = 0; parameter < 9 * numCameras; ++parameter) {
+        stepSize.insert(parameter, parameter) = CameraPenalty(parameter % 9);
+      }
+      stepSize.makeCompressed();
+    } else {
+      stepSize = scale * Ul;
+      stepSize += diagUP * current_be;
+    }
     const double* values = stepSize.valuePtr();
-    std::copy(values, values + full_stepSize.size(), full_stepSize.data()); 
+    if (scalar_proximal_prior) {
+      std::fill(full_stepSize.begin(), full_stepSize.end(), 0.);
+      for (int camera = 0; camera < numCameras; ++camera) {
+        for (int parameter = 0; parameter < 9; ++parameter) {
+            full_stepSize[81 * camera + 10 * parameter] =
+              CameraPenalty(parameter);
+        }
+      }
+    } else {
+      std::copy(values, values + full_stepSize.size(), full_stepSize.data());
+    }
     Ul += stepSize;
   } else {
-    Ul += scale * Ul;
-    Ul += diagUP * current_be;
+    if (scalar_proximal_prior) {
+      full_stepSize.assign(81 * numCameras, 0.);
+      for (int camera = 0; camera < numCameras; ++camera) {
+        for (int parameter = 0; parameter < 9; ++parameter) {
+            full_stepSize[81 * camera + 10 * parameter] =
+              CameraPenalty(parameter);
+          Ul.coeffRef(9 * camera + parameter, 9 * camera + parameter) +=
+              CameraPenalty(parameter);
+        }
+      }
+    } else {
+      Ul += scale * Ul;
+      Ul += diagUP * current_be;
+    }
     // let full_Stepsize define setpsize always. else confusing to debug: cost optimized differs from cost evaluated.
     // const SparseMatrix<double, RowMajor> stepSize = Ul;
     // Ul += stepSize;
   }
   // Loop until ok or adjust tr_region
-  tr_radius = std::min(max_trust_region_radius, tr_radius);
+  if (trust_region_policy == 1 && !persistent_trust_region_active) {
+    tr_radius = std::min(100., max_trust_region_radius);
+  } else {
+    tr_radius = std::min(max_trust_region_radius, tr_radius);
+  }
+  double trust_region_decreasing_ratio = 0.5;
   double inv_tr_radius = 0;
 
   const int power_iterations = 100; //keep_cameras_fixed ? 0 : 100;
@@ -1283,6 +1609,7 @@ void UpdateStepSizeAndSolve() {//bool keep_cameras_fixed = false) { // Recompute
   const double assemblySeconds = collectTiming ? ElapsedSeconds(assemblyStart) : 0.;
   int trust_region_attempts = 0;
   int trust_region_rejections = 0;
+  int linear_iterations = 0;
   // options.max_num_iterations 
   while ( true ) { // if costStart + penaltyStart < costEnd + penaltyP
     ++trust_region_attempts;
@@ -1306,8 +1633,17 @@ void UpdateStepSizeAndSolve() {//bool keep_cameras_fixed = false) { // Recompute
     //std::cout << " VL " << Vl.diagonal() << "\n";
 
     const auto nesterovStart = collectTiming ? TimingClock::now() : TimingClock::time_point{};
-    const auto [delta_p, delta_l] = SolveByGDNesterov(
-      Ul, Vl, W, bp, bl, proximalGradient, power_iterations);
+    std::pair<Eigen::VectorXd, Eigen::VectorXd> step;
+    if (local_linear_solver == 1) {
+      step = SolveBySchurPCG(
+          Ul, Vl, W, bp, bl, proximalGradient, &linear_iterations);
+    } else {
+      step = SolveByGDNesterov(
+          Ul, Vl, W, bp, bl, proximalGradient, power_iterations);
+      linear_iterations = power_iterations;
+    }
+    const Eigen::VectorXd& delta_p = step.first;
+    const Eigen::VectorXd& delta_l = step.second;
     if (collectTiming) {
       nesterovSeconds += ElapsedSeconds(nesterovStart);
     }
@@ -1357,21 +1693,42 @@ void UpdateStepSizeAndSolve() {//bool keep_cameras_fixed = false) { // Recompute
     WORKER_LOG("==Costs start/quad/end: " << costStart << " " << costQuad << " " << costEnd << "\n");
     WORKER_LOG("==Penalties start/end: " << penaltyStart << " " << penaltyEnd << "\n");
 
-    const double tr_check = (costStart - costEnd + penaltyStart - penaltyEnd) / std::max(0.1, costStart - costQuad + penaltyStart - penaltyEnd);
-    if (tr_check < 0.25) {
-      tr_radius /= 2;
-      WORKER_LOG(tr_check << ": decrease TR radius " << tr_radius << "\n");
-    }
-    if (tr_check > 0.8) {
-      tr_radius = std::min(max_trust_region_radius, 2 * tr_radius);//1.5
-      WORKER_LOG(tr_check << ": increase TR radius " << tr_radius << "\n");
+    const double actual_decrease =
+        costStart - costEnd + penaltyStart - penaltyEnd;
+    const double predicted_decrease =
+        costStart - costQuad + penaltyStart - penaltyEnd;
+    const double tr_check = actual_decrease /
+        std::max(0.1, predicted_decrease);
+    bool accept_step = false;
+    if (trust_region_policy == 1) {
+      accept_step = actual_decrease > 0.;
+      if (accept_step) {
+        const double radius_divisor = std::max(
+            1. / 3., 1. - std::pow(2. * tr_check - 1., 3));
+        tr_radius = std::min(
+            max_trust_region_radius, tr_radius / radius_divisor);
+        trust_region_decreasing_ratio = 0.5;
+      } else {
+        tr_radius *= trust_region_decreasing_ratio;
+        trust_region_decreasing_ratio *= 0.5;
+      }
+    } else {
+      if (tr_check < 0.25) {
+        tr_radius /= 2;
+        WORKER_LOG(tr_check << ": decrease TR radius " << tr_radius << "\n");
+      }
+      if (tr_check > 0.8) {
+        tr_radius = std::min(max_trust_region_radius, 2 * tr_radius);//1.5
+        WORKER_LOG(tr_check << ": increase TR radius " << tr_radius << "\n");
+      }
+      accept_step = costStart + penaltyStart >=
+          (costEnd + penaltyEnd) * LocalAcceptanceRatio();
     }
 
     if (costStart + penaltyStart > costQuad + penaltyEnd)
       WORKER_LOG("==Start Cost < estimated cost: " << costStart + penaltyStart << " < " << costQuad + penaltyEnd << "\n");
 
-    if (costStart + penaltyStart <
-        (costEnd + penaltyEnd) * LocalAcceptanceRatio()) { // revert if cost does not improve
+    if (!accept_step) {
       ++trust_region_rejections;
       WORKER_LOG("Reject Start Cost < end cost: "<< costStart + penaltyStart << " < " << costEnd + penaltyEnd << "\n");
       for (int id = 0; id < delta_p.size(); ++id) {
@@ -1379,6 +1736,10 @@ void UpdateStepSizeAndSolve() {//bool keep_cameras_fixed = false) { // Recompute
       }
       for (int id = 0; id < delta_l.size(); ++id) {
         landmarks[id] -= delta_l[id];
+      }
+      if (trust_region_attempts >= 20 || tr_radius < 1e-4) {
+        cost = costStart;
+        break;
       }
       continue;
     }
@@ -1395,6 +1756,9 @@ void UpdateStepSizeAndSolve() {//bool keep_cameras_fixed = false) { // Recompute
          << " predicted=" << costStart - costQuad + penaltyStart - penaltyEnd
          << " rho=" << tr_check
          << " radius=" << tr_radius
+         << " linear_solver=" << local_linear_solver
+         << " linear_iterations=" << linear_iterations
+         << " trust_policy=" << trust_region_policy
          << " diagonal_floor=" << CameraDiagonalRelativeFloor()
          << " acceptance_ratio=" << LocalAcceptanceRatio() << "\n";
       EmitLocalSolveMetric(metric.str());
@@ -1613,7 +1977,7 @@ private:
 
   NormalEquations GetNormalEquations() {
 #ifndef __unweighted_system__
-    if (BatchedEvaluationEnabled()) {
+    if (objective_model == 0 && BatchedEvaluationEnabled()) {
       return GetBatchedNormalEquations();
     }
 #endif
@@ -1626,7 +1990,8 @@ private:
                      &normal_equation_jacobian);
     last_jacobian_evaluate_seconds = collectTiming ? ElapsedSeconds(evaluateStart) : 0.;
     const auto conversionStart = collectTiming ? TimingClock::now() : TimingClock::time_point{};
-    THROW_IF(normal_equation_jacobian.num_rows != 2 * numResiduals);
+    THROW_IF(normal_equation_jacobian.num_rows !=
+         residual_dimension * numResiduals);
     THROW_IF(normal_equation_residuals.size() != normal_equation_jacobian.num_rows);
     std::fill(normal_equation_camera_blocks.begin(),
               normal_equation_camera_blocks.end(), 0.);
@@ -1644,8 +2009,8 @@ private:
       const int cam_id = cam_obs[observation];
         std::array<double, 27>& edgeValues =
           camera_landmark_hessian.ObservationValues(observation);
-      for (int component = 0; component < 2; ++component) {
-        const Eigen::Index row = 2 * observation + component;
+      for (int component = 0; component < residual_dimension; ++component) {
+        const Eigen::Index row = residual_dimension * observation + component;
         const Eigen::Index begin = normal_equation_jacobian.rows[row];
         const Eigen::Index end = normal_equation_jacobian.rows[row + 1];
         THROW_IF(end - begin != 12);
@@ -1777,12 +2142,18 @@ private:
       // slower for standard bundle adjustment problems.
       //options.linear_solver_type = ceres::DENSE_SCHUR; // SPARSE_SCHUR;// same
       options.linear_solver_type = ceres::ITERATIVE_SCHUR; // same ceres::CGNR;//
+      options.preconditioner_type = ceres::SCHUR_JACOBI;
       // options.linear_solver_type = ceres::CGNR;
       // options.linear_solver_type = ceres::DENSE_QR; // SHIT
       // options.max_linear_solver_iterations = 100;
-      const int threads_per_cluster = std::max(1, _num_threads_machine_ / numClusters);
+        const int default_threads_per_cluster =
+          std::max(1, _num_threads_machine_ / numClusters);
+        const int threads_per_cluster = EnvironmentInteger(
+          "BUNDLE_PALM_THREADS_PER_CLUSTER",
+          default_threads_per_cluster, 1, _num_threads_machine_);
       Eigen::setNbThreads(threads_per_cluster);
       options.num_threads = threads_per_cluster; // _ceres_num_threads_; // single cpu -> still slow / bottleneck.
+        WORKER_LOG("Threads per cluster: " << threads_per_cluster << "\n");
       // options.preconditioner_type = ceres::IDENTITY; // Sucks if CGNR of course. 
       // options.preconditioner_type = ceres::JACOBI; // CGNR -> jacobi anyway.
       options.max_num_iterations = 1;
@@ -1797,9 +2168,22 @@ private:
   int numResiduals = 0;
   const double init_be = 1e-4;
   double current_be = init_be;
+  bool scalar_proximal_prior = false;
+  double proximal_rho = 1.;
+  bool split_camera_penalty = false;
+  double proximal_rho_intrinsics = 1.;
+  int local_linear_solver = 0;
+  int trust_region_policy = 0;
+  int objective_model = 0;
+  int residual_dimension = 2;
+  bool persistent_trust_region = false;
+  bool persistent_trust_region_active = false;
+  bool ceres_local_solver = false;
+  int local_iterations = 1;
   double start_be = init_be;
   const double init_trust_region_radius = 1e1; // Todo: set to 1?
   double tr_radius = init_trust_region_radius; // 1e4 is ceres standard. -> Init()
+  double last_tr_radius = init_trust_region_radius;
   const double max_trust_region_radius = 1e6;
   double startCost;
   double cost;
@@ -1820,6 +2204,7 @@ private:
   std::vector<double> unorm;
   std::vector<double> vnorm;
   std::vector<double> cameraTransform;
+  std::vector<double> initial_focal;
   std::vector<int> cam_obs;
   std::vector<int> lm_obs;
   std::vector<double> observed_x;
@@ -1846,10 +2231,16 @@ int main() {
 
   std::mutex mtx; // Mutex for critical section.
 
-  // Bind the socket to a TCP address
-  std::cout << "Starting the server on ports 5556 and 5557..." << std::endl;
-  pull_socket.bind("tcp://*:5556");
-  push_socket.bind("tcp://*:5557");
+  // Bind the socket to configurable addresses so isolated benchmark workers
+  // can run alongside a user-owned server.
+  const char* request_port_env = std::getenv("BUNDLE_PALM_REQUEST_PORT");
+  const char* result_port_env = std::getenv("BUNDLE_PALM_RESULT_PORT");
+  const std::string request_port = request_port_env ? request_port_env : "5556";
+  const std::string result_port = result_port_env ? result_port_env : "5557";
+  std::cout << "Starting the server on ports " << request_port << " and "
+            << result_port << "..." << std::endl;
+  pull_socket.bind("tcp://*:" + request_port);
+  push_socket.bind("tcp://*:" + result_port);
 
   std::map<int, CeresProgram> cluster_to_program;
 
@@ -1895,12 +2286,21 @@ int main() {
                   std::uint64_t phase_id) {
         CeresProgram &program = cluster_to_program[cluster_id];
         // std::cout << cluster_id << " Update "<< "\n";
+  if (program.UsesCeresLocalSolver()) {
+    program.PrepareScalarCeresPrior();
+    program.Solve();
+  } else {
 #ifdef __ceresVersion__
-        program.UpdateStepSize();
-        program.Solve();
+    program.UpdateStepSize();
+    program.Solve();
 #else
-        program.UpdateStepSizeAndSolve();//keep_cameras_fixed);
+          for (int local_iteration = 0;
+               local_iteration < program.LocalIterations();
+               ++local_iteration) {
+            program.UpdateStepSizeAndSolve();//keep_cameras_fixed);
+          }
 #endif
+  }
         return_cluster_proto return_proto = program.FillReturnProto();
         return_proto.set_run_id(run_id);
         return_proto.set_phase_id(phase_id);
@@ -1952,13 +2352,21 @@ int main() {
                    std::uint64_t phase_id) {
         CeresProgram &program = cluster_to_program[cluster_id];
 
+  if (program.UsesCeresLocalSolver()) {
+    program.PrepareScalarCeresPrior();
+    program.Solve();
+  } else {
 #ifdef __ceresVersion__
-        program.UpdateStepSize();
-        // program.Solve(); // only pcg!
-        // std::this_thread::sleep_for(std::chrono::seconds(5));
+    program.UpdateStepSize();
+    // program.Solve(); // only pcg!
 #else
-        program.UpdateStepSizeAndSolve();
+          for (int local_iteration = 0;
+               local_iteration < program.LocalIterations();
+               ++local_iteration) {
+            program.UpdateStepSizeAndSolve();
+          }
 #endif
+  }
         return_cluster_proto return_proto = program.FillReturnProto();
         return_proto.set_run_id(run_id);
         return_proto.set_phase_id(phase_id);
@@ -1989,7 +2397,7 @@ int main() {
             << std::endl);
       THROW_IF(cluster_to_program.find(cluster_id) == cluster_to_program.end());
       CeresProgram &program = cluster_to_program[cluster_id];
-      program.UpdateCameras(
+        program.UpdateCostState(
           costUpdate); // update is local, we need to fill data in main thread.
       bool revert_lms = costUpdate.revert_lm() == 2 ? true : false;
       // Define a Lambda Expression
@@ -2005,6 +2413,7 @@ int main() {
         return_proto.set_cluster_id(cluster_id);
         return_proto.set_run_id(run_id);
         return_proto.set_phase_id(phase_id);
+        program.AddPhysicalLandmarks(return_proto);
         // SerializeToArray saves memory and time?
         const size_t bytes = return_proto.ByteSizeLong();
         zmq::message_t reply(bytes);

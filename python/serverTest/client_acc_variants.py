@@ -1,4 +1,20 @@
-"""Coordinate distributed bundle adjustment over the ZeroMQ C++ server."""
+"""Experiment with safeguarded outer acceleration for distributed BA.
+
+This is an experimental copy of client_acc.py. Select the outer method with
+BUNDLE_PALM_ACCELERATOR:
+
+    none                 plain DRS
+    nesterov             original client_acc.py momentum
+    themelis_nesterov    Fast-DRS direction from the paper
+    fista                corrected inertial/FISTA-style Nesterov
+    adaptive_nesterov    FISTA-style inertia restarted after a fallback
+    lbfgs (or bfgs)      limited-memory BFGS on R(s) = s - T(s)
+    anderson             regularized type-II Anderson acceleration
+
+All accelerated methods retain the original accelerated/plain two-trial merit
+test, landmark rollback, best-state restoration, and regularization increase.
+Optional tuning variables are documented in outer_acceleration.py.
+"""
 
 import bz2
 import faulthandler
@@ -10,78 +26,29 @@ import secrets
 import sys
 import time
 import urllib.request
-from pathlib import Path
 
 import numpy as np
 import torch
 import zmq
 
-from bal_evaluator import (
-    encoded_daba_ray_state_to_matrix,
-    evaluate_bal_state,
-    evaluate_daba_state_pixel_error,
-    evaluate_encoded_daba_ray_state,
-    save_bal_state,
-)
 from clustering import (
     cluster_by_landmark_clean,
     cluster_by_landmark_scalable,
     cluster_by_landmark_scalable_stable,
     cluster_deg_by_landmark,
 )
-from drs_safeguards import should_reject_trial
-from drs_consensus_metrics import (
-    CONSENSUS_METRIC_MODES,
-    reduce_camera_metric_blocks,
-)
 from numpy.linalg import inv as inv_nonHermetian
-from scipy.sparse import bsr_matrix, csr_array, csr_matrix
+from scipy.sparse import csr_array, csr_matrix
 from scipy.sparse import diags as diag_sparse
 
+from outer_acceleration import create_accelerator
+
 faulthandler.enable(all_threads=True)
-client_started_at = time.perf_counter()
-SCRIPT_DIRECTORY = Path(__file__).resolve().parent
-sys.path.insert(0, str(SCRIPT_DIRECTORY / "build" / "generated" / "proto"))
+sys.path.insert(0, './generated/proto/')
 test_pb2 = importlib.import_module("test_pb2")
 context = zmq.Context()
 async_run_id = secrets.randbits(63) or 1
 async_phase_ids = itertools.count(1)
-transport_bytes_sent = 0
-transport_bytes_received = 0
-explicit_cost_landmarks = os.environ.get(
-    "BUNDLE_PALM_EXPLICIT_COST_LANDMARKS", "0") == "1"
-strict_trial_safeguard = os.environ.get(
-    "BUNDLE_PALM_STRICT_TRIAL_SAFEGUARD", "0") == "1"
-require_common_cost_match = os.environ.get(
-    "BUNDLE_PALM_REQUIRE_COMMON_COST_MATCH", "1") == "1"
-DRS_SCALING_METHOD = os.environ.get(
-    "BUNDLE_PALM_DRS_SCALING", "jacobi_gmean").lower()
-DRS_CONSENSUS_METRIC = os.environ.get(
-    "BUNDLE_PALM_DRS_CONSENSUS_METRIC", "full").lower()
-if DRS_CONSENSUS_METRIC not in CONSENSUS_METRIC_MODES:
-    raise ValueError(
-        "BUNDLE_PALM_DRS_CONSENSUS_METRIC must be one of "
-        + ", ".join(CONSENSUS_METRIC_MODES))
-DRS_OBJECTIVE_MODEL = os.environ.get(
-    "BUNDLE_PALM_DRS_OBJECTIVE", "pixel").lower()
-if DRS_OBJECTIVE_MODEL not in ("pixel", "daba_ray"):
-    raise ValueError(
-        "BUNDLE_PALM_DRS_OBJECTIVE must be 'pixel' or 'daba_ray'")
-BLOCK_JACOBI_EIGENVALUE_FLOOR = float(os.environ.get(
-    "BUNDLE_PALM_BLOCK_JACOBI_EIGENVALUE_FLOOR", "1e-6"))
-if not 0 < BLOCK_JACOBI_EIGENVALUE_FLOOR <= 1:
-    raise ValueError("BUNDLE_PALM_BLOCK_JACOBI_EIGENVALUE_FLOOR must be in (0, 1]")
-DRS_SCALING_METHODS = {
-    "none", "jacobi", "jacobi_gmean", "pock", "pock_gmean",
-    "pock_alpha0", "pock_alpha0_gmean",
-    "jacobi_q025_gmean", "jacobi_q0375_gmean", "jacobi_q0625_gmean",
-    "jacobi_damped_gmean", "symmetric_ruiz_gmean",
-    "block_jacobi_gmean"
-}
-if DRS_SCALING_METHOD not in DRS_SCALING_METHODS:
-    raise ValueError(
-        "BUNDLE_PALM_DRS_SCALING must be one of "
-        + ", ".join(sorted(DRS_SCALING_METHODS)))
 
 
 class InputProgress:
@@ -285,22 +252,23 @@ def get_bal_file(base_url, file_name):
 
 def recv_message(socket_, operation):
     """Receive one message, adding context when the configured timeout expires."""
-    global transport_bytes_received
     try:
-        message = socket_.recv()
-        transport_bytes_received += len(message)
-        return message
+        return socket_.recv()
     except zmq.Again as error:
         raise TimeoutError(f"timed out while {operation}") from error
 
 def send_request(push_socket_, request_serialized, operation):
-    """Send one asynchronous server request."""
-    global transport_bytes_sent
+    """Send one server request and verify its immediate acceptance ACK."""
     try:
         push_socket_.send(request_serialized)
-        transport_bytes_sent += len(request_serialized)
     except zmq.Again as error:
         raise TimeoutError(f"timed out while {operation}") from error
+    acknowledgement = recv_message(
+        push_socket_, f"waiting for acknowledgement while {operation}")
+    if acknowledgement != b"Ok":
+        raise RuntimeError(
+            f"unexpected acknowledgement while {operation}: "
+            f"{acknowledgement!r}")
 
 def consume_cluster_reply(pending_cluster_ids, cluster_id, operation):
     """Ensure each asynchronous batch contains exactly one reply per cluster."""
@@ -421,8 +389,7 @@ def cost_DRE(
             local_cost = 0.5 * u_v.dot(U_pose * u_v) - u_v.dot(nabla_p)
 
         cost_dre  += local_cost
-        dre_per_part.append(
-            round(local_cost.copy()) if np.isfinite(local_cost) else local_cost)
+        dre_per_part.append(round(local_cost.copy()))
 
     # TODO: I use a different Vl to compute the cost here than in the update of prox u.
     #       Since I want to work with a new Vl already. Problem.
@@ -437,8 +404,7 @@ def average_cameras_new(
     camera_indices_in_cluster_, poses_in_cluster_, poses_s_in_cluster_, L_in_cluster_, UL_in_cluster_, nabla_p_in_cluster_):
     """Compute the block-metric weighted consensus camera parameters."""
     num_cameras = poses_in_cluster_[0].shape[0]
-    projection_sum = np.zeros((num_cameras, 9, 9))
-    projection_rhs = np.zeros((num_cameras, 9))
+    sum_D_u2_s = np.zeros(num_cameras * 9)
     UL_zeros_in_cluster_ = []
 
     # Here or per part.
@@ -451,27 +417,29 @@ def average_cameras_new(
     for i, UL_in_cluster_i in enumerate(UL_in_cluster_):
         # Lc = L_in_cluster_[i]
         camera_indices_ = np.unique(camera_indices_in_cluster_[i])
-        block_values = np.asarray(UL_in_cluster_i)
-        expected_values = 81 * len(camera_indices_)
-        if block_values.size != expected_values:
-            raise ValueError(
-                f"cluster {i} returned {block_values.size} step-size values; "
-                f"expected {expected_values}")
-        block_indptr = np.zeros(num_cameras + 1, dtype=np.int64)
-        block_indptr[camera_indices_ + 1] = 1
-        np.cumsum(block_indptr, out=block_indptr)
-        projection_blocks = reduce_camera_metric_blocks(
-            block_values.reshape(-1, 9, 9), DRS_CONSENSUS_METRIC)
-        reflected_cameras = (
-            2 * poses_in_cluster_[i][camera_indices_]
-            - poses_s_in_cluster_[i][camera_indices_])
-        projection_sum[camera_indices_] += projection_blocks
-        projection_rhs[camera_indices_] += np.einsum(
-            "bij,bj->bi", projection_blocks, reflected_cameras)
-        U_pose = bsr_matrix(
-            (projection_blocks, camera_indices_, block_indptr),
+        indices = np.repeat(
+            np.array([9 * camera_indices_ + j for j in range(9)]).transpose(), 9, axis=0).flatten()
+        # indices.append(np.array([3 * point_indices_ + j for j in range(3)]).transpose().flatten())
+        # indptr is to be set to have empty lines by 0 3 3 -> no entries in row 3. 0:0-3, row 1:3-3
+
+        indptr = [np.array([0])]
+        j = 0
+        for q in range(num_cameras):
+            # print(q, " ", j, " ", point_indices_.shape[0], " ", np.array([9*j+3, 9*j+6, 9*j+9]) )
+            if j < camera_indices_.shape[0] and camera_indices_[j] == q:
+                indptr.append(np.array([81 * j +  9, 81 * j + 18, 81 * j + 27,
+                                        81 * j + 36, 81 * j + 45, 81 * j + 54,
+                                        81 * j + 63, 81 * j + 72, 81 * j + 81]).flatten())
+                j = j + 1
+            else: # 9x9 block of "0's" not present in data
+                indptr.append(np.array([81 * j, 81 * j, 81 * j, 81 * j,
+                                        81 * j, 81 * j, 81 * j, 81 * j, 81 * j]).flatten())
+        indptr = np.concatenate(indptr)
+        # print(i, " UL_in_cluster_i.shape", (UL_in_cluster_i).shape)
+        U_pose = csr_matrix(
+            (UL_in_cluster_i, indices, indptr), # ((UL_in_cluster_i).data
             shape=(9 * num_cameras, 9 * num_cameras),
-        ).tocsr()
+        )
         UL_zeros_in_cluster_.append(U_pose)
         # print(mean_points.shape, " " , V_land.shape, points_3d_in_cluster_[i].shape)
         # print cost after/before.
@@ -481,30 +449,34 @@ def average_cameras_new(
         # print(i, "averaging 3d ", points_3d_in_cluster_[i][globalSingleLandmarksB_in_c[i], :]) # indeed 1 changed rest is constant
         # print(i, "averaging vl ", V_land.data.reshape(-1,9)[globalSingleLandmarksA_in_c[i],:])  # indeed diagonal
 
-        raw_U_pose = bsr_matrix(
-            (block_values.reshape(-1, 9, 9), camera_indices_, block_indptr),
-            shape=(9 * num_cameras, 9 * num_cameras),
-        ).tocsr()
+        prox_solution = True # does not matter
+        if prox_solution:
+            # TODO change 3, claim  2u+-s = 2 * (s+u)/2 - s  -  2 * (vli/2 .. ), so subtract u to get delta only
+            u2_s = (2 * poses_in_cluster_[i].flatten() - poses_s_in_cluster_[i].flatten())
+            #u2_s = (2 * points_3d_in_cluster_[i].flatten() - landmark_s_in_cluster_[i].flatten()) - (points_3d_in_cluster_[i].flatten() - delta_l_in_cluster[i].flatten())
+            sum_D_u2_s += U_pose * u2_s # has 0's for those not present
+
+        # print(i, "averaging u2_s ", u2_s.reshape(-1,3)[globalSingleLandmarksB_in_c[i], :]) # indeed 1 changed rest is constant
+        #sum_constant_term += poses_in_cluster_[i].flatten().dot(U_pose * (poses_in_cluster_[i].flatten() + u2_s - poses_s_in_cluster_[i].flatten()))
         if i == 0:
-            raw_Up_all = raw_U_pose
+            Up_all = U_pose
         else:
-            raw_Up_all += raw_U_pose
+            Up_all += U_pose
+    Upi_all = blockInverse(Up_all, 9)
 
     # rho_k/2 |u_k - v_k|^2 - rho_k <s_k - u_k, u_k - v_k> is actually
-    # For phi(v) = sum_k 1/2 |u_k-v|^2_{D_k}
-    #                         - <g_k, u_k-v>,
-    # stationarity gives sum_k [D_k(v-u_k) + g_k] = 0, hence
-    # v = (sum_k D_k)^-1 sum_k (D_k u_k - g_k).
-    # Here g_k = D_k(s_k-u_k), so
-    # v = (sum_k D_k)^-1 sum_k D_k(2u_k-s_k).
-    pose_v_out = poses_in_cluster_[0].copy()
-    active_cameras = np.flatnonzero(
-        np.any(projection_sum != 0.0, axis=(1, 2)))
-    for camera in active_cameras:
-        pose_v_out[camera] = np.linalg.solve(
-            projection_sum[camera], projection_rhs[camera])
+    # rho_k/2 |u_k - v_k|^2 - <nabla_k, u_k - v_k>
+    # and solution
+    # sum_k rho_k (u_k - v_k) + nabla_k = 0 ->
+    # v = sum_k (rho_k)^-1 * sum_k (rho_k u_k + nabla_k)
 
-    return pose_v_out, raw_Up_all, UL_zeros_in_cluster_
+    # rho_k/2 |u_k - v_k|^2 - rho_k <s_k - u_k, u_k - v_k>
+    # deriv
+    # sum_k rho_k v + rho_k (s_k - 2 u_k) = 0
+    # v = (sum_k rho_k)^-1 (sum_k rho_k (2 u_k - s_k))
+    pose_v_out = Upi_all * sum_D_u2_s
+
+    return pose_v_out.reshape(num_cameras, 9), Up_all, UL_zeros_in_cluster_
 
 
 # Operates sequentially.
@@ -552,17 +524,6 @@ def prox_f_push_pull(camera_indices_in_cluster_, point_indices_in_cluster_, loca
             request.program.init_l = LipJ_
             request.program.unorm[:] = np.ones(9 * unique_poses_in_c_.shape[0])
             request.program.vnorm[:] = np.ones(3 * unique_points_in_c_.shape[0])
-            request.program.camera_transform[:] = np.tile(
-                np.eye(9), (unique_poses_in_c_.shape[0], 1, 1)
-            ).ravel()
-            request.program.objective_model = (
-                1 if DRS_OBJECTIVE_MODEL == "daba_ray" else 0)
-            request.program.initial_focal[:] = initial_ray_focal[
-                unique_poses_in_c_]
-            if request.program.objective_model != (
-                1 if DRS_OBJECTIVE_MODEL == "daba_ray" else 0
-            ):
-                raise RuntimeError("failed to encode worker objective model")
         else: # just update
             #print("Sending request …", ci)
             request = test_pb2.request_proto()
@@ -618,13 +579,6 @@ def prox_f_push_pull(camera_indices_in_cluster_, point_indices_in_cluster_, loca
         ci = return_proto_.cluster_id
         consume_cluster_reply(
             pending_cluster_ids, ci, "receiving cluster results")
-        expected_objective_model = (
-            1 if DRS_OBJECTIVE_MODEL == "daba_ray" else 0)
-        if return_proto_.objective_model != expected_objective_model:
-            raise RuntimeError(
-                "worker objective model does not match coordinator: "
-                f"{return_proto_.objective_model} versus "
-                f"{expected_objective_model}")
         #print("Return for cluster …", ci)
 
         unique_points_in_c_ = np.unique(point_indices_in_cluster_[ci])
@@ -659,10 +613,7 @@ def prox_f_push_pull(camera_indices_in_cluster_, point_indices_in_cluster_, loca
     return (cost_, L_in_cluster_, Vl_in_cluster_, poses_in_cluster_, landmarks_, nabla_p_in_cluster_, blockEig_in_cluster_)
 
 # Operates sequentially.
-def primal_cost_push_pull(
-    camera_indices_in_cluster_, point_indices_in_cluster_, poses_in_cluster_,
-    landmarks_, k_clusters, single_pose=False, revert_lm_=False
-):
+def primal_cost_push_pull(camera_indices_in_cluster_, poses_in_cluster_, k_clusters, single_pose = False, revert_lm_ = False) :
 
     global push_socket
     global pull_socket
@@ -670,7 +621,6 @@ def primal_cost_push_pull(
 
     for ci in range(k_clusters):
         unique_poses_in_c_ = np.unique(camera_indices_in_cluster_[ci])
-        unique_points_in_c_ = np.unique(point_indices_in_cluster_[ci])
         #print("Sending cost query …", ci)
         request = test_pb2.request_proto()
         #request.program.SetInParent()
@@ -686,15 +636,11 @@ def primal_cost_push_pull(
             request.cost_update.revert_lm = 2
         else:
             request.cost_update.revert_lm = 0
-            if explicit_cost_landmarks:
-                request.cost_update.landmarks[:] = landmarks_[
-                    unique_points_in_c_].ravel()
 
         request_serialized_ = request.SerializeToString() # SerializeToArray() does not exist
         send_request(push_socket, request_serialized_, f"requesting cost for cluster {ci}")
 
     cost_ = np.zeros(k_clusters)
-    cost_landmarks_ = landmarks_.copy()
     pending_cluster_ids = set(range(k_clusters))
     uncorrelated_replies = 0
     while pending_cluster_ids:
@@ -721,68 +667,12 @@ def primal_cost_push_pull(
             pending_cluster_ids, ci, "receiving cluster costs")
         # print("Receiving cost for cluster …", ci, " = ", return_proto_.cost)
         cost_[ci] = return_proto_.cost
-        unique_points_in_c_ = np.unique(point_indices_in_cluster_[ci])
-        expected_landmark_values = 3 * unique_points_in_c_.size
-        if len(return_proto_.landmarks) != expected_landmark_values:
-            raise RuntimeError(
-                f"cluster {ci} returned {len(return_proto_.landmarks)} cost "
-                f"landmark values; expected {expected_landmark_values}")
-        cost_landmarks_[unique_points_in_c_] = np.asarray(
-            return_proto_.landmarks, dtype=np.float64).reshape(-1, 3)
 
     # print("exit primal_cost_push_pull")
-    return cost_, cost_landmarks_
-
-
-def retrieve_best_landmarks(
-    camera_indices_in_cluster_, point_indices_in_cluster_, best_poses_,
-    landmarks_, k_clusters
-):
-    """Retrieve the physical worker landmarks saved with the native best cost."""
-    global push_socket
-    global pull_socket
-    phase_id = next(async_phase_ids)
-    retrieved = landmarks_.copy()
-
-    for ci in range(k_clusters):
-        unique_poses = np.unique(camera_indices_in_cluster_[ci])
-        request = test_pb2.request_proto()
-        request.cost_update.cameras[:] = best_poses_[unique_poses].ravel()
-        request.cost_update.cluster_id = ci
-        request.cost_update.run_id = async_run_id
-        request.cost_update.phase_id = phase_id
-        request.cost_update.revert_lm = 2
-        send_request(
-            push_socket,
-            request.SerializeToString(),
-            f"retrieving best landmarks for cluster {ci}",
-        )
-
-    pending_cluster_ids = set(range(k_clusters))
-    while pending_cluster_ids:
-        reply = test_pb2.return_cost_proto()
-        reply.ParseFromString(recv_message(
-            pull_socket, "waiting for best worker landmarks"))
-        if not is_current_async_reply(reply, phase_id):
-            continue
-        ci = reply.cluster_id
-        consume_cluster_reply(
-            pending_cluster_ids, ci, "receiving best worker landmarks")
-        unique_points = np.unique(point_indices_in_cluster_[ci])
-        expected_values = 3 * unique_points.size
-        if len(reply.landmarks) != expected_values:
-            raise RuntimeError(
-                f"cluster {ci} returned {len(reply.landmarks)} best landmark "
-                f"values; expected {expected_values}")
-        retrieved[unique_points] = np.asarray(
-            reply.landmarks, dtype=np.float64).reshape(-1, 3)
-
-    return retrieved
+    return cost_
 
 # Operates sequentially.
-def best_cost_found_push_pull(
-    point_indices_in_cluster_, k_clusters, costs, cost_landmarks_
-) :
+def best_cost_found_push_pull(k_clusters, costs) :
 
     global push_socket
     global pull_socket
@@ -792,57 +682,17 @@ def best_cost_found_push_pull(
         request = test_pb2.request_proto()
         request.best_cost.cost = costs[ci]
         request.best_cost.cluster_id = ci
-        unique_points_in_c_ = np.unique(point_indices_in_cluster_[ci])
-        request.best_cost.landmarks[:] = cost_landmarks_[
-            unique_points_in_c_].ravel()
 
         request_serialized_ = request.SerializeToString() # SerializeToArray() does not exist
         send_request(
             push_socket, request_serialized_, f"updating best cost for cluster {ci}")
     return
 
-def rounded_cost(value):
-    return round(value) if np.isfinite(value) else float(value)
-
-def normalize_geometric_mean(values, floor=1e-12):
-    values = np.asarray(values, dtype=np.float64)
-    safe_values = np.maximum(
-        np.where(np.isfinite(values), values, floor),
-        floor,
-    )
-    geometric_mean = np.exp(np.mean(np.log(safe_values)))
-    return values / geometric_mean
 
 def getScaling(min_, max_): # aim at max * min = 1. So max * x = 1/(min * x). x^2 = 1/(min * max)
     return np.sqrt(1. / (min_ * max_))
 
-def get_symmetric_ruiz_scaling(matrix, max_iterations=10, tolerance=1e-3):
-    absolute = np.abs(matrix).tocsr()
-    scaling = np.ones(matrix.shape[0], dtype=np.float64)
-    for _ in range(max_iterations):
-        inverse = np.reciprocal(scaling)
-        equilibrated = absolute.multiply(inverse[:, None]).multiply(inverse[None, :])
-        row_norms = np.asarray(equilibrated.max(axis=1).toarray()).ravel()
-        valid = row_norms[np.isfinite(row_norms) & (row_norms > 0)]
-        if valid.size == 0:
-            break
-        floor = max(1e-12 * np.median(valid), np.finfo(float).tiny)
-        update = np.sqrt(np.maximum(
-            np.where(np.isfinite(row_norms), row_norms, floor), floor
-        ))
-        scaling *= update
-        if np.max(np.abs(np.log(update))) < tolerance:
-            break
-    return scaling
-
-def GetPcgScalingDiag(JtJ, W, method=DRS_SCALING_METHOD):
-    if method in {"none", "block_jacobi_gmean"}:
-        return np.ones(JtJ.shape[1])
-
-    if method == "symmetric_ruiz_gmean":
-        temp_ = get_symmetric_ruiz_scaling(JtJ)
-        return normalize_geometric_mean(temp_)
-
+def GetPcgScalingDiag(JtJ, W):
     baseVersion = False
     if baseVersion:
         temp_  = np.squeeze(np.asarray((np.abs(JtJ)).sum(axis=0) )) # ATTENTION: must adjust / add sqrt on lms here below. CCC
@@ -860,42 +710,22 @@ def GetPcgScalingDiag(JtJ, W, method=DRS_SCALING_METHOD):
             #temp_ = np.squeeze(np.asarray((np.abs(JtJ)).sum(axis=0) ))
             #temp_W = np.squeeze(np.asarray((np.abs(W)).sum(axis=0) ))
             #temp_  = temp_ + temp_W # + 1e-6 does nothing
-            if method.startswith("pock_alpha0"):
-                squared = JtJ.copy()
-                squared.data = np.square(np.abs(squared.data))
-                temp_ = np.asarray(squared.sum(axis=0)).ravel()
-            elif method.startswith("pock"):
-                temp_ = np.asarray(np.abs(JtJ).sum(axis=0)).ravel()
-            else:
-                temp_ = np.abs(JtJ.diagonal())
-            positive = temp_[np.isfinite(temp_) & (temp_ > 0)]
-            if positive.size == 0:
-                return np.ones(JtJ.shape[1])
-            floor = max(1e-12 * np.median(positive), np.finfo(float).tiny)
-            temp_ = np.where(np.isfinite(temp_), temp_, floor)
-            if method == "jacobi_damped_gmean":
-                temp_ += 1e-3 * np.median(positive)
-            jacobi_exponents = {
-                "jacobi_q025_gmean": 0.25,
-                "jacobi_q0375_gmean": 0.375,
-                "jacobi_q0625_gmean": 0.625,
-            }
-            exponent = jacobi_exponents.get(method, 0.5)
-            temp_ = np.power(np.maximum(temp_, floor), exponent)
+            # Jacobi pcg: here sqrt here on both, not only on landm. externally
+            temp_ = np.squeeze(np.asarray((np.abs(JtJ.diagonal()))))
+            temp_ = np.sqrt(temp_) # works on Jacobi, not on rest ?
 
-    if False: # clamp and rescale
-        print("min/max Unorm before ", np.min(temp_), np.max(temp_))
-        minTemp = np.percentile(temp_[np.nonzero(temp_)], 0.0001) # not sure..
-        t = getScaling(minTemp, np.max(temp_))
-        temp_  = temp_ * t
-        print("min/max Unorm after ", np.min(temp_), np.max(temp_), " t ", t, " min*max= ", np.min(temp_) * np.max(temp_))
-        print("Preconditioners min/max Unorm ", np.min(temp_), np.max(temp_))
-        minTresh = 1e-18 # 12 -> 14 for 245 and scale!
-        maxTresh = 1e18
-        temp_ = np.fmin(np.fmax(temp_, minTresh), maxTresh) #np.sqrt(np.minimum(np.maximum(t, minTresh), maxTresh))
-        print("Preconditioners min/max Unorm after thresholding ", np.min(temp_), np.max(temp_))
+    print("min/max Unorm before ", np.min(temp_), np.max(temp_))
+    minTemp = np.percentile(temp_[np.nonzero(temp_)], 0.0001) # not sure..
+    t = getScaling(minTemp, np.max(temp_))
+    temp_  = temp_ * t
+    print("min/max Unorm after ", np.min(temp_), np.max(temp_), " t ", t, " min*max= ", np.min(temp_) * np.max(temp_))
+    print("Preconditioners min/max Unorm ", np.min(temp_), np.max(temp_))
+    minTresh = 1e-18 # 12 -> 14 for 245 and scale!
+    maxTresh = 1e18
+    temp_ = np.fmin(np.fmax(temp_, minTresh), maxTresh) #np.sqrt(np.minimum(np.maximum(t, minTresh), maxTresh))
+    print("Preconditioners min/max Unorm after thresholding ", np.min(temp_), np.max(temp_))
 
-    scaleToHaveValuesAroundOneForHess = False #True # cosmetics mostly.
+    scaleToHaveValuesAroundOneForHess = True # cosmetics mostly.
     if scaleToHaveValuesAroundOneForHess:
         absDiagJtJ = np.abs(JtJ.diagonal())
         guess = diag_sparse(1./temp_.flatten()) * absDiagJtJ * diag_sparse(1./temp_.flatten())
@@ -907,71 +737,17 @@ def GetPcgScalingDiag(JtJ, W, method=DRS_SCALING_METHOD):
         guess = diag_sparse(1./temp_.flatten()) * absDiagJtJ * diag_sparse(1./temp_.flatten())
         print("Preconditioners min/max guess ", np.min(guess), np.max(guess))
 
-    if method.endswith("_gmean"):
-        temp_ = normalize_geometric_mean(temp_)
     return temp_
 
 
-def get_camera_block_transforms(
-    matrix, block_size=9,
-    eigenvalue_floor=BLOCK_JACOBI_EIGENVALUE_FLOOR):
-    if matrix.shape[0] != matrix.shape[1] or matrix.shape[0] % block_size != 0:
-        raise ValueError("camera curvature matrix must contain complete square blocks")
-    num_cameras = matrix.shape[0] // block_size
-    transforms = np.empty((num_cameras, block_size, block_size))
-    for camera_id in range(num_cameras):
-        start = block_size * camera_id
-        block = matrix[start:start + block_size, start:start + block_size].toarray()
-        block = 0.5 * (block + block.T)
-        eigenvalues, eigenvectors = np.linalg.eigh(block)
-        largest = max(float(np.max(eigenvalues)), np.finfo(float).tiny)
-        eigenvalues = np.maximum(eigenvalues, eigenvalue_floor * largest)
-        transforms[camera_id] = (
-            eigenvectors * np.reciprocal(np.sqrt(eigenvalues))
-        ) @ eigenvectors.T
-
-    determinant_signs, log_determinants = np.linalg.slogdet(transforms)
-    if np.any(determinant_signs <= 0) or not np.all(np.isfinite(log_determinants)):
-        raise ValueError("camera block transform is not finite positive definite")
-    geometric_mean_singular_value = np.exp(
-        np.mean(log_determinants) / block_size
-    )
-    transforms /= geometric_mean_singular_value
-    if not np.all(np.isfinite(transforms)):
-        raise ValueError("camera block transform contains non-finite values")
-    return transforms
-
-
-def apply_camera_transforms(poses, transforms, inverse=False):
-    if inverse:
-        return np.linalg.solve(transforms, poses[..., None])[..., 0]
-    return np.einsum("nij,nj->ni", transforms, poses)
-
-
-def physical_cameras_from_preconditioned(
-    poses, unorm_, camera_transforms_, cluster_count
-):
-    if camera_transforms_ is None:
-        return poses / unorm_.reshape(-1, 9)
-    return apply_camera_transforms(
-        poses, camera_transforms_
-    ) / (2.0 / np.sqrt(cluster_count))
-
-
 def preconditioning_push(poses_v_, poses_in_cluster_, poses_s_in_cluster_, camera_indices_in_cluster_,
-                         point_indices_in_cluster_, unorm_, vnorm_, kClusters_,
-                         camera_transforms_=None) :
+                         point_indices_in_cluster_, unorm_, vnorm_, kClusters_) :
 
     global push_socket
 
     unorm_ *= 2. / np.sqrt(kClusters_) # TODO: check on small example
 
-    if camera_transforms_ is None:
-        poses_v_ = (unorm_ * poses_v_.ravel()).reshape(-1,9)
-    else:
-        poses_v_ = apply_camera_transforms(
-            poses_v_, camera_transforms_, inverse=True
-        ) * (2. / np.sqrt(kClusters_))
+    poses_v_ = (unorm_ * poses_v_.ravel()).reshape(-1,9)
 
     for ci in range(kClusters_):
         unique_poses_in_c_ = np.unique(camera_indices_in_cluster_[ci])
@@ -979,27 +755,10 @@ def preconditioning_push(poses_v_, poses_in_cluster_, poses_s_in_cluster_, camer
         #print("Sending preconditioning query …", ci)
         request = test_pb2.request_proto()
 
-        if camera_transforms_ is None:
-            poses_in_cluster_[ci] = (unorm_ * poses_in_cluster_[ci].ravel()).reshape(-1,9)
-            poses_s_in_cluster_[ci] = (unorm_ * poses_s_in_cluster_[ci].ravel()).reshape(-1,9)
-        else:
-            poses_in_cluster_[ci] = apply_camera_transforms(
-                poses_in_cluster_[ci], camera_transforms_, inverse=True
-            ) * (2. / np.sqrt(kClusters_))
-            poses_s_in_cluster_[ci] = apply_camera_transforms(
-                poses_s_in_cluster_[ci], camera_transforms_, inverse=True
-            ) * (2. / np.sqrt(kClusters_))
+        poses_in_cluster_[ci] = (unorm_ * poses_in_cluster_[ci].ravel()).reshape(-1,9)
+        poses_s_in_cluster_[ci] = (unorm_ * poses_s_in_cluster_[ci].ravel()).reshape(-1,9)
 
-        if camera_transforms_ is None:
-            request.preconditioning_update.unorm[:] = 1./(unorm_.reshape(-1,9)[unique_poses_in_c_,:]).ravel()
-        else:
-            request.preconditioning_update.unorm[:] = np.full(
-                9 * unique_poses_in_c_.shape[0],
-                1. / (2. / np.sqrt(kClusters_)),
-            )
-            request.preconditioning_update.camera_transform[:] = (
-                camera_transforms_[unique_poses_in_c_]
-            ).ravel()
+        request.preconditioning_update.unorm[:] = 1./(unorm_.reshape(-1,9)[unique_poses_in_c_,:]).ravel()
         #request.preconditioning_update.vnorm[:] = vnorm_[unique_landmarks_in_c_].ravel()
         request.preconditioning_update.vnorm[:] = np.ones(3 * unique_landmarks_in_c_.shape[0])
         request.preconditioning_update.cluster_id = ci
@@ -1236,22 +995,6 @@ if kClusters <= 0:
 
 bal_file = get_bal_file(BASE_URL, FILE_NAME)
 cameras, points_3d, camera_indices, point_indices, points_2d = read_bal_data(bal_file)
-initial_ray_focal = cameras[:, 6].copy()
-initial_pixel_quality_metrics = evaluate_bal_state(
-    cameras, points_3d, camera_indices, point_indices, points_2d)
-if DRS_OBJECTIVE_MODEL == "daba_ray":
-    initial_quality_metrics = evaluate_encoded_daba_ray_state(
-        cameras, cameras, points_3d,
-        camera_indices, point_indices, points_2d)
-    initial_quality_metrics["sumSquaredError"] = (
-        2.0 * initial_quality_metrics["ceresCost"])
-else:
-    initial_quality_metrics = initial_pixel_quality_metrics
-objective_trajectory = [{
-    "overallSeconds": time.perf_counter() - client_started_at,
-    "sumSquaredError": initial_quality_metrics["sumSquaredError"],
-    "source": "initial",
-}]
 n_cameras = cameras.shape[0]
 n_points = points_3d.shape[0]
 
@@ -1263,18 +1006,24 @@ global_init = True
 resetIt = 0
 globalBlockEigUpperLimit = 5e-1 # 1e-1, 1e-3?
 blockEig_in_cluster = 5e-5 * np.ones(kClusters) # 1e-4 or 1e-5, 5e-5?
-failedNesterovAcceleration = 0
-maxFailedNesterovAcceleration = 3 # TODO: 2 or 3?
+failedAcceleration = 0
+maxFailedAcceleration = int(os.environ.get(
+    "BUNDLE_PALM_ACCEL_MAX_FAILURES", "3"))
+if maxFailedAcceleration <= 0:
+    raise ValueError("BUNDLE_PALM_ACCEL_MAX_FAILURES must be positive")
+maxAccelerationBacktracks = int(os.environ.get(
+    "BUNDLE_PALM_ACCEL_BACKTRACKS", "0"))
+if maxAccelerationBacktracks < 0:
+    raise ValueError("BUNDLE_PALM_ACCEL_BACKTRACKS must be nonnegative")
+accelerator = create_accelerator()
+accelerationStopIteration = global_iterations
+if accelerator.name == "lbfgs":
+    accelerationStopIteration = int(os.environ.get(
+        "BUNDLE_PALM_LBFGS_STOP_ITERATION", str(global_iterations)))
+if accelerationStopIteration < 0:
+    raise ValueError("BUNDLE_PALM_LBFGS_STOP_ITERATION must be nonnegative")
+print("outer accelerator", accelerator.name)
 print("input blockEig_in_cluster[ci] ", blockEig_in_cluster[0])
-print("DRS camera scaling:", DRS_SCALING_METHOD)
-print("DRS consensus projection metric:", DRS_CONSENSUS_METRIC)
-print("DRS objective model:", DRS_OBJECTIVE_MODEL)
-print(
-    "DRS trial modes:",
-    f"explicit_cost_landmarks={explicit_cost_landmarks}",
-    f"strict_trial_safeguard={strict_trial_safeguard}",
-    f"require_common_cost_match={require_common_cost_match}",
-)
 
 # Connect to the server
 print("Connecting to cpp server…")
@@ -1282,7 +1031,7 @@ print("Connecting to cpp server…")
 #socket.connect("tcp://localhost:5555")
 
 # new idea.
-push_socket = context.socket(zmq.PUSH)
+push_socket = context.socket(zmq.REQ)#PUSH)
 #pull_socket = context.socket(zmq.REP)#.PULL)
 pull_socket = context.socket(zmq.PULL)
 
@@ -1295,14 +1044,12 @@ for active_socket in (push_socket, pull_socket):
     active_socket.setsockopt(zmq.SNDTIMEO, zmq_timeout_ms)
     active_socket.setsockopt(zmq.LINGER, 0)
 
-request_port = os.environ.get("BUNDLE_PALM_REQUEST_PORT", "5556")
-result_port = os.environ.get("BUNDLE_PALM_RESULT_PORT", "5557")
-push_socket.connect(f"tcp://localhost:{request_port}")
-pull_socket.connect(f"tcp://localhost:{result_port}")
+push_socket.connect("tcp://localhost:5556")
+pull_socket.connect("tcp://localhost:5557")
 
 #lib = ctypes.CDLL("./libprocess_clusters.so")
 # init_lib() # ?
-partition_started_at = time.perf_counter()
+start = time.time() # this is not working at all. Slower then iteratively
 clustering_mode = os.environ.get("BUNDLE_PALM_CLUSTERING", "landmark")
 if clustering_mode == "landmark":
     (
@@ -1378,8 +1125,8 @@ else:
     raise ValueError(
         "BUNDLE_PALM_CLUSTERING must be 'landmark', 'landmark_clean', "
         "'landmark_scalable', or 'landmark_scalable_stable'")
-partition_seconds = time.perf_counter() - partition_started_at
-print("==========", clustering_mode, "clustering took", partition_seconds,
+end = time.time() # this is not working at all. Slower then iteratively
+print("==========", clustering_mode, "clustering took", end - start,
       "s ===========")
 
 nonempty_cluster_ids = [
@@ -1475,12 +1222,7 @@ _, U_all, Up_cluster = average_cameras_new(camera_indices_in_cluster, poses_in_c
 dre, dre_per_part = cost_DRE(camera_indices_in_cluster, poses_in_cluster, poses_s_in_cluster, \
                             L_in_cluster, Ul_in_cluster, poses_v, nabla_p_in_cluster)
 
-camera_transforms = None
-if DRS_SCALING_METHOD == "block_jacobi_gmean":
-    camera_transforms = get_camera_block_transforms(U_all)
 unorm = GetPcgScalingDiag(U_all, 0)
-validate_each_best = os.environ.get(
-    "BUNDLE_PALM_VALIDATE_EACH_BEST", "0") == "1"
 Unorm_ = diag_sparse(unorm.flatten())
 relative_diff  = np.abs(Unorm_.data.flatten() - unorm_t.flatten()) / unorm_t.flatten()
 relative_diff2 = np.abs(Unorm_.data.flatten()) / np.fmin(unorm_t.flatten(),Unorm_.data.flatten())
@@ -1511,8 +1253,7 @@ print("cam2 ", amax//9, " :" , (unorm_t.flatten().reshape((-1,9)))[amax // 9, :]
 # unorm = Unorm_.data.flatten()
 
 poses_v, poses_in_cluster, poses_s_in_cluster = preconditioning_push(poses_v, poses_in_cluster, poses_s_in_cluster,
-                                                                     camera_indices_in_cluster, point_indices_in_cluster, unorm, 0, kClusters,
-                                                                     camera_transforms)
+                                                                     camera_indices_in_cluster, point_indices_in_cluster, unorm, 0, kClusters)
 
 poses_s_in_cluster_pre = [0 for x in range(kClusters)] # dummy fill list
 for ci in range(kClusters):
@@ -1530,9 +1271,7 @@ primal_cost_u = currentCost
 #     primal_cost_u += primal_costs_u[ci]
 dre += primal_cost_u
 
-primal_costs_v, primal_cost_landmarks_v = primal_cost_push_pull(
-    camera_indices_in_cluster, point_indices_in_cluster, poses_v, landmarks,
-    kClusters, True)
+primal_costs_v = primal_cost_push_pull(camera_indices_in_cluster, poses_v, kClusters, True)
 primal_cost_v = np.sum(primal_costs_v)
 primal_cost_v_before = primal_cost_v
 dre = max( primal_cost_v, dre ) # sandwich lemma, prevent maybe chaos
@@ -1548,86 +1287,64 @@ print( -1, " ======== DRE ====== ", round(dre) , " ========= gain " , \
 
 lastCost = currentCost
 lastCostDRE = dre
-search_direction = [0 for x in range(kClusters)] # dummy fill list
 poses_s_in_cluster_bfgs = [0 for x in range(kClusters)] # dummy fill list
 lastCostDRE_bfgs = lastCostDRE
-restartIteration = 0
 if primal_cost_v < bestCost:
     best_poses_v = poses_v.copy()
-    best_landmarks = primal_cost_landmarks_v.copy()
+    best_landmarks = landmarks.copy()
     bestCost = primal_cost_v
     bestCost60 = bestCost
     bestCost30 = bestCost
-    best_cost_found_push_pull(
-        point_indices_in_cluster, kClusters, primal_costs_v,
-        primal_cost_landmarks_v)
-    objective_trajectory.append({
-        "overallSeconds": time.perf_counter() - client_started_at,
-        "sumSquaredError": float(bestCost),
-        "source": "initial_prox",
-    })
+    best_cost_found_push_pull(kClusters, primal_costs_v)
 
 # init state
 print_selected_cameras(poses_in_cluster, best_poses_v, cameras_with_few_observations, cluster_set_few_obs, kClusters)
 
-# Nesterov history is flattened across all cluster-camera parameter blocks.
-outer_transport_bytes_sent_start = transport_bytes_sent
-outer_transport_bytes_received_start = transport_bytes_received
+# Acceleration operates on all cluster-camera reference states as one vector.
 acceleration_state_size = kClusters * 9 * n_cameras
-s_prev = np.zeros(acceleration_state_size)
-delta_s_old_ = np.zeros(acceleration_state_size)
-prev_dk = np.zeros(acceleration_state_size)
+active_camera_masks = []
+for ci in range(kClusters):
+    active_diagonal = Up_cluster[ci].diagonal()
+    active_camera_masks.append(
+        (active_diagonal != 0).reshape(n_cameras, 9))
 for global_iteration in range(global_iterations):
 
-    delta_s  = np.zeros(kClusters * 9 * n_cameras)
-    s_new = np.zeros(kClusters * 9 * n_cameras)
-    s_cur  = np.zeros(kClusters * 9 * n_cameras)
+    s_new = np.zeros(acceleration_state_size)
+    s_cur = np.zeros(acceleration_state_size)
     for ci in range(kClusters):
-        #delta_s1[ci * 9 * n_cameras: (ci+1) * 9 * n_cameras] = (poses_v - poses_in_cluster[ci]).flatten()
-        delta_s [ci * 9 * n_cameras: (ci+1) * 9 * n_cameras] = (poses_v - poses_in_cluster[ci]).flatten()
         s_new[ci * 9 * n_cameras: (ci+1) * 9 * n_cameras] = poses_s_in_cluster_pre[ci].flatten()
         s_cur[ci * 9 * n_cameras: (ci+1) * 9 * n_cameras] = poses_s_in_cluster[ci].flatten()
 
-    if global_iteration <= 0: # s_prev is known
-        dk = s_new - s_cur #+ delta_s
-        lambda_0 = 1.0
-        lambda_1 = 1.0
+    if global_iteration < accelerationStopIteration:
+        accelerated_state, acceleration_proposed = accelerator.propose(
+            s_cur, s_new, global_iteration)
     else:
-        delta_s_ = s_new - s_prev
-        dk = s_new - s_cur + delta_s_
-        if global_iteration > 1:
-            dk = delta_s_ + delta_s_old_ # last 3 + 2nd step (so 2nd twice).
+        accelerated_state, acceleration_proposed = s_new, False
 
-        delta_s_old_ = delta_s_.copy()
-
-        # momentum simple, same for v? about same
-        beta_nesterov = (global_iteration-resetIt-1) / (global_iteration-resetIt+2) # 0.7
-        dk = s_new - s_cur + beta_nesterov * prev_dk
-        if False: # conventional nesterov
-            lambda_1 = (1. + np.sqrt(1. + 4. * lambda_0**2)) / 2.
-            gamma = (lambda_0 - 1.) / lambda_1
-            dk = s_new - s_cur + gamma * (s_new - s_cur)
-            lambda_0 = lambda_1
-
-    prev_dk = dk.copy()
-    dk_stepLength = np.linalg.norm(dk, 2)
-    for ci in range(kClusters):
-        search_direction[ci] = dk[ci * 9 * n_cameras: (ci+1) * 9 * n_cameras].reshape(n_cameras, 9)
-    s_prev = s_cur.copy() # access to old s.
-
-    #line_search_iterations = 1 # is pure DRS (forced, see below set tk == 1)
-    line_search_iterations = 2 # 3 appears ok
-    if global_iteration <= resetIt + 1:
-        line_search_iterations = 1
+    acceleration_enabled = (
+        acceleration_proposed and global_iteration > resetIt + 1)
+    if acceleration_enabled:
+        trial_taus = [
+            0.5**backtrack
+            for backtrack in range(maxAccelerationBacktracks + 1)
+        ]
+        trial_taus.append(0.0)
+    else:
+        trial_taus = [0.0]
+    line_search_iterations = len(trial_taus)
 
     # print(" bfgs step ", dk_stepLength, " ratio ", file=sys.stderr )
     for ls_it in range(line_search_iterations):
-        if line_search_iterations > 1:
-            tk = ls_it / (line_search_iterations-1)
-        else:
-            tk = 1 # 0: line-search 1: drs
+        trial_tau = trial_taus[ls_it]
+        tk = 1.0 - trial_tau
         for ci in range(kClusters):
-            poses_s_in_cluster_bfgs[ci] = tk * poses_s_in_cluster_pre[ci] + (1-tk) * (poses_s_in_cluster[ci] + search_direction[ci])
+            start = ci * 9 * n_cameras
+            stop = (ci + 1) * 9 * n_cameras
+            accelerated_cluster = accelerated_state[start:stop].reshape(
+                n_cameras, 9)
+            poses_s_in_cluster_bfgs[ci] = (
+                tk * poses_s_in_cluster_pre[ci]
+                + (1 - tk) * accelerated_cluster)
 
         if True: # linearize at v / average solution, same issue I suppose. Yes. solution is too return the new gradient, s.t. update of v is wrt to current situation.
             poses_in_cluster_bfgs = [elem.copy() for elem in poses_in_cluster]
@@ -1669,17 +1386,30 @@ for global_iteration in range(global_iterations):
         poses_v_bfgs, Ul_all_bfgs, U_cluster_zeros = average_cameras_new(
             camera_indices_in_cluster, poses_in_cluster_bfgs, poses_s_in_cluster_bfgs, L_in_cluster_bfgs, Ul_in_cluster_bfgs, nabla_p_in_cluster_bfgs)
 
+        # Equation (3.5a): q_k uses the residual at the first full-step trial.
+        first_trial_matches_proposal = (
+            acceleration_enabled or not acceleration_proposed)
+        if ls_it == 0 and first_trial_matches_proposal:
+            trial_residual = np.zeros(acceleration_state_size)
+            for ci in range(kClusters):
+                start = ci * 9 * n_cameras
+                stop = (ci + 1) * 9 * n_cameras
+                residual_cluster = (
+                    poses_in_cluster_bfgs[ci] - poses_v_bfgs)
+                trial_residual[start:stop] = (
+                    active_camera_masks[ci] * residual_cluster).flatten()
+            accelerator.observe_first_trial(trial_residual)
+
         # eval cost
         dre_bfgs, dre_per_part = cost_DRE(camera_indices_in_cluster, poses_in_cluster_bfgs,
             poses_s_in_cluster_bfgs, L_in_cluster_bfgs, Ul_in_cluster_bfgs, poses_v_bfgs, nabla_p_in_cluster_bfgs)
         dre_bfgs += currentCost_bfgs
 
         # debugging cost block ################
-        primal_cost_v_costs, primal_cost_landmarks_v = primal_cost_push_pull(
-            camera_indices_in_cluster, point_indices_in_cluster,
-            poses_v_bfgs, landmarks_bfgs, kClusters, True)
+        primal_cost_v_costs = primal_cost_push_pull(
+            camera_indices_in_cluster, poses_v_bfgs, kClusters, True)
         primal_cost_v = np.sum(primal_cost_v_costs)
-        primal_cost_v_all = [rounded_cost(cost) for cost in primal_cost_v_costs]
+        primal_cost_v_all = [round(cost) for cost in primal_cost_v_costs]
 
         #primal_cost_u_all = []
         #primal_cost_u_all = primal_cost_push_pull(camera_indices_in_cluster, poses_in_cluster_bfgs, kClusters, False)
@@ -1687,7 +1417,7 @@ for global_iteration in range(global_iterations):
         primal_cost_u = np.sum(primal_cost_u_all)
         if currentCost_bfgs != primal_cost_u:
             print("Costs do not match line 740 ", currentCost_bfgs, " u:" , primal_cost_u, " v:", primal_cost_v)
-        primal_cost_u_all = [rounded_cost(cost) for cost in primal_cost_u_all]
+        primal_cost_u_all = [round(cost) for cost in primal_cost_u_all]
         ###
 
         dre_bfgs = max(dre_bfgs, primal_cost_v) # sandwich lemma
@@ -1700,54 +1430,20 @@ for global_iteration in range(global_iterations):
         currentGap = max(primal_gap, 1.) #- round(lastCostDRE_bfgs - dre_bfgs), 1) # not sure ..
         differentialGap = prevGap - currentGap
         costGain = lastCostDRE_bfgs - dre_bfgs
-        gain_to_gap = costGain / currentGap
-        G2C = (
-            round(1000 * gain_to_gap) / 1000
-            if np.isfinite(gain_to_gap) else gain_to_gap)
-        print( global_iteration, "/", ls_it, " ======== DRE BFGS ====== ", rounded_cost(dre_bfgs) , " ========= gain " , \
-            rounded_cost(costGain), "==== f(v)= ", rounded_cost(primal_cost_v), " f(u)= ", rounded_cost(primal_cost_u),
+        G2C = round(1000 * costGain / currentGap) / 1000
+        print( global_iteration, "/", ls_it, " ======== DRE BFGS ====== ", round(dre_bfgs) , " ========= gain " , \
+            round(costGain), "==== f(v)= ", round(primal_cost_v), " f(u)= ", round(primal_cost_u),
             " G ", currentGap , " dG ", differentialGap, " ", differentialGap / np.maximum(costGain, 1.), #" D2G ", diffToGain, "G2G ", gapToGain, 
             " G2C ", G2C, " BE ", blockEigLastIt[0]) #, " L ", L_in_cluster_bfgs) #blockEig_in_cluster_bfgs)
         print( global_iteration, "/", ls_it, " f(v) = ", primal_cost_v_all, " f(u) = ", primal_cost_u_all)
         prevGap = currentGap
 
         if primal_cost_v < bestCost:
-            if validate_each_best:
-                candidate_cameras = physical_cameras_from_preconditioned(
-                    poses_v_bfgs, unorm, camera_transforms, kClusters)
-                if DRS_OBJECTIVE_MODEL == "daba_ray":
-                    candidate_metrics = evaluate_encoded_daba_ray_state(
-                        cameras, candidate_cameras, landmarks_bfgs,
-                        camera_indices, point_indices, points_2d)
-                    candidate_metrics["sumSquaredError"] = (
-                        2.0 * candidate_metrics["ceresCost"])
-                else:
-                    candidate_metrics = evaluate_bal_state(
-                        candidate_cameras, landmarks_bfgs,
-                        camera_indices, point_indices, points_2d)
-                candidate_relative_error = abs(
-                    candidate_metrics["sumSquaredError"] - primal_cost_v
-                ) / max(1.0, abs(primal_cost_v))
-                if candidate_relative_error > 1e-6:
-                    raise RuntimeError(
-                        "candidate state does not match native DRS cost at "
-                        f"iteration {global_iteration}: "
-                        f'{candidate_metrics["sumSquaredError"]} versus '
-                        f"{primal_cost_v} (relative error "
-                        f"{candidate_relative_error})")
             best_poses_v = poses_v_bfgs.copy()
-            best_landmarks = primal_cost_landmarks_v.copy()
+            best_landmarks = landmarks_bfgs.copy() # send a this cost was best -> store lms.
             bestCost = primal_cost_v
             bestIt = global_iteration
-            best_cost_found_push_pull(
-                point_indices_in_cluster, kClusters, primal_cost_v_costs,
-                primal_cost_landmarks_v)
-            objective_trajectory.append({
-                "overallSeconds": time.perf_counter() - client_started_at,
-                "sumSquaredError": float(bestCost),
-                "source": "outer_iteration",
-                "iteration": global_iteration,
-            })
+            best_cost_found_push_pull(kClusters, primal_cost_v_costs)
             # send best proto
         if global_iteration < 60:
             bestCost60 = bestCost
@@ -1783,49 +1479,20 @@ for global_iteration in range(global_iterations):
             # print("Check ================= New primal_cost_v_before ", primal_cost_v_before, " vs. ", np.sum(primal_cost_v_before_), " vs ", primal_cost_v , " vs ", bestCost)
             # primal_cost_v_before = np.sum(primal_cost_v_before_)
 
-        # Reset acceleration if fails 6 times in a row
+        # The second trial is plain DRS, so reaching it means acceleration lost.
         if ls_it == line_search_iterations - 1 and line_search_iterations > 1:
-            failedNesterovAcceleration += 1
-            lambda_0 = np.maximum(1., lambda_1 / 2.) # reset acceleration
-            if False:
-                #lambda_0 = np.maximum(1., lambda_1 / np.sqrt(5)) # reset acceleration, less flickering can be worse results.
-                prev_dk = s_new - s_cur
-                print('lambda_0 reset ', lambda_0)
-
-            if failedNesterovAcceleration >= maxFailedNesterovAcceleration:
-                prev_dk = 0 * prev_dk
+            failedAcceleration += 1
+            accelerator.accepted(False)
+            if failedAcceleration >= maxFailedAcceleration:
+                accelerator.reset()
                 resetIt = global_iteration
-                failedNesterovAcceleration = 0
-                restartIteration = global_iteration # reset RNA has no effect.
-                print("Reset Nesterov acceleration after ", maxFailedNesterovAcceleration, " consecutive failures.")
+                failedAcceleration = 0
+                print("Reset", accelerator.name, "acceleration after",
+                      maxFailedAcceleration, "consecutive failures.")
 
         maxPctV = np.maximum(1.001, np.sqrt(maxPct)) # max 0.1 % AAA
-        nonfinite_trial = (
-            not np.isfinite(dre_bfgs) or not np.isfinite(primal_cost_v))
-        if strict_trial_safeguard:
-            reject_trial = should_reject_trial(
-                ls_it,
-                line_search_iterations,
-                dre_bfgs,
-                primal_cost_v,
-                lastCostDRE_bfgs,
-                primal_cost_v_before,
-                maxPct,
-                maxPctV,
-            )
-        else:
-            reject_trial = (
-                ls_it == line_search_iterations - 1
-                and (
-                    nonfinite_trial
-                    or (
-                        beMin < globalBlockEigUpperLimit
-                        and dre_bfgs > maxPct * lastCostDRE_bfgs
-                        and primal_cost_v > maxPctV * primal_cost_v_before
-                    )
-                )
-            )
-        if reject_trial:
+        if (beMin < globalBlockEigUpperLimit) and (ls_it == line_search_iterations-1) and \
+            (dre_bfgs > maxPct * lastCostDRE_bfgs) and (primal_cost_v > maxPctV * primal_cost_v_before):
             print("Rejected is primal cost (v) bad or what", primal_cost_v, " > ", maxPctV * primal_cost_v_before, " > ", primal_cost_v_before, " * ", maxPctV)
             print("Rejected is dre cost (v) bad or what", dre_bfgs, " > ", maxPct * lastCostDRE_bfgs, " > ", lastCostDRE_bfgs, " * ", maxPct)
 
@@ -1851,15 +1518,9 @@ for global_iteration in range(global_iterations):
             # IDEA: verify cost here.
             CheckCost = True # temporal test. it appears odd that this is so bad. Maybe set be very strict for one iteration?
             if CheckCost:
-                primal_cost_v_check, _ = primal_cost_push_pull(
-                    camera_indices_in_cluster, point_indices_in_cluster,
-                    poses_in_cluster, landmarks, kClusters)
+                primal_cost_v_check = primal_cost_push_pull(camera_indices_in_cluster, poses_in_cluster, kClusters)
                 primal_cost_v_check = np.sum(primal_cost_v_check)
-                print(
-                    "Checking cost after reset: f(v_best)=",
-                    rounded_cost(primal_cost_v_check),
-                    " vs. f(v)=", rounded_cost(primal_cost_v),
-                    " vs. f(u)=", rounded_cost(primal_cost_u))
+                print("Checking cost after reset: f(v_best)=", round(primal_cost_v_check), " vs. f(v)=", round(primal_cost_v), " vs. f(u)=", round(primal_cost_u))
 
             ############
             # VERSION U is doing nothing actually. This is differetn if taking actula steps as below.
@@ -1873,17 +1534,14 @@ for global_iteration in range(global_iterations):
                 blockEig_in_cluster[ci] = np.minimum(blockEig_in_cluster[ci] * be_mult, globalBlockEigUpperLimit)
             print("Be *= ", be_mult, " -> Be= ", blockEig_in_cluster, " LipJ " , np.mean(LipJ))
 
-            # TODO: equalize / reset nesterov(acceleration) here.
-            AlsoResetNesterovAcceleration = True # test on 646, 1266, 1064, 961, 427, 1778 -> no conclusion.
-            if AlsoResetNesterovAcceleration:
-                prev_dk = 0 * prev_dk
+            AlsoResetAcceleration = True
+            if AlsoResetAcceleration:
+                accelerator.reset()
                 resetIt = global_iteration
-                print("Reset Nesterov acceleration after ", failedNesterovAcceleration, " failures.")
-                failedNesterovAcceleration = 0
-            lastCostDRE_bfgs = (
-                bestCost
-                if strict_trial_safeguard or nonfinite_trial
-                else dre_bfgs)
+                print("Reset", accelerator.name, "acceleration after",
+                      failedAcceleration, "failures.")
+                failedAcceleration = 0
+            lastCostDRE_bfgs = dre_bfgs # does not happen? needed to not keep running in it. Yet demanding Lip < X to enter should work
             # THIS AVOIDS INSTANT REJECTION OF NEXT STEP (resetting this best dre cost) unless very bad result in next step.
 
             print(" ************** REVERTED iteration **************, DRE cost set to ", lastCostDRE_bfgs, \
@@ -1928,95 +1586,17 @@ for global_iteration in range(global_iterations):
                 poses_v = poses_v_bfgs.copy()
 
                 if ls_it != line_search_iterations-1:
-                    #print("Reset counter after ", failedNesterovAcceleration , " failed acceleration steps")
-                    failedNesterovAcceleration = np.maximum(0, failedNesterovAcceleration - 1) # success, reset counter / reduce counter TODO: reset more often 2 fails?
+                    accelerator.accepted(True)
+                    failedAcceleration = np.maximum(0, failedAcceleration - 1)
                 revert_lm = 0 # normal case accept
 
                 break # next full iteration
 
-overall_seconds = time.perf_counter() - client_started_at
-outer_transport_bytes_sent = (
-    transport_bytes_sent - outer_transport_bytes_sent_start)
-outer_transport_bytes_received = (
-    transport_bytes_received - outer_transport_bytes_received_start)
-best_physical_cameras = physical_cameras_from_preconditioned(
-    best_poses_v, unorm, camera_transforms, kClusters)
-pixel_cross_metrics = None
-if DRS_OBJECTIVE_MODEL == "daba_ray":
-    quality_metrics = evaluate_encoded_daba_ray_state(
-        cameras, best_physical_cameras, best_landmarks,
-        camera_indices, point_indices, points_2d)
-    quality_metrics["sumSquaredError"] = 2.0 * quality_metrics["ceresCost"]
-    daba_cameras, daba_points = encoded_daba_ray_state_to_matrix(
-        cameras, best_physical_cameras, best_landmarks)
-    pixel_cross_metrics = evaluate_daba_state_pixel_error(
-        cameras, daba_cameras, daba_points,
-        camera_indices, point_indices, points_2d)
-else:
-    quality_metrics = evaluate_bal_state(
-        best_physical_cameras,
-        best_landmarks,
-        camera_indices,
-        point_indices,
-        points_2d,
-    )
-native_cost_relative_error = abs(
-    quality_metrics["sumSquaredError"] - bestCost
-) / max(
-    1.0, abs(bestCost))
-if require_common_cost_match and native_cost_relative_error > 1e-6:
-    raise RuntimeError(
-        "common evaluator cost does not match native DRS cost: "
-        f'{quality_metrics["sumSquaredError"]} versus {bestCost} '
-        f"(relative error {native_cost_relative_error})")
-objective_trajectory.append({
-    "overallSeconds": overall_seconds,
-    "sumSquaredError": quality_metrics["sumSquaredError"],
-    "source": "final_common_evaluator",
-})
 result_dict = {"base_url": BASE_URL, "file_name": FILE_NAME, "iterations" : global_iterations, \
             "bestCost" : round(bestCost), "bestIt": bestIt, "kClusters" : kClusters, \
             "bestCost60" : round(bestCost60), "bestCost30" : round(bestCost30), \
-            "status": "completed", "accelerator": "nesterov", \
-            "drsScaling": DRS_SCALING_METHOD, \
-            "drsConsensusMetric": DRS_CONSENSUS_METRIC, \
-            "objectiveModel": DRS_OBJECTIVE_MODEL, \
-            "partitionSeconds": partition_seconds, \
-            "overallSeconds": overall_seconds, \
-            "qualityMetrics": quality_metrics, \
-            "pixelCrossMetrics": pixel_cross_metrics, \
-            "initialQualityMetrics": initial_quality_metrics, \
-            "initialPixelQualityMetrics": initial_pixel_quality_metrics, \
-            "objectiveTrajectory": objective_trajectory, \
-            "transportBytesSent": transport_bytes_sent, \
-            "transportBytesReceived": transport_bytes_received, \
-            "outerTransportBytesSent": outer_transport_bytes_sent, \
-            "outerTransportBytesReceived": outer_transport_bytes_received, \
-            "outerTransportBytesPerIteration": \
-                (outer_transport_bytes_sent + outer_transport_bytes_received) \
-                / max(1, global_iterations), \
-            "explicitCostLandmarks": explicit_cost_landmarks, \
-            "strictTrialSafeguard": strict_trial_safeguard, \
-            "nativeCostRelativeError": native_cost_relative_error }
+            "accelerator": accelerator.name }
 results_file = os.environ.get("BUNDLE_PALM_RESULTS_FILE", "results_server.json")
-state_file = os.environ.get("BUNDLE_PALM_STATE_FILE")
-if state_file:
-    save_bal_state(
-        state_file,
-        best_physical_cameras,
-        best_landmarks,
-        {
-            "base_url": BASE_URL,
-            "file_name": FILE_NAME,
-            "solver": "drs",
-            "objective_model": DRS_OBJECTIVE_MODEL,
-            "iterations": global_iterations,
-            "clusters": kClusters,
-            "best_iteration": bestIt,
-            "quality_metrics": quality_metrics,
-        },
-    )
-    result_dict["stateFile"] = str(Path(state_file).resolve())
 with open(results_file, 'a') as json_file:
     json.dump(result_dict, json_file)
     json_file.write('\n')
