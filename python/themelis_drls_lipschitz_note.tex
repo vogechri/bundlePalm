@@ -1,0 +1,284 @@
+\documentclass[11pt]{article}
+
+\usepackage[a4paper,margin=27mm]{geometry}
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs}
+\usepackage[hidelinks]{hyperref}
+
+\newcommand{\Edr}{\mathcal{E}_{\mathrm{DR}}}
+\newcommand{\norm}[1]{\left\lVert #1\right\rVert}
+
+\title{Douglas--Rachford Line Search and Lipschitz Scaling\\
+for Block-Metric Distributed Bundle Adjustment}
+\author{}
+\date{27 July 2026}
+
+\begin{document}
+\maketitle
+
+\section{Purpose}
+
+This note records what the Douglas--Rachford line-search method of Themelis,
+Stella, and Patrinos actually does, how it differs from the current bundle
+adjustment (BA) safeguard, and why an independent Lipschitz multiplier is a
+more principled next experiment than increasing only the weak-direction
+coupling term.
+
+The relevant sources are the paper
+\emph{Douglas--Rachford Splitting and ADMM for Nonconvex Optimization:
+Accelerated and Newton-Type Linesearch Algorithms} and its reference
+implementation in
+\href{https://github.com/JuliaFirstOrder/ProximalAlgorithms.jl}
+{JuliaFirstOrder/ProximalAlgorithms.jl}, specifically the \texttt{DRLS}
+algorithm.
+
+\section{Fixed-step Douglas--Rachford splitting}
+
+For a composite objective
+\[
+  \min_s\;\varphi_1(s)+\varphi_2(s),
+\]
+one relaxed DRS step is
+\begin{align}
+  u_k &\in \operatorname{prox}_{\gamma\varphi_1}(s_k), \\
+  v_k &\in \operatorname{prox}_{\gamma\varphi_2}(2u_k-s_k), \\
+  \bar s_k &= s_k+\lambda(v_k-u_k),
+  \qquad \lambda\in(0,2).
+\end{align}
+The fixed-point residual is
+\[
+  r_k=u_k-v_k,
+  \qquad
+  \bar s_k=s_k-\lambda r_k.
+\]
+
+For a smooth, possibly nonconvex first term with Lipschitz gradient constant
+$L_f$, the reference implementation chooses
+\begin{equation}
+  \gamma
+  =\alpha\frac{2-\lambda}{2L_f},
+  \qquad \alpha=0.95 \text{ by default}.
+  \label{eq:gamma}
+\end{equation}
+In particular, for $\lambda=1$,
+\begin{equation}
+  \gamma L_f=0.475.
+  \label{eq:default-margin}
+\end{equation}
+This is a fixed stepsize selected from the smoothness bound. The official DRS
+line search does not repeatedly modify $\gamma$ or the proximal coupling after
+a failed accelerated direction.
+
+\section{The official DRE line search}
+
+Let $d_k$ be an arbitrary direction, such as an L-BFGS, Broyden, Anderson, or
+Nesterov direction. The line-search center is
+\begin{equation}
+  s_k(\tau)
+  =\tau(s_k+d_k)+(1-\tau)\bar s_k,
+  \qquad \tau\in[0,1].
+  \label{eq:tau-interpolation}
+\end{equation}
+Thus $\tau=1$ evaluates the proposed accelerated direction and $\tau=0$
+evaluates the nominal DRS fallback $\bar s_k$. Backtracking halves $\tau$ and
+re-evaluates the complete DRS oracle.
+
+For the nonconvex case, define
+\begin{align}
+  a &= \gamma L_f, \\
+  C &= \frac{\lambda}{(1+a)^2}
+       \left(\frac{2-\lambda}{2}-a\right), \\
+  c &= \beta C,
+  \qquad \beta=0.5 \text{ by default}.
+  \label{eq:decrease-constant}
+\end{align}
+The trial is accepted when
+\begin{equation}
+  \Edr\bigl(s_k(\tau)\bigr)
+  \le
+  \Edr(s_k)-\frac{c}{\gamma}\norm{r_k}^2.
+  \label{eq:drls-acceptance}
+\end{equation}
+Under the exact fixed-metric assumptions, the nominal $\tau=0$ DRS fallback
+satisfies the sufficient-decrease inequality. Global convergence is therefore
+obtained from the fallback, while the direction is responsible only for
+acceleration.
+
+With the defaults $\lambda=1$, $\alpha=0.95$, and $\beta=0.5$,
+\begin{align}
+  a &= 0.475, \\
+  C &= \frac{0.5-0.475}{(1+0.475)^2}
+     \approx 0.01149095, \\
+  c &\approx 0.00574548.
+\end{align}
+
+\section{Block-metric interpretation}
+
+The BA implementation uses a block metric $M\succ0$ and writes the local
+proximal problem as
+\begin{equation}
+  \min_u\;F(u)+\frac{1}{2}\norm{u-s}_M^2.
+  \label{eq:block-prox}
+\end{equation}
+Here the scalar DRS stepsize is absorbed into $M$, so the implementation uses
+$\gamma=1$ in transformed coordinates. The relevant smoothness constant is
+not the inner Schur-solver constant $0.9$, but
+\begin{equation}
+  L_M
+  =\lambda_{\max}\left(
+    M^{-1/2}\nabla^2F\,M^{-1/2}
+  \right).
+  \label{eq:transformed-lipschitz}
+\end{equation}
+Equation~\eqref{eq:default-margin} therefore suggests the target
+\begin{equation}
+  L_M\le0.475
+  \qquad (\lambda=1,\ \alpha=0.95).
+  \label{eq:metric-target}
+\end{equation}
+
+A shared multiplier $\ell$ on the complete metric,
+\[
+  M=\ell\widehat M,
+\]
+is the metric analog of reducing $\gamma$. It changes proximal strength and
+the DRE norm. If the same multiplier is used by every active copy, it cancels
+from the block-metric consensus projection itself.
+
+\section{Why increasing only \texttt{be} is insufficient}
+
+The current worker uses the approximate camera metric
+\begin{equation}
+  M(\mathrm{be})
+  =a(\mathrm{be})J^\top J
+   +10\,\mathrm{be}\,\operatorname{blockdiag}(J^\top J),
+  \label{eq:current-metric}
+\end{equation}
+where
+\begin{equation}
+  a(\mathrm{be})
+  =\min\left(
+    1.005,
+    0.1\sqrt{\frac{\mathrm{be}}{\mathrm{be}_0}}
+  \right).
+\end{equation}
+The parameter \texttt{be} consequently performs two jobs: it changes the
+curvature coefficient and increases the weak-direction diagonal floor.
+
+Under the optimistic Gauss--Newton Schur bound
+\[
+  S\preceq J^\top J,
+\]
+ignoring the additional diagonal term gives the crude estimate
+\begin{equation}
+  L_M\lesssim\frac{1}{a(\mathrm{be})}.
+  \label{eq:crude-bound}
+\end{equation}
+Even at the \texttt{be=0.5} ceiling, $a=1.005$, hence
+\[
+  L_M\lesssim0.995,
+\]
+which does not reach the target $0.475$. To reach that target using only a
+curvature multiple would require approximately
+\begin{equation}
+  M\succeq\frac{1}{0.475}S
+  \approx2.105S.
+  \label{eq:target-curvature-multiple}
+\end{equation}
+
+The historical Python prototype already separated the two roles:
+\begin{equation}
+  M=\mathrm{LipJ}\,J^\top J
+    +\mathrm{be}\,D_{\mathrm{weak}}.
+  \label{eq:historical-metric}
+\end{equation}
+Its comments report that \texttt{LipJ=2} appeared relatively safe and that
+the Lipschitz multiplier should be increased after DRE failure. The prototype's
+directional descent-lemma estimator was later disabled because it stalled or
+failed on some scenes, so that old estimator should not be restored unchanged.
+
+\section{Scene-931 diagnostic}
+
+The current relative safeguard rejected iteration 7 with the following values:
+\begin{center}
+\begin{tabular}{lrr}
+\toprule
+Quantity & Iteration 6 & Iteration 7 trial \\
+\midrule
+Model DRE & $556{,}783$ & $548{,}423$ \\
+Pixel $f(v)$ & $661{,}402$ & $984{,}722$ \\
+Metric residual squared & $20{,}296.5$ & $7{,}237.95$ \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Using the official default $c\approx0.00574548$ and $\gamma=1$, the required
+decrease based on the iteration-6 residual is only
+\[
+  c\norm{r_6}_M^2
+  \approx0.00574548\times20{,}296.5
+  \approx116.6.
+\]
+The observed model-DRE decrease is approximately
+\[
+  556{,}783-548{,}423=8{,}360,
+\]
+so this trial passes the formal DRLS decrease test by a large margin. It is
+rejected by the current implementation because it uses
+\begin{equation}
+  \max\bigl(\Edr^{\mathrm{model}},f(v)\bigr)
+  \label{eq:sandwich}
+\end{equation}
+and also checks the physical pixel objective.
+
+The physical check cannot yet be removed. In a 90-iteration probe with only
+nonfinite rejection, model-DRE decrease coexisted with pixel-SSE excursions
+between $10^{16}$ and $10^{21}$, and the best SSE was only about $6.41$ million.
+This does not contradict the DRLS theorem: the current BA oracle uses one
+finite Gauss--Newton step, refreshes its metric, and has a special
+preconditioning-only first call. It is not the exact fixed-metric proximal
+oracle assumed by the theorem.
+
+\section{Recommended controlled experiment}
+
+Separate the curvature multiplier from the weak-direction floor:
+\begin{equation}
+  M=\ell J^\top J+\mathrm{be}\,D_{\mathrm{weak}}.
+  \label{eq:proposed-metric}
+\end{equation}
+Keep \texttt{be=5e-5} fixed and sweep
+\begin{equation}
+  \ell\in\{1.005,\ 2.0,\ 2.105,\ 4.0\}
+  \label{eq:lip-sweep}
+\end{equation}
+under both the DABA and DRS local trust-region policies. The value $2.105$ is
+the theory-motivated threshold from
+Equation~\eqref{eq:target-curvature-multiple}; $2.0$ reproduces the strongest
+historical hint; and $4.0$ tests margin beyond the approximate Hessian bound.
+
+The first experiment should use a fixed $\ell$ for the entire run. If this
+removes the stale rejection sequence without unacceptable objective or runtime
+regression, a second stage can estimate
+Equation~\eqref{eq:transformed-lipschitz} from the reduced Schur operator and
+select $\ell$ automatically. Acceleration and its $\tau$ line search should be
+added only after the nominal fixed-metric oracle is stable.
+
+\section{Conclusions}
+
+The official DRLS method supports three conclusions relevant to the current BA
+failure:
+\begin{enumerate}
+  \item The Lipschitz constant determines the DRS stepsize or, equivalently,
+        the global scale of the proximal metric.
+  \item The accelerated line search backtracks the direction toward a nominal
+        DRS fallback; it does not repair a bad nominal map by increasing a
+        weak-direction coupling term.
+  \item The current model-DRE and physical-primal disagreement is evidence that
+        finite-prox and variable-metric errors must be measured, not a reason
+        to discard the physical safeguard immediately.
+\end{enumerate}
+
+The clean next change is therefore an independent fixed curvature/Lipschitz
+multiplier, with \texttt{be} retained only as a numerical floor.
+
+\end{document}
