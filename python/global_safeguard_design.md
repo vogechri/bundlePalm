@@ -14,9 +14,9 @@ The validated catastrophic guard rejects only a nonfinite candidate or a
 one-step global pixel-SSE increase greater than `1e6`. This threshold is an
 engineering numerical-failure detector, not a convergence condition.
 
-The mature DRS safeguard is more principled and should be the model for the
-paper. It uses relative thresholds against accepted references and rejects only
-when both the DRE merit and global primal cost deteriorate:
+The mature BA implementation uses relative thresholds against accepted
+references and rejects only when both its sandwiched DRE diagnostic and global
+primal cost deteriorate:
 
 $$
 E_{\mathrm{trial}}>\alpha_k E_{\mathrm{ref}}
@@ -28,7 +28,78 @@ $$
 In `client_acc.py`, these factors are `maxPct` and `maxPctV`. They tighten over
 the run. This relative conjunction permits nonmonotone accelerated progress
 while rejecting trials for which both splitting merit and physical BA quality
-become worse. Nonfinite rejection remains unconditional.
+become worse. Nonfinite rejection remains unconditional. This is an engineering
+BA safeguard, not the line search in Themelis, Stella, and Patrinos.
+
+## Official Douglas--Rachford Line Search
+
+The accelerated paper points to `ProximalAlgorithms.jl`, now maintained at
+`JuliaFirstOrder/ProximalAlgorithms.jl`. Its `DRLS` implementation chooses a
+fixed DRS stepsize from the smoothness constant. In the nonconvex case,
+
+$$
+\gamma=\alpha\frac{2-\lambda}{2L_f},
+\qquad \alpha=0.95 \text{ by default}.
+$$
+
+For $\lambda=1$, this gives $\gamma L_f=0.475$. The implementation computes
+the positive theoretical decrease coefficient
+
+$$
+C=\frac{\lambda}{(1+a)^2}
+\left(\frac{2-\lambda}{2}-a\right),
+\qquad a=\gamma L_f,
+$$
+
+and uses $c=\beta C$ with default $\beta=0.5$. A trial is accepted when
+
+$$
+E_{\mathrm{DR}}(s_{\mathrm{trial}})
+\le E_{\mathrm{DR}}(s_k)-\frac{c}{\gamma}\lVert u_k-v_k\rVert^2.
+$$
+
+Backtracking halves only the interpolation parameter $\tau$ between an
+arbitrary accelerated direction and the nominal DRS point. The final
+$\tau=0$ trial is the nominal DRS fallback. The official `DRLS` implementation
+does not increase the proximal coupling or adapt $\gamma$ inside this line
+search; it assumes a valid $L_f$ and hence an admissible fixed $\gamma$.
+
+For the block-metric BA formulation with $\gamma=1$ absorbed into the metric,
+the corresponding smoothness quantity is
+
+$$
+L_M=\lambda_{\max}
+\left(M^{-1/2}\nabla^2F\,M^{-1/2}\right).
+$$
+
+The default DRLS margin targets $L_M\le0.475$ for $\lambda=1$. A global
+multiplier on the complete proximal metric is therefore the clean analog of
+reducing $\gamma$. The weak-direction diagonal floor is a separate numerical
+regularizer and should not also serve as the Lipschitz multiplier.
+
+The current worker entangles these roles:
+
+$$
+M=\min\left(1.005,0.1\sqrt{\mathrm{be}/\mathrm{be}_0}\right)J^\top J
++10\,\mathrm{be}\,\operatorname{blockdiag}(J^\top J).
+$$
+
+Even at the `be=0.5` ceiling, the curvature coefficient is only `1.005`. Under
+the optimistic Gauss--Newton Schur bound $S\preceq J^\top J$, this gives only
+$L_M\lesssim0.995$ before accounting for the diagonal term, not the DRLS target
+$0.475$. This explains why increasing only `be` need not establish the
+stepsize condition.
+
+The theoretical DRE must also be distinguished from the implementation's
+`max(DRE_model, f(v))` sandwich. On scene 931, iteration 6 to 7 decreases the
+model DRE from approximately `556783` to `548423`. With the official defaults,
+the required decrease is only about `117`, so this trial passes the formal
+DRLS test even though pixel $f(v)$ rises from `661402` to `984722`. Conversely,
+an unguarded 90-iteration probe showed that model-DRE decrease can coexist with
+pixel SSE excursions of $10^{16}$--$10^{21}$ under the present finite-GN,
+refreshed-metric oracle. Therefore the model DRE cannot simply replace the
+physical primal guard until the local proximal defect and metric assumptions
+are controlled.
 
 ## What Is Being Safeguarded
 
