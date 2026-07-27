@@ -349,6 +349,7 @@ class AdmmWorkerClient:
         landmarks,
         cluster_count,
         refinement_steps,
+        use_landmark_state=False,
     ):
         self.phase_id += 1
         phase_id = self.phase_id
@@ -358,6 +359,8 @@ class AdmmWorkerClient:
             request = test_pb2.request_proto()
             update = request.cost_update
             update.cameras[:] = consensus[unique_cameras].ravel()
+            if use_landmark_state:
+                update.landmarks[:] = landmarks[unique_points].ravel()
             update.cluster_id = cluster_id
             update.run_id = self.run_id
             update.phase_id = phase_id

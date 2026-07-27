@@ -88,7 +88,7 @@ def parse_arguments():
     )
     parser.add_argument(
         "--consensus-landmark-refinement-policy",
-        choices=("safeguard", "reporting"),
+        choices=("safeguard", "reporting", "final"),
         default="safeguard",
     )
     parser.add_argument(
@@ -418,6 +418,9 @@ def main():
     trust_region_recovery_ratio = 1.0
     trajectory = []
     termination_reason = "iteration_limit"
+    final_polishing_applied = False
+    final_polishing_initial_sse = float("nan")
+    final_polishing_refined_sse = float("nan")
 
     worker = DrsWorkerClient()
     try:
@@ -545,7 +548,10 @@ def main():
             )
             candidate_landmarks = landmarks
             refined_candidate_metrics = None
-            if arguments.consensus_landmark_refinement_steps > 0:
+            if (
+                arguments.consensus_landmark_refinement_steps > 0
+                and arguments.consensus_landmark_refinement_policy != "final"
+            ):
                 _, candidate_landmarks = worker.refine_landmarks_at_consensus(
                     camera_indices_in_cluster,
                     point_indices_in_cluster,
@@ -903,6 +909,32 @@ def main():
             if recovery_exhausted:
                 termination_reason = "recovery_exhausted"
                 break
+        if (
+            arguments.consensus_landmark_refinement_steps > 0
+            and arguments.consensus_landmark_refinement_policy == "final"
+        ):
+            final_polishing_applied = True
+            final_polishing_initial_sse = best_sse
+            _, refined_points = worker.refine_landmarks_at_consensus(
+                camera_indices_in_cluster,
+                point_indices_in_cluster,
+                to_scaled_cameras(best_cameras, camera_scaling),
+                best_points,
+                cluster_count,
+                arguments.consensus_landmark_refinement_steps,
+                use_landmark_state=True,
+            )
+            refined_metrics = evaluate_bal_state(
+                best_cameras,
+                refined_points,
+                camera_indices,
+                point_indices,
+                observations,
+            )
+            final_polishing_refined_sse = refined_metrics["sumSquaredError"]
+            if final_polishing_refined_sse < best_sse:
+                best_sse = final_polishing_refined_sse
+                best_points = refined_points
     finally:
         sent_bytes = worker.sent_bytes
         received_bytes = worker.received_bytes
@@ -948,6 +980,9 @@ def main():
         "consensusLandmarkRefinementPolicy": (
             arguments.consensus_landmark_refinement_policy
         ),
+        "finalLandmarkPolishingApplied": final_polishing_applied,
+        "finalLandmarkPolishingInitialSSE": final_polishing_initial_sse,
+        "finalLandmarkPolishingRefinedSSE": final_polishing_refined_sse,
         "targetTransformedLipschitz": (
             arguments.target_transformed_lipschitz
         ),
