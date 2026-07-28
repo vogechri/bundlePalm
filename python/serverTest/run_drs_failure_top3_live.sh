@@ -134,18 +134,17 @@ fi
 
 cleanup_worker() {
   if [[ -n "$WORKER_PID" ]] && kill -0 "$WORKER_PID" 2>/dev/null; then
-    terminate_process_tree "$WORKER_PID"
+    kill -TERM -- "-$WORKER_PID" 2>/dev/null || true
+    for _ in {1..50}; do
+      kill -0 "$WORKER_PID" 2>/dev/null || break
+      read -r -t 0.1 _ || true
+    done
+    if kill -0 "$WORKER_PID" 2>/dev/null; then
+      kill -KILL -- "-$WORKER_PID" 2>/dev/null || true
+    fi
     wait "$WORKER_PID" 2>/dev/null || true
   fi
   WORKER_PID=""
-}
-
-terminate_process_tree() {
-  local parent=$1 child
-  while read -r child; do
-    [[ -n "$child" ]] && terminate_process_tree "$child"
-  done < <(pgrep -P "$parent" 2>/dev/null || true)
-  kill -TERM "$parent" 2>/dev/null || true
 }
 
 trap cleanup_worker EXIT
@@ -238,7 +237,7 @@ for problem in "${PROBLEMS[@]}"; do
     echo "Coordinator log: $log_file"
     echo "Worker log:      $worker_log"
     cleanup_worker
-    (cd "$SCRIPT_DIR" && exec /usr/bin/time -v -o "$worker_time" \
+    (cd "$SCRIPT_DIR" && exec setsid /usr/bin/time -v -o "$worker_time" \
       env BUNDLE_PALM_REQUEST_PORT="$REQUEST_PORT" \
           BUNDLE_PALM_RESULT_PORT="$RESULT_PORT" \
           BUNDLE_PALM_THREADS_PER_CLUSTER="$THREADS_PER_CLUSTER" "$WORKER") \
