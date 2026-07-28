@@ -10,6 +10,7 @@ WORKER=${WORKER:-"$SCRIPT_DIR/build_admm/zeromq_cpp_server_ex"}
 PROTO_BUILD=${PROTO_BUILD:-"$SCRIPT_DIR/build_admm"}
 OUTPUT_DIR=${OUTPUT_DIR:-"$WORKSPACE/benchmark_results/drs_failure_top3_i30_k10_k20_k30"}
 PROBLEM_FILTER=${PROBLEM_FILTER:-"646 931 1266"}
+ALL_PROBLEMS=${ALL_PROBLEMS:-0}
 CLUSTERS_LIST=${CLUSTERS_LIST:-"10 20 30"}
 ITERATIONS=${ITERATIONS:-30}
 LOCAL_STEPS=${LOCAL_STEPS:-1}
@@ -19,6 +20,7 @@ TRUST_REGION_POLICY=${TRUST_REGION_POLICY:-daba}
 PERSISTENT_TRUST_REGION=${PERSISTENT_TRUST_REGION:-0}
 TRUST_REGION_RECOVERY_RATIO=${TRUST_REGION_RECOVERY_RATIO:-0.5}
 CAMERA_SCALING=${CAMERA_SCALING:-jacobi_initial}
+CLUSTERING=${CLUSTERING:-${BUNDLE_PALM_CLUSTERING:-landmark_scalable}}
 PROXIMAL_METRIC=${PROXIMAL_METRIC:-block}
 CONSENSUS_METRIC=${CONSENSUS_METRIC:-${BUNDLE_PALM_DRS_CONSENSUS_METRIC:-full}}
 BLOCK_REGULARIZATION=${BLOCK_REGULARIZATION:-5e-5}
@@ -34,6 +36,9 @@ CONSENSUS_LANDMARK_REFINEMENT_POLICY=${CONSENSUS_LANDMARK_REFINEMENT_POLICY:-saf
 TARGET_TRANSFORMED_LIPSCHITZ=${TARGET_TRANSFORMED_LIPSCHITZ:-0.475}
 MAXIMUM_BLOCK_REGULARIZATION=${MAXIMUM_BLOCK_REGULARIZATION:-0.5}
 RELAXATION=${RELAXATION:-1.0}
+OUTER_ACCELERATION=${OUTER_ACCELERATION:-none}
+LINE_SEARCH_GRID=${LINE_SEARCH_GRID:-0,1}
+ACCELERATION_RESTART_AFTER=${ACCELERATION_RESTART_AFTER:-3}
 PENALTY_MULTIPLIER=${PENALTY_MULTIPLIER:-1.0}
 SAFEGUARD_MODE=${SAFEGUARD_MODE:-relative}
 DRE_RELATIVE_INCREASE=${DRE_RELATIVE_INCREASE:-0.01}
@@ -47,6 +52,14 @@ OVERWRITE=${OVERWRITE:-0}
 REQUEST_PORT=${BUNDLE_PALM_REQUEST_PORT:-6656}
 RESULT_PORT=${BUNDLE_PALM_RESULT_PORT:-6657}
 VARIANT_NAME="plain_drs_${PROXIMAL_METRIC}_${CONSENSUS_METRIC}"
+if [[ "$OUTER_ACCELERATION" != "none" ]]; then
+  grid_name=${LINE_SEARCH_GRID//,/}
+  grid_name=${grid_name//./p}
+  VARIANT_NAME="${OUTER_ACCELERATION}_ls${grid_name}_${PROXIMAL_METRIC}_${CONSENSUS_METRIC}"
+fi
+if [[ "$CLUSTERING" != "landmark_scalable" ]]; then
+  VARIANT_NAME="${VARIANT_NAME}_${CLUSTERING}"
+fi
 if [[ "$BLOCK_CURVATURE_MULTIPLIER" != "0" && "$BLOCK_CURVATURE_MULTIPLIER" != "0.0" ]]; then
   VARIANT_NAME="${VARIANT_NAME}_lip${BLOCK_CURVATURE_MULTIPLIER}"
 fi
@@ -75,7 +88,7 @@ RESULT_FILE="$OUTPUT_DIR/${VARIANT_NAME}.jsonl"
 STATUS_FILE="$OUTPUT_DIR/status.tsv"
 WORKER_PID=""
 
-for flag in LIVE_OUTPUT DEBUG_OUTPUT OVERWRITE PERSISTENT_TRUST_REGION; do
+for flag in LIVE_OUTPUT DEBUG_OUTPUT OVERWRITE PERSISTENT_TRUST_REGION ALL_PROBLEMS; do
   value=${!flag}
   if [[ "$value" != "0" && "$value" != "1" ]]; then
     echo "$flag must be 0 or 1" >&2
@@ -98,6 +111,22 @@ PROBLEMS=(
   "1723|problem-1723-156502-pre.txt"
 )
 
+if [[ "$ALL_PROBLEMS" == "1" ]]; then
+  PROBLEMS=()
+  while IFS= read -r dataset; do
+    scene=${dataset#problem-}
+    scene=${scene%%-*}
+    PROBLEMS+=("$scene|$dataset")
+  done < <(
+    find "$WORKSPACE" -maxdepth 1 -type f -name 'problem-*-pre.txt' \
+      -printf '%f\n' | sort -V
+  )
+  if [[ ${#PROBLEMS[@]} -ne 29 ]]; then
+    echo "Expected 29 top-level BAL problems, found ${#PROBLEMS[@]}" >&2
+    exit 2
+  fi
+fi
+
 mkdir -p "$OUTPUT_DIR/logs" "$OUTPUT_DIR/states" "$OUTPUT_DIR/memory"
 if [[ ! -f "$STATUS_FILE" ]]; then
   printf 'variant\tdataset\tclusters\titerations\tlocal_steps\tthreads_per_cluster\tstatus\texit_code\telapsed_seconds\tcoordinator_max_rss_kb\tworker_max_rss_kb\n' > "$STATUS_FILE"
@@ -105,17 +134,23 @@ fi
 
 cleanup_worker() {
   if [[ -n "$WORKER_PID" ]] && kill -0 "$WORKER_PID" 2>/dev/null; then
-    mapfile -t worker_children < <(pgrep -P "$WORKER_PID" || true)
-    if [[ ${#worker_children[@]} -gt 0 ]]; then
-      kill "${worker_children[@]}" 2>/dev/null || true
-    else
-      kill "$WORKER_PID" 2>/dev/null || true
-    fi
+    terminate_process_tree "$WORKER_PID"
     wait "$WORKER_PID" 2>/dev/null || true
   fi
   WORKER_PID=""
 }
-trap cleanup_worker EXIT INT TERM
+
+terminate_process_tree() {
+  local parent=$1 child
+  while read -r child; do
+    [[ -n "$child" ]] && terminate_process_tree "$child"
+  done < <(pgrep -P "$parent" 2>/dev/null || true)
+  kill -TERM "$parent" 2>/dev/null || true
+}
+
+trap cleanup_worker EXIT
+trap 'cleanup_worker; exit 130' INT
+trap 'cleanup_worker; exit 143' TERM
 
 case_exists() {
   local dataset=$1 clusters=$2
@@ -181,7 +216,7 @@ read_max_rss() {
 
 for problem in "${PROBLEMS[@]}"; do
   IFS='|' read -r scene dataset <<< "$problem"
-  if [[ " $PROBLEM_FILTER " != *" $scene "* ]]; then
+  if [[ -n "$PROBLEM_FILTER" && " $PROBLEM_FILTER " != *" $scene "* ]]; then
     continue
   fi
   for clusters in $CLUSTERS_LIST; do
@@ -240,6 +275,10 @@ for problem in "${PROBLEMS[@]}"; do
             --trust-region-policy "$TRUST_REGION_POLICY" \
             --trust-region-recovery-ratio "$TRUST_REGION_RECOVERY_RATIO" \
             --camera-scaling "$CAMERA_SCALING" \
+            --clustering "$CLUSTERING" \
+            --outer-acceleration "$OUTER_ACCELERATION" \
+            --line-search-grid "$LINE_SEARCH_GRID" \
+            --acceleration-restart-after "$ACCELERATION_RESTART_AFTER" \
             --proximal-metric "$PROXIMAL_METRIC" \
             --consensus-metric "$CONSENSUS_METRIC" \
             --block-regularization "$BLOCK_REGULARIZATION" \
@@ -279,6 +318,10 @@ for problem in "${PROBLEMS[@]}"; do
             --trust-region-policy "$TRUST_REGION_POLICY" \
             --trust-region-recovery-ratio "$TRUST_REGION_RECOVERY_RATIO" \
             --camera-scaling "$CAMERA_SCALING" \
+            --clustering "$CLUSTERING" \
+            --outer-acceleration "$OUTER_ACCELERATION" \
+            --line-search-grid "$LINE_SEARCH_GRID" \
+            --acceleration-restart-after "$ACCELERATION_RESTART_AFTER" \
             --proximal-metric "$PROXIMAL_METRIC" \
             --consensus-metric "$CONSENSUS_METRIC" \
             --block-regularization "$BLOCK_REGULARIZATION" \

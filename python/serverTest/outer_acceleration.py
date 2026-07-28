@@ -32,6 +32,17 @@ def _env_int(name, default, minimum=1):
     return value
 
 
+def interpolate_line_search_center(nominal, accelerated, weight):
+    """Interpolate from the nominal DRS image to an accelerated center."""
+    if not np.isfinite(weight) or not 0.0 <= weight <= 1.0:
+        raise ValueError("line-search weight must be in [0, 1]")
+    nominal = np.asarray(nominal, dtype=float)
+    accelerated = np.asarray(accelerated, dtype=float)
+    if nominal.shape != accelerated.shape:
+        raise ValueError("line-search centers must have equal shape")
+    return nominal + weight * (accelerated - nominal)
+
+
 class FixedPointAccelerator:
     """Base class for proposals around the fixed-point map ``mapped = T(x)``."""
 

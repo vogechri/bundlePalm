@@ -8,6 +8,7 @@ from admm_acceleration import (
     nesterov_coefficient,
     should_fallback_acceleration,
 )
+from outer_acceleration import LegacyNesterov, interpolate_line_search_center
 
 
 def test_nesterov_coefficient_restarts_with_two_plain_steps():
@@ -53,3 +54,29 @@ def test_acceleration_falls_back_after_leaving_established_best_basin():
 def test_nonfinite_accelerated_candidate_falls_back(value):
     assert should_fallback_acceleration(
         value, 10.0, 5.0, 1.0, 1.0, 1.01, 1.01, 1e4)
+
+
+def test_legacy_nesterov_has_two_nominal_startup_proposals():
+    accelerator = LegacyNesterov()
+    current = np.array([0.0])
+    mapped = np.array([2.0])
+    first, first_accelerated = accelerator.propose(current, mapped, 0)
+    second, second_accelerated = accelerator.propose(mapped, np.array([3.0]), 1)
+    third, third_accelerated = accelerator.propose(
+        np.array([3.0]), np.array([4.0]), 2)
+    np.testing.assert_allclose(first, [2.0])
+    np.testing.assert_allclose(second, [3.0])
+    np.testing.assert_allclose(third, [4.25])
+    assert not first_accelerated
+    assert not second_accelerated
+    assert third_accelerated
+
+
+@pytest.mark.parametrize(
+    ("weight", "expected"),
+    [(0.0, [2.0, 4.0]), (0.5, [3.0, 6.0]), (1.0, [4.0, 8.0])],
+)
+def test_line_search_center_weights(weight, expected):
+    result = interpolate_line_search_center(
+        np.array([2.0, 4.0]), np.array([4.0, 8.0]), weight)
+    np.testing.assert_allclose(result, expected)

@@ -161,6 +161,7 @@ class AdmmWorkerClient:
         block_curvature_multiplier=0.0,
         metric_diagnostic_iterations=0,
         landmark_refinement_steps=0,
+        override_landmarks=False,
         return_metric_blocks=False,
         return_metric_diagnostics=False,
     ):
@@ -228,7 +229,7 @@ class AdmmWorkerClient:
                 update.persistent_trust_region = persistent_trust_region
                 update.trust_region_recovery_ratio = (
                     trust_region_recovery_ratio)
-                if int(revert_landmarks) == 2:
+                if int(revert_landmarks) == 2 or override_landmarks:
                     update.landmarks[:] = landmarks[unique_points].ravel()
             self._send(request)
 

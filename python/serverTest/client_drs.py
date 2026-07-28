@@ -15,7 +15,10 @@ from bal_evaluator import (
     save_bal_state,
 )
 from client_admm import AdmmWorkerClient as DrsWorkerClient
-from clustering import cluster_by_landmark_scalable_stable
+from clustering import (
+    cluster_by_landmark_scalable,
+    cluster_by_landmark_scalable_stable,
+)
 from drs_consensus import (
     complete_douglas_rachford_envelope,
     dre_splitting_term,
@@ -30,6 +33,7 @@ from drs_safeguards import (
     relative_safeguard_ratios,
     should_reject_trial,
 )
+from outer_acceleration import create_accelerator, interpolate_line_search_center
 from admm_scaling import (
     compute_initial_jacobi_scaling,
     to_physical_cameras,
@@ -60,6 +64,13 @@ def parse_arguments():
     parser.add_argument("--camera-scaling-maximum-ratio", type=float)
     parser.add_argument("--camera-scaling-clipping-percentile", type=float)
     parser.add_argument("--relaxation", type=float, default=1.0)
+    parser.add_argument(
+        "--outer-acceleration", choices=("none", "nesterov"), default="none"
+    )
+    parser.add_argument(
+        "--line-search-grid", choices=("0,1", "0,0.5,1"), default="0,1"
+    )
+    parser.add_argument("--acceleration-restart-after", type=int, default=3)
     parser.add_argument("--penalty-multiplier", type=float, default=1.0)
     parser.add_argument(
         "--proximal-metric", choices=("scalar", "block"), default="scalar"
@@ -113,6 +124,11 @@ def parse_arguments():
     parser.add_argument("--residual-balance-slack", type=float, default=0.01)
     parser.add_argument("--minimum-camera-landmarks", type=int, default=20)
     parser.add_argument("--max-refinement-passes", type=int, default=3)
+    parser.add_argument(
+        "--clustering",
+        choices=("landmark_scalable", "landmark_scalable_stable"),
+        default="landmark_scalable",
+    )
     parser.add_argument("--debug-output", action="store_true")
     return parser.parse_args()
 
@@ -124,6 +140,16 @@ def validate_arguments(arguments):
         raise ValueError("local steps and threads must be positive")
     if not 0.0 < arguments.relaxation < 2.0:
         raise ValueError("relaxation must be in (0, 2)")
+    if arguments.acceleration_restart_after <= 0:
+        raise ValueError("acceleration restart count must be positive")
+    if (
+        arguments.outer_acceleration != "none"
+        and arguments.consensus_landmark_refinement_steps > 0
+        and arguments.consensus_landmark_refinement_policy != "final"
+    ):
+        raise ValueError(
+            "accelerated trials support only final consensus landmark refinement"
+        )
     if arguments.penalty_multiplier <= 0.0:
         raise ValueError("penalty multiplier must be positive")
     if arguments.block_regularization <= 0.0:
@@ -255,6 +281,10 @@ def print_iteration(row, best_sse, best_iteration, prox_costs):
         f"trial_f(v)={row['candidateSumSquaredError']:.6g} "
         f"best={best_sse:.6g}@{best_iteration} "
         f"gain={row['referenceSumSquaredError'] - row['candidateSumSquaredError']:.6g} "
+        f"accel_w={row.get('acceptedAccelerationWeight', 0):g} "
+        f"trials={row.get('acceleratedTrials', 0)} "
+        f"oracle={row.get('oracleCallsThisIteration', 1)}/"
+        f"{row.get('proximalOracleCalls', row['iteration'] + 1)} "
         f"elapsed={row['overallSeconds']:.3f}s",
         file=sys.stderr,
         flush=True,
@@ -328,12 +358,17 @@ def main():
         )
 
     partition_started = time.perf_counter()
+    partitioner = (
+        cluster_by_landmark_scalable
+        if arguments.clustering == "landmark_scalable"
+        else cluster_by_landmark_scalable_stable
+    )
     (
         camera_indices_in_cluster,
         point_indices_in_cluster,
         points_2d_in_cluster,
         cluster_count,
-    ) = cluster_by_landmark_scalable_stable(
+    ) = partitioner(
         camera_indices,
         observations,
         point_indices,
@@ -413,7 +448,7 @@ def main():
     accepted_consensus = consensus.copy()
     accepted_landmarks = landmarks.copy()
     rejected_count = 0
-    accepted_since_curvature_change = 0
+    accepted_since_curvature_increase = 0
     revert_landmark_mode = 0
     trust_region_recovery_ratio = 1.0
     trajectory = []
@@ -421,6 +456,18 @@ def main():
     final_polishing_applied = False
     final_polishing_initial_sse = float("nan")
     final_polishing_refined_sse = float("nan")
+    initialization_seconds = float("nan")
+    optimization_seconds = float("nan")
+    accelerator = create_accelerator(arguments.outer_acceleration)
+    line_search_weights = tuple(
+        sorted((float(value) for value in arguments.line_search_grid.split(",")),
+               reverse=True)
+    )
+    acceleration_failures = 0
+    accelerated_acceptances = 0
+    nominal_fallbacks = 0
+    proximal_oracle_calls = 0
+    override_landmarks = False
 
     worker = DrsWorkerClient()
     try:
@@ -460,6 +507,8 @@ def main():
             cluster_count,
         )
         accepted_landmarks = landmarks.copy()
+        initialization_seconds = time.perf_counter() - started_at
+        optimization_started_at = time.perf_counter()
         for iteration in range(arguments.iterations):
             reference_sse = accepted_metrics["sumSquaredError"]
             reference_dre = accepted_dre
@@ -468,6 +517,13 @@ def main():
             proximal_block_curvature_multiplier = block_curvature_multiplier
             recovery_exhausted = False
             curvature_decay_applied = False
+            oracle_initial_local_cameras = local_cameras.copy()
+            oracle_initial_landmarks = landmarks.copy()
+            oracle_input_centers = centers.copy()
+            oracle_input_consensus = consensus.copy()
+            oracle_calls_this_iteration = 1
+            accelerated_trials = 0
+            accepted_acceleration_weight = 0.0
 
             prox_result = worker.solve_batch(
                 camera_indices_in_cluster,
@@ -501,11 +557,14 @@ def main():
                 landmark_refinement_steps=(
                     arguments.landmark_refinement_steps
                 ),
+                override_landmarks=override_landmarks,
                 return_metric_blocks=(arguments.proximal_metric == "block"),
                 return_metric_diagnostics=(
                     arguments.metric_diagnostic_iterations > 0
                 ),
             )
+            proximal_oracle_calls += 1
+            override_landmarks = False
             if (
                 arguments.proximal_metric == "block"
                 and arguments.metric_diagnostic_iterations > 0
@@ -680,9 +739,264 @@ def main():
                     not np.isfinite(douglas_rachford_envelope)
                     or not np.isfinite(candidate_sse)
                 )
+
+            nominal_trial = {
+                "local_cameras": local_cameras.copy(),
+                "landmarks": landmarks.copy(),
+                "prox_costs": prox_costs.copy(),
+                "raw_metric_blocks": (
+                    raw_metric_blocks.copy()
+                    if raw_metric_blocks is not None else None
+                ),
+                "metric_diagnostics": metric_diagnostics,
+                "candidate_consensus": candidate_consensus.copy(),
+                "candidate_centers": candidate_centers.copy(),
+                "residuals": residuals,
+                "selected_metric_blocks": selected_metric_blocks.copy(),
+                "candidate_metrics": candidate_metrics,
+                "candidate_sse": candidate_sse,
+                "splitting_scale": splitting_scale,
+                "proximal_displacement_cost": proximal_displacement_cost,
+                "local_data_objective": local_data_objective,
+                "splitting_term": splitting_term,
+                "dre_model_envelope": dre_model_envelope,
+                "douglas_rachford_envelope": douglas_rachford_envelope,
+                "rejected": rejected,
+            }
+            acceleration_proposal, proposal_is_accelerated = accelerator.propose(
+                oracle_input_centers,
+                candidate_centers,
+                iteration,
+            )
+            selected_trial = nominal_trial
+            evaluated_accelerated_trial = False
+            if proposal_is_accelerated:
+                for acceleration_weight in line_search_weights:
+                    if acceleration_weight == 0.0:
+                        continue
+                    evaluated_accelerated_trial = True
+                    accelerated_trials += 1
+                    oracle_calls_this_iteration += 1
+                    proximal_oracle_calls += 1
+                    trial_centers = interpolate_line_search_center(
+                        candidate_centers,
+                        acceleration_proposal,
+                        acceleration_weight,
+                    )
+                    trial_local_cameras = oracle_initial_local_cameras.copy()
+                    trial_landmarks = oracle_initial_landmarks.copy()
+                    trial_result = worker.solve_batch(
+                        camera_indices_in_cluster,
+                        point_indices_in_cluster,
+                        points_2d_in_cluster,
+                        local_camera_indices,
+                        local_point_indices,
+                        trial_local_cameras,
+                        trial_landmarks,
+                        trial_centers,
+                        proximal_penalty,
+                        proximal_penalty,
+                        False,
+                        initialize=False,
+                        cluster_count=cluster_count,
+                        local_steps=arguments.local_steps,
+                        local_solver=arguments.local_solver,
+                        trust_region_policy=arguments.trust_region_policy,
+                        camera_scaling=camera_scaling,
+                        revert_landmarks=1,
+                        persistent_trust_region=arguments.persistent_trust_region,
+                        trust_region_recovery_ratio=1.0,
+                        scalar_proximal_prior=(arguments.proximal_metric == "scalar"),
+                        block_regularization=proximal_block_regularization,
+                        block_curvature_multiplier=proximal_block_curvature_multiplier,
+                        metric_diagnostic_iterations=arguments.metric_diagnostic_iterations,
+                        landmark_refinement_steps=arguments.landmark_refinement_steps,
+                        return_metric_blocks=(arguments.proximal_metric == "block"),
+                        return_metric_diagnostics=(arguments.metric_diagnostic_iterations > 0),
+                    )
+                    if (
+                        arguments.proximal_metric == "block"
+                        and arguments.metric_diagnostic_iterations > 0
+                    ):
+                        trial_prox_costs, trial_raw_blocks, trial_diagnostics = trial_result
+                    elif arguments.proximal_metric == "block":
+                        trial_prox_costs, trial_raw_blocks = trial_result
+                        trial_diagnostics = None
+                    else:
+                        trial_prox_costs = trial_result
+                        trial_raw_blocks = None
+                        trial_diagnostics = None
+                    (
+                        trial_consensus,
+                        trial_next_centers,
+                        _,
+                        trial_residuals,
+                        trial_selected_blocks,
+                    ) = drs_step(
+                        trial_local_cameras,
+                        trial_centers,
+                        camera_masks,
+                        oracle_input_consensus,
+                        relaxation=arguments.relaxation,
+                        metric_blocks=trial_raw_blocks,
+                        metric_mode=arguments.consensus_metric,
+                    )
+                    trial_metrics = evaluate_bal_state(
+                        to_physical_cameras(trial_consensus, camera_scaling),
+                        trial_landmarks,
+                        camera_indices,
+                        point_indices,
+                        observations,
+                    )
+                    trial_sse = trial_metrics["sumSquaredError"]
+                    if arguments.proximal_metric == "scalar":
+                        trial_splitting_scale = proximal_penalty
+                        trial_displacement_cost = (
+                            proximal_penalty
+                            * trial_residuals.proximal_displacement_squared
+                        )
+                        trial_local_objective = recover_local_data_objective(
+                            float(np.sum(trial_prox_costs)),
+                            proximal_penalty,
+                            trial_residuals.proximal_displacement_squared,
+                        )
+                    else:
+                        trial_splitting_scale = 1.0
+                        trial_displacement_cost = metric_quadratic_sum(
+                            trial_local_cameras - trial_centers,
+                            trial_raw_blocks,
+                            camera_masks,
+                        )
+                        trial_local_objective = float(np.sum(trial_prox_costs))
+                    trial_splitting_term = dre_splitting_term(
+                        trial_local_cameras,
+                        trial_consensus,
+                        trial_centers,
+                        camera_masks,
+                        trial_splitting_scale,
+                        metric_blocks=trial_selected_blocks,
+                    )
+                    trial_model_dre, trial_dre = complete_douglas_rachford_envelope(
+                        trial_local_objective,
+                        trial_splitting_term,
+                        trial_sse,
+                    )
+                    if arguments.safeguard_mode == "relative":
+                        trial_rejected = should_reject_trial(
+                            0, 1, trial_dre, trial_sse,
+                            reference_dre, reference_sse,
+                            dre_ratio, primal_ratio,
+                        )
+                    elif arguments.safeguard_mode == "catastrophic":
+                        trial_rejected = (
+                            not np.isfinite(trial_sse)
+                            or trial_sse > arguments.catastrophic_ratio * reference_sse
+                        )
+                    else:
+                        trial_rejected = (
+                            not np.isfinite(trial_dre)
+                            or not np.isfinite(trial_sse)
+                        )
+                    if not trial_rejected:
+                        selected_trial = {
+                            "local_cameras": trial_local_cameras,
+                            "landmarks": trial_landmarks,
+                            "prox_costs": trial_prox_costs,
+                            "raw_metric_blocks": trial_raw_blocks,
+                            "metric_diagnostics": trial_diagnostics,
+                            "candidate_consensus": trial_consensus,
+                            "candidate_centers": trial_next_centers,
+                            "residuals": trial_residuals,
+                            "selected_metric_blocks": trial_selected_blocks,
+                            "candidate_metrics": trial_metrics,
+                            "candidate_sse": trial_sse,
+                            "splitting_scale": trial_splitting_scale,
+                            "proximal_displacement_cost": trial_displacement_cost,
+                            "local_data_objective": trial_local_objective,
+                            "splitting_term": trial_splitting_term,
+                            "dre_model_envelope": trial_model_dre,
+                            "douglas_rachford_envelope": trial_dre,
+                            "rejected": False,
+                        }
+                        accepted_acceleration_weight = acceleration_weight
+                        break
+
+            if selected_trial is not nominal_trial:
+                local_cameras = selected_trial["local_cameras"]
+                landmarks = selected_trial["landmarks"]
+                prox_costs = selected_trial["prox_costs"]
+                raw_metric_blocks = selected_trial["raw_metric_blocks"]
+                metric_diagnostics = selected_trial["metric_diagnostics"]
+                candidate_consensus = selected_trial["candidate_consensus"]
+                candidate_centers = selected_trial["candidate_centers"]
+                residuals = selected_trial["residuals"]
+                selected_metric_blocks = selected_trial["selected_metric_blocks"]
+                candidate_metrics = selected_trial["candidate_metrics"]
+                reporting_candidate_metrics = candidate_metrics
+                candidate_landmarks = landmarks
+                candidate_sse = selected_trial["candidate_sse"]
+                splitting_scale = selected_trial["splitting_scale"]
+                proximal_displacement_cost = selected_trial["proximal_displacement_cost"]
+                local_data_objective = selected_trial["local_data_objective"]
+                splitting_term = selected_trial["splitting_term"]
+                dre_model_envelope = selected_trial["dre_model_envelope"]
+                douglas_rachford_envelope = selected_trial["douglas_rachford_envelope"]
+                rejected = False
+                accelerated_acceptances += 1
+                acceleration_failures = 0
+                accelerator.accepted(True)
+            else:
+                local_cameras = nominal_trial["local_cameras"]
+                landmarks = nominal_trial["landmarks"]
+                if evaluated_accelerated_trial and not rejected:
+                    nominal_fallbacks += 1
+                    acceleration_failures += 1
+                    override_landmarks = True
+                    accelerator.accepted(False)
+                    if acceleration_failures >= arguments.acceleration_restart_after:
+                        accelerator.reset()
+                        acceleration_failures = 0
+                elif rejected:
+                    accelerator.reset()
+                    acceleration_failures = 0
+
+            transformed_lipschitz_maximum = (
+                float(np.nanmax(metric_diagnostics["transformedLipschitz"]))
+                if metric_diagnostics is not None
+                and np.any(np.isfinite(metric_diagnostics["transformedLipschitz"]))
+                else float("nan")
+            )
+            themelis_metric_admissible = (
+                np.isfinite(transformed_lipschitz_maximum)
+                and transformed_lipschitz_maximum < themelis_margin
+            )
+            if themelis_metric_admissible:
+                themelis_decrease_constant = 0.5 * (
+                    arguments.relaxation
+                    / (1.0 + transformed_lipschitz_maximum) ** 2
+                    * (themelis_margin - transformed_lipschitz_maximum)
+                )
+                themelis_model_threshold = (
+                    accepted_model_dre
+                    - themelis_decrease_constant * accepted_fixed_point_squared
+                )
+                themelis_decrease_passed = (
+                    dre_model_envelope <= themelis_model_threshold
+                )
+            else:
+                themelis_decrease_constant = float("nan")
+                themelis_model_threshold = float("nan")
+                themelis_decrease_passed = False
+            dre_threshold_exceeded = (
+                not np.isfinite(douglas_rachford_envelope)
+                or douglas_rachford_envelope > dre_ratio * reference_dre
+            )
+            primal_threshold_exceeded = (
+                not np.isfinite(candidate_sse)
+                or candidate_sse > primal_ratio * reference_sse
+            )
             if rejected:
                 rejected_count += 1
-                accepted_since_curvature_change = 0
                 (
                     local_cameras,
                     centers,
@@ -722,6 +1036,8 @@ def main():
                             block_curvature_multiplier
                             > proximal_block_curvature_multiplier
                         )
+                        if proximal_metric_changed:
+                            accepted_since_curvature_increase = 0
                     else:
                         (
                             block_regularization,
@@ -750,10 +1066,10 @@ def main():
                 accepted_landmarks = landmarks.copy()
                 metrics = candidate_metrics
                 recovery_action = "none"
-                accepted_since_curvature_change += 1
+                accepted_since_curvature_increase += 1
                 if (
                     arguments.curvature_decay_after > 0
-                    and accepted_since_curvature_change
+                    and accepted_since_curvature_increase
                     >= arguments.curvature_decay_after
                     and block_curvature_multiplier
                     > arguments.block_curvature_multiplier
@@ -763,7 +1079,7 @@ def main():
                         block_curvature_multiplier
                         * arguments.curvature_decay_ratio,
                     )
-                    accepted_since_curvature_change = 0
+                    accepted_since_curvature_increase = 0
                     curvature_decay_applied = True
 
             if metric_diagnostics is not None and np.any(np.isfinite(
@@ -798,6 +1114,9 @@ def main():
             row = {
                 "iteration": iteration,
                 "overallSeconds": time.perf_counter() - started_at,
+                "optimizationSeconds": (
+                    time.perf_counter() - optimization_started_at
+                ),
                 "sumSquaredError": metrics["sumSquaredError"],
                 "candidateSumSquaredError": candidate_sse,
                 "refinedCandidateSumSquaredError": (
@@ -830,6 +1149,14 @@ def main():
                 "dreThresholdExceeded": bool(dre_threshold_exceeded),
                 "primalThresholdExceeded": bool(primal_threshold_exceeded),
                 "recoveryAction": recovery_action,
+                "outerAcceleration": arguments.outer_acceleration,
+                "lineSearchGrid": arguments.line_search_grid,
+                "acceptedAccelerationWeight": accepted_acceleration_weight,
+                "acceleratedTrials": accelerated_trials,
+                "oracleCallsThisIteration": oracle_calls_this_iteration,
+                "proximalOracleCalls": proximal_oracle_calls,
+                "acceleratedAcceptances": accelerated_acceptances,
+                "nominalFallbacks": nominal_fallbacks,
                 "localProximalObjectiveSum": float(np.sum(prox_costs)),
                 "proximalPenalty": proximal_penalty,
                 "nextPenalty": penalty,
@@ -909,6 +1236,7 @@ def main():
             if recovery_exhausted:
                 termination_reason = "recovery_exhausted"
                 break
+        optimization_seconds = time.perf_counter() - optimization_started_at
         if (
             arguments.consensus_landmark_refinement_steps > 0
             and arguments.consensus_landmark_refinement_policy == "final"
@@ -949,6 +1277,7 @@ def main():
         "dataset": str(Path(arguments.dataset).resolve()),
         "iterations": arguments.iterations,
         "clusters": cluster_count,
+        "clustering": arguments.clustering,
         "localSteps": arguments.local_steps,
         "threadsPerCluster": arguments.threads_per_cluster,
         "localSolver": arguments.local_solver,
@@ -957,7 +1286,15 @@ def main():
         "trustRegionRecoveryRatio": arguments.trust_region_recovery_ratio,
         "cameraScaling": arguments.camera_scaling,
         "scalingSeconds": scaling_seconds,
+        "initializationSeconds": initialization_seconds,
+        "optimizationSeconds": optimization_seconds,
         "relaxation": arguments.relaxation,
+        "outerAcceleration": arguments.outer_acceleration,
+        "lineSearchGrid": arguments.line_search_grid,
+        "accelerationRestartAfter": arguments.acceleration_restart_after,
+        "acceleratedAcceptances": accelerated_acceptances,
+        "nominalFallbacks": nominal_fallbacks,
+        "proximalOracleCalls": proximal_oracle_calls,
         "proximalMetric": arguments.proximal_metric,
         "consensusMetric": arguments.consensus_metric,
         "initialBlockRegularization": arguments.block_regularization,
@@ -1027,6 +1364,7 @@ def main():
             f"be={block_regularization:.6g} "
             f"lip={block_curvature_multiplier:.6g} "
             f"termination={termination_reason} "
+            f"optimization={result['optimizationSeconds']:.3f}s "
             f"overall={result['overallSeconds']:.3f}s\n"
             f"result={output_path} state={arguments.state or '-'}",
             file=sys.stderr,
