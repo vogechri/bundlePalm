@@ -1,5 +1,7 @@
 """Static camera-coordinate scaling for consensus ADMM."""
 
+import warnings
+
 import numpy as np
 import torch
 
@@ -93,10 +95,18 @@ def compute_initial_jacobi_scaling(
         observed_points = torch.tensor(
             points[point_indices[start:stop]], dtype=torch.float64)
         projections = _project_observations(observed_cameras, observed_points)
-        gradient_x = torch.autograd.grad(
-            projections[:, 0].sum(), observed_cameras, retain_graph=True)[0]
-        gradient_y = torch.autograd.grad(
-            projections[:, 1].sum(), observed_cameras)[0]
+        with warnings.catch_warnings():
+            warnings.filterwarnings(
+                "ignore",
+                message=(
+                    "CUDA initialization: The NVIDIA driver on your system "
+                    "is too old.*"
+                ),
+            )
+            gradient_x = torch.autograd.grad(
+                projections[:, 0].sum(), observed_cameras, retain_graph=True)[0]
+            gradient_y = torch.autograd.grad(
+                projections[:, 1].sum(), observed_cameras)[0]
         contribution = (
             gradient_x.square() + gradient_y.square()
         ).detach().numpy()

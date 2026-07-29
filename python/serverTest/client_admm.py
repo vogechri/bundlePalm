@@ -40,12 +40,15 @@ from bal_evaluator import (
     save_bal_state,
 )
 from clustering import cluster_by_landmark_scalable_stable
+from drs_consensus import ActiveCameraMetricBlocks
+from drs_consensus_metrics import unpack_symmetric_camera_metric_blocks
 
 
 SCRIPT_DIRECTORY = Path(__file__).resolve().parent
 PROTO_BUILD = Path(os.environ.get(
     "BUNDLE_PALM_PROTO_BUILD", SCRIPT_DIRECTORY / "build"))
 sys.path.insert(0, str(PROTO_BUILD / "generated" / "proto"))
+sys.path.insert(0, str(PROTO_BUILD / "generated"))
 test_pb2 = importlib.import_module("test_pb2")
 
 
@@ -123,8 +126,15 @@ class AdmmWorkerClient:
         self.phase_id = 0
         self.sent_bytes = 0
         self.received_bytes = 0
+        self.maximum_metric_asymmetry = 0.0
 
     def close(self):
+        if os.environ.get("BUNDLE_PALM_VALIDATE_METRIC_SYMMETRY") == "1":
+            print(
+                f"maximum_metric_asymmetry={self.maximum_metric_asymmetry:.17g}",
+                file=sys.stderr,
+                flush=True,
+            )
         self.push_socket.close()
         self.pull_socket.close()
         self.context.term()
@@ -164,12 +174,19 @@ class AdmmWorkerClient:
         override_landmarks=False,
         return_metric_blocks=False,
         return_metric_diagnostics=False,
+        return_landmarks=True,
     ):
         self.phase_id += 1
         phase_id = self.phase_id
+        unique_cameras_by_cluster = [
+            np.unique(indices) for indices in camera_indices_in_cluster
+        ]
+        unique_points_by_cluster = [
+            np.unique(indices) for indices in point_indices_in_cluster
+        ]
         for cluster_id in range(cluster_count):
-            unique_cameras = np.unique(camera_indices_in_cluster[cluster_id])
-            unique_points = np.unique(point_indices_in_cluster[cluster_id])
+            unique_cameras = unique_cameras_by_cluster[cluster_id]
+            unique_points = unique_points_by_cluster[cluster_id]
             request = test_pb2.request_proto()
             if initialize:
                 program = request.program
@@ -216,6 +233,7 @@ class AdmmWorkerClient:
                 update.block_curvature_multiplier = block_curvature_multiplier
                 update.metric_diagnostic_iterations = metric_diagnostic_iterations
                 update.landmark_refinement_steps = landmark_refinement_steps
+                update.omit_landmarks = not return_landmarks
                 update.scalar_proximal_prior = scalar_proximal_prior
                 update.proximal_rho = extrinsics_penalty
                 update.split_camera_penalty = split_camera_penalty
@@ -235,10 +253,39 @@ class AdmmWorkerClient:
 
         pending = set(range(cluster_count))
         costs = np.zeros(cluster_count)
-        metric_blocks = np.zeros(
-            (cluster_count, local_cameras.shape[1], 9, 9),
-            dtype=np.float64,
-        )
+        metric_blocks = None
+        metric_offsets = None
+        if return_metric_blocks:
+            metric_counts = np.fromiter(
+                (indices.size for indices in unique_cameras_by_cluster),
+                dtype=np.int64,
+                count=cluster_count,
+            )
+            metric_offsets = np.empty(cluster_count + 1, dtype=np.int64)
+            metric_offsets[0] = 0
+            np.cumsum(metric_counts, out=metric_offsets[1:])
+            camera_dtype = (
+                np.uint16
+                if local_cameras.shape[1] <= np.iinfo(np.uint16).max
+                else np.uint32
+            )
+            cluster_dtype = (
+                np.uint16
+                if cluster_count <= np.iinfo(np.uint16).max
+                else np.uint32
+            )
+            metric_blocks = ActiveCameraMetricBlocks(
+                np.repeat(
+                    np.arange(cluster_count, dtype=cluster_dtype),
+                    metric_counts,
+                ),
+                np.concatenate(unique_cameras_by_cluster).astype(
+                    camera_dtype, copy=False
+                ),
+                np.empty((metric_offsets[-1], 9, 9), dtype=np.float64),
+                cluster_count,
+                local_cameras.shape[1],
+            )
         transformed_lipschitz = np.full(cluster_count, np.nan)
         transformed_lipschitz_residual = np.full(cluster_count, np.nan)
         metric_iterations = np.zeros(cluster_count, dtype=np.int32)
@@ -256,28 +303,69 @@ class AdmmWorkerClient:
             if cluster_id not in pending:
                 raise RuntimeError(f"duplicate ADMM reply for cluster {cluster_id}")
             pending.remove(cluster_id)
-            unique_cameras = np.unique(camera_indices_in_cluster[cluster_id])
-            unique_points = np.unique(point_indices_in_cluster[cluster_id])
+            unique_cameras = unique_cameras_by_cluster[cluster_id]
+            unique_points = unique_points_by_cluster[cluster_id]
             expected_cameras = 9 * unique_cameras.size
             expected_points = 3 * unique_points.size
-            if len(reply.cameras) != expected_cameras:
+            reply_cameras = (
+                np.frombuffer(reply.cameras_f64, dtype="<f8")
+                if reply.cameras_f64
+                else np.asarray(reply.cameras, dtype=np.float64)
+            )
+            reply_landmarks = (
+                np.frombuffer(reply.landmarks_f64, dtype="<f8")
+                if reply.landmarks_f64
+                else np.asarray(reply.landmarks, dtype=np.float64)
+            )
+            if reply_cameras.size != expected_cameras:
                 raise RuntimeError("ADMM worker returned an invalid camera state")
-            if len(reply.landmarks) != expected_points:
+            if return_landmarks and reply_landmarks.size != expected_points:
                 raise RuntimeError("ADMM worker returned an invalid landmark state")
+            if not return_landmarks and reply_landmarks.size != 0:
+                raise RuntimeError("ADMM worker unexpectedly returned landmarks")
             if return_metric_blocks:
-                expected_step_values = 81 * unique_cameras.size
-                if len(reply.step_size) != expected_step_values:
-                    raise RuntimeError(
-                        "worker returned an invalid camera metric block state"
+                if reply.step_size_upper_f32:
+                    packed_metric_blocks = np.frombuffer(
+                        reply.step_size_upper_f32, dtype="<f4"
                     )
-            local_cameras[cluster_id][unique_cameras] = np.array(
-                reply.cameras, dtype=np.float64).reshape(-1, 9)
-            landmarks[unique_points] = np.array(
-                reply.landmarks, dtype=np.float64).reshape(-1, 3)
+                    if packed_metric_blocks.size != 45 * unique_cameras.size:
+                        raise RuntimeError(
+                            "worker returned an invalid packed camera metric state"
+                        )
+                    reply_metric_blocks = (
+                        unpack_symmetric_camera_metric_blocks(
+                            packed_metric_blocks
+                        )
+                    )
+                else:
+                    expected_step_values = 81 * unique_cameras.size
+                    reply_metric_blocks = (
+                        np.frombuffer(reply.step_size_f32, dtype="<f4")
+                        if reply.step_size_f32
+                        else np.asarray(reply.step_size, dtype=np.float32)
+                    )
+                    if reply_metric_blocks.size != expected_step_values:
+                        raise RuntimeError(
+                            "worker returned an invalid camera metric block state"
+                        )
+                    reply_metric_blocks = reply_metric_blocks.reshape((-1, 9, 9))
+                if os.environ.get("BUNDLE_PALM_VALIDATE_METRIC_SYMMETRY") == "1":
+                    asymmetry = float(np.max(np.abs(
+                        reply_metric_blocks
+                        - np.swapaxes(reply_metric_blocks, 1, 2)
+                    )))
+                    self.maximum_metric_asymmetry = max(
+                        self.maximum_metric_asymmetry, asymmetry
+                    )
+            local_cameras[cluster_id][unique_cameras] = reply_cameras.reshape(
+                -1, 9
+            )
+            if return_landmarks:
+                landmarks[unique_points] = reply_landmarks.reshape(-1, 3)
             if return_metric_blocks:
-                metric_blocks[cluster_id, unique_cameras] = np.asarray(
-                    reply.step_size, dtype=np.float64
-                ).reshape((-1, 9, 9))
+                metric_blocks.blocks[
+                    metric_offsets[cluster_id]:metric_offsets[cluster_id + 1]
+                ] = reply_metric_blocks
             costs[cluster_id] = reply.cost
             transformed_lipschitz[cluster_id] = (
                 reply.transformed_lipschitz_estimate
@@ -394,6 +482,152 @@ class AdmmWorkerClient:
             ).reshape((-1, 3))
             costs[cluster_id] = reply.cost
         return costs, refined_landmarks
+
+    def evaluate_consensus_sse(
+        self,
+        camera_indices_in_cluster,
+        consensus,
+        cluster_count,
+    ):
+        """Evaluate consensus cameras against worker-owned landmark states."""
+        self.phase_id += 1
+        phase_id = self.phase_id
+        for cluster_id in range(cluster_count):
+            unique_cameras = np.unique(camera_indices_in_cluster[cluster_id])
+            request = test_pb2.request_proto()
+            update = request.cost_update
+            update.cameras[:] = consensus[unique_cameras].ravel()
+            update.cluster_id = cluster_id
+            update.run_id = self.run_id
+            update.phase_id = phase_id
+            update.omit_landmarks = True
+            self._send(request)
+
+        pending = set(range(cluster_count))
+        costs = np.zeros(cluster_count, dtype=np.float64)
+        while pending:
+            payload = self.pull_socket.recv()
+            self.received_bytes += len(payload)
+            reply = test_pb2.return_cost_proto()
+            reply.ParseFromString(payload)
+            if reply.run_id != self.run_id or reply.phase_id != phase_id:
+                continue
+            cluster_id = reply.cluster_id
+            if cluster_id not in pending:
+                raise RuntimeError(
+                    f"duplicate consensus-cost reply for cluster {cluster_id}"
+                )
+            pending.remove(cluster_id)
+            if reply.landmarks:
+                raise RuntimeError("worker unexpectedly returned landmarks")
+            costs[cluster_id] = reply.precise_cost
+        return float(np.sum(costs))
+
+    def control_nominal_landmark_state(
+        self,
+        cluster_count,
+        state_id,
+        operation,
+    ):
+        """Save, restore, or discard one versioned nominal landmark snapshot."""
+        operations = {
+            "save": test_pb2.landmark_state_proto.SAVE_NOMINAL,
+            "restore": test_pb2.landmark_state_proto.RESTORE_NOMINAL,
+            "restore_roundtrip": (
+                test_pb2.landmark_state_proto.RESTORE_NOMINAL_ROUNDTRIP
+            ),
+            "discard": test_pb2.landmark_state_proto.DISCARD_NOMINAL,
+            "save_accepted": test_pb2.landmark_state_proto.SAVE_ACCEPTED,
+            "restore_accepted": test_pb2.landmark_state_proto.RESTORE_ACCEPTED,
+            "save_best": test_pb2.landmark_state_proto.SAVE_BEST,
+        }
+        if operation not in operations:
+            raise ValueError(f"unknown landmark state operation: {operation}")
+        if state_id <= 0:
+            raise ValueError("landmark state ID must be positive")
+        self.phase_id += 1
+        phase_id = self.phase_id
+        for cluster_id in range(cluster_count):
+            request = test_pb2.request_proto()
+            state = request.landmark_state
+            state.cluster_id = cluster_id
+            state.run_id = self.run_id
+            state.phase_id = phase_id
+            state.state_id = state_id
+            state.operation = operations[operation]
+            self._send(request)
+
+        pending = set(range(cluster_count))
+        while pending:
+            payload = self.pull_socket.recv()
+            self.received_bytes += len(payload)
+            reply = test_pb2.landmark_state_reply_proto()
+            reply.ParseFromString(payload)
+            if reply.run_id != self.run_id or reply.phase_id != phase_id:
+                continue
+            cluster_id = reply.cluster_id
+            if cluster_id not in pending:
+                raise RuntimeError(
+                    f"duplicate landmark-state reply for cluster {cluster_id}"
+                )
+            if reply.state_id != state_id:
+                raise RuntimeError("worker acknowledged the wrong landmark state")
+            pending.remove(cluster_id)
+
+    def materialize_current_landmarks(
+        self,
+        point_indices_in_cluster,
+        landmarks,
+        cluster_count,
+        state_id,
+        source="current",
+    ):
+        """Fetch a packed worker landmark state through a versioned snapshot."""
+        if state_id <= 0:
+            raise ValueError("landmark state ID must be positive")
+        operations = {
+            "current": test_pb2.landmark_state_proto.MATERIALIZE_CURRENT,
+            "best": test_pb2.landmark_state_proto.MATERIALIZE_BEST,
+        }
+        if source not in operations:
+            raise ValueError(f"unknown landmark materialization source: {source}")
+        self.phase_id += 1
+        phase_id = self.phase_id
+        for cluster_id in range(cluster_count):
+            request = test_pb2.request_proto()
+            state = request.landmark_state
+            state.cluster_id = cluster_id
+            state.run_id = self.run_id
+            state.phase_id = phase_id
+            state.state_id = state_id
+            state.operation = operations[source]
+            self._send(request)
+
+        materialized = landmarks.copy()
+        pending = set(range(cluster_count))
+        while pending:
+            payload = self.pull_socket.recv()
+            self.received_bytes += len(payload)
+            reply = test_pb2.landmark_state_reply_proto()
+            reply.ParseFromString(payload)
+            if reply.run_id != self.run_id or reply.phase_id != phase_id:
+                continue
+            cluster_id = reply.cluster_id
+            if cluster_id not in pending:
+                raise RuntimeError(
+                    f"duplicate landmark materialization for cluster {cluster_id}"
+                )
+            if reply.state_id != state_id:
+                raise RuntimeError("worker materialized the wrong landmark state")
+            unique_points = np.unique(point_indices_in_cluster[cluster_id])
+            reply_landmarks = np.frombuffer(reply.landmarks_f64, dtype="<f8")
+            if reply_landmarks.size != 3 * unique_points.size:
+                raise RuntimeError(
+                    "worker returned an invalid materialized landmark state"
+                )
+            materialized[unique_points] = reply_landmarks.reshape((-1, 3))
+            pending.remove(cluster_id)
+        return materialized
 
 
 def parse_arguments():

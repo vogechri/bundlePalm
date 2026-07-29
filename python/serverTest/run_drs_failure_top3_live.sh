@@ -4,10 +4,10 @@ set -euo pipefail
 
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 WORKSPACE=$(cd -- "$SCRIPT_DIR/.." && pwd)
-PYTHON="$SCRIPT_DIR/.venv/bin/python"
+PYTHON=${PYTHON:-"$SCRIPT_DIR/.venv/bin/python"}
 CLIENT="$SCRIPT_DIR/client_drs.py"
-WORKER=${WORKER:-"$SCRIPT_DIR/build_admm/zeromq_cpp_server_ex"}
-PROTO_BUILD=${PROTO_BUILD:-"$SCRIPT_DIR/build_admm"}
+WORKER=${WORKER:-"$SCRIPT_DIR/build/zeromq_cpp_server_ex"}
+PROTO_BUILD=${PROTO_BUILD:-"$SCRIPT_DIR/build"}
 OUTPUT_DIR=${OUTPUT_DIR:-"$WORKSPACE/benchmark_results/drs_failure_top3_i30_k10_k20_k30"}
 PROBLEM_FILTER=${PROBLEM_FILTER:-"646 931 1266"}
 ALL_PROBLEMS=${ALL_PROBLEMS:-0}
@@ -30,6 +30,9 @@ MAXIMUM_BLOCK_CURVATURE_MULTIPLIER=${MAXIMUM_BLOCK_CURVATURE_MULTIPLIER:-16.0}
 CURVATURE_DECAY_AFTER=${CURVATURE_DECAY_AFTER:-0}
 CURVATURE_DECAY_RATIO=${CURVATURE_DECAY_RATIO:-0.5}
 METRIC_DIAGNOSTIC_ITERATIONS=${METRIC_DIAGNOSTIC_ITERATIONS:-0}
+WORKER_SSE_SHADOW=${WORKER_SSE_SHADOW:-0}
+SUPPRESS_ACCELERATED_LANDMARK_REPLIES=${SUPPRESS_ACCELERATED_LANDMARK_REPLIES:-0}
+WORKER_OWNED_LANDMARKS=${WORKER_OWNED_LANDMARKS:-1}
 LANDMARK_REFINEMENT_STEPS=${LANDMARK_REFINEMENT_STEPS:-0}
 CONSENSUS_LANDMARK_REFINEMENT_STEPS=${CONSENSUS_LANDMARK_REFINEMENT_STEPS:-0}
 CONSENSUS_LANDMARK_REFINEMENT_POLICY=${CONSENSUS_LANDMARK_REFINEMENT_POLICY:-safeguard}
@@ -88,7 +91,18 @@ RESULT_FILE="$OUTPUT_DIR/${VARIANT_NAME}.jsonl"
 STATUS_FILE="$OUTPUT_DIR/status.tsv"
 WORKER_PID=""
 
-for flag in LIVE_OUTPUT DEBUG_OUTPUT OVERWRITE PERSISTENT_TRUST_REGION ALL_PROBLEMS; do
+if [[ ! -x "$PYTHON" ]]; then
+  echo "Python interpreter is not executable: $PYTHON" >&2
+  echo "Set PYTHON to a working environment with numpy, pyzmq, and torch." >&2
+  exit 2
+fi
+if [[ ! -x "$WORKER" ]]; then
+  echo "DRS worker is not executable: $WORKER" >&2
+  echo "Run ./build_local.sh or set WORKER to a built server." >&2
+  exit 2
+fi
+
+for flag in LIVE_OUTPUT DEBUG_OUTPUT OVERWRITE PERSISTENT_TRUST_REGION ALL_PROBLEMS WORKER_SSE_SHADOW SUPPRESS_ACCELERATED_LANDMARK_REPLIES WORKER_OWNED_LANDMARKS; do
   value=${!flag}
   if [[ "$value" != "0" && "$value" != "1" ]]; then
     echo "$flag must be 0 or 1" >&2
@@ -257,6 +271,10 @@ for problem in "${PROBLEMS[@]}"; do
     [[ "$DEBUG_OUTPUT" == "1" ]] && debug_args+=(--debug-output)
     trust_args=()
     [[ "$PERSISTENT_TRUST_REGION" == "1" ]] && trust_args+=(--persistent-trust-region)
+    worker_sse_args=()
+    [[ "$WORKER_SSE_SHADOW" == "1" ]] && worker_sse_args+=(--worker-sse-shadow)
+    [[ "$SUPPRESS_ACCELERATED_LANDMARK_REPLIES" == "1" ]] && worker_sse_args+=(--suppress-accelerated-landmark-replies)
+    [[ "$WORKER_OWNED_LANDMARKS" == "1" ]] && worker_sse_args+=(--worker-owned-landmarks)
     start_seconds=$SECONDS
     set +e
     if [[ "$LIVE_OUTPUT" == "1" ]]; then
@@ -300,7 +318,7 @@ for problem in "${PROBLEMS[@]}"; do
             --catastrophic-ratio "$CATASTROPHIC_RATIO" \
             --recovery-penalty-ratio "$RECOVERY_PENALTY_RATIO" \
             --results "$RESULT_FILE" --state "$state_file" \
-            "${debug_args[@]}" "${trust_args[@]}") 2>&1 | tee "$log_file"
+            "${debug_args[@]}" "${trust_args[@]}" "${worker_sse_args[@]}") 2>&1 | tee "$log_file"
       exit_code=${PIPESTATUS[0]}
     else
       (cd "$SCRIPT_DIR" && /usr/bin/time -v -o "$coordinator_time" \
@@ -343,7 +361,7 @@ for problem in "${PROBLEMS[@]}"; do
             --catastrophic-ratio "$CATASTROPHIC_RATIO" \
             --recovery-penalty-ratio "$RECOVERY_PENALTY_RATIO" \
             --results "$RESULT_FILE" --state "$state_file" \
-            "${debug_args[@]}" "${trust_args[@]}") > "$log_file" 2>&1
+            "${debug_args[@]}" "${trust_args[@]}" "${worker_sse_args[@]}") > "$log_file" 2>&1
       exit_code=$?
     fi
     set -e

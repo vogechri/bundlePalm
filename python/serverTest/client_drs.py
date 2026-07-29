@@ -41,6 +41,9 @@ from admm_scaling import (
 )
 
 
+WORKER_SSE_RELATIVE_TOLERANCE = 1e-9
+
+
 def parse_arguments():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("dataset")
@@ -95,6 +98,11 @@ def parse_arguments():
     parser.add_argument("--curvature-decay-after", type=int, default=0)
     parser.add_argument("--curvature-decay-ratio", type=float, default=0.5)
     parser.add_argument("--metric-diagnostic-iterations", type=int, default=0)
+    parser.add_argument("--worker-sse-shadow", action="store_true")
+    parser.add_argument(
+        "--suppress-accelerated-landmark-replies", action="store_true"
+    )
+    parser.add_argument("--worker-owned-landmarks", action="store_true")
     parser.add_argument("--landmark-refinement-steps", type=int, default=0)
     parser.add_argument(
         "--consensus-landmark-refinement-steps", type=int, default=0
@@ -152,6 +160,21 @@ def validate_arguments(arguments):
         raise ValueError(
             "accelerated trials support only final consensus landmark refinement"
         )
+    if (
+        arguments.suppress_accelerated_landmark_replies
+        and arguments.outer_acceleration == "none"
+    ):
+        raise ValueError(
+            "accelerated landmark suppression requires outer acceleration"
+        )
+    if (
+        arguments.worker_owned_landmarks
+        and arguments.consensus_landmark_refinement_steps > 0
+        and arguments.consensus_landmark_refinement_policy != "final"
+    ):
+        raise ValueError(
+            "worker-owned landmarks support only final consensus refinement"
+        )
     if arguments.penalty_multiplier <= 0.0:
         raise ValueError("penalty multiplier must be positive")
     if arguments.block_regularization <= 0.0:
@@ -189,6 +212,13 @@ def validate_arguments(arguments):
     if not 0 <= arguments.consensus_landmark_refinement_steps <= 20:
         raise ValueError(
             "consensus landmark refinement steps must be in [0, 20]"
+        )
+    if (
+        arguments.worker_sse_shadow
+        and arguments.consensus_landmark_refinement_steps > 0
+    ):
+        raise ValueError(
+            "worker SSE shadow currently requires zero consensus landmark refinement"
         )
     if not np.isfinite(arguments.target_transformed_lipschitz) or not (
         0.0 < arguments.target_transformed_lipschitz < 1.0
@@ -470,6 +500,10 @@ def main():
     nominal_fallbacks = 0
     proximal_oracle_calls = 0
     override_landmarks = False
+    maximum_worker_sse_relative_error = 0.0
+    suppressed_accelerated_landmark_replies = 0
+    materialized_accelerated_landmark_states = 0
+    suppressed_routine_landmark_replies = 0
 
     worker = DrsWorkerClient()
     try:
@@ -509,6 +543,13 @@ def main():
             cluster_count,
         )
         accepted_landmarks = landmarks.copy()
+        if arguments.worker_owned_landmarks:
+            worker.control_nominal_landmark_state(
+                cluster_count, 1, "save_accepted"
+            )
+            worker.control_nominal_landmark_state(
+                cluster_count, 1, "save_best"
+            )
         initialization_seconds = time.perf_counter() - started_at
         optimization_started_at = time.perf_counter()
         for iteration in range(arguments.iterations):
@@ -564,7 +605,10 @@ def main():
                 return_metric_diagnostics=(
                     arguments.metric_diagnostic_iterations > 0
                 ),
+                return_landmarks=not arguments.worker_owned_landmarks,
             )
+            if arguments.worker_owned_landmarks:
+                suppressed_routine_landmark_replies += cluster_count
             proximal_oracle_calls += 1
             override_landmarks = False
             if (
@@ -600,13 +644,49 @@ def main():
             physical_candidate = to_physical_cameras(
                 candidate_consensus, camera_scaling
             )
-            unrefined_candidate_metrics = evaluate_bal_state(
-                physical_candidate,
-                landmarks,
-                camera_indices,
-                point_indices,
-                observations,
-            )
+            worker_sse = None
+            if arguments.worker_owned_landmarks:
+                worker_sse = worker.evaluate_consensus_sse(
+                    camera_indices_in_cluster,
+                    candidate_consensus,
+                    cluster_count,
+                )
+                unrefined_candidate_metrics = {
+                    "sumSquaredError": worker_sse,
+                    "meanReprojectionError": float("nan"),
+                }
+            else:
+                unrefined_candidate_metrics = evaluate_bal_state(
+                    physical_candidate,
+                    landmarks,
+                    camera_indices,
+                    point_indices,
+                    observations,
+                )
+            if arguments.worker_sse_shadow and worker_sse is None:
+                worker_sse = worker.evaluate_consensus_sse(
+                    camera_indices_in_cluster,
+                    candidate_consensus,
+                    cluster_count,
+                )
+                worker_sse_relative_error = abs(
+                    worker_sse
+                    - unrefined_candidate_metrics["sumSquaredError"]
+                ) / max(
+                    abs(unrefined_candidate_metrics["sumSquaredError"]),
+                    np.finfo(np.float64).tiny,
+                )
+                maximum_worker_sse_relative_error = max(
+                    maximum_worker_sse_relative_error,
+                    worker_sse_relative_error,
+                )
+                if worker_sse_relative_error > WORKER_SSE_RELATIVE_TOLERANCE:
+                    raise RuntimeError(
+                        "worker/Python candidate SSE mismatch: "
+                        f"worker={worker_sse:.17g} "
+                        f"python={unrefined_candidate_metrics['sumSquaredError']:.17g} "
+                        f"relative_error={worker_sse_relative_error:.3g}"
+                    )
             candidate_landmarks = landmarks
             refined_candidate_metrics = None
             if (
@@ -776,6 +856,17 @@ def main():
                 proposal_is_accelerated
                 or accelerator.requires_first_trial_observation
             ):
+                nominal_landmark_state_id = iteration + 1
+                if (
+                    arguments.worker_sse_shadow
+                    or arguments.suppress_accelerated_landmark_replies
+                    or arguments.worker_owned_landmarks
+                ):
+                    worker.control_nominal_landmark_state(
+                        cluster_count,
+                        nominal_landmark_state_id,
+                        "save",
+                    )
                 for acceleration_weight in line_search_weights:
                     if acceleration_weight == 0.0:
                         continue
@@ -818,7 +909,16 @@ def main():
                         landmark_refinement_steps=arguments.landmark_refinement_steps,
                         return_metric_blocks=(arguments.proximal_metric == "block"),
                         return_metric_diagnostics=(arguments.metric_diagnostic_iterations > 0),
+                        return_landmarks=(
+                            not arguments.suppress_accelerated_landmark_replies
+                            and not arguments.worker_owned_landmarks
+                        ),
                     )
+                    if (
+                        arguments.suppress_accelerated_landmark_replies
+                        or arguments.worker_owned_landmarks
+                    ):
+                        suppressed_accelerated_landmark_replies += cluster_count
                     if (
                         arguments.proximal_metric == "block"
                         and arguments.metric_diagnostic_iterations > 0
@@ -850,14 +950,53 @@ def main():
                         accelerator.observe_first_trial(
                             trial_centers - trial_next_centers
                         )
-                    trial_metrics = evaluate_bal_state(
-                        to_physical_cameras(trial_consensus, camera_scaling),
-                        trial_landmarks,
-                        camera_indices,
-                        point_indices,
-                        observations,
-                    )
-                    trial_sse = trial_metrics["sumSquaredError"]
+                    trial_metrics = None
+                    worker_sse = None
+                    if (
+                        arguments.suppress_accelerated_landmark_replies
+                        or arguments.worker_owned_landmarks
+                    ):
+                        worker_sse = worker.evaluate_consensus_sse(
+                            camera_indices_in_cluster,
+                            trial_consensus,
+                            cluster_count,
+                        )
+                        trial_sse = worker_sse
+                    else:
+                        trial_metrics = evaluate_bal_state(
+                            to_physical_cameras(trial_consensus, camera_scaling),
+                            trial_landmarks,
+                            camera_indices,
+                            point_indices,
+                            observations,
+                        )
+                        trial_sse = trial_metrics["sumSquaredError"]
+                    if arguments.worker_sse_shadow and worker_sse is None:
+                        worker_sse = worker.evaluate_consensus_sse(
+                            camera_indices_in_cluster,
+                            trial_consensus,
+                            cluster_count,
+                        )
+                        worker_sse_relative_error = abs(
+                            worker_sse - trial_metrics["sumSquaredError"]
+                        ) / max(
+                            abs(trial_metrics["sumSquaredError"]),
+                            np.finfo(np.float64).tiny,
+                        )
+                        maximum_worker_sse_relative_error = max(
+                            maximum_worker_sse_relative_error,
+                            worker_sse_relative_error,
+                        )
+                        if (
+                            worker_sse_relative_error
+                            > WORKER_SSE_RELATIVE_TOLERANCE
+                        ):
+                            raise RuntimeError(
+                                "worker/Python trial SSE mismatch: "
+                                f"worker={worker_sse:.17g} "
+                                f"python={trial_metrics['sumSquaredError']:.17g} "
+                                f"relative_error={worker_sse_relative_error:.3g}"
+                            )
                     if arguments.proximal_metric == "scalar":
                         trial_splitting_scale = proximal_penalty
                         trial_displacement_cost = (
@@ -906,6 +1045,102 @@ def main():
                             not np.isfinite(trial_dre)
                             or not np.isfinite(trial_sse)
                         )
+                    if (
+                        arguments.suppress_accelerated_landmark_replies
+                        and not arguments.worker_owned_landmarks
+                    ):
+                        error_bound = (
+                            WORKER_SSE_RELATIVE_TOLERANCE
+                            * max(abs(trial_sse), np.finfo(np.float64).tiny)
+                        )
+                        if arguments.safeguard_mode == "relative":
+                            decisive_rejection = (
+                                trial_rejected
+                                and trial_dre
+                                > dre_ratio * reference_dre + error_bound
+                                and trial_sse
+                                > primal_ratio * reference_sse + error_bound
+                            )
+                        elif arguments.safeguard_mode == "catastrophic":
+                            decisive_rejection = (
+                                trial_rejected
+                                and trial_sse
+                                > arguments.catastrophic_ratio * reference_sse
+                                + error_bound
+                            )
+                        else:
+                            decisive_rejection = trial_rejected
+                        if not decisive_rejection:
+                            trial_landmarks = (
+                                worker.materialize_current_landmarks(
+                                    point_indices_in_cluster,
+                                    trial_landmarks,
+                                    cluster_count,
+                                    nominal_landmark_state_id,
+                                )
+                            )
+                            materialized_accelerated_landmark_states += 1
+                            trial_metrics = evaluate_bal_state(
+                                to_physical_cameras(
+                                    trial_consensus, camera_scaling
+                                ),
+                                trial_landmarks,
+                                camera_indices,
+                                point_indices,
+                                observations,
+                            )
+                            trial_sse = trial_metrics["sumSquaredError"]
+                            worker_sse_relative_error = abs(
+                                worker_sse - trial_sse
+                            ) / max(
+                                abs(trial_sse), np.finfo(np.float64).tiny
+                            )
+                            maximum_worker_sse_relative_error = max(
+                                maximum_worker_sse_relative_error,
+                                worker_sse_relative_error,
+                            )
+                            if (
+                                worker_sse_relative_error
+                                > WORKER_SSE_RELATIVE_TOLERANCE
+                            ):
+                                raise RuntimeError(
+                                    "worker/Python materialized trial SSE "
+                                    "mismatch: "
+                                    f"worker={worker_sse:.17g} "
+                                    f"python={trial_sse:.17g} "
+                                    f"relative_error="
+                                    f"{worker_sse_relative_error:.3g}"
+                                )
+                            trial_model_dre, trial_dre = (
+                                complete_douglas_rachford_envelope(
+                                    trial_local_objective,
+                                    trial_splitting_term,
+                                    trial_sse,
+                                )
+                            )
+                            if arguments.safeguard_mode == "relative":
+                                trial_rejected = should_reject_trial(
+                                    0, 1, trial_dre, trial_sse,
+                                    reference_dre, reference_sse,
+                                    dre_ratio, primal_ratio,
+                                )
+                            elif arguments.safeguard_mode == "catastrophic":
+                                trial_rejected = (
+                                    not np.isfinite(trial_sse)
+                                    or trial_sse
+                                    > arguments.catastrophic_ratio
+                                    * reference_sse
+                                )
+                            else:
+                                trial_rejected = (
+                                    not np.isfinite(trial_dre)
+                                    or not np.isfinite(trial_sse)
+                                )
+                    if trial_metrics is None:
+                        trial_metrics = {
+                            "sumSquaredError": trial_sse,
+                            "meanReprojectionError": float("nan"),
+                        }
                     if not trial_rejected:
                         selected_trial = {
                             "local_cameras": trial_local_cameras,
@@ -960,7 +1195,7 @@ def main():
                 if evaluated_accelerated_trial and not rejected:
                     nominal_fallbacks += 1
                     acceleration_failures += 1
-                    override_landmarks = True
+                    override_landmarks = not arguments.worker_owned_landmarks
                     accelerator.accepted(False)
                     if acceleration_failures >= arguments.acceleration_restart_after:
                         accelerator.reset()
@@ -968,6 +1203,52 @@ def main():
                 elif rejected:
                     accelerator.reset()
                     acceleration_failures = 0
+
+            if (
+                evaluated_accelerated_trial
+                and (
+                    arguments.worker_sse_shadow
+                    or arguments.suppress_accelerated_landmark_replies
+                    or arguments.worker_owned_landmarks
+                )
+            ):
+                if selected_trial is nominal_trial:
+                    worker.control_nominal_landmark_state(
+                        cluster_count,
+                        nominal_landmark_state_id,
+                        (
+                            "restore_roundtrip"
+                            if arguments.worker_owned_landmarks
+                            else "restore"
+                        ),
+                    )
+                    restored_worker_sse = worker.evaluate_consensus_sse(
+                        camera_indices_in_cluster,
+                        nominal_trial["candidate_consensus"],
+                        cluster_count,
+                    )
+                    restored_relative_error = abs(
+                        restored_worker_sse - nominal_trial["candidate_sse"]
+                    ) / max(
+                        abs(nominal_trial["candidate_sse"]),
+                        np.finfo(np.float64).tiny,
+                    )
+                    maximum_worker_sse_relative_error = max(
+                        maximum_worker_sse_relative_error,
+                        restored_relative_error,
+                    )
+                    if restored_relative_error > WORKER_SSE_RELATIVE_TOLERANCE:
+                        raise RuntimeError(
+                            "restored nominal landmark SSE mismatch: "
+                            f"worker={restored_worker_sse:.17g} "
+                            f"python={nominal_trial['candidate_sse']:.17g} "
+                            f"relative_error={restored_relative_error:.3g}"
+                        )
+                worker.control_nominal_landmark_state(
+                    cluster_count,
+                    nominal_landmark_state_id,
+                    "discard",
+                )
 
             transformed_lipschitz_maximum = (
                 float(np.nanmax(metric_diagnostics["transformedLipschitz"]))
@@ -1006,6 +1287,12 @@ def main():
             )
             if rejected:
                 rejected_count += 1
+                if arguments.worker_owned_landmarks:
+                    worker.control_nominal_landmark_state(
+                        cluster_count,
+                        iteration + 1,
+                        "restore_accepted",
+                    )
                 (
                     local_cameras,
                     centers,
@@ -1058,7 +1345,9 @@ def main():
                         )
                 recovery_exhausted = not proximal_metric_changed
                 metrics = accepted_metrics
-                revert_landmark_mode = 2
+                revert_landmark_mode = (
+                    3 if arguments.worker_owned_landmarks else 2
+                )
                 if arguments.persistent_trust_region:
                     trust_region_recovery_ratio = (
                         arguments.trust_region_recovery_ratio
@@ -1073,6 +1362,12 @@ def main():
                 accepted_fixed_point_squared = residuals.fixed_point_squared
                 accepted_consensus = consensus.copy()
                 accepted_landmarks = landmarks.copy()
+                if arguments.worker_owned_landmarks:
+                    worker.control_nominal_landmark_state(
+                        cluster_count,
+                        iteration + 1,
+                        "save_accepted",
+                    )
                 metrics = candidate_metrics
                 recovery_action = "none"
                 accepted_since_curvature_increase += 1
@@ -1239,13 +1534,28 @@ def main():
                 best_sse = reporting_candidate_metrics["sumSquaredError"]
                 best_iteration = iteration
                 best_cameras = to_physical_cameras(consensus, camera_scaling).copy()
-                best_points = candidate_landmarks.copy()
+                if arguments.worker_owned_landmarks:
+                    worker.control_nominal_landmark_state(
+                        cluster_count,
+                        iteration + 1,
+                        "save_best",
+                    )
+                else:
+                    best_points = candidate_landmarks.copy()
             if arguments.debug_output:
                 print_iteration(row, best_sse, best_iteration, prox_costs)
             if recovery_exhausted:
                 termination_reason = "recovery_exhausted"
                 break
         optimization_seconds = time.perf_counter() - optimization_started_at
+        if arguments.worker_owned_landmarks:
+            best_points = worker.materialize_current_landmarks(
+                point_indices_in_cluster,
+                best_points,
+                cluster_count,
+                max(1, best_iteration + 1),
+                source="best",
+            )
         if (
             arguments.consensus_landmark_refinement_steps > 0
             and arguments.consensus_landmark_refinement_policy == "final"
@@ -1319,6 +1629,22 @@ def main():
         "curvatureDecayAfter": arguments.curvature_decay_after,
         "curvatureDecayRatio": arguments.curvature_decay_ratio,
         "metricDiagnosticIterations": arguments.metric_diagnostic_iterations,
+        "workerSSEShadow": arguments.worker_sse_shadow,
+        "workerOwnedLandmarks": arguments.worker_owned_landmarks,
+        "suppressedRoutineLandmarkReplies": (
+            suppressed_routine_landmark_replies
+        ),
+        "suppressedAcceleratedLandmarkReplies": (
+            suppressed_accelerated_landmark_replies
+        ),
+        "materializedAcceleratedLandmarkStates": (
+            materialized_accelerated_landmark_states
+        ),
+        "acceleratedLandmarkReplySuppression": (
+            arguments.suppress_accelerated_landmark_replies
+        ),
+        "maximumWorkerSSERelativeError": maximum_worker_sse_relative_error,
+        "workerSSERelativeTolerance": WORKER_SSE_RELATIVE_TOLERANCE,
         "landmarkRefinementSteps": arguments.landmark_refinement_steps,
         "consensusLandmarkRefinementSteps": (
             arguments.consensus_landmark_refinement_steps

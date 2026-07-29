@@ -48,7 +48,15 @@ protobuf_generate(
 # Add your source files
 add_executable(${PROJECT_NAME} main.cpp)
 add_executable(ceres_bal_runner ceres_bal_runner.cpp)
-add_executable(daba_ceres_bal_runner daba_ceres_bal_runner.cpp)
+
+set(DABA_SOURCE_DIR "${CMAKE_CURRENT_LIST_DIR}/../third_party/DABA")
+if(EXISTS "${DABA_SOURCE_DIR}/examples/ceres/camera.h")
+    add_executable(daba_ceres_bal_runner daba_ceres_bal_runner.cpp)
+    target_include_directories(daba_ceres_bal_runner PRIVATE "${DABA_SOURCE_DIR}")
+    target_link_libraries(daba_ceres_bal_runner PRIVATE Ceres::ceres)
+else()
+    message(STATUS "DABA sources not found at ${DABA_SOURCE_DIR}; skipping daba_ceres_bal_runner")
+endif()
 
 option(BUNDLE_PALM_VERBOSE_LOGGING "Enable verbose C++ worker logging" OFF)
 if(BUNDLE_PALM_VERBOSE_LOGGING)
@@ -62,6 +70,3 @@ target_include_directories(${PROJECT_NAME} PRIVATE ${ZeroMQ_INCLUDE_DIR}) # ${CM
 # Link the Library
 target_link_libraries(${PROJECT_NAME} PRIVATE proto-objects ${ZeroMQ_LIBRARIES} ${Protobuf_LIBRARIES} Ceres::ceres)
 target_link_libraries(ceres_bal_runner PRIVATE Ceres::ceres)
-target_include_directories(
-    daba_ceres_bal_runner PRIVATE "${CMAKE_CURRENT_LIST_DIR}/../third_party/DABA")
-target_link_libraries(daba_ceres_bal_runner PRIVATE Ceres::ceres)

@@ -1,7 +1,11 @@
 import numpy as np
 import pytest
 
-from drs_consensus_metrics import reduce_camera_metric_blocks
+from drs_consensus_metrics import (
+    CAMERA_METRIC_UPPER_INDICES,
+    reduce_camera_metric_blocks,
+    unpack_symmetric_camera_metric_blocks,
+)
 
 
 def test_full_mode_preserves_blocks_without_aliasing():
@@ -33,3 +37,12 @@ def test_scalar_mode_uses_geometric_mean_diagonal():
     reduced = reduce_camera_metric_blocks(blocks, "scalar")
     expected = np.exp(np.mean(np.log(diagonal)))
     np.testing.assert_allclose(reduced[0], expected * np.eye(9))
+
+
+def test_packed_upper_camera_metrics_reconstruct_symmetric_blocks():
+    rows, columns = CAMERA_METRIC_UPPER_INDICES
+    packed = np.arange(90, dtype=np.float32).reshape(2, 45)
+    blocks = unpack_symmetric_camera_metric_blocks(packed)
+
+    np.testing.assert_array_equal(blocks[:, rows, columns], packed)
+    np.testing.assert_array_equal(blocks, np.swapaxes(blocks, 1, 2))

@@ -20,7 +20,7 @@
 #include <mutex>
 #include <omp.h>
 #include <chrono>
-#include "proto/test.pb.h"
+#include "test.pb.h"
 #include <google/protobuf/message_lite.h>
 
 #include <Eigen/Core>
@@ -1162,6 +1162,26 @@ public:
       }
     }
 
+    void AddPhysicalLandmarks(
+        const std::vector<double>& source_landmarks,
+        landmark_state_reply_proto& return_proto) const {
+      THROW_IF(source_landmarks.size() != vnorm.size());
+      std::vector<double> physical_landmarks(source_landmarks.size());
+      for (int landmark_value = 0; landmark_value < source_landmarks.size();
+           ++landmark_value) {
+        physical_landmarks[landmark_value] =
+            source_landmarks[landmark_value] * vnorm[landmark_value];
+      }
+      return_proto.set_landmarks_f64(
+          reinterpret_cast<const char*>(physical_landmarks.data()),
+          physical_landmarks.size() * sizeof(double));
+    }
+
+    void MaterializeCurrentLandmarkState(
+        landmark_state_reply_proto& return_proto) const {
+      AddPhysicalLandmarks(landmarks, return_proto);
+    }
+
     double EvaluateRefinedLandmarkCost(
         int refinement_steps, return_cost_proto& return_proto) {
       const std::vector<double> local_landmarks = landmarks;
@@ -1217,22 +1237,41 @@ public:
 
     //void SetBe(double be) { be = be; }
     
-    return_cluster_proto FillReturnProto() {
+    return_cluster_proto FillReturnProto(bool include_landmarks = true) {
       return_cluster_proto return_proto = return_cluster_proto();
-      for (const double &v : cameras) {
-        //return_proto.add_cameras(static_cast<float>(v));
-        return_proto.add_cameras(v);
-      }
+      return_proto.set_cameras_f64(
+          reinterpret_cast<const char*>(cameras.data()),
+          cameras.size() * sizeof(double));
+      if (include_landmarks) {
       THROW_IF(landmarks.size() != vnorm.size());
+      std::vector<double> physical_landmarks(landmarks.size());
       for (int landmark_value = 0; landmark_value < landmarks.size();
-           ++landmark_value) {
-        return_proto.add_landmarks(
-        landmarks[landmark_value] * vnorm[landmark_value]);
+         ++landmark_value) {
+        physical_landmarks[landmark_value] =
+          landmarks[landmark_value] * vnorm[landmark_value];
       }
-      for (const double &v : full_stepSize) {
-        //return_proto.add_step_size(static_cast<float>(v));
-        return_proto.add_step_size(v);
+      return_proto.set_landmarks_f64(
+        reinterpret_cast<const char*>(physical_landmarks.data()),
+        physical_landmarks.size() * sizeof(double));
       }
+      std::vector<float> metric_upper_blocks;
+      metric_upper_blocks.reserve(45 * numCameras);
+      for (int camera = 0; camera < numCameras; ++camera) {
+        const int offset = 81 * camera;
+        for (int row = 0; row < 9; ++row) {
+          for (int column = row; column < 9; ++column) {
+            const float upper = static_cast<float>(
+                full_stepSize[offset + 9 * row + column]);
+            const float lower = static_cast<float>(
+                full_stepSize[offset + 9 * column + row]);
+            THROW_IF(upper != lower);
+            metric_upper_blocks.push_back(upper);
+          }
+        }
+      }
+      return_proto.set_step_size_upper_f32(
+          reinterpret_cast<const char*>(metric_upper_blocks.data()),
+          metric_upper_blocks.size() * sizeof(float));
       return_proto.set_cluster_id(cluster_id);
       return_proto.set_cost(cost);
       return_proto.set_objective_model(objective_model);
@@ -1296,6 +1335,57 @@ public:
       }
     }
 
+    void SaveNominalLandmarkState(std::uint64_t state_id) {
+      THROW_IF(state_id == 0 || nominal_landmark_state_id != 0);
+      nominal_landmarks = landmarks;
+      nominal_landmark_state_id = state_id;
+    }
+
+    void ValidateNominalLandmarkState(std::uint64_t state_id) const {
+      THROW_IF(state_id == 0 || state_id != nominal_landmark_state_id);
+      THROW_IF(nominal_landmarks.size() != landmarks.size());
+    }
+
+    void RestoreNominalLandmarkState(std::uint64_t state_id) {
+      ValidateNominalLandmarkState(state_id);
+      landmarks = nominal_landmarks;
+    }
+
+    void RoundTripPhysicalLandmarks() {
+      for (int id = 0; id < landmarks.size(); ++id) {
+        landmarks[id] = (landmarks[id] * vnorm[id]) / vnorm[id];
+      }
+    }
+
+    void RestoreNominalLandmarkStateWithRoundTrip(std::uint64_t state_id) {
+      RestoreNominalLandmarkState(state_id);
+      RoundTripPhysicalLandmarks();
+    }
+
+    void DiscardNominalLandmarkState(std::uint64_t state_id) {
+      THROW_IF(state_id == 0 || state_id != nominal_landmark_state_id);
+      nominal_landmarks.clear();
+      nominal_landmark_state_id = 0;
+    }
+
+    void SaveAcceptedLandmarkState() {
+      accepted_landmarks = landmarks;
+    }
+
+    void RestoreAcceptedLandmarkState() {
+      THROW_IF(accepted_landmarks.size() != landmarks.size());
+      landmarks = accepted_landmarks;
+    }
+
+    void SaveBestOutputLandmarkState() {
+      best_output_landmarks = landmarks;
+    }
+
+    void MaterializeBestOutputLandmarkState(
+        landmark_state_reply_proto& return_proto) const {
+      AddPhysicalLandmarks(best_output_landmarks, return_proto);
+    }
+
     void UpdateData(const prox_cluster_proto &update) {
       // std::cout << "Update cluster " << cluster_id << " update proto id:" << update.cluster_id() << "\n";
       THROW_IF(update.cameras_size() != cameras.size());
@@ -1352,6 +1442,18 @@ public:
           tr_radius *= update.trust_region_recovery_ratio();
           last_tr_radius = tr_radius;
         }
+      } else if (update.revert_lm() == 3) {
+        WORKER_LOG(cluster_id << ". Keep restored accepted landmarks\n");
+        RoundTripPhysicalLandmarks();
+        if (persistent_trust_region) {
+          persistent_trust_region_active = true;
+          tr_radius = last_tr_radius * update.trust_region_recovery_ratio();
+          tr_radius = std::max(1e-4, std::min(
+              max_trust_region_radius, tr_radius));
+          last_tr_radius = tr_radius;
+        }
+        last_landmarks = landmarks;
+        last_tr_radius = tr_radius;
       } else if (update.revert_lm() == 2) {
         WORKER_LOG(cluster_id << ". Revert landmarks to best cost lms\n");
         if (persistent_trust_region) {
@@ -2502,6 +2604,10 @@ private:
   std::vector<double> cameras_s;
   std::vector<double> landmarks;// todo: either revert or send landmarkss all the time.
   std::vector<double> last_landmarks;
+  std::vector<double> nominal_landmarks;
+  std::uint64_t nominal_landmark_state_id = 0;
+  std::vector<double> accepted_landmarks;
+  std::vector<double> best_output_landmarks;
   std::vector<double> best_landmarks;
   std::vector<double> stepSize; // internally modelling prox term. 'sqrt' of full_stepSize 
   std::vector<double> full_stepSize; // returned to compute s update in DRS.
@@ -2586,8 +2692,8 @@ int main() {
 
       // Define a Lambda Expression
       auto update_lambda = [&push_socket, &cluster_to_program,
-                &mtx](int cluster_id, std::uint64_t run_id,
-                  std::uint64_t phase_id) {
+                &mtx](int cluster_id, bool omit_landmarks,
+                  std::uint64_t run_id, std::uint64_t phase_id) {
         CeresProgram &program = cluster_to_program[cluster_id];
         // std::cout << cluster_id << " Update "<< "\n";
   if (program.UsesCeresLocalSolver()) {
@@ -2605,7 +2711,8 @@ int main() {
           }
 #endif
   }
-        return_cluster_proto return_proto = program.FillReturnProto();
+        return_cluster_proto return_proto =
+          program.FillReturnProto(!omit_landmarks);
         return_proto.set_run_id(run_id);
         return_proto.set_phase_id(phase_id);
         const double cost = return_proto.cost();
@@ -2622,8 +2729,9 @@ int main() {
 
       // std::thread update_thread(update_lambda, std::ref(program),
       // std::cref(update));
-      std::thread update_thread(update_lambda, cluster_id, update.run_id(),
-                update.phase_id());//, keep_cameras_fixed);
+      std::thread update_thread(update_lambda, cluster_id,
+            update.omit_landmarks(), update.run_id(),
+            update.phase_id());//, keep_cameras_fixed);
       update_thread.detach();
       /// update_thread.join();
 
@@ -2704,6 +2812,7 @@ int main() {
         program.UpdateCostState(
           costUpdate); // update is local, we need to fill data in main thread.
       bool revert_lms = costUpdate.revert_lm() == 2 ? true : false;
+        const bool omit_landmarks = costUpdate.omit_landmarks();
         const int landmark_refinement_steps =
           costUpdate.landmark_refinement_steps();
         THROW_IF(landmark_refinement_steps < 0 ||
@@ -2712,6 +2821,7 @@ int main() {
       auto cost_lambda = [&push_socket, &cluster_to_program,
               &mtx](int cluster_id, bool revert_lms,
                 int landmark_refinement_steps,
+                bool omit_landmarks,
                 std::uint64_t run_id,
                 std::uint64_t phase_id) {
         CeresProgram &program = cluster_to_program[cluster_id];
@@ -2722,10 +2832,12 @@ int main() {
           : 2 * program.GetCost(revert_lms);
         WORKER_LOG(cluster_id << ". Cost from cost: " << cost << "\n");
         return_proto.set_cost(cost);
+        return_proto.set_precise_cost(cost);
         return_proto.set_cluster_id(cluster_id);
         return_proto.set_run_id(run_id);
         return_proto.set_phase_id(phase_id);
-        if (landmark_refinement_steps == 0 || revert_lms) {
+        if (!omit_landmarks &&
+            (landmark_refinement_steps == 0 || revert_lms)) {
           program.AddPhysicalLandmarks(return_proto);
         }
         // SerializeToArray saves memory and time?
@@ -2737,8 +2849,62 @@ int main() {
       };
             std::thread cost_thread(cost_lambda, cluster_id, revert_lms,
               landmark_refinement_steps,
+              omit_landmarks,
               costUpdate.run_id(), costUpdate.phase_id());
       cost_thread.detach();
+      break;
+    }
+
+    case request_proto::OptionsCase::kLandmarkState: {
+      const landmark_state_proto& state = request_p.landmark_state();
+      const int cluster_id = state.cluster_id();
+      THROW_IF(cluster_to_program.find(cluster_id) == cluster_to_program.end());
+      CeresProgram& program = cluster_to_program[cluster_id];
+      landmark_state_reply_proto reply_proto;
+      bool materialize_landmarks = false;
+      switch (state.operation()) {
+        case landmark_state_proto::SAVE_NOMINAL:
+          program.SaveNominalLandmarkState(state.state_id());
+          break;
+        case landmark_state_proto::RESTORE_NOMINAL:
+          program.RestoreNominalLandmarkState(state.state_id());
+          break;
+        case landmark_state_proto::DISCARD_NOMINAL:
+          program.DiscardNominalLandmarkState(state.state_id());
+          break;
+        case landmark_state_proto::MATERIALIZE_CURRENT:
+          program.ValidateNominalLandmarkState(state.state_id());
+          materialize_landmarks = true;
+          break;
+        case landmark_state_proto::SAVE_ACCEPTED:
+          program.SaveAcceptedLandmarkState();
+          break;
+        case landmark_state_proto::RESTORE_ACCEPTED:
+          program.RestoreAcceptedLandmarkState();
+          break;
+        case landmark_state_proto::SAVE_BEST:
+          program.SaveBestOutputLandmarkState();
+          break;
+        case landmark_state_proto::MATERIALIZE_BEST:
+          program.MaterializeBestOutputLandmarkState(reply_proto);
+          break;
+        case landmark_state_proto::RESTORE_NOMINAL_ROUNDTRIP:
+          program.RestoreNominalLandmarkStateWithRoundTrip(state.state_id());
+          break;
+        default:
+          THROW_IF(true);
+      }
+      reply_proto.set_cluster_id(cluster_id);
+      reply_proto.set_run_id(state.run_id());
+      reply_proto.set_phase_id(state.phase_id());
+      reply_proto.set_state_id(state.state_id());
+      if (materialize_landmarks) {
+        program.MaterializeCurrentLandmarkState(reply_proto);
+      }
+      const size_t bytes = reply_proto.ByteSizeLong();
+      zmq::message_t reply(bytes);
+      reply_proto.SerializeToArray(reply.data(), bytes);
+      push_socket.send(reply, zmq::send_flags::none);
       break;
     }
 

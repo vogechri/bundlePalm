@@ -59,7 +59,7 @@ message prox_cluster_proto {
   repeated double cameras_s = 2; // 3d
   float be = 3;
   int32 cluster_id = 4;
-  int32 revert_lm = 5; // if acc. stepsize is reverted, revert lm as well: 1. Also revert to best solution: 2.
+  int32 revert_lm = 5; // 1=last, 2=legacy best, 3=keep restored accepted state
   uint64 run_id = 6;
   uint64 phase_id = 7;
   bool scalar_proximal_prior = 8;
@@ -75,6 +75,7 @@ message prox_cluster_proto {
   double block_curvature_multiplier = 18;
   int32 metric_diagnostic_iterations = 19;
   int32 landmark_refinement_steps = 20;
+  bool omit_landmarks = 21; // retain solved landmarks in the worker only
   // clustering: lms by cam. # lms that can fill up cam in cl.
 }
 
@@ -97,6 +98,10 @@ message return_cluster_proto {
   double camera_proximal_defect_squared = 12;
   double landmark_proximal_defect_squared = 13;
   double proximal_defect_squared = 14;
+  bytes cameras_f64 = 15; // packed native little-endian float64 camera state
+  bytes landmarks_f64 = 16; // packed native little-endian float64 physical landmarks
+  bytes step_size_f32 = 17; // packed native little-endian float32 camera metric blocks
+  bytes step_size_upper_f32 = 18; // packed upper triangle: 45 float32 values per camera
 }
 
 // send to get cost
@@ -108,6 +113,7 @@ message cost_proto {
   uint64 phase_id = 5;
   repeated double landmarks = 6; // explicit physical landmark state for reproducible cost evaluation
   int32 landmark_refinement_steps = 7;
+  bool omit_landmarks = 8; // return only the precise cost for routine evaluation
 }
 
 message return_cost_proto {
@@ -116,12 +122,41 @@ message return_cost_proto {
   uint64 run_id = 3;
   uint64 phase_id = 4;
   repeated double landmarks = 5; // physical landmarks used for this cost
+  double precise_cost = 6;
 }
 
 message best_cost_proto {
   float cost = 1;
   int32 cluster_id = 2;
   repeated double landmarks = 3; // exact physical landmarks associated with cost
+}
+
+message landmark_state_proto {
+  enum operation_type {
+    LANDMARK_STATE_UNSPECIFIED = 0;
+    SAVE_NOMINAL = 1;
+    RESTORE_NOMINAL = 2;
+    DISCARD_NOMINAL = 3;
+    MATERIALIZE_CURRENT = 4;
+    SAVE_ACCEPTED = 5;
+    RESTORE_ACCEPTED = 6;
+    SAVE_BEST = 7;
+    MATERIALIZE_BEST = 8;
+    RESTORE_NOMINAL_ROUNDTRIP = 9;
+  }
+  int32 cluster_id = 1;
+  uint64 run_id = 2;
+  uint64 phase_id = 3;
+  uint64 state_id = 4;
+  operation_type operation = 5;
+}
+
+message landmark_state_reply_proto {
+  int32 cluster_id = 1;
+  uint64 run_id = 2;
+  uint64 phase_id = 3;
+  uint64 state_id = 4;
+  bytes landmarks_f64 = 5; // packed physical landmarks for explicit materialization
 }
 
 // can be one of messages. so proto converts to correct message. client messages server messages
@@ -133,6 +168,7 @@ message request_proto {
         cost_proto cost_update = 4;
         preconditioning_proto preconditioning_update = 5;
         best_cost_proto best_cost = 6;
+        landmark_state_proto landmark_state = 7;
   }
 }
 

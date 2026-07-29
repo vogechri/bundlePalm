@@ -1,6 +1,6 @@
 """Product-space Douglas-Rachford consensus operators."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import numpy as np
 
@@ -16,6 +16,66 @@ class DrsResiduals:
     proximal_displacement_squared: float
     reflection_projection_squared: float
     center_step_squared: float
+
+
+@dataclass(frozen=True)
+class ActiveCameraMetricBlocks:
+    """Metric blocks stored only for active cluster-camera copies."""
+
+    cluster_indices: np.ndarray
+    camera_indices: np.ndarray
+    blocks: np.ndarray
+    cluster_count: int
+    camera_count: int
+    _cluster_starts: np.ndarray = field(default=None, repr=False, compare=False)
+
+    def __post_init__(self):
+        cluster_indices = np.asarray(self.cluster_indices)
+        camera_indices = np.asarray(self.camera_indices)
+        blocks = np.asarray(self.blocks, dtype=np.float64)
+        if cluster_indices.ndim != 1 or camera_indices.shape != cluster_indices.shape:
+            raise ValueError("active metric indices must be one-dimensional")
+        if blocks.shape != (cluster_indices.size, 9, 9):
+            raise ValueError("active metric blocks must have shape (copies, 9, 9)")
+        if np.any(cluster_indices < 0) or np.any(cluster_indices >= self.cluster_count):
+            raise ValueError("active metric cluster index is out of range")
+        if np.any(camera_indices < 0) or np.any(camera_indices >= self.camera_count):
+            raise ValueError("active metric camera index is out of range")
+        object.__setattr__(self, "cluster_indices", cluster_indices)
+        object.__setattr__(self, "camera_indices", camera_indices)
+        object.__setattr__(self, "blocks", blocks)
+        if self._cluster_starts is None:
+            cluster_counts = np.bincount(
+                cluster_indices, minlength=self.cluster_count
+            )
+            cluster_starts = np.empty(self.cluster_count + 1, dtype=np.int64)
+            cluster_starts[0] = 0
+            np.cumsum(cluster_counts, out=cluster_starts[1:])
+            object.__setattr__(self, "_cluster_starts", cluster_starts)
+
+    def copy(self):
+        return ActiveCameraMetricBlocks(
+            self.cluster_indices.copy(),
+            self.camera_indices.copy(),
+            self.blocks.copy(),
+            self.cluster_count,
+            self.camera_count,
+            self._cluster_starts,
+        )
+
+
+def _validate_active_metrics(metric_blocks, camera_masks):
+    if (
+        metric_blocks.cluster_count != camera_masks.shape[0]
+        or metric_blocks.camera_count != camera_masks.shape[1]
+    ):
+        raise ValueError("active metric dimensions do not match camera masks")
+    if not np.all(camera_masks[
+        metric_blocks.cluster_indices, metric_blocks.camera_indices
+    ]):
+        raise ValueError("active metrics contain an absent camera copy")
+    if metric_blocks.blocks.shape[0] != np.count_nonzero(camera_masks):
+        raise ValueError("active metrics do not cover every camera copy")
 
 
 def validate_drs_arrays(local_cameras, centers, camera_masks, previous_consensus):
@@ -50,6 +110,16 @@ def reduce_metric_tensor(metric_blocks, camera_masks, mode, parameter_count=9):
         ).copy()
         reduced[~camera_masks] = 0.0
         return reduced
+    if isinstance(metric_blocks, ActiveCameraMetricBlocks):
+        _validate_active_metrics(metric_blocks, camera_masks)
+        return ActiveCameraMetricBlocks(
+            metric_blocks.cluster_indices,
+            metric_blocks.camera_indices,
+            reduce_camera_metric_blocks(metric_blocks.blocks, mode),
+            metric_blocks.cluster_count,
+            metric_blocks.camera_count,
+            metric_blocks._cluster_starts,
+        )
     metric_blocks = np.asarray(metric_blocks, dtype=np.float64)
     if metric_blocks.shape != camera_masks.shape + (9, 9):
         raise ValueError(
@@ -66,9 +136,20 @@ def metric_quadratic_sum(vectors, metric_blocks, camera_masks):
     """Return the sum of active per-copy block quadratic forms."""
     vectors = np.asarray(vectors, dtype=np.float64)
     camera_masks = np.asarray(camera_masks, dtype=bool)
-    metric_blocks = np.asarray(metric_blocks, dtype=np.float64)
     if vectors.shape[:2] != camera_masks.shape:
         raise ValueError("vectors must have shape (clusters, cameras, parameters)")
+    if isinstance(metric_blocks, ActiveCameraMetricBlocks):
+        _validate_active_metrics(metric_blocks, camera_masks)
+        active_vectors = vectors[
+            metric_blocks.cluster_indices, metric_blocks.camera_indices
+        ]
+        return float(np.einsum(
+            "bi,bij,bj->",
+            active_vectors,
+            metric_blocks.blocks,
+            active_vectors,
+        ))
+    metric_blocks = np.asarray(metric_blocks, dtype=np.float64)
     if metric_blocks.shape != camera_masks.shape + (vectors.shape[2],) * 2:
         raise ValueError("metric blocks do not match vectors")
     active_vectors = vectors[camera_masks]
@@ -87,18 +168,33 @@ def project_consensus(
         metric_blocks = reduce_metric_tensor(
             None, camera_masks, "arithmetic", values.shape[2]
         )
-    metric_blocks = np.asarray(metric_blocks, dtype=np.float64)
     denominator = np.sum(camera_masks, axis=0)
     if np.any(denominator == 0):
         raise ValueError("every camera must occur in at least one cluster")
-    metric_sum = np.sum(metric_blocks, axis=0)
-    right_hand_side = np.einsum("kcij,kcj->ci", metric_blocks, values)
-    consensus = previous_consensus.copy()
-    for camera in range(values.shape[1]):
-        consensus[camera] = np.linalg.solve(
-            metric_sum[camera], right_hand_side[camera]
+    if isinstance(metric_blocks, ActiveCameraMetricBlocks):
+        _validate_active_metrics(metric_blocks, camera_masks)
+        active_values = values[
+            metric_blocks.cluster_indices, metric_blocks.camera_indices
+        ]
+        active_products = np.einsum(
+            "bij,bj->bi", metric_blocks.blocks, active_values
         )
-    return consensus
+        metric_sum = np.zeros(
+            (values.shape[1], values.shape[2], values.shape[2]),
+            dtype=np.float64,
+        )
+        right_hand_side = np.zeros(values.shape[1:], dtype=np.float64)
+        for cluster in range(metric_blocks.cluster_count):
+            start = metric_blocks._cluster_starts[cluster]
+            stop = metric_blocks._cluster_starts[cluster + 1]
+            camera_indices = metric_blocks.camera_indices[start:stop]
+            metric_sum[camera_indices] += metric_blocks.blocks[start:stop]
+            right_hand_side[camera_indices] += active_products[start:stop]
+    else:
+        metric_blocks = np.asarray(metric_blocks, dtype=np.float64)
+        metric_sum = np.sum(metric_blocks, axis=0)
+        right_hand_side = np.einsum("kcij,kcj->ci", metric_blocks, values)
+    return np.linalg.solve(metric_sum, right_hand_side[..., None])[..., 0]
 
 
 def drs_step(
@@ -169,6 +265,24 @@ def dre_splitting_term(
         metric_blocks = reduce_metric_tensor(
             None, camera_masks, "arithmetic", local_cameras.shape[2]
         )
+    if isinstance(metric_blocks, ActiveCameraMetricBlocks):
+        _validate_active_metrics(metric_blocks, np.asarray(camera_masks, dtype=bool))
+        cluster_indices = metric_blocks.cluster_indices
+        camera_indices = metric_blocks.camera_indices
+        u_minus_v = (
+            local_cameras[cluster_indices, camera_indices]
+            - consensus[camera_indices]
+        )
+        u_minus_s = (
+            local_cameras[cluster_indices, camera_indices]
+            - centers[cluster_indices, camera_indices]
+        )
+        return 0.5 * penalty * float(np.einsum(
+            "bi,bij,bj->",
+            u_minus_v,
+            metric_blocks.blocks,
+            u_minus_v + 2.0 * u_minus_s,
+        ))
     metric_blocks = np.asarray(metric_blocks, dtype=np.float64)
     u_minus_v = active * (local_cameras - consensus[None, :, :])
     u_minus_s = active * (local_cameras - centers)

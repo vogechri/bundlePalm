@@ -13,7 +13,7 @@ if ! command -v cmake >/dev/null 2>&1; then
     exit 1
 fi
 
-g++ -std=c++17 -O3 -march=native -fPIC -fopenmp -shared \
+g++ -std=c++17 -O3 -fno-thread-jumps -march=native -fPIC -fopenmp -shared \
     "${python_dir}/process_clusters.cpp" \
     "${python_dir}/camera_hypergraph_partitioning.cpp" \
     "${python_dir}/landmark_partitioning.cpp" \

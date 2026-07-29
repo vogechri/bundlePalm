@@ -4,6 +4,20 @@ import numpy as np
 
 
 CONSENSUS_METRIC_MODES = ("arithmetic", "scalar", "diagonal", "full")
+CAMERA_METRIC_UPPER_INDICES = np.triu_indices(9)
+
+
+def unpack_symmetric_camera_metric_blocks(packed):
+    """Expand packed upper triangles to symmetric 9x9 camera blocks."""
+    packed = np.asarray(packed, dtype=np.float32)
+    if packed.size % 45 != 0:
+        raise ValueError("packed camera metrics must contain 45 values per block")
+    packed = packed.reshape((-1, 45))
+    blocks = np.empty((packed.shape[0], 9, 9), dtype=np.float32)
+    rows, columns = CAMERA_METRIC_UPPER_INDICES
+    blocks[:, rows, columns] = packed
+    blocks[:, columns, rows] = packed
+    return blocks
 
 
 def reduce_camera_metric_blocks(blocks, mode):

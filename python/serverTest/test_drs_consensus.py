@@ -3,6 +3,7 @@ import pytest
 
 from admm_consensus import plain_drs_step
 from drs_consensus import (
+    ActiveCameraMetricBlocks,
     complete_douglas_rachford_envelope,
     dre_splitting_term,
     drs_step,
@@ -203,3 +204,83 @@ def test_full_metric_projection_preserves_parameter_coupling():
     )
     np.testing.assert_allclose(consensus[0], expected)
     np.testing.assert_allclose(selected, raw)
+
+
+def test_full_metric_projection_batched_solve_matches_camera_loop():
+    rng = np.random.default_rng(20260729)
+    clusters = 4
+    cameras = 7
+    parameters = 9
+    masks = rng.random((clusters, cameras)) > 0.35
+    masks[0] = True
+    values = rng.normal(size=(clusters, cameras, parameters))
+    factors = rng.normal(size=(clusters, cameras, parameters, parameters))
+    blocks = np.einsum("kcji,kcjl->kcil", factors, factors)
+    blocks += 0.1 * np.eye(parameters)[None, None]
+    blocks[~masks] = 0.0
+
+    metric_sum = np.sum(blocks, axis=0)
+    right_hand_side = np.einsum("kcij,kcj->ci", blocks, values)
+    expected = np.stack([
+        np.linalg.solve(metric_sum[camera], right_hand_side[camera])
+        for camera in range(cameras)
+    ])
+
+    from drs_consensus import project_consensus
+
+    actual = project_consensus(
+        values, masks, np.zeros((cameras, parameters)), blocks
+    )
+    np.testing.assert_allclose(actual, expected, rtol=1e-13, atol=1e-13)
+
+
+def test_active_metric_storage_matches_dense_drs_step():
+    rng = np.random.default_rng(20260730)
+    clusters = 4
+    cameras = 7
+    masks = rng.random((clusters, cameras)) > 0.35
+    masks[0] = True
+    local = rng.normal(size=(clusters, cameras, 9))
+    centers = rng.normal(size=(clusters, cameras, 9))
+    previous = rng.normal(size=(cameras, 9))
+    factors = rng.normal(size=(clusters, cameras, 9, 9))
+    dense_blocks = np.einsum("kcji,kcjl->kcil", factors, factors)
+    dense_blocks += 0.1 * np.eye(9)[None, None]
+    dense_blocks[~masks] = 0.0
+    cluster_indices, camera_indices = np.nonzero(masks)
+    active_blocks = ActiveCameraMetricBlocks(
+        cluster_indices.astype(np.uint16),
+        camera_indices.astype(np.uint16),
+        dense_blocks[masks],
+        clusters,
+        cameras,
+    )
+
+    dense = drs_step(
+        local, centers, masks, previous,
+        metric_blocks=dense_blocks, metric_mode="full",
+    )
+    active = drs_step(
+        local, centers, masks, previous,
+        metric_blocks=active_blocks, metric_mode="full",
+    )
+
+    np.testing.assert_allclose(active[0], dense[0], rtol=1e-13, atol=1e-13)
+    np.testing.assert_allclose(active[1], dense[1], rtol=1e-13, atol=1e-13)
+    np.testing.assert_allclose(active[2], dense[2], rtol=1e-13, atol=1e-13)
+    np.testing.assert_allclose(
+        tuple(vars(active[3]).values()),
+        tuple(vars(dense[3]).values()),
+        rtol=1e-13,
+        atol=1e-13,
+    )
+    np.testing.assert_allclose(active[4].blocks, dense[4][masks])
+    assert dre_splitting_term(
+        local, active[0], centers, masks, metric_blocks=active[4]
+    ) == pytest.approx(
+        dre_splitting_term(
+            local, dense[0], centers, masks, metric_blocks=dense[4]
+        ),
+        rel=1e-13,
+        abs=1e-13,
+    )
