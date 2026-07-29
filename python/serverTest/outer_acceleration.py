@@ -47,6 +47,7 @@ class FixedPointAccelerator:
     """Base class for proposals around the fixed-point map ``mapped = T(x)``."""
 
     name = "none"
+    requires_first_trial_observation = False
 
     def __init__(self):
         self.max_step_ratio = _env_float(
@@ -196,6 +197,7 @@ class LBFGSAcceleration(FixedPointAccelerator):
     """Paper-style L-BFGS using p=d and first-trial residual differences."""
 
     name = "lbfgs"
+    requires_first_trial_observation = True
 
     def __init__(self):
         super().__init__()
@@ -215,7 +217,8 @@ class LBFGSAcceleration(FixedPointAccelerator):
         self.residual_differences.clear()
 
     def _candidate(self, current, mapped, iteration):
-        residual = current - mapped
+        state_shape = current.shape
+        residual = (current - mapped).ravel()
         if not self.steps:
             return mapped
 
@@ -241,19 +244,22 @@ class LBFGSAcceleration(FixedPointAccelerator):
             beta = inverse_curvature * np.dot(difference, vector)
             vector += step * (coefficient - beta)
 
-        return current - vector
+        return current - vector.reshape(state_shape)
 
     def observe_first_trial(self, trial_residual):
         if self.current_residual is None or self.proposal_direction is None:
             return
-        difference = np.asarray(trial_residual) - self.current_residual
-        curvature = float(np.dot(self.proposal_direction, difference))
+        proposal_direction = self.proposal_direction.ravel()
+        difference = (
+            np.asarray(trial_residual) - self.current_residual
+        ).ravel()
+        curvature = float(np.dot(proposal_direction, difference))
         threshold = self.curvature_tolerance * max(
-            np.linalg.norm(self.proposal_direction) * np.linalg.norm(difference),
+            np.linalg.norm(proposal_direction) * np.linalg.norm(difference),
             np.finfo(float).eps,
         )
         if curvature > threshold:
-            self.steps.append(self.proposal_direction.copy())
+            self.steps.append(proposal_direction.copy())
             self.residual_differences.append(difference.copy())
 
 
@@ -261,6 +267,7 @@ class AndersonAcceleration(FixedPointAccelerator):
     """Paper-style inverse multisecant Anderson acceleration."""
 
     name = "anderson"
+    requires_first_trial_observation = True
 
     def __init__(self):
         super().__init__()
@@ -283,7 +290,8 @@ class AndersonAcceleration(FixedPointAccelerator):
         self.residual_differences.clear()
 
     def _candidate(self, current, mapped, iteration):
-        residual = current - mapped
+        state_shape = current.shape
+        residual = (current - mapped).ravel()
         if not self.steps:
             return mapped
 
@@ -301,14 +309,19 @@ class AndersonAcceleration(FixedPointAccelerator):
 
         inverse_jacobian_residual = (
             residual + (step_matrix - difference_matrix) @ coefficients)
-        return current - self.damping * inverse_jacobian_residual
+        return current - self.damping * inverse_jacobian_residual.reshape(
+            state_shape
+        )
 
     def observe_first_trial(self, trial_residual):
         if self.current_residual is None or self.proposal_direction is None:
             return
-        difference = np.asarray(trial_residual) - self.current_residual
+        proposal_direction = self.proposal_direction.ravel()
+        difference = (
+            np.asarray(trial_residual) - self.current_residual
+        ).ravel()
         if np.linalg.norm(difference) > np.finfo(float).eps:
-            self.steps.append(self.proposal_direction.copy())
+            self.steps.append(proposal_direction.copy())
             self.residual_differences.append(difference.copy())
 
 

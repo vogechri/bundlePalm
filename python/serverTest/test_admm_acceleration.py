@@ -8,7 +8,12 @@ from admm_acceleration import (
     nesterov_coefficient,
     should_fallback_acceleration,
 )
-from outer_acceleration import LegacyNesterov, interpolate_line_search_center
+from outer_acceleration import (
+    AndersonAcceleration,
+    LBFGSAcceleration,
+    LegacyNesterov,
+    interpolate_line_search_center,
+)
 
 
 def test_nesterov_coefficient_restarts_with_two_plain_steps():
@@ -70,6 +75,26 @@ def test_legacy_nesterov_has_two_nominal_startup_proposals():
     assert not first_accelerated
     assert not second_accelerated
     assert third_accelerated
+
+
+@pytest.mark.parametrize(
+    "accelerator_type", [LBFGSAcceleration, AndersonAcceleration]
+)
+def test_secant_accelerator_uses_observed_first_trial(accelerator_type):
+    accelerator = accelerator_type()
+    current = np.array([0.0])
+    mapped = np.array([1.0])
+
+    first, first_accelerated = accelerator.propose(current, mapped, 0)
+    accelerator.observe_first_trial(np.array([0.5]))
+    second, second_accelerated = accelerator.propose(
+        np.array([1.0]), np.array([2.0]), 1
+    )
+
+    np.testing.assert_allclose(first, mapped)
+    assert not first_accelerated
+    assert second_accelerated
+    assert not np.array_equal(second, np.array([2.0]))
 
 
 @pytest.mark.parametrize(

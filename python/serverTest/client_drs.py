@@ -65,7 +65,9 @@ def parse_arguments():
     parser.add_argument("--camera-scaling-clipping-percentile", type=float)
     parser.add_argument("--relaxation", type=float, default=1.0)
     parser.add_argument(
-        "--outer-acceleration", choices=("none", "nesterov"), default="none"
+        "--outer-acceleration",
+        choices=("none", "nesterov", "lbfgs", "anderson"),
+        default="none",
     )
     parser.add_argument(
         "--line-search-grid", choices=("0,1", "0,0.5,1"), default="0,1"
@@ -770,7 +772,10 @@ def main():
             )
             selected_trial = nominal_trial
             evaluated_accelerated_trial = False
-            if proposal_is_accelerated:
+            if (
+                proposal_is_accelerated
+                or accelerator.requires_first_trial_observation
+            ):
                 for acceleration_weight in line_search_weights:
                     if acceleration_weight == 0.0:
                         continue
@@ -841,6 +846,10 @@ def main():
                         metric_blocks=trial_raw_blocks,
                         metric_mode=arguments.consensus_metric,
                     )
+                    if acceleration_weight == 1.0:
+                        accelerator.observe_first_trial(
+                            trial_centers - trial_next_centers
+                        )
                     trial_metrics = evaluate_bal_state(
                         to_physical_cameras(trial_consensus, camera_scaling),
                         trial_landmarks,
