@@ -1,0 +1,5 @@
+__pycache__/
+*.py[cod]
+serverTest/.venv/
+serverTest/build/
+serverTest/build_*/

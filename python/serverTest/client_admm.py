@@ -48,10 +48,39 @@ from drs_consensus_metrics import unpack_symmetric_camera_metric_blocks
 
 SCRIPT_DIRECTORY = Path(__file__).resolve().parent
 PROTO_BUILD = Path(os.environ.get(
-    "BUNDLE_PALM_PROTO_BUILD", SCRIPT_DIRECTORY / "build"))
+    "BUNDLE_PALM_PROTO_BUILD", SCRIPT_DIRECTORY / "build_admm"))
 sys.path.insert(0, str(PROTO_BUILD / "generated" / "proto"))
 sys.path.insert(0, str(PROTO_BUILD / "generated"))
 test_pb2 = importlib.import_module("test_pb2")
+
+_REQUIRED_PROTO_FIELDS = {
+    "program_proto": {"block_curvature_multiplier"},
+    "prox_cluster_proto": {"block_curvature_multiplier"},
+    "return_cluster_proto": {
+        "cameras_f64",
+        "landmarks_f64",
+        "step_size_upper_f32",
+    },
+}
+_missing_proto_fields = {
+    message_name: sorted(
+        required_fields
+        - set(getattr(test_pb2, message_name).DESCRIPTOR.fields_by_name)
+    )
+    for message_name, required_fields in _REQUIRED_PROTO_FIELDS.items()
+}
+_missing_proto_fields = {
+    message_name: fields
+    for message_name, fields in _missing_proto_fields.items()
+    if fields
+}
+if _missing_proto_fields:
+    raise RuntimeError(
+        f"stale generated protobuf module {test_pb2.__file__}: missing "
+        f"{_missing_proto_fields}; rebuild {PROTO_BUILD} from "
+        f"{SCRIPT_DIRECTORY / 'proto' / 'test.proto'} or set "
+        "BUNDLE_PALM_PROTO_BUILD to a matching build directory"
+    )
 
 
 @dataclass(frozen=True)

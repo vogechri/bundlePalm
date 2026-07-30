@@ -104,6 +104,10 @@ Important runtime contract:
 - `serverTest/.venv/bin/python` is the validated Python environment;
 - serial C++ builds (`-j1`) are safer because GCC/Eigen has previously hit an
   internal compiler error.
+- `client_admm.py` and the general DRS runner default to `build_admm`; generated
+  Python/C++ protobuf code must be rebuilt from `serverTest/proto/test.proto`
+  after cloning. Runtime descriptor checks reject stale generated schemas before
+  worker communication.
 
 ## Critical Correctness Fixes Already Made
 
@@ -212,7 +216,21 @@ The five-scene breadth gate found full `9x9` blocks best on all scenes:
 See the links in [the experiment status](benchmark_results/EXPERIMENT_STATUS.md)
 and [the derivation](block_metric_consensus_derivation.md).
 
-## Active Experiment: L-BFGS and Anderson
+### Phase-1 One-Factor Screen
+
+The complete human-readable interpretation is in the
+[Phase-1 summary](benchmark_results/drs_29_scene_phase1_k30_i90/summary.md), with
+the machine-generated table in
+[the Phase-1 report](benchmark_results/drs_29_scene_phase1_k30_i90/report.md).
+The optimization matrix completed all 406 variant/scene rows. Its main decisions
+are to retain full block consensus, promote DRS trust to the cumulative ladder,
+test regularization recovery and curvature 0.05 as compatible additions, keep
+binary Nesterov as the default acceleration tradeoff, and retain final landmark
+polishing as output postprocessing. All 406 repaired NPZ states independently
+reproduce their recorded canonical pixel SSE exactly. Atomic state saving now
+prevents interrupted or overlapping runs from exposing partial NPZ archives.
+
+## Completed Experiment: L-BFGS and Anderson
 
 Runner: [run_drs_29_scene_secant_acceleration.sh](serverTest/run_drs_29_scene_secant_acceleration.sh)
 
@@ -226,23 +244,31 @@ as Nesterov. Secant algebra flattens the product-space tensors internally and
 reshapes proposals back to `(clusters, cameras, 9)`. Focused tests pass and real
 worker smoke runs produced accelerated acceptances.
 
-Status at this handoff: L-BFGS and Anderson each have `25/29` unique completed
-scenes. No solver process was active at the final check. The four missing scenes
-for both methods are 1490, 1723, 1778, and 3068. Regenerate the report rather
-than trusting raw line counts, because interrupted overlapping resumes created
-duplicate JSONL rows that the analyzer correctly deduplicates by scene.
+Final status: 29/29 unique scenes for plain, Nesterov, L-BFGS, and Anderson.
+All 58 L-BFGS/Anderson NPZ states independently reproduce their recorded
+canonical pixel SSE exactly. There were no failed cases and no active solver at
+the final check. Interrupted overlapping resumes created duplicate raw JSONL
+rows, but the analyzer deduplicates them by scene.
 
-The latest provisional aggregate should always be regenerated from the JSONL
-files; the final checked count was 25 four-way scenes.
+Final aggregate relative to plain DRS:
 
-- Nesterov equal-iteration ratio `0.984773`.
-- L-BFGS equal-iteration ratio `0.982762`.
-- Anderson equal-iteration ratio `0.982997`.
+- Nesterov equal-iteration ratio `0.982266`, W/T/L `27/2/0`.
+- L-BFGS equal-iteration ratio `0.980380`, W/T/L `28/1/0`.
+- Anderson equal-iteration ratio `0.981218`, W/T/L `28/1/0`.
 - Nesterov/L-BFGS/Anderson equal-oracle ratios:
-  `0.999400/0.996944/0.997224`.
-- L-BFGS and Anderson are slightly better at fixed iterations but much slower
-  in the current Python implementation.
-- Anderson is operationally cleaner; L-BFGS has many more nominal fallbacks.
+  `0.995403/0.993269/0.994008`.
+- Optimization-time ratios are `1.71/4.05/3.45` respectively over 28 timed
+  pairs; scene 49 predates optimization-only timing.
+- Calls/rejections/fallbacks are Nesterov `5016/66/119`, L-BFGS
+  `5220/62/514`, and Anderson `5220/45/107`.
+
+Direct geomean ratios are L-BFGS/Nesterov `0.998080`, Anderson/Nesterov
+`0.998933`, and L-BFGS/Anderson `0.999146`. L-BFGS has the best aggregate
+quality, but the gain over Nesterov is only 0.19% and costs substantial Python
+full-state secant algebra plus many fallbacks. Anderson is operationally cleaner
+and especially strong on 427, 646, 1723, and 1778. Nesterov remains the best
+default efficiency tradeoff; retain L-BFGS and Anderson as paper ablations or
+hard-scene candidates unless their coordinator algebra is optimized.
 
 To inspect or resume on the current machine:
 
@@ -258,7 +284,7 @@ OVERWRITE=0 LIVE_OUTPUT=0 DEBUG_OUTPUT=0 \
 serverTest/run_drs_29_scene_secant_acceleration.sh
 ```
 
-After completion, independently verify all saved states as done for Phase 0.
+The independent saved-state verification is complete.
 
 ## Competitors and Positioning
 
@@ -288,40 +314,38 @@ Comparison policy:
 
 ### Immediate
 
-1. Finish and validate the 29-scene L-BFGS/Anderson run.
-2. Decide whether Anderson or L-BFGS merits promotion beyond an acceleration
-   ablation. Current evidence favors Anderson operationally and Nesterov as the
-   default efficiency tradeoff.
-3. Build a unified Phase-1 one-factor matrix runner/analyzer. The design exists,
+1. Decide whether Anderson or L-BFGS merits any optimized follow-up beyond an
+  acceleration ablation. Current evidence retains Nesterov as the default.
+2. Build a unified Phase-1 one-factor matrix runner/analyzer. The design exists,
    but not every row has a one-click runner.
-4. Run the remaining one-factor screen against the corrected plain denominator:
+3. Run the remaining one-factor screen against the corrected plain denominator:
    consensus modes, no/Jacobi scaling, recovery modes, initial curvature,
    reset-DABA/persistent-DABA/DRS trust, local landmark refinement, line-search
    depth, final polishing, local linear solver, and partition construction.
 
 ### Method Development
 
-5. Collect per-cluster trust-radius and model-ratio traces on 245, 3068, 1723,
+4. Collect per-cluster trust-radius and model-ratio traces on 245, 3068, 1723,
    and a neutral scene.
-6. Implement and test a trust hybrid: carry accepted radius on good progress;
+5. Implement and test a trust hybrid: carry accepted radius on good progress;
    restore, shrink, or reset it after rollback.
-7. Replace fixed curvature decay with a cautious adaptive policy if diagnostics
+6. Replace fixed curvature decay with a cautious adaptive policy if diagnostics
    support it.
-8. Evaluate Schur-PCG versus local Nesterov at matched products/residuals.
-9. Complete the cumulative forward-selection ladder over all 29 scenes.
-10. Confirm selected plain, accelerated, and cumulative methods at K10 and K20.
+7. Evaluate Schur-PCG versus local Nesterov at matched products/residuals.
+8. Complete the cumulative forward-selection ladder over all 29 scenes.
+9. Confirm selected plain, accelerated, and cumulative methods at K10 and K20.
 
 ### Paper and External Validity
 
-11. Run controlled same-machine competitors where feasible: Ceres, STBA, and
+10. Run controlled same-machine competitors where feasible: Ceres, STBA, and
     available MegBA/DABA configurations.
-12. Add communication bytes, synchronization rounds, max-worker and aggregate
+11. Add communication bytes, synchronization rounds, max-worker and aggregate
     RSS, and time-to-quality plots to the main comparison.
-13. Run network latency/bandwidth and straggler experiments only after the
+12. Run network latency/bandwidth and straggler experiments only after the
     single-host method is frozen.
-14. Extend external validity with the SfM_Init-derived 1DSfM pipeline; do not
+13. Extend external validity with the SfM_Init-derived 1DSfM pipeline; do not
     label it a reproduction of DABA Table II.
-15. Decide whether finite-local-solve diagnostics support an inexact-prox
+14. Decide whether finite-local-solve diagnostics support an inexact-prox
     theorem. Do not overclaim practical convergence from exact fixed-metric DRS.
 
 ## What Must Be Checked In
@@ -349,6 +373,13 @@ These important files are untracked and should be added:
 - `serverTest/analyze_drs_29_scene_decay.py`
 - `serverTest/run_drs_29_scene_secant_acceleration.sh`
 - `serverTest/analyze_drs_29_scene_secant_acceleration.py`
+- `.gitignore`
+
+The protobuf build-contract repair also requires checking in:
+
+- `serverTest/CMakeLists.txt`
+- `serverTest/client_admm.py`
+- `serverTest/run_drs_failure_top3_live.sh`
 
 Compact reports worth committing:
 
@@ -368,7 +399,10 @@ A focused staging command after the active run completes is:
 
 ```bash
 git add \
+  .gitignore \
   CONTINUATION_HANDOFF.md \
+  serverTest/CMakeLists.txt \
+  serverTest/client_admm.py \
   serverTest/client_drs.py \
   serverTest/outer_acceleration.py \
   serverTest/test_admm_acceleration.py \
@@ -381,6 +415,7 @@ git add \
   serverTest/analyze_drs_29_scene_decay.py \
   serverTest/run_drs_29_scene_secant_acceleration.sh \
   serverTest/analyze_drs_29_scene_secant_acceleration.py \
+  serverTest/run_drs_failure_top3_live.sh \
   benchmark_results/drs_29_scene_benchmark_plan.md \
   benchmark_results/drs_29_scene_phase0_k30_i90/report.md \
   benchmark_results/drs_29_scene_persistent_daba_nesterov_k30_i90/progress.md \

@@ -3,7 +3,9 @@
 import argparse
 import bz2
 import json
+import os
 from pathlib import Path
+import tempfile
 
 import numpy as np
 
@@ -303,12 +305,27 @@ def save_bal_state(path, cameras, points, metadata=None):
     """Save a solver state and compact provenance in a portable NPZ file."""
     output_path = Path(path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    np.savez_compressed(
-        output_path,
-        cameras=np.asarray(cameras, dtype=np.float64),
-        points=np.asarray(points, dtype=np.float64),
-        metadata_json=np.asarray(json.dumps(metadata or {}, sort_keys=True)),
+    descriptor, temporary_path = tempfile.mkstemp(
+        prefix=output_path.name + ".",
+        suffix=".tmp",
+        dir=output_path.parent,
     )
+    try:
+        with os.fdopen(descriptor, "wb") as output_file:
+            np.savez_compressed(
+                output_file,
+                cameras=np.asarray(cameras, dtype=np.float64),
+                points=np.asarray(points, dtype=np.float64),
+                metadata_json=np.asarray(
+                    json.dumps(metadata or {}, sort_keys=True)
+                ),
+            )
+            output_file.flush()
+            os.fsync(output_file.fileno())
+        os.replace(temporary_path, output_path)
+    finally:
+        if os.path.exists(temporary_path):
+            os.remove(temporary_path)
 
 
 def read_bal_problem(path):
