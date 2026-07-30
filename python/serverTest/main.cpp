@@ -884,11 +884,10 @@ MetricDiagnostic EstimateTransformedLipschitz(
 //   }
 // }
 
-bool stop_criterion(double x_squared_norm, double gradient_squared_norm, double lip, int i) {
-  // lower (1e-4) can be worse? maybe just the parts / how parts are.
-  const double eps = 1e-2; //#1e-2 used in paper, tune. might allow smaller as faster?
+bool stop_criterion(double x_squared_norm, double gradient_squared_norm,
+                    double lip, int i, double tolerance) {
   const double iterations = i + 1.;
-  const double scaled_eps = eps * lip;
+  const double scaled_eps = tolerance * lip;
   return iterations * iterations * gradient_squared_norm
       < scaled_eps * scaled_eps * x_squared_norm;
 }
@@ -944,6 +943,11 @@ public:
       block_curvature_multiplier = pro.block_curvature_multiplier();
       metric_diagnostic_iterations = pro.metric_diagnostic_iterations();
       landmark_refinement_steps = pro.landmark_refinement_steps();
+        nesterov_max_iterations = pro.nesterov_max_iterations();
+        nesterov_stop_tolerance = pro.nesterov_stop_tolerance();
+        THROW_IF(nesterov_max_iterations <= 0 || nesterov_max_iterations > 1000);
+        THROW_IF(!(nesterov_stop_tolerance > 0.)
+          || !(nesterov_stop_tolerance < 1.));
       THROW_IF(metric_diagnostic_iterations < 0 ||
            metric_diagnostic_iterations > 100);
       THROW_IF(landmark_refinement_steps < 0 ||
@@ -1529,6 +1533,11 @@ public:
       block_curvature_multiplier = update.block_curvature_multiplier();
       metric_diagnostic_iterations = update.metric_diagnostic_iterations();
       landmark_refinement_steps = update.landmark_refinement_steps();
+        nesterov_max_iterations = update.nesterov_max_iterations();
+        nesterov_stop_tolerance = update.nesterov_stop_tolerance();
+        THROW_IF(nesterov_max_iterations <= 0 || nesterov_max_iterations > 1000);
+        THROW_IF(!(nesterov_stop_tolerance > 0.)
+          || !(nesterov_stop_tolerance < 1.));
       THROW_IF(metric_diagnostic_iterations < 0 ||
            metric_diagnostic_iterations > 100);
       THROW_IF(landmark_refinement_steps < 0 ||
@@ -1735,7 +1744,10 @@ SolveByGDNesterov(SparseMatrix<double, RowMajor> Uli, SparseMatrix<double, RowMa
                 const Matrix<double, Eigen::Dynamic, 1>& bp,
                 const Matrix<double, Eigen::Dynamic, 1>& bl,
                 const Matrix<double, Eigen::Dynamic, 1>& proximalGradient,
-                int power_iterations) {
+                int power_iterations, double stop_tolerance,
+                int* completed_iterations) {
+
+  *completed_iterations = 0;
 
   // compute bS, Vli, W
   BlockInverse<3>(Vli);
@@ -1782,6 +1794,7 @@ SolveByGDNesterov(SparseMatrix<double, RowMajor> Uli, SparseMatrix<double, RowMa
   // std::cout << "xk :" << xk.squaredNorm() << "\n";
 
   for (int i = 0; i < power_iterations; ++i) {
+      *completed_iterations = i + 1;
       const double lambda1 = (1. + std::sqrt(1. + 4. * lambda0 * lambda0)) / 2.;
       const double gamma = (1. - lambda0) / lambda1;
       lambda0 = lambda1;
@@ -1805,7 +1818,8 @@ SolveByGDNesterov(SparseMatrix<double, RowMajor> Uli, SparseMatrix<double, RowMa
 
       //std::cout << i << ". xk :" << xk.squaredNorm() << "\n";
 
-        if (stop_criterion(xk.squaredNorm(), g.squaredNorm(), Lip, i)) {
+        if (stop_criterion(
+          xk.squaredNorm(), g.squaredNorm(), Lip, i, stop_tolerance)) {
           break;
       }
   }
@@ -2060,7 +2074,7 @@ void UpdateStepSizeAndSolve() {//bool keep_cameras_fixed = false) { // Recompute
   double trust_region_decreasing_ratio = 0.5;
   double inv_tr_radius = 0;
 
-  const int power_iterations = 100; //keep_cameras_fixed ? 0 : 100;
+  const int power_iterations = nesterov_max_iterations;
   const double costStart = residual.squaredNorm();
   const BlockEdgeMatrix& W = camera_landmark_hessian;
   const Eigen::VectorXd& bp = normalEquations.camera_gradient;
@@ -2107,8 +2121,8 @@ void UpdateStepSizeAndSolve() {//bool keep_cameras_fixed = false) { // Recompute
           Ul, Vl, W, bp, bl, proximalGradient, &linear_iterations);
     } else {
       step = SolveByGDNesterov(
-          Ul, Vl, W, bp, bl, proximalGradient, power_iterations);
-      linear_iterations = power_iterations;
+          Ul, Vl, W, bp, bl, proximalGradient, power_iterations,
+          nesterov_stop_tolerance, &linear_iterations);
     }
     const Eigen::VectorXd& delta_p = step.first;
     const Eigen::VectorXd& delta_l = step.second;
@@ -2713,6 +2727,8 @@ private:
   double block_curvature_multiplier = 0.;
   int metric_diagnostic_iterations = 0;
   int landmark_refinement_steps = 0;
+  int nesterov_max_iterations = 100;
+  double nesterov_stop_tolerance = 1e-2;
   MetricDiagnostic metric_diagnostic;
   bool scalar_proximal_prior = false;
   double proximal_rho = 1.;
@@ -2942,6 +2958,9 @@ int main() {
     // Wait for the next request from a client
     // socket.recv(&request);
     pull_socket.recv(&request);
+    const bool collect_request_timing = LocalSolveMetricsEnabled();
+    const auto request_parse_start = collect_request_timing
+      ? TimingClock::now() : TimingClock::time_point{};
     // std::cout << "Received pull request \n";
 
     // ParseFromString expects a byte string.
@@ -2954,6 +2973,8 @@ int main() {
     request_proto request_p;
     // request_p.ParseFromString(received_message);
     request_p.ParseFromArray(request.data(), request.size());
+    const double request_parse_seconds = collect_request_timing
+      ? ElapsedSeconds(request_parse_start) : 0.;
     // std::cout << "Request ParseFromArray\n";
 
     switch (request_p.options_case()) {
@@ -2970,7 +2991,11 @@ int main() {
 
       //bool keep_cameras_fixed = (update.revert_lm() == 2) ? true : false;
 
+      const auto update_data_start = collect_request_timing
+        ? TimingClock::now() : TimingClock::time_point{};
       program.UpdateData(update); // update is local, we nned to fill data in main thread.
+      const double update_data_seconds = collect_request_timing
+        ? ElapsedSeconds(update_data_start) : 0.;
 
       // Define a Lambda Expression
       auto update_lambda = [&push_socket, &cluster_to_program,
@@ -2979,7 +3004,13 @@ int main() {
                   bool return_consensus_rhs,
                   bool single_node_consensus,
                   double consensus_relaxation,
-                  std::uint64_t run_id, std::uint64_t phase_id) {
+                  std::uint64_t run_id, std::uint64_t phase_id,
+                  double request_parse_seconds,
+                  double update_data_seconds,
+                  TimingClock::time_point launch_start) {
+        const bool collect_completion_timing = LocalSolveMetricsEnabled();
+        const double launch_wait_seconds = collect_completion_timing
+          ? ElapsedSeconds(launch_start) : 0.;
         CeresProgram &program = cluster_to_program[cluster_id];
         // std::cout << cluster_id << " Update "<< "\n";
   if (program.UsesCeresLocalSolver()) {
@@ -2997,13 +3028,30 @@ int main() {
           }
 #endif
   }
+        const auto completion_start = collect_completion_timing
+          ? TimingClock::now() : TimingClock::time_point{};
+        double contribution_seconds = 0.;
+        double reduction_seconds = 0.;
         std::shared_ptr<const SingleNodeConsensusResult> consensus_result;
         if (single_node_consensus) {
+          const auto contribution_start = collect_completion_timing
+            ? TimingClock::now() : TimingClock::time_point{};
+          SingleNodeConsensusContribution contribution =
+            program.BuildSingleNodeConsensusContribution();
+          if (collect_completion_timing) {
+            contribution_seconds = ElapsedSeconds(contribution_start);
+          }
+          const auto reduction_start = collect_completion_timing
+            ? TimingClock::now() : TimingClock::time_point{};
           consensus_result = single_node_consensus_reducer.Submit(
             run_id, phase_id, cluster_id, program.ClusterCount(),
-            consensus_relaxation,
-            program.BuildSingleNodeConsensusContribution());
+            consensus_relaxation, std::move(contribution));
+          if (collect_completion_timing) {
+            reduction_seconds = ElapsedSeconds(reduction_start);
+          }
         }
+        const auto reply_pack_start = collect_completion_timing
+          ? TimingClock::now() : TimingClock::time_point{};
         return_cluster_proto return_proto = program.FillReturnProto(
           !omit_landmarks, return_consensus_rhs, !single_node_consensus);
         if (single_node_consensus && cluster_id == 0) {
@@ -3024,25 +3072,66 @@ int main() {
         }
         return_proto.set_run_id(run_id);
         return_proto.set_phase_id(phase_id);
+        const double reply_pack_seconds = collect_completion_timing
+          ? ElapsedSeconds(reply_pack_start) : 0.;
         const double cost = return_proto.cost();
         WORKER_LOG(cluster_id << ". Cost from update: " << cost << "\n");
         // std::cout << "Cost from update " << cost <<"\n";
         //  SerializeToArray saves memory and time?
+        const auto serialize_start = collect_completion_timing
+          ? TimingClock::now() : TimingClock::time_point{};
         size_t bytes = return_proto.ByteSizeLong();
         zmq::message_t reply(bytes);
         return_proto.SerializeToArray(reply.data(), bytes);
-        std::lock_guard<std::mutex> lock(mtx);
-        push_socket.send(reply, zmq::send_flags::none);
+        const double serialize_seconds = collect_completion_timing
+          ? ElapsedSeconds(serialize_start) : 0.;
+        const auto mutex_start = collect_completion_timing
+          ? TimingClock::now() : TimingClock::time_point{};
+        double mutex_wait_seconds = 0.;
+        double send_seconds = 0.;
+        {
+          std::unique_lock<std::mutex> lock(mtx);
+          if (collect_completion_timing) {
+            mutex_wait_seconds = ElapsedSeconds(mutex_start);
+          }
+          const auto send_start = collect_completion_timing
+            ? TimingClock::now() : TimingClock::time_point{};
+          push_socket.send(reply, zmq::send_flags::none);
+          if (collect_completion_timing) {
+            send_seconds = ElapsedSeconds(send_start);
+          }
+        }
+        if (collect_completion_timing) {
+          std::ostringstream timing;
+          timing << "SOLVE_COMPLETION_TIMING cluster=" << cluster_id
+            << " run=" << run_id << " phase=" << phase_id
+            << " single_node=" << single_node_consensus
+            << " bytes=" << bytes
+            << " request_parse=" << request_parse_seconds
+            << " update_data=" << update_data_seconds
+            << " launch_wait=" << launch_wait_seconds
+            << " contribution=" << contribution_seconds
+            << " reduction=" << reduction_seconds
+            << " reply_pack=" << reply_pack_seconds
+            << " serialize=" << serialize_seconds
+            << " mutex_wait=" << mutex_wait_seconds
+            << " send=" << send_seconds
+            << " total=" << ElapsedSeconds(completion_start) << "\n";
+          EmitLocalSolveMetric(timing.str());
+        }
         // std::cout << cluster_id << ". Update send" << std::endl;
       };
 
       // std::thread update_thread(update_lambda, std::ref(program),
       // std::cref(update));
+      const auto launch_start = collect_request_timing
+        ? TimingClock::now() : TimingClock::time_point{};
       std::thread update_thread(update_lambda, cluster_id,
         update.omit_landmarks(), update.return_consensus_rhs(),
         update.single_node_consensus(), update.consensus_relaxation(),
         update.run_id(),
-            update.phase_id());//, keep_cameras_fixed);
+        update.phase_id(), request_parse_seconds, update_data_seconds,
+        launch_start);//, keep_cameras_fixed);
       update_thread.detach();
       /// update_thread.join();
 

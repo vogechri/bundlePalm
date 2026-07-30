@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 
+# Usage and parameter reference: DRS_RUNNER_USAGE.md
+
 set -euo pipefail
 
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
@@ -15,12 +17,19 @@ CLUSTERS_LIST=${CLUSTERS_LIST:-"10 20 30"}
 ITERATIONS=${ITERATIONS:-30}
 LOCAL_STEPS=${LOCAL_STEPS:-1}
 THREADS_PER_CLUSTER=${THREADS_PER_CLUSTER:-1}
+NESTEROV_MAX_ITERATIONS=${NESTEROV_MAX_ITERATIONS:-100}
+NESTEROV_STOP_TOLERANCE=${NESTEROV_STOP_TOLERANCE:-1e-2}
+PARTITION_CACHE=${PARTITION_CACHE:-auto}
+PARTITION_CACHE_DIRECTORY=${PARTITION_CACHE_DIRECTORY:-$HOME/.cache/bundle_palm/partitions}
 LOCAL_SOLVER=${LOCAL_SOLVER:-nesterov}
 TRUST_REGION_POLICY=${TRUST_REGION_POLICY:-daba}
 PERSISTENT_TRUST_REGION=${PERSISTENT_TRUST_REGION:-0}
 TRUST_REGION_RECOVERY_RATIO=${TRUST_REGION_RECOVERY_RATIO:-0.5}
 CAMERA_SCALING=${CAMERA_SCALING:-jacobi_initial}
 CLUSTERING=${CLUSTERING:-${BUNDLE_PALM_CLUSTERING:-landmark_scalable}}
+RESIDUAL_BALANCE_SLACK=${RESIDUAL_BALANCE_SLACK:-0.01}
+MINIMUM_CAMERA_LANDMARKS=${MINIMUM_CAMERA_LANDMARKS:-20}
+MAX_REFINEMENT_PASSES=${MAX_REFINEMENT_PASSES:-3}
 PROXIMAL_METRIC=${PROXIMAL_METRIC:-block}
 CONSENSUS_METRIC=${CONSENSUS_METRIC:-${BUNDLE_PALM_DRS_CONSENSUS_METRIC:-full}}
 CONSENSUS_EXECUTION=${CONSENSUS_EXECUTION:-coordinator}
@@ -302,11 +311,18 @@ for problem in "${PROBLEMS[@]}"; do
             --iterations "$ITERATIONS" --clusters "$clusters" \
             --local-steps "$LOCAL_STEPS" \
             --threads-per-cluster "$THREADS_PER_CLUSTER" \
+            --nesterov-max-iterations "$NESTEROV_MAX_ITERATIONS" \
+            --nesterov-stop-tolerance "$NESTEROV_STOP_TOLERANCE" \
+            --partition-cache "$PARTITION_CACHE" \
+            --partition-cache-directory "$PARTITION_CACHE_DIRECTORY" \
             --local-solver "$LOCAL_SOLVER" \
             --trust-region-policy "$TRUST_REGION_POLICY" \
             --trust-region-recovery-ratio "$TRUST_REGION_RECOVERY_RATIO" \
             --camera-scaling "$CAMERA_SCALING" \
             --clustering "$CLUSTERING" \
+            --residual-balance-slack "$RESIDUAL_BALANCE_SLACK" \
+            --minimum-camera-landmarks "$MINIMUM_CAMERA_LANDMARKS" \
+            --max-refinement-passes "$MAX_REFINEMENT_PASSES" \
             --outer-acceleration "$OUTER_ACCELERATION" \
             --line-search-grid "$LINE_SEARCH_GRID" \
             --acceleration-restart-after "$ACCELERATION_RESTART_AFTER" \
@@ -346,11 +362,18 @@ for problem in "${PROBLEMS[@]}"; do
             --iterations "$ITERATIONS" --clusters "$clusters" \
             --local-steps "$LOCAL_STEPS" \
             --threads-per-cluster "$THREADS_PER_CLUSTER" \
+            --nesterov-max-iterations "$NESTEROV_MAX_ITERATIONS" \
+            --nesterov-stop-tolerance "$NESTEROV_STOP_TOLERANCE" \
+            --partition-cache "$PARTITION_CACHE" \
+            --partition-cache-directory "$PARTITION_CACHE_DIRECTORY" \
             --local-solver "$LOCAL_SOLVER" \
             --trust-region-policy "$TRUST_REGION_POLICY" \
             --trust-region-recovery-ratio "$TRUST_REGION_RECOVERY_RATIO" \
             --camera-scaling "$CAMERA_SCALING" \
             --clustering "$CLUSTERING" \
+            --residual-balance-slack "$RESIDUAL_BALANCE_SLACK" \
+            --minimum-camera-landmarks "$MINIMUM_CAMERA_LANDMARKS" \
+            --max-refinement-passes "$MAX_REFINEMENT_PASSES" \
             --outer-acceleration "$OUTER_ACCELERATION" \
             --line-search-grid "$LINE_SEARCH_GRID" \
             --acceleration-restart-after "$ACCELERATION_RESTART_AFTER" \

@@ -33,6 +33,8 @@ message program_proto {
   int32 metric_diagnostic_iterations = 28;
   int32 landmark_refinement_steps = 29;
   repeated uint32 global_camera_id = 30; // local camera slot to global camera identifier
+  int32 nesterov_max_iterations = 31;
+  double nesterov_stop_tolerance = 32;
 }
 
 // sent once
@@ -85,6 +87,8 @@ message prox_cluster_proto {
   bytes cameras_s_f64 = 26; // optional packed little-endian float64 DRS centers
   bool single_node_consensus = 27; // reduce full-block consensus inside this server
   double consensus_relaxation = 28;
+  int32 nesterov_max_iterations = 29;
+  double nesterov_stop_tolerance = 30;
   // clustering: lms by cam. # lms that can fill up cam in cl.
 }
 

@@ -8,6 +8,7 @@ import secrets
 import sys
 import time
 from dataclasses import dataclass
+from functools import wraps
 from pathlib import Path
 
 import numpy as np
@@ -61,6 +62,22 @@ class SingleNodeConsensusSummary:
     reflection_projection_squared: float
     center_step_squared: float
     splitting_term: float
+
+
+def _timed_operation(name):
+    def decorate(function):
+        @wraps(function)
+        def timed(self, *args, **kwargs):
+            started_at = time.perf_counter()
+            try:
+                return function(self, *args, **kwargs)
+            finally:
+                self.operation_seconds[name] += time.perf_counter() - started_at
+                self.operation_calls[name] += 1
+
+        return timed
+
+    return decorate
 
 
 def _debug_number(value):
@@ -138,6 +155,26 @@ class AdmmWorkerClient:
         self.sent_bytes = 0
         self.received_bytes = 0
         self.maximum_metric_asymmetry = 0.0
+        self.operation_seconds = {
+            "solveBatch": 0.0,
+            "updatePreconditioning": 0.0,
+            "refineLandmarksAtConsensus": 0.0,
+            "evaluateConsensusSSE": 0.0,
+            "controlLandmarkState": 0.0,
+            "materializeLandmarks": 0.0,
+        }
+        self.operation_calls = {name: 0 for name in self.operation_seconds}
+        self.transport_phase_seconds = {
+            "batchSetup": 0.0,
+            "requestBuild": 0.0,
+            "requestSerialize": 0.0,
+            "requestSend": 0.0,
+            "replySetup": 0.0,
+            "replyReceiveWait": 0.0,
+            "replyParse": 0.0,
+            "replyDecode": 0.0,
+            "batchFinalize": 0.0,
+        }
 
     def close(self):
         if os.environ.get("BUNDLE_PALM_VALIDATE_METRIC_SYMMETRY") == "1":
@@ -151,10 +188,19 @@ class AdmmWorkerClient:
         self.context.term()
 
     def _send(self, request):
+        started_at = time.perf_counter()
         payload = request.SerializeToString()
+        self.transport_phase_seconds["requestSerialize"] += (
+            time.perf_counter() - started_at
+        )
+        started_at = time.perf_counter()
         self.push_socket.send(payload)
+        self.transport_phase_seconds["requestSend"] += (
+            time.perf_counter() - started_at
+        )
         self.sent_bytes += len(payload)
 
+    @_timed_operation("solveBatch")
     def solve_batch(
         self,
         camera_indices_in_cluster,
@@ -191,7 +237,10 @@ class AdmmWorkerClient:
         packed_request_buffers=False,
         single_node_consensus=False,
         consensus_relaxation=1.0,
+        nesterov_max_iterations=100,
+        nesterov_stop_tolerance=1e-2,
     ):
+        batch_setup_started_at = time.perf_counter()
         if return_consensus_rhs and not return_metric_blocks:
             raise ValueError(
                 "consensus RHS requires returned camera metric blocks"
@@ -202,6 +251,10 @@ class AdmmWorkerClient:
             )
         if single_node_consensus and not 0.0 < consensus_relaxation < 2.0:
             raise ValueError("consensus relaxation must be in (0, 2)")
+        if nesterov_max_iterations <= 0:
+            raise ValueError("Nesterov maximum iterations must be positive")
+        if not 0.0 < nesterov_stop_tolerance < 1.0:
+            raise ValueError("Nesterov stop tolerance must be in (0, 1)")
         self.phase_id += 1
         phase_id = self.phase_id
         unique_cameras_by_cluster = [
@@ -210,7 +263,11 @@ class AdmmWorkerClient:
         unique_points_by_cluster = [
             np.unique(indices) for indices in point_indices_in_cluster
         ]
+        self.transport_phase_seconds["batchSetup"] += (
+            time.perf_counter() - batch_setup_started_at
+        )
         for cluster_id in range(cluster_count):
+            request_build_started_at = time.perf_counter()
             unique_cameras = unique_cameras_by_cluster[cluster_id]
             unique_points = unique_points_by_cluster[cluster_id]
             request = test_pb2.request_proto()
@@ -228,6 +285,8 @@ class AdmmWorkerClient:
                 program.metric_diagnostic_iterations = metric_diagnostic_iterations
                 program.landmark_refinement_steps = landmark_refinement_steps
                 program.global_camera_id[:] = unique_cameras
+                program.nesterov_max_iterations = nesterov_max_iterations
+                program.nesterov_stop_tolerance = nesterov_stop_tolerance
                 program.cluster_id = cluster_id
                 program.num_clusters = cluster_count
                 program.run_id = self.run_id
@@ -275,6 +334,8 @@ class AdmmWorkerClient:
                 update.return_consensus_rhs = return_consensus_rhs
                 update.single_node_consensus = single_node_consensus
                 update.consensus_relaxation = consensus_relaxation
+                update.nesterov_max_iterations = nesterov_max_iterations
+                update.nesterov_stop_tolerance = nesterov_stop_tolerance
                 update.cluster_id = cluster_id
                 update.run_id = self.run_id
                 update.phase_id = phase_id
@@ -298,8 +359,12 @@ class AdmmWorkerClient:
                     trust_region_recovery_ratio)
                 if int(revert_landmarks) == 2 or override_landmarks:
                     update.landmarks[:] = landmarks[unique_points].ravel()
+            self.transport_phase_seconds["requestBuild"] += (
+                time.perf_counter() - request_build_started_at
+            )
             self._send(request)
 
+        reply_setup_started_at = time.perf_counter()
         pending = set(range(cluster_count))
         costs = np.zeros(cluster_count)
         metric_blocks = None
@@ -348,13 +413,25 @@ class AdmmWorkerClient:
             if return_consensus_rhs else None
         )
         single_node_summary = None
+        self.transport_phase_seconds["replySetup"] += (
+            time.perf_counter() - reply_setup_started_at
+        )
         while pending:
+            started_at = time.perf_counter()
             payload = self.pull_socket.recv()
+            self.transport_phase_seconds["replyReceiveWait"] += (
+                time.perf_counter() - started_at
+            )
             self.received_bytes += len(payload)
             reply = test_pb2.return_cluster_proto()
+            started_at = time.perf_counter()
             reply.ParseFromString(payload)
+            self.transport_phase_seconds["replyParse"] += (
+                time.perf_counter() - started_at
+            )
             if reply.run_id != self.run_id or reply.phase_id != phase_id:
                 continue
+            decode_started_at = time.perf_counter()
             cluster_id = reply.cluster_id
             if cluster_id not in pending:
                 raise RuntimeError(f"duplicate ADMM reply for cluster {cluster_id}")
@@ -472,6 +549,10 @@ class AdmmWorkerClient:
             proximal_defect_squared[cluster_id] = (
                 reply.proximal_defect_squared
             )
+            self.transport_phase_seconds["replyDecode"] += (
+                time.perf_counter() - decode_started_at
+            )
+        batch_finalize_started_at = time.perf_counter()
         diagnostics = None
         if return_metric_diagnostics:
             diagnostics = {
@@ -486,6 +567,9 @@ class AdmmWorkerClient:
                 ),
                 "proximalDefectSquared": proximal_defect_squared,
             }
+        self.transport_phase_seconds["batchFinalize"] += (
+            time.perf_counter() - batch_finalize_started_at
+        )
         if single_node_consensus:
             if single_node_summary is None:
                 raise RuntimeError("worker omitted single-node consensus reply")
@@ -515,6 +599,7 @@ class AdmmWorkerClient:
             }
         return costs
 
+    @_timed_operation("updatePreconditioning")
     def update_preconditioning(
         self,
         camera_indices_in_cluster,
@@ -537,6 +622,7 @@ class AdmmWorkerClient:
             update.cluster_id = cluster_id
             self._send(request)
 
+    @_timed_operation("refineLandmarksAtConsensus")
     def refine_landmarks_at_consensus(
         self,
         camera_indices_in_cluster,
@@ -599,6 +685,7 @@ class AdmmWorkerClient:
             costs[cluster_id] = reply.cost
         return costs, refined_landmarks
 
+    @_timed_operation("evaluateConsensusSSE")
     def evaluate_consensus_sse(
         self,
         camera_indices_in_cluster,
@@ -648,6 +735,7 @@ class AdmmWorkerClient:
             costs[cluster_id] = reply.precise_cost
         return float(np.sum(costs))
 
+    @_timed_operation("controlLandmarkState")
     def control_nominal_landmark_state(
         self,
         cluster_count,
@@ -699,6 +787,7 @@ class AdmmWorkerClient:
                 raise RuntimeError("worker acknowledged the wrong landmark state")
             pending.remove(cluster_id)
 
+    @_timed_operation("materializeLandmarks")
     def materialize_current_landmarks(
         self,
         point_indices_in_cluster,

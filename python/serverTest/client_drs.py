@@ -35,6 +35,7 @@ from drs_safeguards import (
     should_reject_trial,
 )
 from outer_acceleration import create_accelerator, interpolate_line_search_center
+from partition_cache import PARTITION_CACHE_MODES, partition_with_cache
 from admm_scaling import (
     compute_initial_jacobi_scaling,
     to_physical_cameras,
@@ -130,6 +131,8 @@ def parse_arguments():
     parser.add_argument("--clusters", type=int, default=10)
     parser.add_argument("--local-steps", type=int, default=1)
     parser.add_argument("--threads-per-cluster", type=int, default=1)
+    parser.add_argument("--nesterov-max-iterations", type=int, default=100)
+    parser.add_argument("--nesterov-stop-tolerance", type=float, default=1e-2)
     parser.add_argument(
         "--local-solver",
         choices=("ceres_pcg", "schur_pcg", "nesterov"),
@@ -226,6 +229,13 @@ def parse_arguments():
         choices=("landmark_scalable", "landmark_scalable_stable"),
         default="landmark_scalable",
     )
+    parser.add_argument(
+        "--partition-cache", choices=PARTITION_CACHE_MODES, default="auto"
+    )
+    parser.add_argument(
+        "--partition-cache-directory",
+        default="~/.cache/bundle_palm/partitions",
+    )
     parser.add_argument("--debug-output", action="store_true")
     return parser.parse_args()
 
@@ -235,6 +245,10 @@ def validate_arguments(arguments):
         raise ValueError("iterations and clusters must be positive")
     if arguments.local_steps <= 0 or arguments.threads_per_cluster <= 0:
         raise ValueError("local steps and threads must be positive")
+    if arguments.nesterov_max_iterations <= 0:
+        raise ValueError("Nesterov maximum iterations must be positive")
+    if not 0.0 < arguments.nesterov_stop_tolerance < 1.0:
+        raise ValueError("Nesterov stop tolerance must be in (0, 1)")
     if not 0.0 < arguments.relaxation < 2.0:
         raise ValueError("relaxation must be in (0, 2)")
     if arguments.acceleration_restart_after <= 0:
@@ -509,12 +523,9 @@ def main():
         if arguments.clustering == "landmark_scalable"
         else cluster_by_landmark_scalable_stable
     )
-    (
-        camera_indices_in_cluster,
-        point_indices_in_cluster,
-        points_2d_in_cluster,
-        cluster_count,
-    ) = partitioner(
+    partition, partition_cache_status, partition_cache_path = partition_with_cache(
+        partitioner,
+        arguments.clustering,
         camera_indices,
         observations,
         point_indices,
@@ -524,7 +535,15 @@ def main():
         arguments.residual_balance_slack,
         arguments.minimum_camera_landmarks,
         arguments.max_refinement_passes,
+        arguments.partition_cache,
+        arguments.partition_cache_directory,
     )
+    (
+        camera_indices_in_cluster,
+        point_indices_in_cluster,
+        points_2d_in_cluster,
+        cluster_count,
+    ) = partition
     partition_seconds = time.perf_counter() - partition_started
     if cluster_count != arguments.clusters:
         raise RuntimeError("DRS partitioner changed the requested cluster count")
@@ -620,6 +639,7 @@ def main():
     suppressed_accelerated_landmark_replies = 0
     materialized_accelerated_landmark_states = 0
     suppressed_routine_landmark_replies = 0
+    consensus_projection_seconds = 0.0
 
     worker = DrsWorkerClient()
     try:
@@ -651,6 +671,8 @@ def main():
             block_regularization=block_regularization,
             block_curvature_multiplier=block_curvature_multiplier,
             return_metric_blocks=(arguments.proximal_metric == "block"),
+            nesterov_max_iterations=arguments.nesterov_max_iterations,
+            nesterov_stop_tolerance=arguments.nesterov_stop_tolerance,
         )
         worker.update_preconditioning(
             camera_indices_in_cluster,
@@ -670,6 +692,11 @@ def main():
                 cluster_count, 1, "save_best"
             )
         initialization_seconds = time.perf_counter() - started_at
+        optimization_operation_start = worker.operation_seconds.copy()
+        optimization_operation_call_start = worker.operation_calls.copy()
+        optimization_transport_phase_start = (
+            worker.transport_phase_seconds.copy()
+        )
         optimization_started_at = time.perf_counter()
         for iteration in range(arguments.iterations):
             reference_sse = accepted_metrics["sumSquaredError"]
@@ -732,6 +759,8 @@ def main():
                     arguments.consensus_execution == "single-node"
                 ),
                 consensus_relaxation=arguments.relaxation,
+                nesterov_max_iterations=arguments.nesterov_max_iterations,
+                nesterov_stop_tolerance=arguments.nesterov_stop_tolerance,
             )
             if arguments.worker_owned_landmarks:
                 suppressed_routine_landmark_replies += cluster_count
@@ -773,6 +802,7 @@ def main():
             revert_landmark_mode = 0
             trust_region_recovery_ratio = 1.0
 
+            consensus_started_at = time.perf_counter()
             if single_node_summary is not None:
                 (
                     candidate_consensus,
@@ -803,6 +833,9 @@ def main():
                     metric_blocks=raw_metric_blocks,
                     metric_mode=arguments.consensus_metric,
                 )
+            consensus_projection_seconds += (
+                time.perf_counter() - consensus_started_at
+            )
             if arguments.worker_consensus_shadow:
                 rhs_error, consensus_error = validate_worker_consensus_rhs(
                     local_cameras,
@@ -1112,6 +1145,12 @@ def main():
                             arguments.consensus_execution == "single-node"
                         ),
                         consensus_relaxation=arguments.relaxation,
+                        nesterov_max_iterations=(
+                            arguments.nesterov_max_iterations
+                        ),
+                        nesterov_stop_tolerance=(
+                            arguments.nesterov_stop_tolerance
+                        ),
                     )
                     if (
                         arguments.suppress_accelerated_landmark_replies
@@ -1149,6 +1188,7 @@ def main():
                         trial_raw_blocks = None
                         trial_diagnostics = None
                         trial_single_node_summary = None
+                    consensus_started_at = time.perf_counter()
                     if arguments.consensus_execution == "single-node":
                         (
                             trial_consensus,
@@ -1179,6 +1219,9 @@ def main():
                             metric_blocks=trial_raw_blocks,
                             metric_mode=arguments.consensus_metric,
                         )
+                    consensus_projection_seconds += (
+                        time.perf_counter() - consensus_started_at
+                    )
                     if acceleration_weight == 1.0:
                         accelerator.observe_first_trial(
                             trial_centers - trial_next_centers
@@ -1796,6 +1839,18 @@ def main():
                 termination_reason = "recovery_exhausted"
                 break
         optimization_seconds = time.perf_counter() - optimization_started_at
+        optimization_worker_operation_seconds = {
+            name: seconds - optimization_operation_start[name]
+            for name, seconds in worker.operation_seconds.items()
+        }
+        optimization_worker_operation_calls = {
+            name: calls - optimization_operation_call_start[name]
+            for name, calls in worker.operation_calls.items()
+        }
+        optimization_transport_phase_seconds = {
+            name: seconds - optimization_transport_phase_start[name]
+            for name, seconds in worker.transport_phase_seconds.items()
+        }
         if arguments.worker_owned_landmarks:
             best_points = worker.materialize_current_landmarks(
                 point_indices_in_cluster,
@@ -1835,6 +1890,9 @@ def main():
     finally:
         sent_bytes = worker.sent_bytes
         received_bytes = worker.received_bytes
+        worker_operation_seconds = worker.operation_seconds.copy()
+        worker_operation_calls = worker.operation_calls.copy()
+        transport_phase_seconds = worker.transport_phase_seconds.copy()
         worker.close()
 
     final_metrics = evaluate_bal_state(
@@ -1847,7 +1905,12 @@ def main():
         "iterations": arguments.iterations,
         "clusters": cluster_count,
         "clustering": arguments.clustering,
+        "partitionCacheMode": arguments.partition_cache,
+        "partitionCacheStatus": partition_cache_status,
+        "partitionCachePath": str(partition_cache_path),
         "localSteps": arguments.local_steps,
+        "nesterovMaxIterations": arguments.nesterov_max_iterations,
+        "nesterovStopTolerance": arguments.nesterov_stop_tolerance,
         "threadsPerCluster": arguments.threads_per_cluster,
         "localSolver": arguments.local_solver,
         "trustRegionPolicy": arguments.trust_region_policy,
@@ -1867,6 +1930,19 @@ def main():
         "proximalMetric": arguments.proximal_metric,
         "consensusMetric": arguments.consensus_metric,
         "consensusExecution": arguments.consensus_execution,
+        "consensusProjectionSeconds": consensus_projection_seconds,
+        "workerOperationSeconds": worker_operation_seconds,
+        "optimizationWorkerOperationSeconds": (
+            optimization_worker_operation_seconds
+        ),
+        "optimizationWorkerOperationCalls": (
+            optimization_worker_operation_calls
+        ),
+        "workerOperationCalls": worker_operation_calls,
+        "transportPhaseSeconds": transport_phase_seconds,
+        "optimizationTransportPhaseSeconds": (
+            optimization_transport_phase_seconds
+        ),
         "initialBlockRegularization": arguments.block_regularization,
         "finalBlockRegularization": block_regularization,
         "initialBlockCurvatureMultiplier": (
