@@ -26,7 +26,13 @@ LOCAL_SOLVER=${LOCAL_SOLVER:-nesterov}
 TRUST_REGION_POLICY=${TRUST_REGION_POLICY:-daba}
 PERSISTENT_TRUST_REGION=${PERSISTENT_TRUST_REGION:-0}
 TRUST_REGION_RECOVERY_RATIO=${TRUST_REGION_RECOVERY_RATIO:-0.5}
+SCENE_NORMALIZATION=${SCENE_NORMALIZATION:-points_p95}
 CAMERA_SCALING=${CAMERA_SCALING:-jacobi_initial}
+CAMERA_SCALING_MAXIMUM_RATIO=${CAMERA_SCALING_MAXIMUM_RATIO:-}
+CAMERA_SCALING_CLIPPING_PERCENTILE=${CAMERA_SCALING_CLIPPING_PERCENTILE:-}
+CAMERA_DIAGONAL_RELATIVE_FLOOR=${BUNDLE_PALM_CAMERA_DIAGONAL_FLOOR:-1e-48}
+CAMERA_TRUST_DIAGONAL_SCALE=${BUNDLE_PALM_CAMERA_TRUST_DIAGONAL_SCALE:-1e-4}
+CAMERA_DIAGONAL_METRIC_SCALE=${BUNDLE_PALM_CAMERA_DIAGONAL_METRIC_SCALE:-1e1}
 CLUSTERING=${CLUSTERING:-${BUNDLE_PALM_CLUSTERING:-landmark_scalable}}
 RESIDUAL_BALANCE_SLACK=${RESIDUAL_BALANCE_SLACK:-0.01}
 MINIMUM_CAMERA_LANDMARKS=${MINIMUM_CAMERA_LANDMARKS:-20}
@@ -60,6 +66,7 @@ PENALTY_MULTIPLIER=${PENALTY_MULTIPLIER:-1.0}
 SAFEGUARD_MODE=${SAFEGUARD_MODE:-relative}
 DRE_RELATIVE_INCREASE=${DRE_RELATIVE_INCREASE:-0.01}
 MINIMUM_PRIMAL_RATIO=${MINIMUM_PRIMAL_RATIO:-1.001}
+SAFEGUARD_RELATIVE_DEADBAND=${SAFEGUARD_RELATIVE_DEADBAND:-0}
 CATASTROPHIC_RATIO=${CATASTROPHIC_RATIO:-${SAFEGUARD_RATIO:-1000000}}
 RECOVERY_PENALTY_RATIO=${RECOVERY_PENALTY_RATIO:-2.0}
 CASE_TIMEOUT_SECONDS=${CASE_TIMEOUT_SECONDS:-3600}
@@ -79,6 +86,30 @@ if [[ "$CONSENSUS_EXECUTION" != "coordinator" ]]; then
 fi
 if [[ "$CLUSTERING" != "landmark_scalable" ]]; then
   VARIANT_NAME="${VARIANT_NAME}_${CLUSTERING}"
+fi
+if [[ "$SCENE_NORMALIZATION" == "none" ]]; then
+  VARIANT_NAME="${VARIANT_NAME}_scene_raw"
+elif [[ "$SCENE_NORMALIZATION" != "points_p95" ]]; then
+  echo "SCENE_NORMALIZATION must be points_p95 or none" >&2
+  exit 2
+fi
+if [[ -n "$CAMERA_SCALING_MAXIMUM_RATIO" ]]; then
+  VARIANT_NAME="${VARIANT_NAME}_scale_cap${CAMERA_SCALING_MAXIMUM_RATIO}"
+fi
+if [[ -n "$CAMERA_SCALING_CLIPPING_PERCENTILE" ]]; then
+  VARIANT_NAME="${VARIANT_NAME}_scale_clip${CAMERA_SCALING_CLIPPING_PERCENTILE}"
+fi
+if [[ "$CAMERA_DIAGONAL_RELATIVE_FLOOR" != "1e-48" ]]; then
+  VARIANT_NAME="${VARIANT_NAME}_camera_floor${CAMERA_DIAGONAL_RELATIVE_FLOOR}"
+fi
+if [[ "$CAMERA_TRUST_DIAGONAL_SCALE" != "1e-4" ]]; then
+  VARIANT_NAME="${VARIANT_NAME}_trust_diag${CAMERA_TRUST_DIAGONAL_SCALE}"
+fi
+if [[ "$CAMERA_DIAGONAL_METRIC_SCALE" != "1e1" && "$CAMERA_DIAGONAL_METRIC_SCALE" != "10" ]]; then
+  VARIANT_NAME="${VARIANT_NAME}_diag_metric${CAMERA_DIAGONAL_METRIC_SCALE}"
+fi
+if [[ "$SAFEGUARD_RELATIVE_DEADBAND" != "0" && "$SAFEGUARD_RELATIVE_DEADBAND" != "0.0" ]]; then
+  VARIANT_NAME="${VARIANT_NAME}_guard_db${SAFEGUARD_RELATIVE_DEADBAND}"
 fi
 if [[ "$BLOCK_CURVATURE_MULTIPLIER" != "0" && "$BLOCK_CURVATURE_MULTIPLIER" != "0.0" ]]; then
   VARIANT_NAME="${VARIANT_NAME}_lip${BLOCK_CURVATURE_MULTIPLIER}"
@@ -275,7 +306,11 @@ for problem in "${PROBLEMS[@]}"; do
     (cd "$SCRIPT_DIR" && exec setsid /usr/bin/time -v -o "$worker_time" \
       env BUNDLE_PALM_REQUEST_PORT="$REQUEST_PORT" \
           BUNDLE_PALM_RESULT_PORT="$RESULT_PORT" \
-          BUNDLE_PALM_THREADS_PER_CLUSTER="$THREADS_PER_CLUSTER" "$WORKER") \
+          BUNDLE_PALM_THREADS_PER_CLUSTER="$THREADS_PER_CLUSTER" \
+          BUNDLE_PALM_CAMERA_DIAGONAL_FLOOR="$CAMERA_DIAGONAL_RELATIVE_FLOOR" \
+          BUNDLE_PALM_CAMERA_TRUST_DIAGONAL_SCALE="$CAMERA_TRUST_DIAGONAL_SCALE" \
+          BUNDLE_PALM_CAMERA_DIAGONAL_METRIC_SCALE="$CAMERA_DIAGONAL_METRIC_SCALE" \
+          "$WORKER") \
       > "$worker_log" 2>&1 &
     WORKER_PID=$!
     for _ in {1..100}; do
@@ -292,6 +327,9 @@ for problem in "${PROBLEMS[@]}"; do
     [[ "$DEBUG_OUTPUT" == "1" ]] && debug_args+=(--debug-output)
     trust_args=()
     [[ "$PERSISTENT_TRUST_REGION" == "1" ]] && trust_args+=(--persistent-trust-region)
+    scaling_args=()
+    [[ -n "$CAMERA_SCALING_MAXIMUM_RATIO" ]] && scaling_args+=(--camera-scaling-maximum-ratio "$CAMERA_SCALING_MAXIMUM_RATIO")
+    [[ -n "$CAMERA_SCALING_CLIPPING_PERCENTILE" ]] && scaling_args+=(--camera-scaling-clipping-percentile "$CAMERA_SCALING_CLIPPING_PERCENTILE")
     worker_sse_args=()
     [[ "$WORKER_SSE_SHADOW" == "1" ]] && worker_sse_args+=(--worker-sse-shadow)
     [[ "$SUPPRESS_ACCELERATED_LANDMARK_REPLIES" == "1" ]] && worker_sse_args+=(--suppress-accelerated-landmark-replies)
@@ -320,7 +358,11 @@ for problem in "${PROBLEMS[@]}"; do
             --local-solver "$LOCAL_SOLVER" \
             --trust-region-policy "$TRUST_REGION_POLICY" \
             --trust-region-recovery-ratio "$TRUST_REGION_RECOVERY_RATIO" \
+            --scene-normalization "$SCENE_NORMALIZATION" \
             --camera-scaling "$CAMERA_SCALING" \
+            --camera-diagonal-relative-floor "$CAMERA_DIAGONAL_RELATIVE_FLOOR" \
+            --camera-trust-diagonal-scale "$CAMERA_TRUST_DIAGONAL_SCALE" \
+            --camera-diagonal-metric-scale "$CAMERA_DIAGONAL_METRIC_SCALE" \
             --clustering "$CLUSTERING" \
             --residual-balance-slack "$RESIDUAL_BALANCE_SLACK" \
             --minimum-camera-landmarks "$MINIMUM_CAMERA_LANDMARKS" \
@@ -348,10 +390,11 @@ for problem in "${PROBLEMS[@]}"; do
             --safeguard-mode "$SAFEGUARD_MODE" \
             --dre-relative-increase "$DRE_RELATIVE_INCREASE" \
             --minimum-primal-ratio "$MINIMUM_PRIMAL_RATIO" \
+            --safeguard-relative-deadband "$SAFEGUARD_RELATIVE_DEADBAND" \
             --catastrophic-ratio "$CATASTROPHIC_RATIO" \
             --recovery-penalty-ratio "$RECOVERY_PENALTY_RATIO" \
             --results "$RESULT_FILE" --state "$state_file" \
-            "${debug_args[@]}" "${trust_args[@]}" "${worker_sse_args[@]}") 2>&1 | tee "$log_file"
+            "${debug_args[@]}" "${trust_args[@]}" "${scaling_args[@]}" "${worker_sse_args[@]}") 2>&1 | tee "$log_file"
       exit_code=${PIPESTATUS[0]}
     else
       (cd "$SCRIPT_DIR" && /usr/bin/time -v -o "$coordinator_time" \
@@ -372,7 +415,11 @@ for problem in "${PROBLEMS[@]}"; do
             --local-solver "$LOCAL_SOLVER" \
             --trust-region-policy "$TRUST_REGION_POLICY" \
             --trust-region-recovery-ratio "$TRUST_REGION_RECOVERY_RATIO" \
+            --scene-normalization "$SCENE_NORMALIZATION" \
             --camera-scaling "$CAMERA_SCALING" \
+            --camera-diagonal-relative-floor "$CAMERA_DIAGONAL_RELATIVE_FLOOR" \
+            --camera-trust-diagonal-scale "$CAMERA_TRUST_DIAGONAL_SCALE" \
+            --camera-diagonal-metric-scale "$CAMERA_DIAGONAL_METRIC_SCALE" \
             --clustering "$CLUSTERING" \
             --residual-balance-slack "$RESIDUAL_BALANCE_SLACK" \
             --minimum-camera-landmarks "$MINIMUM_CAMERA_LANDMARKS" \
@@ -400,10 +447,11 @@ for problem in "${PROBLEMS[@]}"; do
             --safeguard-mode "$SAFEGUARD_MODE" \
             --dre-relative-increase "$DRE_RELATIVE_INCREASE" \
             --minimum-primal-ratio "$MINIMUM_PRIMAL_RATIO" \
+            --safeguard-relative-deadband "$SAFEGUARD_RELATIVE_DEADBAND" \
             --catastrophic-ratio "$CATASTROPHIC_RATIO" \
             --recovery-penalty-ratio "$RECOVERY_PENALTY_RATIO" \
             --results "$RESULT_FILE" --state "$state_file" \
-            "${debug_args[@]}" "${trust_args[@]}" "${worker_sse_args[@]}") > "$log_file" 2>&1
+            "${debug_args[@]}" "${trust_args[@]}" "${scaling_args[@]}" "${worker_sse_args[@]}") > "$log_file" 2>&1
       exit_code=$?
     fi
     set -e

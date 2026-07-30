@@ -357,7 +357,7 @@ def read_bal_problem(path):
 
 
 def canonicalize_bal_problem(
-    cameras, points, camera_indices, observations
+    cameras, points, camera_indices, observations, normalize_scene=True
 ):
     """Apply the focal-sign and scene normalization used by client_acc.py."""
     cameras = np.asarray(cameras, dtype=np.float64).copy()
@@ -368,6 +368,9 @@ def canonicalize_bal_problem(
     flipped_cameras = cameras[:, 6] < 0
     cameras[flipped_cameras, 6] *= -1
     observations[flipped_cameras[camera_indices]] *= -1
+
+    if not normalize_scene:
+        return cameras, points, observations
 
     median = np.median(points, axis=0)
     points -= median

@@ -30,6 +30,7 @@ from drs_consensus import (
 )
 from drs_consensus_metrics import CONSENSUS_METRIC_MODES
 from drs_safeguards import (
+    exceeds_with_relative_deadband,
     increase_recovery_parameter,
     relative_safeguard_ratios,
     should_reject_trial,
@@ -147,8 +148,16 @@ def parse_arguments():
     parser.add_argument(
         "--camera-scaling", choices=("none", "jacobi_initial"), default="jacobi_initial"
     )
+    parser.add_argument(
+        "--scene-normalization",
+        choices=("points_p95", "none"),
+        default="points_p95",
+    )
     parser.add_argument("--camera-scaling-maximum-ratio", type=float)
     parser.add_argument("--camera-scaling-clipping-percentile", type=float)
+    parser.add_argument("--camera-diagonal-relative-floor", type=float, default=1e-48)
+    parser.add_argument("--camera-trust-diagonal-scale", type=float, default=1e-4)
+    parser.add_argument("--camera-diagonal-metric-scale", type=float, default=1e1)
     parser.add_argument("--relaxation", type=float, default=1.0)
     parser.add_argument(
         "--outer-acceleration",
@@ -216,6 +225,7 @@ def parse_arguments():
     )
     parser.add_argument("--dre-relative-increase", type=float, default=0.01)
     parser.add_argument("--minimum-primal-ratio", type=float, default=1.001)
+    parser.add_argument("--safeguard-relative-deadband", type=float, default=0.0)
     parser.add_argument("--catastrophic-ratio", type=float, default=1e6)
     parser.add_argument("--recovery-penalty-ratio", type=float, default=2.0)
     parser.add_argument("--maximum-penalty", type=float, default=1e12)
@@ -385,6 +395,11 @@ def validate_arguments(arguments):
         raise ValueError("DRE relative increase must be nonnegative")
     if arguments.minimum_primal_ratio < 1.0:
         raise ValueError("minimum primal ratio must be at least one")
+    if (
+        not np.isfinite(arguments.safeguard_relative_deadband)
+        or arguments.safeguard_relative_deadband < 0.0
+    ):
+        raise ValueError("safeguard relative deadband must be finite and nonnegative")
     if arguments.catastrophic_ratio < 1.0:
         raise ValueError("catastrophic ratio must be at least one")
     if arguments.recovery_penalty_ratio <= 1.0:
@@ -510,7 +525,11 @@ def main():
         read_bal_problem(arguments.dataset)
     )
     cameras, points, observations = canonicalize_bal_problem(
-        raw_cameras, raw_points, camera_indices, raw_observations
+        raw_cameras,
+        raw_points,
+        camera_indices,
+        raw_observations,
+        normalize_scene=arguments.scene_normalization == "points_p95",
     )
     camera_count = len(cameras)
     point_count = len(points)
@@ -1023,11 +1042,19 @@ def main():
             )
             dre_threshold_exceeded = (
                 not np.isfinite(douglas_rachford_envelope)
-                or douglas_rachford_envelope > dre_ratio * reference_dre
+                or exceeds_with_relative_deadband(
+                    douglas_rachford_envelope,
+                    dre_ratio * reference_dre,
+                    arguments.safeguard_relative_deadband,
+                )
             )
             primal_threshold_exceeded = (
                 not np.isfinite(candidate_sse)
-                or candidate_sse > primal_ratio * reference_sse
+                or exceeds_with_relative_deadband(
+                    candidate_sse,
+                    primal_ratio * reference_sse,
+                    arguments.safeguard_relative_deadband,
+                )
             )
             if arguments.safeguard_mode == "relative":
                 rejected = should_reject_trial(
@@ -1039,6 +1066,7 @@ def main():
                     reference_sse,
                     dre_ratio,
                     primal_ratio,
+                    arguments.safeguard_relative_deadband,
                 )
             elif arguments.safeguard_mode == "catastrophic":
                 rejected = (
@@ -1332,6 +1360,7 @@ def main():
                             0, 1, trial_dre, trial_sse,
                             reference_dre, reference_sse,
                             dre_ratio, primal_ratio,
+                            arguments.safeguard_relative_deadband,
                         )
                     elif arguments.safeguard_mode == "catastrophic":
                         trial_rejected = (
@@ -1354,10 +1383,16 @@ def main():
                         if arguments.safeguard_mode == "relative":
                             decisive_rejection = (
                                 trial_rejected
-                                and trial_dre
-                                > dre_ratio * reference_dre + error_bound
-                                and trial_sse
-                                > primal_ratio * reference_sse + error_bound
+                                and exceeds_with_relative_deadband(
+                                    trial_dre - error_bound,
+                                    dre_ratio * reference_dre,
+                                    arguments.safeguard_relative_deadband,
+                                )
+                                and exceeds_with_relative_deadband(
+                                    trial_sse - error_bound,
+                                    primal_ratio * reference_sse,
+                                    arguments.safeguard_relative_deadband,
+                                )
                             )
                         elif arguments.safeguard_mode == "catastrophic":
                             decisive_rejection = (
@@ -1421,6 +1456,7 @@ def main():
                                     0, 1, trial_dre, trial_sse,
                                     reference_dre, reference_sse,
                                     dre_ratio, primal_ratio,
+                                    arguments.safeguard_relative_deadband,
                                 )
                             elif arguments.safeguard_mode == "catastrophic":
                                 trial_rejected = (
@@ -1927,7 +1963,23 @@ def main():
         "trustRegionPolicy": arguments.trust_region_policy,
         "persistentTrustRegion": arguments.persistent_trust_region,
         "trustRegionRecoveryRatio": arguments.trust_region_recovery_ratio,
+        "sceneNormalization": arguments.scene_normalization,
         "cameraScaling": arguments.camera_scaling,
+        "cameraScalingMaximumRatio": arguments.camera_scaling_maximum_ratio,
+        "cameraScalingClippingPercentile": (
+            arguments.camera_scaling_clipping_percentile
+        ),
+        "cameraScalingMinimum": float(np.min(camera_scaling)),
+        "cameraScalingMaximum": float(np.max(camera_scaling)),
+        "cameraScalingRatio": float(
+            np.max(camera_scaling) / np.min(camera_scaling)
+        ),
+        "cameraScalingGeometricMean": float(
+            np.exp(np.mean(np.log(camera_scaling)))
+        ),
+        "cameraDiagonalRelativeFloor": arguments.camera_diagonal_relative_floor,
+        "cameraTrustDiagonalScale": arguments.camera_trust_diagonal_scale,
+        "cameraDiagonalMetricScale": arguments.camera_diagonal_metric_scale,
         "scalingSeconds": scaling_seconds,
         "initializationSeconds": initialization_seconds,
         "optimizationSeconds": optimization_seconds,
@@ -2016,6 +2068,7 @@ def main():
         "safeguardMode": arguments.safeguard_mode,
         "dreRelativeIncrease": arguments.dre_relative_increase,
         "minimumPrimalRatio": arguments.minimum_primal_ratio,
+        "safeguardRelativeDeadband": arguments.safeguard_relative_deadband,
         "catastrophicRatio": arguments.catastrophic_ratio,
         "recoveryPenaltyRatio": arguments.recovery_penalty_ratio,
         "recoveryState": "last_accepted_consensus",

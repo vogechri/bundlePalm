@@ -20,6 +20,7 @@
 #include <thread>
 #include <mutex>
 #include <condition_variable>
+#include <limits>
 #include <memory>
 #include <omp.h>
 #include <chrono>
@@ -111,9 +112,87 @@ int EnvironmentInteger(const char* name, int default_value,
   return static_cast<int>(value);
 }
 
-double CameraDiagonalRelativeFloor() { // 1e-48 worked well, lower maybe more stable for different cluster sizes, example problem 1723. 40 already delivered inferior costs for 30 clusters 
+// Highly active: changing this floor alters convergence paths and final costs.
+double CameraDiagonalRelativeFloor() {
   static const double value = EnvironmentDouble(
       "BUNDLE_PALM_CAMERA_DIAGONAL_FLOOR", 1e-48, 0.0, 1.0);
+  return value;
+}
+
+// Inactive in the standard build; only used by the __ceresVersion__ path.
+double BlockSqrtEigenvalueFloor() {
+  static const double value = EnvironmentDouble(
+      "BUNDLE_PALM_BLOCK_SQRT_EIGENVALUE_FLOOR", 1e-16, 0.0, 1.0);
+  return value;
+}
+
+// Never hit in measured runs; reasonable perturbations had no effect.
+double LandmarkPreconditionerFloor() {
+  static const double value = EnvironmentDouble(
+      "BUNDLE_PALM_LANDMARK_PRECONDITIONER_FLOOR", 1e-24, 0.0, 1.0);
+  return value;
+}
+
+// Highly active: changes early progress, final costs, and runtime.
+double CameraTrustDiagonalScale() {
+  static const double value = EnvironmentDouble(
+      "BUNDLE_PALM_CAMERA_TRUST_DIAGONAL_SCALE", 1e-4, 0.0, 1.0);
+  return value;
+}
+
+// Inactive in the standard build; only used by the __ceresVersion__ path.
+double CameraBlockScale() {
+  static const double value = EnvironmentDouble(
+      "BUNDLE_PALM_CAMERA_BLOCK_SCALE", 1e1, 1e-12, 1e12);
+  return value;
+}
+
+// Inactive in the standard build; only used by the _const_diag_ path.
+double ConstantDiagonalMaximumFloor() {
+  static const double value = EnvironmentDouble(
+      "BUNDLE_PALM_CONST_DIAGONAL_MAXIMUM_FLOOR", 1e-32, 0.0, 1.0);
+  return value;
+}
+
+// Inactive in the standard build; only used by the _const_diag_ path.
+double ConstantDiagonalRelativeFloor() {
+  static const double value = EnvironmentDouble(
+      "BUNDLE_PALM_CONST_DIAGONAL_RELATIVE_FLOOR", 1e-3, 0.0, 1.0);
+  return value;
+}
+
+// Never hit in measured runs; observed block maxima were many orders larger.
+double CameraDiagonalMaximumGuard() {
+  static const double value = EnvironmentDouble(
+      "BUNDLE_PALM_CAMERA_DIAGONAL_MAXIMUM_GUARD", 1e-32, 0.0, 1.0);
+  return value;
+}
+
+// Little or no effect for reasonable values in measured runs.
+double MinimumTrustRegionRadius() {
+  static const double value = EnvironmentDouble(
+      "BUNDLE_PALM_MINIMUM_TRUST_REGION_RADIUS", 1e-4, 0.0, 1e6);
+  return value;
+}
+
+// Inactive in the standard build; only used by the __ceresVersion__ path.
+double LegacyLandmarkJacobianSqrtFloor() {
+  static const double value = EnvironmentDouble(
+      "BUNDLE_PALM_LEGACY_LANDMARK_JACOBIAN_SQRT_FLOOR", 1e-10, 0.0, 1.0);
+  return value;
+}
+
+// Hit by near-zero entries, but reasonable perturbations had no observed effect.
+double CameraPreconditionerDiagonalFloor() {
+  static const double value = EnvironmentDouble(
+      "BUNDLE_PALM_CAMERA_PRECONDITIONER_DIAGONAL_FLOOR", 1e-36, 0.0, 1.0);
+  return value;
+}
+
+// Highly active: strongly changes convergence quality, rejection count, and cost.
+double CameraDiagonalMetricScale() {
+  static const double value = EnvironmentDouble(
+      "BUNDLE_PALM_CAMERA_DIAGONAL_METRIC_SCALE", 1e1, 0.0, 1e12);
   return value;
 }
 
@@ -406,8 +485,12 @@ void BlockSqrt(SparseMatrix<double, RowMajor>& mat) {
     THROW_IF(numrows != mat.cols());
     THROW_IF(mat.nonZeros() != numrows * N);
     double* values = mat.valuePtr();
+    const double eigenvalueFloor = BlockSqrtEigenvalueFloor();
+    double minimumSqrtEigenvalue = std::numeric_limits<double>::infinity();
+    long long flooredEigenvalues = 0;
     //std::cout << "before  "<< values[0]<< " " << values[1]<< " " << values[2]<< " " << values[3] << "\n";
-#pragma omp parallel for num_threads(options.num_threads)
+  #pragma omp parallel for num_threads(options.num_threads) \
+    reduction(min:minimumSqrtEigenvalue) reduction(+:flooredEigenvalues)
     for (int i = 0; i < numrows / N; i++) {
         auto matNxN = Map< Matrix<double, N, N> > (&(values[i * N*N]));//,  Eigen::Stride<0, 0>);
         //std::cout << "before "<< matNxN << " \n";
@@ -417,12 +500,28 @@ void BlockSqrt(SparseMatrix<double, RowMajor>& mat) {
         //VPQ_EXPECT_EQ(eigensolver.info(), Eigen::Success);
 
         // SqrtCovEigenValues are sorted in decreasing order.
-        const Eigen::Vector<double, N> sqrtEigenValues = eigensolver.eigenvalues().cwiseAbs().cwiseSqrt().cwiseMax(1e-16);//.cwiseMax(lowerBoundSquared).cwiseSqrt().cwiseInverse();
+        const Eigen::Vector<double, N> rawSqrtEigenValues =
+          eigensolver.eigenvalues().cwiseAbs().cwiseSqrt();
+        minimumSqrtEigenvalue =
+          std::min(minimumSqrtEigenvalue, rawSqrtEigenValues.minCoeff());
+        flooredEigenvalues +=
+          (rawSqrtEigenValues.array() < eigenvalueFloor).count();
+        const Eigen::Vector<double, N> sqrtEigenValues =
+          rawSqrtEigenValues.cwiseMax(eigenvalueFloor);//.cwiseMax(lowerBoundSquared).cwiseSqrt().cwiseInverse();
         // recall : i had here min ev >= 1e-6 * maxEv. Could return a diag matrix
         matNxN = eigensolver.eigenvectors() * sqrtEigenValues.asDiagonal() * eigensolver.eigenvectors().transpose();
 
         //auto matNxN_out = Map< Matrix<double,N,N> > (&(values[i * N*N]));//,  Eigen::Stride<0, 0>);
         //std::cout << "after  "<< matNxN_out.transpose() * matNxN_out << " \n";
+    }
+    if (LocalSolveMetricsEnabled()) {
+      std::ostringstream metric;
+      metric << "BLOCK_SQRT_FLOOR blocks=" << numrows / N
+             << " entries=" << numrows
+             << " floored=" << flooredEigenvalues
+             << " minimum=" << minimumSqrtEigenvalue
+             << " floor=" << eigenvalueFloor << "\n";
+      EmitLocalSolveMetric(metric.str());
     }
     //std::cout << "after  "<< values[0]<< " " << values[1]<< " " << values[2]<< " " << values[3] << "\n";
 }
@@ -490,7 +589,7 @@ Diagonal(SparseMatrix<double, RowMajor>& mat, int cluster_id = -1) {
       for (int id = 1; id < N; ++id) {
         mv = std::max(mv, diagdiag(N*b + id));
       }
-      mv = std::max(1e-32, mv);
+      mv = std::max(ConstantDiagonalMaximumFloor(), mv);
       // TODO: stricter if max is very small?
       // With PCG, The GN-Hessian aprox should have a scale of #clusters (1/#clusters?). So we can say if max is < t we must correct. 
       // t = 1e-4. We can even scale. if 1 -> 1e-10, 1e-4: 1e-3. maybe log() -- could also be global min (max cam block)
@@ -506,7 +605,7 @@ Diagonal(SparseMatrix<double, RowMajor>& mat, int cluster_id = -1) {
 
           // This does ok in handling cases with degenerate cameras (observing only 1/2/3 landmarks in cluster).
           // Bad clustering 1e-3, not 1e-4. so < 1e-4, but 1e-2 a bit better than 1e-3? a bit random.
-          diagdiag(N*b + id) = std::max(1e-3 * mv, diagdiag(N*b + id)); // not < 1/inf. also 1e10: ok, 1e-6: bit worse
+          diagdiag(N*b + id) = std::max(ConstantDiagonalRelativeFloor() * mv, diagdiag(N*b + id)); // not < 1/inf. also 1e10: ok, 1e-6: bit worse
 
           //diagdiag(N*b + id) = std::max(variableThresh * mv, diagdiag(N*b + id)); // not < 1/inf. also 1e10: ok, 1e-6: bit worse
       }
@@ -518,14 +617,21 @@ Diagonal(SparseMatrix<double, RowMajor>& mat, int cluster_id = -1) {
     const bool collectMetrics = LocalSolveMetricsEnabled();
     int flooredEntries = 0;
     int zeroEntries = 0;
+    int guardedBlocks = 0;
     double minimumRelativeDiagonal = 1.0;
+    double minimumBlockMaximum = std::numeric_limits<double>::infinity();
 #pragma omp parallel for num_threads(options.num_threads) \
-    reduction(+:flooredEntries, zeroEntries) reduction(min:minimumRelativeDiagonal)
+    reduction(+:flooredEntries, zeroEntries, guardedBlocks) \
+    reduction(min:minimumRelativeDiagonal, minimumBlockMaximum)
     for (int block = 0; block < mat.rows() / N; ++block) {
       const auto cameraDiagonal = blockDiagonal.template segment<N>(N * block);
-      const double maxDiagonal = std::max(1e-32, cameraDiagonal.maxCoeff());
+      const double rawMaxDiagonal = cameraDiagonal.maxCoeff();
+      minimumBlockMaximum = std::min(minimumBlockMaximum, rawMaxDiagonal);
+      const double maxDiagonal =
+          std::max(CameraDiagonalMaximumGuard(), rawMaxDiagonal);
       const double floor = CameraDiagonalRelativeFloor() * maxDiagonal;
       if (collectMetrics) {
+        guardedBlocks += rawMaxDiagonal < CameraDiagonalMaximumGuard();
         for (int coordinate = 0; coordinate < N; ++coordinate) {
           zeroEntries += cameraDiagonal[coordinate] == 0.0;
           flooredEntries += cameraDiagonal[coordinate] < floor;
@@ -548,8 +654,11 @@ Diagonal(SparseMatrix<double, RowMajor>& mat, int cluster_id = -1) {
          << " entries=" << blockDiagonal.size()
          << " floored=" << flooredEntries
          << " zeros=" << zeroEntries
+         << " guarded_blocks=" << guardedBlocks
          << " min_relative=" << minimumRelativeDiagonal
-         << " floor=" << CameraDiagonalRelativeFloor() << "\n";
+         << " min_block_maximum=" << minimumBlockMaximum
+         << " floor=" << CameraDiagonalRelativeFloor()
+         << " maximum_guard=" << CameraDiagonalMaximumGuard() << "\n";
       EmitLocalSolveMetric(metric.str());
     }
   }
@@ -1592,7 +1701,7 @@ public:
         if (persistent_trust_region) {
           persistent_trust_region_active = true;
           tr_radius = last_tr_radius * update.trust_region_recovery_ratio();
-          tr_radius = std::max(1e-4, std::min(
+          tr_radius = std::max(MinimumTrustRegionRadius(), std::min(
               max_trust_region_radius, tr_radius));
           last_tr_radius = tr_radius;
         }
@@ -1604,7 +1713,7 @@ public:
         if (persistent_trust_region) {
           persistent_trust_region_active = true;
           tr_radius = last_tr_radius * update.trust_region_recovery_ratio();
-          tr_radius = std::max(1e-4, std::min(
+          tr_radius = std::max(MinimumTrustRegionRadius(), std::min(
               max_trust_region_radius, tr_radius));
           last_tr_radius = tr_radius;
         }
@@ -1654,7 +1763,7 @@ public:
       if (firstIteration) {
         const SparseMatrix<double, RowMajor> JlJ =
             BlockDiagonalJtJ<3>(Jl, numLandmarks);
-        const auto diag = JlJ.diagonal().array().cwiseAbs().cwiseSqrt().cwiseMax(1e-10);
+        const auto diag = JlJ.diagonal().array().cwiseAbs().cwiseSqrt().cwiseMax(LegacyLandmarkJacobianSqrtFloor());
         WORKER_LOG(" Update vnorm " << cluster_id << " " << diag.size() << " == " << vnorm.size() << "\n");
         THROW_IF(diag.size() != vnorm.size());
         for (int id = 0; id < vnorm.size(); ++id) {
@@ -1737,11 +1846,26 @@ void UpdatePreconditioningCameras(SparseMatrix<double, RowMajor> JpJ) {
   full_stepSize.resize(81 * numCameras, 0);
   const double *values = JpJ.valuePtr();
   std::copy(values, values + full_stepSize.size(), full_stepSize.data());
+  int flooredEntries = 0;
+  double minimumDiagonal = std::numeric_limits<double>::infinity();
   // ToDo: Is this ok or an issue to be resolved differently?
   for (int b = 0; b < numCameras; ++b) {
     for(int id = 0; id < 81; id += 10) { // diagonal entries !?
-      full_stepSize[81*b + id] = std::max(1e-36, full_stepSize[81*b + id]);
+      const double diagonal = full_stepSize[81*b + id];
+      minimumDiagonal = std::min(minimumDiagonal, diagonal);
+      flooredEntries += diagonal < CameraPreconditionerDiagonalFloor();
+      full_stepSize[81*b + id] =
+          std::max(CameraPreconditionerDiagonalFloor(), diagonal);
     }
+  }
+  if (LocalSolveMetricsEnabled()) {
+    std::ostringstream metric;
+    metric << "CAMERA_PRECONDITIONER_FLOOR cluster=" << cluster_id
+           << " entries=" << 9 * numCameras
+           << " floored=" << flooredEntries
+           << " minimum=" << minimumDiagonal
+           << " floor=" << CameraPreconditionerDiagonalFloor() << "\n";
+    EmitLocalSolveMetric(metric.str());
   }
 }
 
@@ -2073,7 +2197,19 @@ void UpdateStepSizeAndSolve() {//bool keep_cameras_fixed = false) { // Recompute
   SparseMatrix<double, RowMajor> Vl = normalEquations.landmark_hessian;
   if (firstIteration) { // preconditioning
       // diag is a reference .. why? i do stuff on it.
-      const auto diag = Vl.diagonal().array().cwiseMax(1e-24).cwiseSqrt().cwiseInverse().eval();
+      const Eigen::VectorXd landmarkDiagonal = Vl.diagonal();
+      const double landmarkFloor = LandmarkPreconditionerFloor();
+      if (LocalSolveMetricsEnabled()) {
+        std::ostringstream metric;
+        metric << "LANDMARK_PRECONDITIONER_FLOOR cluster=" << cluster_id
+               << " entries=" << landmarkDiagonal.size()
+               << " floored="
+               << (landmarkDiagonal.array() < landmarkFloor).count()
+               << " minimum=" << landmarkDiagonal.minCoeff()
+               << " floor=" << landmarkFloor << "\n";
+        EmitLocalSolveMetric(metric.str());
+      }
+      const auto diag = landmarkDiagonal.array().cwiseMax(landmarkFloor).cwiseSqrt().cwiseInverse().eval();
       THROW_IF(diag.size() != vnorm.size());
       WORKER_LOG(" Update vnorm " << cluster_id << " " << diag.size() << " == " << vnorm.size() << "\n");
       for (int id = 0; id < vnorm.size(); ++id) {
@@ -2118,7 +2254,7 @@ void UpdateStepSizeAndSolve() {//bool keep_cameras_fixed = false) { // Recompute
     return; // 1st step only preconditioning as it can go very wrong?
   }
   const Eigen::DiagonalMatrix<double, Eigen::Dynamic> diagVL = Diagonal<3>(Vl); // Vl = VL + L * diagVL
-  const Eigen::DiagonalMatrix<double, Eigen::Dynamic> diagUP = 1e1 * Diagonal<9>(Ul, cluster_id); // Vp = Vp + L * diagVp
+  const Eigen::DiagonalMatrix<double, Eigen::Dynamic> diagUP = CameraDiagonalMetricScale() * Diagonal<9>(Ul, cluster_id); // Vp = Vp + L * diagVp
   const SparseMatrix<double, RowMajor>& cameraHessian = normalEquations.camera_hessian;
   const SparseMatrix<double, RowMajor>& landmarkHessian = normalEquations.landmark_hessian;
 
@@ -2228,7 +2364,7 @@ void UpdateStepSizeAndSolve() {//bool keep_cameras_fixed = false) { // Recompute
     //   std::cout << " diagVL " << Vl.diagonal()[0] << " " << Vl.diagonal()[1] << " " << Vl.diagonal()[2] << "\n";// TOTALLY OFF after tr_check fails.
 
     // if not complicated this will lead to total chaos, likely the 
-    Ul += (1. / tr_radius - inv_tr_radius) * (1e-4 * diagUP);// + Jp.transpose() * Jp);
+    Ul += (1. / tr_radius - inv_tr_radius) * (CameraTrustDiagonalScale() * diagUP);// + Jp.transpose() * Jp);
     Ul += cameraHessian * (1. / tr_radius - inv_tr_radius);
 
     if (inv_tr_radius != 0) {
@@ -2348,7 +2484,8 @@ void UpdateStepSizeAndSolve() {//bool keep_cameras_fixed = false) { // Recompute
       for (int id = 0; id < delta_l.size(); ++id) {
         landmarks[id] -= delta_l[id];
       }
-      if (trust_region_attempts >= 20 || tr_radius < 1e-4) {
+        if (trust_region_attempts >= 20 ||
+          tr_radius < MinimumTrustRegionRadius()) {
         cost = costStart;
         break;
       }
@@ -2371,6 +2508,15 @@ void UpdateStepSizeAndSolve() {//bool keep_cameras_fixed = false) { // Recompute
          << " linear_iterations=" << linear_iterations
          << " trust_policy=" << trust_region_policy
          << " diagonal_floor=" << CameraDiagonalRelativeFloor()
+         << " block_sqrt_floor=" << BlockSqrtEigenvalueFloor()
+         << " landmark_preconditioner_floor=" << LandmarkPreconditionerFloor()
+         << " camera_trust_diagonal_scale=" << CameraTrustDiagonalScale()
+         << " camera_diagonal_maximum_guard=" << CameraDiagonalMaximumGuard()
+         << " minimum_trust_region_radius=" << MinimumTrustRegionRadius()
+         << " camera_preconditioner_floor="
+         << CameraPreconditionerDiagonalFloor()
+         << " camera_diagonal_metric_scale=" << CameraDiagonalMetricScale()
+         << " camera_block_scale=" << CameraBlockScale()
          << " acceptance_ratio=" << LocalAcceptanceRatio() << "\n";
       EmitLocalSolveMetric(metric.str());
       std::ostringstream timingMetric;
@@ -2522,7 +2668,9 @@ private:
       // ToDo: Is this ok or an issue to be resolved differently?
       for (int b = 0; b < numCameras; ++b) {
         for(int id = 0; id < 81; id += 10) { // diagonal entries !?
-          full_stepSize[81*b + id] = std::max(1e-36, full_stepSize[81*b + id]);
+            full_stepSize[81*b + id] = std::max(
+              CameraPreconditionerDiagonalFloor(),
+              full_stepSize[81*b + id]);
         }
       }
       best_landmarks = landmarks; // !
@@ -2531,7 +2679,7 @@ private:
     }
 
     // Allow to scale JtJ as well?
-    const double scale = 1e1;
+    const double scale = CameraBlockScale();
     // TODO.
     //const double scale = std::max(1. / 1.005, 1e1 * std::sqrt(start_be / current_be)); // 1e0: @29: 501k, no jump. 1e1 many jumps. 473k
     WORKER_LOG("scale " << scale << " " << start_be << " " << current_be << "\n");

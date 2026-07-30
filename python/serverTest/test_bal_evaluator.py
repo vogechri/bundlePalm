@@ -123,6 +123,34 @@ def test_canonicalization_preserves_per_observation_squared_errors(tmp_path):
     np.testing.assert_allclose(round_trip[4], canonical_observations)
 
 
+def test_canonicalization_can_preserve_raw_scene_coordinates():
+    cameras = np.array([
+        [0.1, -0.2, 0.05, 1, 2, 3, -2, 0.01, -0.001],
+        [-0.1, 0.05, 0.2, -2, 1, 4, 3, -0.02, 0.002],
+    ])
+    points = np.array([[1, 2, -4], [-2, 1, -6], [3, -1, -5]], dtype=float)
+    camera_indices = np.array([0, 1, 0, 1])
+    observations = np.array([[1, 2], [3, 4], [-2, 1], [1, -3]], dtype=float)
+
+    canonical_cameras, canonical_points, canonical_observations = (
+        canonicalize_bal_problem(
+            cameras,
+            points,
+            camera_indices,
+            observations,
+            normalize_scene=False,
+        )
+    )
+
+    np.testing.assert_array_equal(canonical_points, points)
+    np.testing.assert_array_equal(canonical_cameras[:, :6], cameras[:, :6])
+    np.testing.assert_array_equal(canonical_cameras[:, 6], [2, 3])
+    np.testing.assert_array_equal(
+        canonical_observations,
+        np.array([[-1, -2], [3, 4], [2, -1], [1, -3]], dtype=float),
+    )
+
+
 def test_daba_ray_metric_matches_direct_source_formula():
     cameras = np.array([[0, 0, 0, 0, 0, 1, 2, 0, 0]], dtype=float)
     points = np.array([[1, 2, -4]], dtype=float)

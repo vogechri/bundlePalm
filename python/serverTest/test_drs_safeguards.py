@@ -25,6 +25,17 @@ def test_relative_rejection_requires_both_merit_and_primal_worsening():
     assert not should_reject_trial(0, 1, 102.0, 100.1, 100.0, 100.0, 1.01, 1.005)
 
 
+def test_relative_deadband_ignores_threshold_roundoff_but_not_clear_worsening():
+    assert not should_reject_trial(
+        0, 1, 101.0 + 5e-7, 100.5 + 5e-7,
+        100.0, 100.0, 1.01, 1.005, relative_deadband=1e-8,
+    )
+    assert should_reject_trial(
+        0, 1, 101.0 + 5e-5, 100.5 + 5e-5,
+        100.0, 100.0, 1.01, 1.005, relative_deadband=1e-8,
+    )
+
+
 def test_nonfinite_relative_candidate_is_always_rejected():
     assert should_reject_trial(0, 1, np.inf, 1.0, 1.0, 1.0, 1.01, 1.005)
 

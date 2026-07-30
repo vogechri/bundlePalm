@@ -44,6 +44,7 @@ BLOCK_REGULARIZATION=5e-5 \
 MAXIMUM_BLOCK_CURVATURE_MULTIPLIER=64 \
 SAFEGUARD_MODE=relative \
 MINIMUM_PRIMAL_RATIO=1.001 \
+SCENE_NORMALIZATION=points_p95 \
 CAMERA_SCALING=jacobi_initial \
 DEBUG_OUTPUT=1 \
 LIVE_OUTPUT=1 \
@@ -129,7 +130,8 @@ OVERWRITE=1 PARTITION_CACHE=off ... ./run_drs_failure_top3_live.sh
 
 Each JSON result records `partitionCacheMode`, `partitionCacheStatus`
 (`hit`, `written`, or `disabled`), `partitionCachePath`, and
-`partitionSeconds`.
+`partitionSeconds`. It also records the worker's configured relative camera
+diagonal floor as `cameraDiagonalRelativeFloor`.
 
 ## Selecting problems and experiment size
 
@@ -169,7 +171,24 @@ ALL_PROBLEMS=1 PROBLEM_FILTER='' CLUSTERS_LIST='10 30' \
 | `TRUST_REGION_POLICY` | `daba` | `daba`, `drs`, or `ceres`. |
 | `PERSISTENT_TRUST_REGION` | `0` | `1`: carry the local trust-region radius between oracle calls. |
 | `TRUST_REGION_RECOVERY_RATIO` | `0.5` | Radius recovery factor in `(0,1]`. |
-| `BUNDLE_PALM_CAMERA_DIAGONAL_FLOOR` | `1e-48` | C++ floor used when regularizing camera diagonal terms. |
+| `BUNDLE_PALM_CAMERA_DIAGONAL_FLOOR` | `1e-48` | Relative C++ floor used when regularizing camera diagonal terms. Non-default values are included in the variant name and result metadata. |
+| `BUNDLE_PALM_BLOCK_SQRT_EIGENVALUE_FLOOR` | `1e-16` | Absolute floor applied after taking square roots of camera-block eigenvalues in the optional `__ceresVersion__` path; inactive in the standard Nesterov build. |
+| `BUNDLE_PALM_LANDMARK_PRECONDITIONER_FLOOR` | `1e-24` | Floor on the landmark Hessian diagonal before inverse-square-root preconditioning. |
+| `BUNDLE_PALM_CAMERA_TRUST_DIAGONAL_SCALE` | `1e-4` | Relative weight of the camera diagonal in trust-region damping. |
+| `BUNDLE_PALM_CAMERA_DIAGONAL_MAXIMUM_GUARD` | `1e-32` | Absolute guard used when forming relative camera diagonal floors. |
+| `BUNDLE_PALM_MINIMUM_TRUST_REGION_RADIUS` | `1e-4` | Lower trust-region radius used by recovery clamping and failed-attempt termination. |
+| `BUNDLE_PALM_CAMERA_PRECONDITIONER_DIAGONAL_FLOOR` | `1e-36` | Absolute floor on initial camera Hessian diagonal entries. |
+| `BUNDLE_PALM_CAMERA_DIAGONAL_METRIC_SCALE` | `1e1` | Multiplier on the active camera diagonal metric used by proximal and trust-region terms. |
+| `BUNDLE_PALM_CAMERA_BLOCK_SCALE` | `1e1` | Scale used when constructing the camera block step metric in the optional `__ceresVersion__` path; inactive in the standard Nesterov build. |
+| `BUNDLE_PALM_LEGACY_LANDMARK_JACOBIAN_SQRT_FLOOR` | `1e-10` | JlJ square-root floor in the optional `__ceresVersion__` path; inactive in the standard Nesterov build. |
+| `BUNDLE_PALM_CONST_DIAGONAL_MAXIMUM_FLOOR` | `1e-32` | Maximum-diagonal floor in the optional `_const_diag_` path; inactive in the standard build. |
+| `BUNDLE_PALM_CONST_DIAGONAL_RELATIVE_FLOOR` | `1e-3` | Relative diagonal floor in the optional `_const_diag_` path; inactive in the standard build. |
+
+All defaults above preserve the original hard-coded values. The standard build
+defines neither `__ceresVersion__` nor `_const_diag_`, so the corresponding
+controls have no effect unless those experimental code paths are explicitly
+enabled at compile time. In the standard Nesterov build, the landmark
+preconditioner floor and camera trust diagonal scale are active.
 
 Compatibility rules:
 
@@ -258,25 +277,34 @@ records absolute final SSE, optimization time, overall time, cost change, and
 speedup for every scene. The aggregate table includes summed times and
 geometric-mean ratios. Runs are resumable unless `OVERWRITE=1` is set.
 
-## Camera scaling and metrics
+## Scene normalization, camera scaling, and metrics
 
 | Variable | Default | Values / meaning |
 |---|---:|---|
-| `CAMERA_SCALING` | `jacobi_initial` | `jacobi_initial`: compute initial coordinate scaling. `none`: identity scaling. |
+| `SCENE_NORMALIZATION` | `points_p95` | `points_p95`: existing `client_acc.py`-compatible median centering and p95 landmark-radius scaling to 100. `none`: preserve raw spatial coordinates after focal-sign canonicalization. |
+| `CAMERA_SCALING` | `jacobi_initial` | `jacobi_initial`: compute `sqrt(diag(J_camera^T J_camera))` and normalize it to geometric mean one before the DRS cluster factor. `none`: identity scaling. |
+| `CAMERA_SCALING_MAXIMUM_RATIO` | unset | Optional maximum ratio between the largest and smallest gmean-normalized Jacobi scales. |
+| `CAMERA_SCALING_CLIPPING_PERCENTILE` | unset | Optional per-parameter lower/upper percentile clipping before gmean normalization, in `[0, 50)`. |
 | `PROXIMAL_METRIC` | `block` in runner | `scalar` or full 9×9 camera `block`. |
 | `CONSENSUS_METRIC` | `full` in runner | `arithmetic`, `scalar`, `diagonal`, or `full`. |
 | `CONSENSUS_EXECUTION` | `coordinator` | `coordinator`: Python reduction, representing remote nodes. `single-node`: exact in-worker reduction when all clusters share this worker. |
 | `RELAXATION` | `1.0` | DRS consensus relaxation in `(0,2)`. |
 | `PENALTY_MULTIPLIER` | `1.0` | Positive scalar proximal penalty multiplier. |
 
+Result JSON records the effective camera-scaling minimum, maximum, ratio, and
+geometric mean so conditioning experiments can be compared directly.
+
 Compatibility rules:
 
+- Use `SCENE_NORMALIZATION=none` only as a numerical-conditioning ablation. The
+  runner appends `_scene_raw` to its variant name to keep those results separate.
 - Scalar proximal mode only supports `CONSENSUS_METRIC=arithmetic`.
 - `CONSENSUS_EXECUTION=single-node` currently requires
   `PROXIMAL_METRIC=block CONSENSUS_METRIC=full`.
-- `coordinator` and `single-node` implement the same exact full-block
-  projection; they differ in where the reduction runs and what deployment is
-  represented.
+- `coordinator` and `single-node` implement the same mathematical full-block
+  projection, but NumPy/LAPACK and Eigen reduction/solve ordering is not
+  bitwise identical. Accelerated nonlinear trajectories can therefore diverge
+  after initially negligible floating-point differences.
 
 ## Block metric recovery and decay
 
@@ -305,6 +333,7 @@ to `64`, and halve recovered curvature after five accepted iterations.
 | `SAFEGUARD_MODE` | `relative` | `relative`, `catastrophic`, or `none`. |
 | `DRE_RELATIVE_INCREASE` | `0.01` | Allowed relative DRE increase; nonnegative. |
 | `MINIMUM_PRIMAL_RATIO` | `1.001` | Minimum safeguard ratio; must be at least 1. |
+| `SAFEGUARD_RELATIVE_DEADBAND` | `0` | Nonnegative relative numerical deadband around DRE and primal rejection thresholds; `0` preserves strict comparisons. |
 | `CATASTROPHIC_RATIO` | `1000000` | Rejection threshold for catastrophic mode; at least 1. |
 | `RECOVERY_PENALTY_RATIO` | `2.0` | Recovery growth factor; must exceed 1. |
 
