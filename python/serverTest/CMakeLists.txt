@@ -34,7 +34,11 @@ target_link_libraries(proto-objects PUBLIC protobuf::libprotobuf)
 set(PROTO_BINARY_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated")
 file(MAKE_DIRECTORY "${PROTO_BINARY_DIR}")
 #set(PROTO_BINARY_DIR "${CMAKE_CURRENT_LIST_DIR}/generated")
-target_include_directories(proto-objects PUBLIC "$<BUILD_INTERFACE:${PROTO_BINARY_DIR}>")
+target_include_directories(
+    proto-objects PUBLIC
+    "$<BUILD_INTERFACE:${PROTO_BINARY_DIR}>"
+    "$<BUILD_INTERFACE:${PROTO_BINARY_DIR}/proto>"
+)
 protobuf_generate(
     TARGET proto-objects
     IMPORT_DIRS "${CMAKE_CURRENT_LIST_DIR}/proto"
