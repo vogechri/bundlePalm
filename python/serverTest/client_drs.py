@@ -42,6 +42,59 @@ from admm_scaling import (
 
 
 WORKER_SSE_RELATIVE_TOLERANCE = 1e-9
+WORKER_CONSENSUS_RELATIVE_TOLERANCE = 1e-11
+
+
+def validate_worker_consensus_rhs(
+    local_cameras,
+    centers,
+    metric_blocks,
+    worker_rhs,
+    reference_consensus,
+):
+    """Validate worker M(2u-s) contributions and their ordered reduction."""
+    active_reflection = (
+        2.0 * local_cameras[
+            metric_blocks.cluster_indices, metric_blocks.camera_indices
+        ]
+        - centers[
+            metric_blocks.cluster_indices, metric_blocks.camera_indices
+        ]
+    )
+    expected_rhs = np.einsum(
+        "bij,bj->bi", metric_blocks.blocks, active_reflection
+    )
+    rhs_scale = max(float(np.max(np.abs(expected_rhs))), 1.0)
+    rhs_relative_error = float(
+        np.max(np.abs(worker_rhs - expected_rhs)) / rhs_scale
+    )
+    metric_sum = np.zeros(
+        (metric_blocks.camera_count, 9, 9), dtype=np.float64
+    )
+    rhs_sum = np.zeros((metric_blocks.camera_count, 9), dtype=np.float64)
+    for cluster in range(metric_blocks.cluster_count):
+        start = metric_blocks._cluster_starts[cluster]
+        stop = metric_blocks._cluster_starts[cluster + 1]
+        camera_indices = metric_blocks.camera_indices[start:stop]
+        metric_sum[camera_indices] += metric_blocks.blocks[start:stop]
+        rhs_sum[camera_indices] += worker_rhs[start:stop]
+    shadow_consensus = np.linalg.solve(
+        metric_sum, rhs_sum[..., None]
+    )[..., 0]
+    consensus_scale = max(float(np.max(np.abs(reference_consensus))), 1.0)
+    consensus_relative_error = float(
+        np.max(np.abs(shadow_consensus - reference_consensus))
+        / consensus_scale
+    )
+    if max(rhs_relative_error, consensus_relative_error) > (
+        WORKER_CONSENSUS_RELATIVE_TOLERANCE
+    ):
+        raise RuntimeError(
+            "worker consensus shadow mismatch: "
+            f"rhs_relative_error={rhs_relative_error:.3g} "
+            f"consensus_relative_error={consensus_relative_error:.3g}"
+        )
+    return rhs_relative_error, consensus_relative_error
 
 
 def parse_arguments():
@@ -103,6 +156,8 @@ def parse_arguments():
         "--suppress-accelerated-landmark-replies", action="store_true"
     )
     parser.add_argument("--worker-owned-landmarks", action="store_true")
+    parser.add_argument("--worker-owned-cameras", action="store_true")
+    parser.add_argument("--worker-consensus-shadow", action="store_true")
     parser.add_argument("--landmark-refinement-steps", type=int, default=0)
     parser.add_argument(
         "--consensus-landmark-refinement-steps", type=int, default=0
@@ -174,6 +229,18 @@ def validate_arguments(arguments):
     ):
         raise ValueError(
             "worker-owned landmarks support only final consensus refinement"
+        )
+    if arguments.worker_owned_cameras and not arguments.worker_owned_landmarks:
+        raise ValueError(
+            "worker-owned cameras require worker-owned landmarks"
+        )
+    if arguments.worker_consensus_shadow and not (
+        arguments.proximal_metric == "block"
+        and arguments.consensus_metric == "full"
+        and arguments.outer_acceleration == "none"
+    ):
+        raise ValueError(
+            "worker consensus shadow requires block/full metrics without acceleration"
         )
     if arguments.penalty_multiplier <= 0.0:
         raise ValueError("penalty multiplier must be positive")
@@ -501,6 +568,8 @@ def main():
     proximal_oracle_calls = 0
     override_landmarks = False
     maximum_worker_sse_relative_error = 0.0
+    maximum_worker_consensus_rhs_relative_error = 0.0
+    maximum_worker_consensus_relative_error = 0.0
     suppressed_accelerated_landmark_replies = 0
     materialized_accelerated_landmark_states = 0
     suppressed_routine_landmark_replies = 0
@@ -541,6 +610,9 @@ def main():
             point_indices_in_cluster,
             camera_scaling,
             cluster_count,
+            camera_state=(
+                local_cameras if arguments.worker_owned_cameras else None
+            ),
         )
         accepted_landmarks = landmarks.copy()
         if arguments.worker_owned_landmarks:
@@ -606,18 +678,32 @@ def main():
                     arguments.metric_diagnostic_iterations > 0
                 ),
                 return_landmarks=not arguments.worker_owned_landmarks,
+                worker_owned_cameras=arguments.worker_owned_cameras,
+                return_consensus_rhs=arguments.worker_consensus_shadow,
             )
             if arguments.worker_owned_landmarks:
                 suppressed_routine_landmark_replies += cluster_count
             proximal_oracle_calls += 1
             override_landmarks = False
+            worker_consensus_rhs = None
             if (
                 arguments.proximal_metric == "block"
                 and arguments.metric_diagnostic_iterations > 0
             ):
-                prox_costs, raw_metric_blocks, metric_diagnostics = prox_result
+                if arguments.worker_consensus_shadow:
+                    (
+                        prox_costs,
+                        raw_metric_blocks,
+                        metric_diagnostics,
+                        worker_consensus_rhs,
+                    ) = prox_result
+                else:
+                    prox_costs, raw_metric_blocks, metric_diagnostics = prox_result
             elif arguments.proximal_metric == "block":
-                prox_costs, raw_metric_blocks = prox_result
+                if arguments.worker_consensus_shadow:
+                    prox_costs, raw_metric_blocks, worker_consensus_rhs = prox_result
+                else:
+                    prox_costs, raw_metric_blocks = prox_result
                 metric_diagnostics = None
             else:
                 prox_costs = prox_result
@@ -641,6 +727,20 @@ def main():
                 metric_blocks=raw_metric_blocks,
                 metric_mode=arguments.consensus_metric,
             )
+            if arguments.worker_consensus_shadow:
+                rhs_error, consensus_error = validate_worker_consensus_rhs(
+                    local_cameras,
+                    centers,
+                    raw_metric_blocks,
+                    worker_consensus_rhs,
+                    candidate_consensus,
+                )
+                maximum_worker_consensus_rhs_relative_error = max(
+                    maximum_worker_consensus_rhs_relative_error, rhs_error
+                )
+                maximum_worker_consensus_relative_error = max(
+                    maximum_worker_consensus_relative_error, consensus_error
+                )
             physical_candidate = to_physical_cameras(
                 candidate_consensus, camera_scaling
             )
@@ -650,6 +750,7 @@ def main():
                     camera_indices_in_cluster,
                     candidate_consensus,
                     cluster_count,
+                    preserve_cameras=arguments.worker_owned_cameras,
                 )
                 unrefined_candidate_metrics = {
                     "sumSquaredError": worker_sse,
@@ -668,6 +769,7 @@ def main():
                     camera_indices_in_cluster,
                     candidate_consensus,
                     cluster_count,
+                    preserve_cameras=arguments.worker_owned_cameras,
                 )
                 worker_sse_relative_error = abs(
                     worker_sse
@@ -700,6 +802,7 @@ def main():
                     landmarks,
                     cluster_count,
                     arguments.consensus_landmark_refinement_steps,
+                    preserve_cameras=arguments.worker_owned_cameras,
                 )
                 refined_candidate_metrics = evaluate_bal_state(
                     physical_candidate,
@@ -913,6 +1016,7 @@ def main():
                             not arguments.suppress_accelerated_landmark_replies
                             and not arguments.worker_owned_landmarks
                         ),
+                        worker_owned_cameras=arguments.worker_owned_cameras,
                     )
                     if (
                         arguments.suppress_accelerated_landmark_replies
@@ -960,6 +1064,7 @@ def main():
                             camera_indices_in_cluster,
                             trial_consensus,
                             cluster_count,
+                            preserve_cameras=arguments.worker_owned_cameras,
                         )
                         trial_sse = worker_sse
                     else:
@@ -976,6 +1081,7 @@ def main():
                             camera_indices_in_cluster,
                             trial_consensus,
                             cluster_count,
+                            preserve_cameras=arguments.worker_owned_cameras,
                         )
                         worker_sse_relative_error = abs(
                             worker_sse - trial_metrics["sumSquaredError"]
@@ -1226,6 +1332,7 @@ def main():
                         camera_indices_in_cluster,
                         nominal_trial["candidate_consensus"],
                         cluster_count,
+                        preserve_cameras=arguments.worker_owned_cameras,
                     )
                     restored_relative_error = abs(
                         restored_worker_sse - nominal_trial["candidate_sse"]
@@ -1570,6 +1677,7 @@ def main():
                 cluster_count,
                 arguments.consensus_landmark_refinement_steps,
                 use_landmark_state=True,
+                preserve_cameras=arguments.worker_owned_cameras,
             )
             refined_metrics = evaluate_bal_state(
                 best_cameras,
@@ -1631,6 +1739,8 @@ def main():
         "metricDiagnosticIterations": arguments.metric_diagnostic_iterations,
         "workerSSEShadow": arguments.worker_sse_shadow,
         "workerOwnedLandmarks": arguments.worker_owned_landmarks,
+        "workerOwnedCameras": arguments.worker_owned_cameras,
+        "workerConsensusShadow": arguments.worker_consensus_shadow,
         "suppressedRoutineLandmarkReplies": (
             suppressed_routine_landmark_replies
         ),
@@ -1645,6 +1755,15 @@ def main():
         ),
         "maximumWorkerSSERelativeError": maximum_worker_sse_relative_error,
         "workerSSERelativeTolerance": WORKER_SSE_RELATIVE_TOLERANCE,
+        "maximumWorkerConsensusRHSRelativeError": (
+            maximum_worker_consensus_rhs_relative_error
+        ),
+        "maximumWorkerConsensusRelativeError": (
+            maximum_worker_consensus_relative_error
+        ),
+        "workerConsensusRelativeTolerance": (
+            WORKER_CONSENSUS_RELATIVE_TOLERANCE
+        ),
         "landmarkRefinementSteps": arguments.landmark_refinement_steps,
         "consensusLandmarkRefinementSteps": (
             arguments.consensus_landmark_refinement_steps

@@ -934,6 +934,7 @@ public:
       for (const auto &v : pro.cameras()) {
         cameras.push_back(v);
       }
+      last_cameras = cameras;
       //std::cout << "cameras.push_back\n";
       landmarks.clear();
       landmarks.reserve(3 * numLandmarks);
@@ -1237,7 +1238,9 @@ public:
 
     //void SetBe(double be) { be = be; }
     
-    return_cluster_proto FillReturnProto(bool include_landmarks = true) {
+    return_cluster_proto FillReturnProto(
+      bool include_landmarks = true,
+      bool include_consensus_rhs = false) {
       return_cluster_proto return_proto = return_cluster_proto();
       return_proto.set_cameras_f64(
           reinterpret_cast<const char*>(cameras.data()),
@@ -1272,6 +1275,27 @@ public:
       return_proto.set_step_size_upper_f32(
           reinterpret_cast<const char*>(metric_upper_blocks.data()),
           metric_upper_blocks.size() * sizeof(float));
+      if (include_consensus_rhs) {
+        std::vector<double> consensus_rhs(9 * numCameras, 0.);
+        for (int camera = 0; camera < numCameras; ++camera) {
+          const int camera_offset = 9 * camera;
+          const int metric_offset = 81 * camera;
+          for (int row = 0; row < 9; ++row) {
+            double value = 0.;
+            for (int column = 0; column < 9; ++column) {
+              const double metric_value = static_cast<float>(
+                  full_stepSize[metric_offset + 9 * row + column]);
+              value += metric_value * (
+                  2. * cameras[camera_offset + column]
+                  - cameras_s[camera_offset + column]);
+            }
+            consensus_rhs[camera_offset + row] = value;
+          }
+        }
+        return_proto.set_consensus_rhs_f64(
+            reinterpret_cast<const char*>(consensus_rhs.data()),
+            consensus_rhs.size() * sizeof(double));
+      }
       return_proto.set_cluster_id(cluster_id);
       return_proto.set_cost(cost);
       return_proto.set_objective_model(objective_model);
@@ -1335,19 +1359,31 @@ public:
       }
     }
 
+    const std::vector<double>& CurrentCameras() const {
+      return cameras;
+    }
+
+    void RestoreCameras(const std::vector<double>& saved_cameras) {
+      THROW_IF(saved_cameras.size() != cameras.size());
+      cameras = saved_cameras;
+    }
+
     void SaveNominalLandmarkState(std::uint64_t state_id) {
       THROW_IF(state_id == 0 || nominal_landmark_state_id != 0);
+      nominal_cameras = cameras;
       nominal_landmarks = landmarks;
       nominal_landmark_state_id = state_id;
     }
 
     void ValidateNominalLandmarkState(std::uint64_t state_id) const {
       THROW_IF(state_id == 0 || state_id != nominal_landmark_state_id);
+      THROW_IF(nominal_cameras.size() != cameras.size());
       THROW_IF(nominal_landmarks.size() != landmarks.size());
     }
 
     void RestoreNominalLandmarkState(std::uint64_t state_id) {
       ValidateNominalLandmarkState(state_id);
+      cameras = nominal_cameras;
       landmarks = nominal_landmarks;
     }
 
@@ -1364,6 +1400,7 @@ public:
 
     void DiscardNominalLandmarkState(std::uint64_t state_id) {
       THROW_IF(state_id == 0 || state_id != nominal_landmark_state_id);
+      nominal_cameras.clear();
       nominal_landmarks.clear();
       nominal_landmark_state_id = 0;
     }
@@ -1388,13 +1425,17 @@ public:
 
     void UpdateData(const prox_cluster_proto &update) {
       // std::cout << "Update cluster " << cluster_id << " update proto id:" << update.cluster_id() << "\n";
-      THROW_IF(update.cameras_size() != cameras.size());
+        THROW_IF(update.retain_cameras()
+          ? update.cameras_size() != 0
+          : update.cameras_size() != cameras.size());
       THROW_IF(update.cameras_s_size() != cameras_s.size());
       THROW_IF(update.cluster_id() != cluster_id);
 
       int id = 0; // fill existing buffer
-      for (const auto &v : update.cameras()) {
-        cameras[id++] = v;
+      if (!update.retain_cameras()) {
+        for (const auto &v : update.cameras()) {
+          cameras[id++] = v;
+        }
       }
       id = 0;
       for (const auto &v : update.cameras_s()) {
@@ -1435,6 +1476,10 @@ public:
 
       if (update.revert_lm() == 1) {
         WORKER_LOG(cluster_id << ". Revert landmarks\n");
+        if (update.revert_cameras()) {
+          THROW_IF(last_cameras.size() != cameras.size());
+          cameras = last_cameras;
+        }
         landmarks = last_landmarks;
         tr_radius = last_tr_radius;
         if (persistent_trust_region) {
@@ -1452,6 +1497,7 @@ public:
               max_trust_region_radius, tr_radius));
           last_tr_radius = tr_radius;
         }
+        last_cameras = cameras;
         last_landmarks = landmarks;
         last_tr_radius = tr_radius;
       } else if (update.revert_lm() == 2) {
@@ -1496,6 +1542,7 @@ public:
 
       }
       else {
+        last_cameras = cameras;
         last_landmarks = landmarks;
         last_tr_radius = tr_radius;
       }
@@ -1545,6 +1592,13 @@ public:
         THROW_IF(preconditioningProto.cluster_id() != cluster_id);
         THROW_IF(preconditioningProto.unorm_size() != unorm.size());
         THROW_IF(preconditioningProto.vnorm_size() != vnorm.size());
+        if (preconditioningProto.cameras_size() > 0) {
+          THROW_IF(preconditioningProto.cameras_size() != cameras.size());
+          cameras.assign(
+              preconditioningProto.cameras().begin(),
+              preconditioningProto.cameras().end());
+          last_cameras = cameras;
+        }
 
         int id = 0; // fill existing buffer
         WORKER_LOG("Preconditioning update " << cluster_id << " " << unorm.size() << " " << vnorm.size() << "\n");
@@ -2600,6 +2654,8 @@ private:
   //bool new_best_cost = false;
   std::vector<ceres::ResidualBlockId> function_residual_blocks;
   std::vector<double> cameras;
+  std::vector<double> last_cameras;
+  std::vector<double> nominal_cameras;
   //std::vector<double> best_poses;
   std::vector<double> cameras_s;
   std::vector<double> landmarks;// todo: either revert or send landmarkss all the time.
@@ -2693,6 +2749,7 @@ int main() {
       // Define a Lambda Expression
       auto update_lambda = [&push_socket, &cluster_to_program,
                 &mtx](int cluster_id, bool omit_landmarks,
+                  bool return_consensus_rhs,
                   std::uint64_t run_id, std::uint64_t phase_id) {
         CeresProgram &program = cluster_to_program[cluster_id];
         // std::cout << cluster_id << " Update "<< "\n";
@@ -2712,7 +2769,7 @@ int main() {
 #endif
   }
         return_cluster_proto return_proto =
-          program.FillReturnProto(!omit_landmarks);
+          program.FillReturnProto(!omit_landmarks, return_consensus_rhs);
         return_proto.set_run_id(run_id);
         return_proto.set_phase_id(phase_id);
         const double cost = return_proto.cost();
@@ -2730,7 +2787,8 @@ int main() {
       // std::thread update_thread(update_lambda, std::ref(program),
       // std::cref(update));
       std::thread update_thread(update_lambda, cluster_id,
-            update.omit_landmarks(), update.run_id(),
+        update.omit_landmarks(), update.return_consensus_rhs(),
+        update.run_id(),
             update.phase_id());//, keep_cameras_fixed);
       update_thread.detach();
       /// update_thread.join();
@@ -2809,6 +2867,9 @@ int main() {
             << std::endl);
       THROW_IF(cluster_to_program.find(cluster_id) == cluster_to_program.end());
       CeresProgram &program = cluster_to_program[cluster_id];
+      const std::vector<double> saved_cameras =
+          costUpdate.preserve_cameras()
+          ? program.CurrentCameras() : std::vector<double>();
         program.UpdateCostState(
           costUpdate); // update is local, we need to fill data in main thread.
       bool revert_lms = costUpdate.revert_lm() == 2 ? true : false;
@@ -2822,6 +2883,8 @@ int main() {
               &mtx](int cluster_id, bool revert_lms,
                 int landmark_refinement_steps,
                 bool omit_landmarks,
+                bool preserve_cameras,
+                std::vector<double> saved_cameras,
                 std::uint64_t run_id,
                 std::uint64_t phase_id) {
         CeresProgram &program = cluster_to_program[cluster_id];
@@ -2840,6 +2903,9 @@ int main() {
             (landmark_refinement_steps == 0 || revert_lms)) {
           program.AddPhysicalLandmarks(return_proto);
         }
+        if (preserve_cameras) {
+          program.RestoreCameras(saved_cameras);
+        }
         // SerializeToArray saves memory and time?
         const size_t bytes = return_proto.ByteSizeLong();
         zmq::message_t reply(bytes);
@@ -2850,6 +2916,7 @@ int main() {
             std::thread cost_thread(cost_lambda, cluster_id, revert_lms,
               landmark_refinement_steps,
               omit_landmarks,
+              costUpdate.preserve_cameras(), saved_cameras,
               costUpdate.run_id(), costUpdate.phase_id());
       cost_thread.detach();
       break;

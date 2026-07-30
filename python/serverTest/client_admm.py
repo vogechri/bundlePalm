@@ -175,7 +175,13 @@ class AdmmWorkerClient:
         return_metric_blocks=False,
         return_metric_diagnostics=False,
         return_landmarks=True,
+        worker_owned_cameras=False,
+        return_consensus_rhs=False,
     ):
+        if return_consensus_rhs and not return_metric_blocks:
+            raise ValueError(
+                "consensus RHS requires returned camera metric blocks"
+            )
         self.phase_id += 1
         phase_id = self.phase_id
         unique_cameras_by_cluster = [
@@ -222,10 +228,19 @@ class AdmmWorkerClient:
                 program.persistent_trust_region = persistent_trust_region
             else:
                 update = request.update
-                update.cameras[:] = local_cameras[cluster_id][
-                    unique_cameras].ravel()
+                retain_worker_cameras = (
+                    worker_owned_cameras and int(revert_landmarks) != 3
+                )
+                if not retain_worker_cameras:
+                    update.cameras[:] = local_cameras[cluster_id][
+                        unique_cameras].ravel()
                 update.cameras_s[:] = centers[cluster_id][
                     unique_cameras].ravel()
+                update.retain_cameras = retain_worker_cameras
+                update.revert_cameras = (
+                    worker_owned_cameras and int(revert_landmarks) == 1
+                )
+                update.return_consensus_rhs = return_consensus_rhs
                 update.cluster_id = cluster_id
                 update.run_id = self.run_id
                 update.phase_id = phase_id
@@ -292,6 +307,10 @@ class AdmmWorkerClient:
         camera_proximal_defect_squared = np.full(cluster_count, np.nan)
         landmark_proximal_defect_squared = np.full(cluster_count, np.nan)
         proximal_defect_squared = np.full(cluster_count, np.nan)
+        consensus_rhs = (
+            np.empty((metric_offsets[-1], 9), dtype=np.float64)
+            if return_consensus_rhs else None
+        )
         while pending:
             payload = self.pull_socket.recv()
             self.received_bytes += len(payload)
@@ -366,6 +385,17 @@ class AdmmWorkerClient:
                 metric_blocks.blocks[
                     metric_offsets[cluster_id]:metric_offsets[cluster_id + 1]
                 ] = reply_metric_blocks
+            if return_consensus_rhs:
+                reply_rhs = np.frombuffer(
+                    reply.consensus_rhs_f64, dtype="<f8"
+                )
+                if reply_rhs.size != 9 * unique_cameras.size:
+                    raise RuntimeError(
+                        "worker returned an invalid consensus RHS"
+                    )
+                consensus_rhs[
+                    metric_offsets[cluster_id]:metric_offsets[cluster_id + 1]
+                ] = reply_rhs.reshape((-1, 9))
             costs[cluster_id] = reply.cost
             transformed_lipschitz[cluster_id] = (
                 reply.transformed_lipschitz_estimate
@@ -384,7 +414,7 @@ class AdmmWorkerClient:
                 reply.proximal_defect_squared
             )
         if return_metric_blocks and return_metric_diagnostics:
-            return costs, metric_blocks, {
+            diagnostics = {
                 "transformedLipschitz": transformed_lipschitz,
                 "relativeResidual": transformed_lipschitz_residual,
                 "iterations": metric_iterations,
@@ -396,7 +426,12 @@ class AdmmWorkerClient:
                 ),
                 "proximalDefectSquared": proximal_defect_squared,
             }
+            if return_consensus_rhs:
+                return costs, metric_blocks, diagnostics, consensus_rhs
+            return costs, metric_blocks, diagnostics
         if return_metric_blocks:
+            if return_consensus_rhs:
+                return costs, metric_blocks, consensus_rhs
             return costs, metric_blocks
         if return_metric_diagnostics:
             return costs, {
@@ -419,6 +454,7 @@ class AdmmWorkerClient:
         point_indices_in_cluster,
         camera_scaling,
         cluster_count,
+        camera_state=None,
     ):
         for cluster_id in range(cluster_count):
             unique_cameras = np.unique(camera_indices_in_cluster[cluster_id])
@@ -427,6 +463,10 @@ class AdmmWorkerClient:
             update = request.preconditioning_update
             update.unorm[:] = (1.0 / camera_scaling[unique_cameras]).ravel()
             update.vnorm[:] = np.ones(3 * unique_points.size)
+            if camera_state is not None:
+                update.cameras[:] = camera_state[cluster_id][
+                    unique_cameras
+                ].ravel()
             update.cluster_id = cluster_id
             self._send(request)
 
@@ -439,6 +479,7 @@ class AdmmWorkerClient:
         cluster_count,
         refinement_steps,
         use_landmark_state=False,
+        preserve_cameras=False,
     ):
         self.phase_id += 1
         phase_id = self.phase_id
@@ -454,6 +495,7 @@ class AdmmWorkerClient:
             update.run_id = self.run_id
             update.phase_id = phase_id
             update.landmark_refinement_steps = refinement_steps
+            update.preserve_cameras = preserve_cameras
             self._send(request)
 
         pending = set(range(cluster_count))
@@ -488,6 +530,7 @@ class AdmmWorkerClient:
         camera_indices_in_cluster,
         consensus,
         cluster_count,
+        preserve_cameras=False,
     ):
         """Evaluate consensus cameras against worker-owned landmark states."""
         self.phase_id += 1
@@ -501,6 +544,7 @@ class AdmmWorkerClient:
             update.run_id = self.run_id
             update.phase_id = phase_id
             update.omit_landmarks = True
+            update.preserve_cameras = preserve_cameras
             self._send(request)
 
         pending = set(range(cluster_count))
