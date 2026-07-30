@@ -27,6 +27,22 @@ COMPLETION_COMPONENTS = (
 	"send",
 )
 DISPATCH_COMPONENTS = ("request_parse", "update_data", "launch_wait")
+NESTEROV_INNER_COMPONENTS = (
+	"inverse_landmark_blocks",
+	"inverse_camera_blocks",
+	"rhs_landmark_multiply",
+	"rhs_w_multiply",
+	"rhs_vector",
+	"initialize",
+	"iter_w_transpose",
+	"iter_landmark_multiply",
+	"iter_w_multiply",
+	"iter_camera_multiply",
+	"iter_vector",
+	"iter_stop",
+	"final_w_transpose",
+	"final_landmark_multiply",
+)
 
 
 def parse_arguments():
@@ -62,7 +78,7 @@ def scene_id(row):
 def find_worker_log(log_dir, row):
 	scene = scene_id(row)
 	pattern = (
-		f"*_{scene}_k{row['clusters']}_i{row['iterations']}_"
+		f"{row['variant']}_{scene}_k{row['clusters']}_i{row['iterations']}_"
 		f"l{row['localSteps']}_t{row['threadsPerCluster']}_worker.log"
 	)
 	matches = sorted(log_dir.glob(pattern))
@@ -86,6 +102,24 @@ def parse_worker_timings(path):
 						key: float(values[key])
 						for key in (*COMPONENTS, "total")
 					}
+					record.update({
+						f"nesterov_inner_{key}": float(
+							values.get(f"nesterov_{key}", 0.0)
+						)
+						for key in NESTEROV_INNER_COMPONENTS
+					})
+					record["nesterov_inner_total"] = float(
+						values.get("nesterov_inner_total", 0.0)
+					)
+					record["nesterov_inner_calls"] = float(
+						values.get("nesterov_calls", 0.0)
+					)
+					record["nesterov_inner_iterations"] = float(
+						values.get("nesterov_iterations", 0.0)
+					)
+					record["nesterov_inner_edge_visits"] = float(
+						values.get("nesterov_iterative_edge_visits", 0.0)
+					)
 					records_by_cluster[int(values["cluster"])].append(record)
 				continue
 			completion_match = COMPLETION_TIMING_PATTERN.search(line)
@@ -120,6 +154,15 @@ def summarize_worker_critical_path(records_by_cluster, completion_by_cluster):
 		*COMPLETION_COMPONENTS, "total"
 	)})
 	summary.update({f"dispatch_{key}": 0.0 for key in DISPATCH_COMPONENTS})
+	summary.update({
+		f"nesterov_inner_{key}": 0.0 for key in NESTEROV_INNER_COMPONENTS
+	})
+	summary.update({
+		"nesterov_inner_total": 0.0,
+		"nesterov_inner_calls": 0.0,
+		"nesterov_inner_iterations": 0.0,
+		"nesterov_inner_edge_visits": 0.0,
+	})
 	worker_cpu_total = 0.0
 	for oracle in range(oracle_count):
 		records = [records_by_cluster[cluster][oracle] for cluster in clusters]
@@ -196,6 +239,14 @@ def summarize_row(row, log_dir):
 			for key in DISPATCH_COMPONENTS
 		},
 		**{
+			f"nesterov_inner_{key}": worker[f"nesterov_inner_{key}"]
+			for key in NESTEROV_INNER_COMPONENTS
+		},
+		"nesterov_inner_total": worker["nesterov_inner_total"],
+		"nesterov_inner_calls": worker["nesterov_inner_calls"],
+		"nesterov_inner_iterations": worker["nesterov_inner_iterations"],
+		"nesterov_inner_edge_visits": worker["nesterov_inner_edge_visits"],
+		**{
 			f"transport_{key}": float(transport.get(key, 0.0))
 			for key in (
 				"batchSetup", "requestBuild", "requestSerialize", "requestSend",
@@ -226,6 +277,11 @@ def render_report(rows, source):
 		*tuple(f"local_{key}" for key in COMPONENTS),
 		*tuple(f"completion_{key}" for key in COMPLETION_COMPONENTS),
 		*tuple(f"dispatch_{key}" for key in DISPATCH_COMPONENTS),
+		*tuple(f"nesterov_inner_{key}" for key in NESTEROV_INNER_COMPONENTS),
+		"nesterov_inner_total",
+		"nesterov_inner_calls",
+		"nesterov_inner_iterations",
+		"nesterov_inner_edge_visits",
 		"transport_requestSerialize",
 		"transport_batchSetup",
 		"transport_requestBuild",
@@ -299,6 +355,93 @@ def render_report(rows, source):
 			f"| {key.replace('_', ' ')} | {value:.3f} | "
 			f"{percentage(value, aggregate['local_critical']):.1f}% |"
 		)
+	inner_component_total = sum(
+		aggregate[f"nesterov_inner_{key}"]
+		for key in NESTEROV_INNER_COMPONENTS
+	)
+	inner_unattributed = max(
+		0.0, aggregate["local_nesterov"] - inner_component_total
+	)
+	inner_iterations = aggregate["nesterov_inner_iterations"]
+	iterative_edge_visits = aggregate["nesterov_inner_edge_visits"]
+	iterative_w_seconds = sum(
+		aggregate[f"nesterov_inner_{key}"]
+		for key in ("iter_w_transpose", "iter_w_multiply")
+	)
+	edge_payload_gb = iterative_edge_visits * 27 * 8 / 1e9
+	lines.extend([
+		"",
+		"## Inner Nesterov kernel breakdown",
+		"",
+		f"Critical-path calls: {aggregate['nesterov_inner_calls']:.0f}; "
+		f"completed inner iterations: {inner_iterations:.0f}; "
+		f"mean iterations per call: "
+		f"{aggregate['nesterov_inner_iterations'] / aggregate['nesterov_inner_calls'] if aggregate['nesterov_inner_calls'] else 0.0:.2f}.",
+		f"Iterative edge-block visits: {iterative_edge_visits / 1e6:.3f}M; "
+		f"27-double edge payload read: {edge_payload_gb:.3f} GB; "
+		f"lower-bound edge-payload bandwidth: "
+		f"{edge_payload_gb / iterative_w_seconds if iterative_w_seconds else 0.0:.2f} GB/s.",
+		"",
+		"| Kernel | Seconds | Share of Nesterov | Mean per inner iteration |",
+		"|---|---:|---:|---:|",
+	])
+	for key in NESTEROV_INNER_COMPONENTS:
+		value = aggregate[f"nesterov_inner_{key}"]
+		per_iteration_us = (
+			1e6 * value / inner_iterations if inner_iterations else 0.0
+		)
+		lines.append(
+			f"| {key.replace('_', ' ')} | {value:.3f} | "
+			f"{percentage(value, aggregate['local_nesterov']):.1f}% | "
+			f"{per_iteration_us:.2f} µs |"
+		)
+	lines.append(
+		f"| function-entry copies, returns, and timer residual | "
+		f"{inner_unattributed:.3f} | "
+		f"{percentage(inner_unattributed, aggregate['local_nesterov']):.1f}% | "
+		f"{1e6 * inner_unattributed / inner_iterations if inner_iterations else 0.0:.2f} µs |"
+	)
+	iterative_w_share = percentage(
+		iterative_w_seconds, aggregate["local_nesterov"]
+	)
+	transpose_seconds = aggregate["nesterov_inner_iter_w_transpose"]
+	forward_seconds = aggregate["nesterov_inner_iter_w_multiply"]
+	inverse_seconds = sum(
+		aggregate[f"nesterov_inner_{key}"]
+		for key in ("inverse_landmark_blocks", "inverse_camera_blocks")
+	)
+	vector_stop_seconds = sum(
+		aggregate[f"nesterov_inner_{key}"]
+		for key in ("iter_vector", "iter_stop")
+	)
+	lines.extend([
+		"",
+		"### Inner Nesterov interpretation",
+		"",
+		f"- The iterative `W^T x` and `W y` traversals consume "
+		f"{iterative_w_seconds:.3f}s ({iterative_w_share:.1f}% of inner "
+		f"Nesterov and {percentage(iterative_w_seconds, total):.1f}% of total "
+		"optimization time).",
+		f"- `W^T x` takes {transpose_seconds:.3f}s versus "
+		f"{forward_seconds:.3f}s for `W y` "
+		f"({percentage(transpose_seconds - forward_seconds, forward_seconds):.1f}% "
+		"more). The current edge array is camera-major: forward multiplication "
+		"updates contiguous camera blocks, while transpose multiplication "
+		"scatters into landmark blocks.",
+		f"- The two block inversions total {inverse_seconds:.3f}s "
+		f"({percentage(inverse_seconds, aggregate['local_nesterov']):.1f}% of "
+		"Nesterov); vector acceleration and stopping checks total only "
+		f"{vector_stop_seconds:.3f}s "
+		f"({percentage(vector_stop_seconds, aggregate['local_nesterov']):.1f}%).",
+		f"- The {edge_payload_gb:.3f} GB payload figure excludes vector traffic, "
+		"indices, allocation, and cache effects, so its "
+		f"{edge_payload_gb / iterative_w_seconds if iterative_w_seconds else 0.0:.2f} "
+		"GB/s is a lower-bound effective rate, not measured DRAM bandwidth.",
+		"- The first implementation experiment should preserve camera-major "
+		"storage for `W y` while adding a landmark-major transpose view (or a "
+		"fused landmark-group Schur application) for `W^T x`; optimize iteration "
+		"caps only after measuring that layout change.",
+	])
 	lines.extend([
 		"",
 		"## C++ pre-solve dispatch critical path",

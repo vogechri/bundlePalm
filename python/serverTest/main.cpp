@@ -691,6 +691,7 @@ class BlockEdgeMatrix {
 
   int rows() const { return 9 * num_cameras_; }
   int cols() const { return 3 * num_landmarks_; }
+  size_t EdgeCount() const { return edges_.size(); }
 
   void Multiply(const Eigen::VectorXd& landmark_vector,
                 Eigen::VectorXd& camera_result) const {
@@ -944,8 +945,11 @@ public:
       metric_diagnostic_iterations = pro.metric_diagnostic_iterations();
       landmark_refinement_steps = pro.landmark_refinement_steps();
         nesterov_max_iterations = pro.nesterov_max_iterations();
+        nesterov_min_iterations = pro.nesterov_min_iterations();
         nesterov_stop_tolerance = pro.nesterov_stop_tolerance();
         THROW_IF(nesterov_max_iterations <= 0 || nesterov_max_iterations > 1000);
+        THROW_IF(nesterov_min_iterations <= 0
+          || nesterov_min_iterations > nesterov_max_iterations);
         THROW_IF(!(nesterov_stop_tolerance > 0.)
           || !(nesterov_stop_tolerance < 1.));
       THROW_IF(metric_diagnostic_iterations < 0 ||
@@ -1534,8 +1538,11 @@ public:
       metric_diagnostic_iterations = update.metric_diagnostic_iterations();
       landmark_refinement_steps = update.landmark_refinement_steps();
         nesterov_max_iterations = update.nesterov_max_iterations();
+        nesterov_min_iterations = update.nesterov_min_iterations();
         nesterov_stop_tolerance = update.nesterov_stop_tolerance();
         THROW_IF(nesterov_max_iterations <= 0 || nesterov_max_iterations > 1000);
+        THROW_IF(nesterov_min_iterations <= 0
+          || nesterov_min_iterations > nesterov_max_iterations);
         THROW_IF(!(nesterov_stop_tolerance > 0.)
           || !(nesterov_stop_tolerance < 1.));
       THROW_IF(metric_diagnostic_iterations < 0 ||
@@ -1738,39 +1745,103 @@ void UpdatePreconditioningCameras(SparseMatrix<double, RowMajor> JpJ) {
   }
 }
 
+struct NesterovInnerTiming {
+  double inverse_landmark_blocks = 0.;
+  double inverse_camera_blocks = 0.;
+  double rhs_landmark_multiply = 0.;
+  double rhs_w_multiply = 0.;
+  double rhs_vector = 0.;
+  double initialize = 0.;
+  double iter_w_transpose = 0.;
+  double iter_landmark_multiply = 0.;
+  double iter_w_multiply = 0.;
+  double iter_camera_multiply = 0.;
+  double iter_vector = 0.;
+  double iter_stop = 0.;
+  double final_w_transpose = 0.;
+  double final_landmark_multiply = 0.;
+  double inner_total = 0.;
+  std::uint64_t iterative_edge_visits = 0;
+  int calls = 0;
+  int iterations = 0;
+};
+
 std::pair<Matrix<double, Eigen::Dynamic, 1>, Matrix<double, Eigen::Dynamic, 1>>
 SolveByGDNesterov(SparseMatrix<double, RowMajor> Uli, SparseMatrix<double, RowMajor> Vli, 
                 const BlockEdgeMatrix& W,
                 const Matrix<double, Eigen::Dynamic, 1>& bp,
                 const Matrix<double, Eigen::Dynamic, 1>& bl,
                 const Matrix<double, Eigen::Dynamic, 1>& proximalGradient,
-                int power_iterations, double stop_tolerance,
-                int* completed_iterations) {
+                int power_iterations, int minimum_iterations,
+                double stop_tolerance,
+                int* completed_iterations, NesterovInnerTiming* timing) {
 
   *completed_iterations = 0;
+  const bool collect_timing = timing != nullptr;
+  const auto inner_start = collect_timing
+      ? TimingClock::now() : TimingClock::time_point{};
+  if (collect_timing) {
+    ++timing->calls;
+  }
 
   // compute bS, Vli, W
+  auto operation_start = collect_timing
+      ? TimingClock::now() : TimingClock::time_point{};
   BlockInverse<3>(Vli);
+  if (collect_timing) {
+    timing->inverse_landmark_blocks += ElapsedSeconds(operation_start);
+  }
 
   if (power_iterations == 0) {  // quick hack: xk = delta_p = 0
+    operation_start = collect_timing
+        ? TimingClock::now() : TimingClock::time_point{};
     Matrix<double, Eigen::Dynamic, 1> ubs = Uli * bp;
     Matrix<double, Eigen::Dynamic, 1> xk = 0 * ubs;
     Matrix<double, Eigen::Dynamic, 1> delta_l = Vli * (-bl);
+    if (collect_timing) {
+      timing->initialize += ElapsedSeconds(operation_start);
+      timing->inner_total += ElapsedSeconds(inner_start);
+    }
     return {xk, delta_l};
    }
 
+  operation_start = collect_timing
+      ? TimingClock::now() : TimingClock::time_point{};
   BlockInverse<9>(Uli);
+  if (collect_timing) {
+    timing->inverse_camera_blocks += ElapsedSeconds(operation_start);
+  }
   const double Lip = 0.9;
   double lambda0 = (1. + std::sqrt(5.)) / 2.;
+  operation_start = collect_timing
+      ? TimingClock::now() : TimingClock::time_point{};
   Matrix<double, Eigen::Dynamic, 1> bS = bp;
   // bS = (bp_s                     - W * Vli * bl).flatten() # see XX equals 2 * (bp - W * Vli * bl)
   //       bp_s = bp + stepSize * prox_rhs
   // bS = (bp + stepSize * prox_rhs - W * Vli * bl).flatten() # see XX equals 2 * (bp - W * Vli * bl)
   bS += proximalGradient;
+  if (collect_timing) {
+    timing->rhs_vector += ElapsedSeconds(operation_start);
+  }
+  operation_start = collect_timing
+      ? TimingClock::now() : TimingClock::time_point{};
   Eigen::VectorXd landmarkWorkspace = Vli * bl;
+  if (collect_timing) {
+    timing->rhs_landmark_multiply += ElapsedSeconds(operation_start);
+  }
   Eigen::VectorXd cameraWorkspace(W.rows());
+  operation_start = collect_timing
+      ? TimingClock::now() : TimingClock::time_point{};
   W.Multiply(landmarkWorkspace, cameraWorkspace);
+  if (collect_timing) {
+    timing->rhs_w_multiply += ElapsedSeconds(operation_start);
+  }
+  operation_start = collect_timing
+      ? TimingClock::now() : TimingClock::time_point{};
   bS -= cameraWorkspace;
+  if (collect_timing) {
+    timing->rhs_vector += ElapsedSeconds(operation_start);
+  }
 
   // std::cout << " Jl " << Jl.valuePtr()[0] << " " << Jl.valuePtr()[1] << " " << Jl.valuePtr()[2] << "\n";
   // std::cout << "bS :" << bS.array() << "\n";
@@ -1778,6 +1849,8 @@ SolveByGDNesterov(SparseMatrix<double, RowMajor> Uli, SparseMatrix<double, RowMa
   // std::cout << "bl :" << (Jl.transpose() * res).array() << "\n";
   // std::cout << "res :" << res.array() << "\n"; //ok
 
+  operation_start = collect_timing
+      ? TimingClock::now() : TimingClock::time_point{};
   Matrix<double, Eigen::Dynamic, 1> ubs = -Uli * bS;
   // Todo : * 1. / Lip ? or not
   Matrix<double, Eigen::Dynamic, 1> xk = - 1. / Lip * ubs; // xk =0, g = ubs, yk = -1. / Lip * g = - 1. / Lip * ubs; xk = (1-gamma) yk + gamma y0, gamma = 0
@@ -1788,6 +1861,9 @@ SolveByGDNesterov(SparseMatrix<double, RowMajor> Uli, SparseMatrix<double, RowMa
   Matrix<double, Eigen::Dynamic, 1> uinvWVinvWtX(W.rows());
   Matrix<double, Eigen::Dynamic, 1> g(W.rows());
   Matrix<double, Eigen::Dynamic, 1> yk(W.rows());
+  if (collect_timing) {
+    timing->initialize += ElapsedSeconds(operation_start);
+  }
   // Lip = 0.9 # 100 -> 1. # TODO: play, find out how to progress over time.
   // lambda0 = (1.+np.sqrt(5.)) / 2. # l=0 g=1, 0, .. L0=1 g = 0,..
 
@@ -1795,6 +1871,12 @@ SolveByGDNesterov(SparseMatrix<double, RowMajor> Uli, SparseMatrix<double, RowMa
 
   for (int i = 0; i < power_iterations; ++i) {
       *completed_iterations = i + 1;
+      if (collect_timing) {
+        ++timing->iterations;
+        timing->iterative_edge_visits += 2 * W.EdgeCount();
+      }
+      operation_start = collect_timing
+          ? TimingClock::now() : TimingClock::time_point{};
       const double lambda1 = (1. + std::sqrt(1. + 4. * lambda0 * lambda0)) / 2.;
       const double gamma = (1. - lambda0) / lambda1;
       lambda0 = lambda1;
@@ -1804,10 +1886,35 @@ SolveByGDNesterov(SparseMatrix<double, RowMajor> Uli, SparseMatrix<double, RowMa
       //     xk = (1-gamma) * yk + gamma * y0
       //     y0 = yk
       // const Matrix<double, Eigen::Dynamic, 1> g = (xk - Uli * (W * (Vli * (W.transpose() * xk).eval()).eval()).eval() + ubs).eval();
+      if (collect_timing) {
+        timing->iter_vector += ElapsedSeconds(operation_start);
+      }
+      operation_start = collect_timing
+          ? TimingClock::now() : TimingClock::time_point{};
       W.TransposeMultiply(xk, wtX);
+      if (collect_timing) {
+        timing->iter_w_transpose += ElapsedSeconds(operation_start);
+      }
+      operation_start = collect_timing
+          ? TimingClock::now() : TimingClock::time_point{};
       vinvWtX.noalias() = Vli * wtX;
+      if (collect_timing) {
+        timing->iter_landmark_multiply += ElapsedSeconds(operation_start);
+      }
+      operation_start = collect_timing
+          ? TimingClock::now() : TimingClock::time_point{};
       W.Multiply(vinvWtX, wVinvWtX);
+      if (collect_timing) {
+        timing->iter_w_multiply += ElapsedSeconds(operation_start);
+      }
+      operation_start = collect_timing
+          ? TimingClock::now() : TimingClock::time_point{};
       uinvWVinvWtX.noalias() = Uli * wVinvWtX;
+      if (collect_timing) {
+        timing->iter_camera_multiply += ElapsedSeconds(operation_start);
+      }
+      operation_start = collect_timing
+          ? TimingClock::now() : TimingClock::time_point{};
       g = xk;
       g -= uinvWVinvWtX;
       g += ubs;
@@ -1815,17 +1922,37 @@ SolveByGDNesterov(SparseMatrix<double, RowMajor> Uli, SparseMatrix<double, RowMa
       yk -= 1. / Lip * g;
       xk = (1. - gamma) * yk + gamma * y0;
       y0 = yk;
+      if (collect_timing) {
+        timing->iter_vector += ElapsedSeconds(operation_start);
+      }
 
       //std::cout << i << ". xk :" << xk.squaredNorm() << "\n";
 
-        if (stop_criterion(
-          xk.squaredNorm(), g.squaredNorm(), Lip, i, stop_tolerance)) {
+      operation_start = collect_timing
+          ? TimingClock::now() : TimingClock::time_point{};
+      const bool should_stop = stop_criterion(
+          xk.squaredNorm(), g.squaredNorm(), Lip, i, stop_tolerance);
+      if (collect_timing) {
+        timing->iter_stop += ElapsedSeconds(operation_start);
+      }
+      if (i + 1 >= minimum_iterations && should_stop) {
           break;
       }
   }
 
+  operation_start = collect_timing
+      ? TimingClock::now() : TimingClock::time_point{};
   W.TransposeMultiply(xk, wtX);
+  if (collect_timing) {
+    timing->final_w_transpose += ElapsedSeconds(operation_start);
+  }
+  operation_start = collect_timing
+      ? TimingClock::now() : TimingClock::time_point{};
   Matrix<double, Eigen::Dynamic, 1> delta_l = Vli * (wtX - bl);
+  if (collect_timing) {
+    timing->final_landmark_multiply += ElapsedSeconds(operation_start);
+    timing->inner_total += ElapsedSeconds(inner_start);
+  }
   return {-xk, delta_l};
 }
 
@@ -2092,6 +2219,7 @@ void UpdateStepSizeAndSolve() {//bool keep_cameras_fixed = false) { // Recompute
   int trust_region_attempts = 0;
   int trust_region_rejections = 0;
   int linear_iterations = 0;
+  NesterovInnerTiming nesterov_inner_timing;
   // options.max_num_iterations 
   while ( true ) { // if costStart + penaltyStart < costEnd + penaltyP
     ++trust_region_attempts;
@@ -2122,7 +2250,8 @@ void UpdateStepSizeAndSolve() {//bool keep_cameras_fixed = false) { // Recompute
     } else {
       step = SolveByGDNesterov(
           Ul, Vl, W, bp, bl, proximalGradient, power_iterations,
-          nesterov_stop_tolerance, &linear_iterations);
+          nesterov_min_iterations, nesterov_stop_tolerance, &linear_iterations,
+          collectTiming ? &nesterov_inner_timing : nullptr);
     }
     const Eigen::VectorXd& delta_p = step.first;
     const Eigen::VectorXd& delta_l = step.second;
@@ -2251,6 +2380,35 @@ void UpdateStepSizeAndSolve() {//bool keep_cameras_fixed = false) { // Recompute
         << " jacobian_conversion=" << last_jacobian_conversion_seconds
         << " assembly=" << assemblySeconds
         << " nesterov=" << nesterovSeconds
+        << " nesterov_calls=" << nesterov_inner_timing.calls
+        << " nesterov_iterations=" << nesterov_inner_timing.iterations
+        << " nesterov_inverse_landmark_blocks="
+        << nesterov_inner_timing.inverse_landmark_blocks
+        << " nesterov_inverse_camera_blocks="
+        << nesterov_inner_timing.inverse_camera_blocks
+        << " nesterov_rhs_landmark_multiply="
+        << nesterov_inner_timing.rhs_landmark_multiply
+        << " nesterov_rhs_w_multiply="
+        << nesterov_inner_timing.rhs_w_multiply
+        << " nesterov_rhs_vector=" << nesterov_inner_timing.rhs_vector
+        << " nesterov_initialize=" << nesterov_inner_timing.initialize
+        << " nesterov_iter_w_transpose="
+        << nesterov_inner_timing.iter_w_transpose
+        << " nesterov_iter_landmark_multiply="
+        << nesterov_inner_timing.iter_landmark_multiply
+        << " nesterov_iter_w_multiply="
+        << nesterov_inner_timing.iter_w_multiply
+        << " nesterov_iter_camera_multiply="
+        << nesterov_inner_timing.iter_camera_multiply
+        << " nesterov_iter_vector=" << nesterov_inner_timing.iter_vector
+        << " nesterov_iter_stop=" << nesterov_inner_timing.iter_stop
+        << " nesterov_final_w_transpose="
+        << nesterov_inner_timing.final_w_transpose
+        << " nesterov_final_landmark_multiply="
+        << nesterov_inner_timing.final_landmark_multiply
+        << " nesterov_inner_total=" << nesterov_inner_timing.inner_total
+        << " nesterov_iterative_edge_visits="
+        << nesterov_inner_timing.iterative_edge_visits
         << " cost_evaluate=" << costEvaluationSeconds
         << " total=" << ElapsedSeconds(localSolveStart)
         << " attempts=" << trust_region_attempts << "\n";
@@ -2728,6 +2886,7 @@ private:
   int metric_diagnostic_iterations = 0;
   int landmark_refinement_steps = 0;
   int nesterov_max_iterations = 100;
+  int nesterov_min_iterations = 1;
   double nesterov_stop_tolerance = 1e-2;
   MetricDiagnostic metric_diagnostic;
   bool scalar_proximal_prior = false;

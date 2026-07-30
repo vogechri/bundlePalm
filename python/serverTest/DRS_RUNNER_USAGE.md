@@ -164,6 +164,7 @@ ALL_PROBLEMS=1 PROBLEM_FILTER='' CLUSTERS_LIST='10 30' \
 |---|---:|---|
 | `LOCAL_SOLVER` | `nesterov` | `nesterov`: custom accelerated inner solve. `schur_pcg`: custom Schur-PCG solve. `ceres_pcg`: Ceres local solve. |
 | `NESTEROV_MAX_ITERATIONS` | `100` | Hard maximum for the inner Nesterov solve; valid range in the worker is 1–1000. |
+| `NESTEROV_MIN_ITERATIONS` | `1` | Minimum completed inner iterations before the stopping criterion may terminate the solve; must not exceed the maximum. |
 | `NESTEROV_STOP_TOLERANCE` | `1e-2` | Inner relative stopping tolerance in `(0,1)`. Larger is cheaper/looser. |
 | `TRUST_REGION_POLICY` | `daba` | `daba`, `drs`, or `ceres`. |
 | `PERSISTENT_TRUST_REGION` | `0` | `1`: carry the local trust-region radius between oracle calls. |
@@ -195,6 +196,67 @@ done
 Use a separate `OUTPUT_DIR` for every parameter combination. Several numerical
 parameters are not included in the generated variant name, so sharing one
 directory can otherwise overwrite or skip a logically different experiment.
+
+### Ten-scene stopping grid
+
+Run the standard ten-scene K30/I90 grid for maximum iterations
+`50, 100, 200` and stopping epsilon `1e-2, 1e-3, 5e-3` with:
+
+```bash
+./run_nesterov_stopping_grid.sh
+```
+
+The wrapper runs 90 cases and writes each parameter pair to a separate
+directory under:
+
+```text
+../benchmark_results/nesterov_stopping_grid_ten_scene_k30_i90/
+```
+
+The generated `comparison.md` uses `(max iterations=100, epsilon=1e-2)` as the
+baseline. It reports final `qualityMetrics.sumSquaredError` changes and both
+optimization-loop and overall speedups for every scene and grid cell.
+
+The run is resumable: completed cases are skipped by default. Set `OVERWRITE=1`
+to rerun every case. `SCENE_LIST` may select a different cohort but must contain
+at least ten scene IDs. `ITERATIONS`, `CLUSTERS`, `OUTPUT_ROOT`, and the two grid
+lists can also be overridden.
+
+To run a fresh matched epsilon `1e-2` versus `2e-2` comparison without requiring
+the full 3×3 analysis grid:
+
+```bash
+OUTPUT_ROOT="$PWD/../benchmark_results/nesterov_epsilon_2e-2_paired_ten_scene_k30_i90" \
+MAX_ITERATIONS_LIST=100 \
+STOP_TOLERANCE_LIST='1e-2 2e-2' \
+ANALYZE=0 \
+./run_nesterov_stopping_grid.sh
+```
+
+`ANALYZE=0` permits a partial grid and leaves analysis to a dedicated paired
+report. The measured ten-scene result was a 1.0532× geometric-mean optimization
+speedup and +0.0700% geometric-mean final-cost change at epsilon `2e-2`.
+
+### Ten-scene block Lipschitz grid
+
+Sweep `BLOCK_CURVATURE_MULTIPLIER` (`Lip`) over
+`1.0, 0.95, 0.925, 0.9, 0.85, 0.8` with the validated inner Nesterov settings using:
+
+```bash
+./run_block_lipschitz_grid.sh
+```
+
+This runs 60 K30/I90 cases over the standard ten-scene cohort. Results are
+stored under:
+
+```text
+../benchmark_results/block_lipschitz_grid_ten_scene_k30_i90/
+```
+
+The generated `comparison.md` uses Lip `1.0` as the within-grid baseline and
+records absolute final SSE, optimization time, overall time, cost change, and
+speedup for every scene. The aggregate table includes summed times and
+geometric-mean ratios. Runs are resumable unless `OVERWRITE=1` is set.
 
 ## Camera scaling and metrics
 

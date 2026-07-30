@@ -18,6 +18,7 @@ ITERATIONS=${ITERATIONS:-30}
 LOCAL_STEPS=${LOCAL_STEPS:-1}
 THREADS_PER_CLUSTER=${THREADS_PER_CLUSTER:-1}
 NESTEROV_MAX_ITERATIONS=${NESTEROV_MAX_ITERATIONS:-100}
+NESTEROV_MIN_ITERATIONS=${NESTEROV_MIN_ITERATIONS:-1}
 NESTEROV_STOP_TOLERANCE=${NESTEROV_STOP_TOLERANCE:-1e-2}
 PARTITION_CACHE=${PARTITION_CACHE:-auto}
 PARTITION_CACHE_DIRECTORY=${PARTITION_CACHE_DIRECTORY:-$HOME/.cache/bundle_palm/partitions}
@@ -312,6 +313,7 @@ for problem in "${PROBLEMS[@]}"; do
             --local-steps "$LOCAL_STEPS" \
             --threads-per-cluster "$THREADS_PER_CLUSTER" \
             --nesterov-max-iterations "$NESTEROV_MAX_ITERATIONS" \
+            --nesterov-min-iterations "$NESTEROV_MIN_ITERATIONS" \
             --nesterov-stop-tolerance "$NESTEROV_STOP_TOLERANCE" \
             --partition-cache "$PARTITION_CACHE" \
             --partition-cache-directory "$PARTITION_CACHE_DIRECTORY" \
@@ -363,6 +365,7 @@ for problem in "${PROBLEMS[@]}"; do
             --local-steps "$LOCAL_STEPS" \
             --threads-per-cluster "$THREADS_PER_CLUSTER" \
             --nesterov-max-iterations "$NESTEROV_MAX_ITERATIONS" \
+            --nesterov-min-iterations "$NESTEROV_MIN_ITERATIONS" \
             --nesterov-stop-tolerance "$NESTEROV_STOP_TOLERANCE" \
             --partition-cache "$PARTITION_CACHE" \
             --partition-cache-directory "$PARTITION_CACHE_DIRECTORY" \

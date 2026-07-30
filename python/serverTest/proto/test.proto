@@ -35,6 +35,7 @@ message program_proto {
   repeated uint32 global_camera_id = 30; // local camera slot to global camera identifier
   int32 nesterov_max_iterations = 31;
   double nesterov_stop_tolerance = 32;
+  int32 nesterov_min_iterations = 33;
 }
 
 // sent once
@@ -89,6 +90,7 @@ message prox_cluster_proto {
   double consensus_relaxation = 28;
   int32 nesterov_max_iterations = 29;
   double nesterov_stop_tolerance = 30;
+  int32 nesterov_min_iterations = 31;
   // clustering: lms by cam. # lms that can fill up cam in cl.
 }
 

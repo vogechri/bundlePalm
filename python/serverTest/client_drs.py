@@ -132,6 +132,7 @@ def parse_arguments():
     parser.add_argument("--local-steps", type=int, default=1)
     parser.add_argument("--threads-per-cluster", type=int, default=1)
     parser.add_argument("--nesterov-max-iterations", type=int, default=100)
+    parser.add_argument("--nesterov-min-iterations", type=int, default=1)
     parser.add_argument("--nesterov-stop-tolerance", type=float, default=1e-2)
     parser.add_argument(
         "--local-solver",
@@ -247,6 +248,10 @@ def validate_arguments(arguments):
         raise ValueError("local steps and threads must be positive")
     if arguments.nesterov_max_iterations <= 0:
         raise ValueError("Nesterov maximum iterations must be positive")
+    if not 1 <= arguments.nesterov_min_iterations <= arguments.nesterov_max_iterations:
+        raise ValueError(
+            "Nesterov minimum iterations must be between 1 and the maximum"
+        )
     if not 0.0 < arguments.nesterov_stop_tolerance < 1.0:
         raise ValueError("Nesterov stop tolerance must be in (0, 1)")
     if not 0.0 < arguments.relaxation < 2.0:
@@ -672,6 +677,7 @@ def main():
             block_curvature_multiplier=block_curvature_multiplier,
             return_metric_blocks=(arguments.proximal_metric == "block"),
             nesterov_max_iterations=arguments.nesterov_max_iterations,
+            nesterov_min_iterations=arguments.nesterov_min_iterations,
             nesterov_stop_tolerance=arguments.nesterov_stop_tolerance,
         )
         worker.update_preconditioning(
@@ -760,6 +766,7 @@ def main():
                 ),
                 consensus_relaxation=arguments.relaxation,
                 nesterov_max_iterations=arguments.nesterov_max_iterations,
+                nesterov_min_iterations=arguments.nesterov_min_iterations,
                 nesterov_stop_tolerance=arguments.nesterov_stop_tolerance,
             )
             if arguments.worker_owned_landmarks:
@@ -1147,6 +1154,9 @@ def main():
                         consensus_relaxation=arguments.relaxation,
                         nesterov_max_iterations=(
                             arguments.nesterov_max_iterations
+                        ),
+                        nesterov_min_iterations=(
+                            arguments.nesterov_min_iterations
                         ),
                         nesterov_stop_tolerance=(
                             arguments.nesterov_stop_tolerance
@@ -1910,6 +1920,7 @@ def main():
         "partitionCachePath": str(partition_cache_path),
         "localSteps": arguments.local_steps,
         "nesterovMaxIterations": arguments.nesterov_max_iterations,
+        "nesterovMinIterations": arguments.nesterov_min_iterations,
         "nesterovStopTolerance": arguments.nesterov_stop_tolerance,
         "threadsPerCluster": arguments.threads_per_cluster,
         "localSolver": arguments.local_solver,

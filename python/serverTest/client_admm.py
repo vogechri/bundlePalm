@@ -238,6 +238,7 @@ class AdmmWorkerClient:
         single_node_consensus=False,
         consensus_relaxation=1.0,
         nesterov_max_iterations=100,
+        nesterov_min_iterations=1,
         nesterov_stop_tolerance=1e-2,
     ):
         batch_setup_started_at = time.perf_counter()
@@ -253,6 +254,10 @@ class AdmmWorkerClient:
             raise ValueError("consensus relaxation must be in (0, 2)")
         if nesterov_max_iterations <= 0:
             raise ValueError("Nesterov maximum iterations must be positive")
+        if not 1 <= nesterov_min_iterations <= nesterov_max_iterations:
+            raise ValueError(
+                "Nesterov minimum iterations must be between 1 and the maximum"
+            )
         if not 0.0 < nesterov_stop_tolerance < 1.0:
             raise ValueError("Nesterov stop tolerance must be in (0, 1)")
         self.phase_id += 1
@@ -286,6 +291,7 @@ class AdmmWorkerClient:
                 program.landmark_refinement_steps = landmark_refinement_steps
                 program.global_camera_id[:] = unique_cameras
                 program.nesterov_max_iterations = nesterov_max_iterations
+                program.nesterov_min_iterations = nesterov_min_iterations
                 program.nesterov_stop_tolerance = nesterov_stop_tolerance
                 program.cluster_id = cluster_id
                 program.num_clusters = cluster_count
@@ -335,6 +341,7 @@ class AdmmWorkerClient:
                 update.single_node_consensus = single_node_consensus
                 update.consensus_relaxation = consensus_relaxation
                 update.nesterov_max_iterations = nesterov_max_iterations
+                update.nesterov_min_iterations = nesterov_min_iterations
                 update.nesterov_stop_tolerance = nesterov_stop_tolerance
                 update.cluster_id = cluster_id
                 update.run_id = self.run_id
