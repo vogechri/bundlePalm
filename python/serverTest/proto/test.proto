@@ -32,6 +32,7 @@ message program_proto {
   double block_curvature_multiplier = 27; // 0=legacy be-dependent schedule, >0=fixed JtJ multiplier
   int32 metric_diagnostic_iterations = 28;
   int32 landmark_refinement_steps = 29;
+  repeated uint32 global_camera_id = 30; // local camera slot to global camera identifier
 }
 
 // sent once
@@ -40,6 +41,7 @@ message preconditioning_proto {
   repeated double unorm = 2; // must be double
   repeated float vnorm = 3;
   repeated double camera_transform = 4; // optional row-major 9x9 matrix per camera
+  repeated double cameras = 5; // optional post-bootstrap scaled camera state
 }
 
 // message solution_proto {
@@ -76,6 +78,13 @@ message prox_cluster_proto {
   int32 metric_diagnostic_iterations = 19;
   int32 landmark_refinement_steps = 20;
   bool omit_landmarks = 21; // retain solved landmarks in the worker only
+  bool retain_cameras = 22; // use the current worker-owned local camera state
+  bool revert_cameras = 23; // restore the pre-oracle local camera state
+  bool return_consensus_rhs = 24; // packed M(2u-s) shadow contribution
+  bytes cameras_f64 = 25; // optional packed little-endian float64 camera state
+  bytes cameras_s_f64 = 26; // optional packed little-endian float64 DRS centers
+  bool single_node_consensus = 27; // reduce full-block consensus inside this server
+  double consensus_relaxation = 28;
   // clustering: lms by cam. # lms that can fill up cam in cl.
 }
 
@@ -102,6 +111,14 @@ message return_cluster_proto {
   bytes landmarks_f64 = 16; // packed native little-endian float64 physical landmarks
   bytes step_size_f32 = 17; // packed native little-endian float32 camera metric blocks
   bytes step_size_upper_f32 = 18; // packed upper triangle: 45 float32 values per camera
+  bytes consensus_rhs_f64 = 19; // packed float64 M(2u-s), 9 values per camera
+  bytes consensus_f64 = 20; // leader-only packed global float64 consensus
+  double consensus_fixed_point_squared = 21;
+  double consensus_proximal_displacement_squared = 22;
+  double consensus_reflection_projection_squared = 23;
+  double consensus_center_step_squared = 24;
+  double consensus_splitting_term = 25;
+  bool has_single_node_consensus = 26;
 }
 
 // send to get cost
@@ -114,6 +131,8 @@ message cost_proto {
   repeated double landmarks = 6; // explicit physical landmark state for reproducible cost evaluation
   int32 landmark_refinement_steps = 7;
   bool omit_landmarks = 8; // return only the precise cost for routine evaluation
+  bool preserve_cameras = 9; // restore resident local cameras after evaluation
+  bytes cameras_f64 = 10; // optional packed little-endian float64 camera state
 }
 
 message return_cost_proto {

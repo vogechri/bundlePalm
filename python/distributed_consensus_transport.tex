@@ -1,0 +1,306 @@
+% Includable paper section. Requires amsmath and amssymb.
+\section{Persistent State and Sparse Consensus Communication}
+
+\section{Scope}
+
+This note describes an implementation-preserving communication design for the
+landmark-partitioned Douglas--Rachford splitting (DRS) bundle-adjustment method.
+Logical clusters may reside on remote physical workers.  The design therefore
+distinguishes communication reductions that remain valid across machines from
+single-node shared-memory optimizations.
+
+The principal rule is that solver state remains resident on its owning worker.
+The coordinator exchanges versioned commands, sparse consensus contributions,
+and consensus camera values.  Full local cameras, centers, and landmarks are
+materialized only when required for diagnostics or final output.
+
+\section{Full block-metric consensus}
+
+Let $u_{ki}\in\mathbb{R}^9$ be the local proximal camera for global camera $i$
+on logical cluster $k$, let $s_{ki}\in\mathbb{R}^9$ be its DRS center, and let
+$M_{ki}\in\mathbb{R}^{9\times9}$ be the selected symmetric positive definite
+camera metric block.  The reflected value is
+\begin{equation}
+  r_{ki}=2u_{ki}-s_{ki}.
+\end{equation}
+The exact full-block consensus projection is obtained from
+\begin{equation}
+  A_i=\sum_{k\in\mathcal K_i}M_{ki},
+  \qquad
+  b_i=\sum_{k\in\mathcal K_i}M_{ki}r_{ki},
+  \qquad
+  v_i=A_i^{-1}b_i,
+\end{equation}
+where $\mathcal K_i$ is the set of clusters containing camera $i$.  Thus every
+metric block remains mathematically necessary, but raw blocks need not be
+returned to the Python coordinator.  A remote worker sends the sparse pair
+$(A_{ki},b_{ki})$, indexed by global camera identifier, to a reducer.
+
+The next local center is updated as
+\begin{equation}
+  s_{ki}^{+}=s_{ki}+\lambda(v_i-u_{ki}),
+\end{equation}
+where $\lambda\in(0,2)$ is the DRS relaxation.  Each worker can also evaluate
+its local contributions to the fixed-point residual, proximal displacement,
+reflection-projection residual, center step, and DRS envelope because it retains
+$u_{ki}$, $s_{ki}$, $M_{ki}$, and receives $v_i$.
+
+\section{Persistent remote state}
+
+Each physical worker retains the following versioned state:
+\begin{itemize}
+  \item local cameras and DRS centers for its logical clusters;
+  \item landmark vectors and local trust-region state;
+  \item accepted landmark snapshots, nominal camera--landmark trial snapshots,
+        and best-output landmark snapshots;
+  \item metric blocks and acceleration history when required.
+\end{itemize}
+A compact command contains a run identifier, phase identifier, input and output
+state identifiers, proximal parameters, acceleration coefficient, and a commit
+or restore operation.  Stale identifiers are rejected.  Worker restart
+invalidates all state identifiers.
+
+Persistent landmarks and worker-side candidate objective evaluation are already
+implemented.  Routine landmark replies are omitted, while accepted recovery and
+nominal fallback reproduce the legacy physical scaling round trip locally.  On
+a ten-scene, 30-cluster, 90-iteration cohort, saved cameras and landmarks are
+bitwise identical to the full-transfer reference.  Aggregate traffic decreases
+from $9.289$~GiB to $5.025$~GiB, optimization time from $398.788$~s to
+$184.738$~s, and overall time from $448.414$~s to $228.257$~s.
+
+The same ownership contract has now been extended to local cameras.  After the
+bootstrap solve, the preconditioning message installs the coordinator's initial
+scaled camera state once.  Routine proximal commands then omit the current local
+camera vector.  Consensus-objective evaluation temporarily installs consensus
+cameras and restores the resident local cameras before the next proximal call.
+Nominal acceleration snapshots contain both camera and landmark state, so a
+failed accelerated trial can restore the exact nominal oracle output.
+
+Rejected safeguards require one important exception.  The reference
+implementation replaces every local camera copy by the accepted consensus,
+rather than by either the accepted or rejected proximal camera.  Consequently,
+the recovery command explicitly sends this accepted-consensus camera reset.
+Accepted landmark restoration remains landmark-only.  This rare fallback
+preserves the reference transition while routine accepted iterations remain
+camera-payload free.
+
+The implementation was first compared against the full-camera protocol on BAL
+scene 89 with 30 clusters.  Over ten unaccelerated iterations, including a
+rejected safeguard and accepted-consensus recovery, saved cameras and landmarks
+were bitwise identical, all decisions and final quality metrics agreed, and sent
+traffic decreased by 6.03 percent.  Over five Anderson-accelerated iterations,
+all five acceleration choices, saved states, and final metrics were identical,
+while sent traffic decreased by 6.78 percent.
+
+The final gate used the frozen ten-scene, 30-cluster, 90-iteration cohort.  All
+saved camera and landmark arrays were bitwise identical; safeguard decisions,
+acceleration choices, and final quality metrics also agreed.  Sent traffic fell
+from 2.610~GB to 1.920~GB (26.45 percent), while received traffic was unchanged,
+reducing aggregate traffic from 5.396~GB to 4.705~GB (12.80 percent).
+Optimization time decreased from 184.738~s to 182.460~s (1.23 percent).  The
+observed overall-time decrease from 228.257~s to 222.003~s is not attributed
+entirely to communication because unchanged setup stages also varied between
+the paired runs.
+
+The first sparse-reduction shadow is also implemented.  On request, each worker
+packs the nine-vector
+\begin{equation}
+  b_{ki}=M_{ki}(2u_{ki}-s_{ki})
+\end{equation}
+beside the existing 45-value upper-triangular metric block.  The coordinator
+retains the reference path, independently accumulates the worker vectors in
+fixed cluster order, solves the batched systems, and compares both active-copy
+right-hand sides and final consensus cameras.  On BAL scene 89 with 30 clusters
+and three iterations, the maximum relative right-hand-side discrepancy was
+$3.37\times10^{-16}$ and the maximum relative consensus discrepancy was
+$9.71\times10^{-15}$, below the $10^{-11}$ shadow gate.  A matched run with the
+shadow disabled produced bitwise-identical saved cameras and landmarks and
+identical quality metrics.  The additional 526,536 received bytes are
+validation traffic only and disappear when raw replies are replaced.
+
+Request-side camera and center arrays are now encoded as contiguous
+little-endian double-precision byte fields, with the previous repeated-double
+fields retained as a compatibility fallback.  The worker rejects mixed
+representations and validates exact byte lengths before copying into resident
+state.  An isolated protobuf benchmark with 89 cameras reduced request
+construction from $44.82~\mu$s to $0.46~\mu$s, a factor of 97.5, while changing
+the serialized request by one byte.  On the frozen ten-scene cohort, packing
+proximal camera and center requests preserved all saved states, decisions, and
+quality metrics; aggregate optimization time decreased from 182.460~s to
+179.082~s (1.85 percent) and overall time from 222.003~s to 219.329~s
+(1.20 percent).  Aggregate sent traffic increased by only 0.004 percent.
+Packing the remaining consensus-objective camera requests was also bitwise
+exact on the 90-iteration scene-89 gate and did not change measured wire bytes.
+Its additional wall-time benefit requires a repeated cohort measurement before
+being reported independently.
+
+\section{Sparse batched reduction}
+
+After persistent camera-state validation, each physical worker forms one packed
+message per oracle.  For every global camera present on that worker, it sends
+\begin{equation}
+  \bigl(i,\operatorname{upper}(A_{pi}),b_{pi}\bigr),
+\end{equation}
+where local logical clusters are first combined as
+\begin{equation}
+  A_{pi}=\sum_{k\in\mathcal K_{pi}}M_{ki},
+  \qquad
+  b_{pi}=\sum_{k\in\mathcal K_{pi}}M_{ki}(2u_{ki}-s_{ki}).
+\end{equation}
+This hierarchical reduction removes duplicate network contributions when a
+camera occurs in several logical clusters on the same physical machine.  The
+reducer sums worker contributions in a fixed order, solves the batched
+$9\times9$ systems, and returns each $v_i$ only to workers containing camera
+$i$.
+
+With single-precision symmetric metric transport and double-precision vectors,
+an upward worker--camera contribution contains 45 metric values and 9 vector
+values, approximately 252 bytes before identifiers and framing.  A consensus
+broadcast contains 9 doubles, or 72 bytes.  Before persistent camera ownership,
+the protocol transported a local camera, center, returned local camera, and
+metric block, approximately 396 bytes per incidence.  Persistent camera
+ownership removes the first local-camera vector, leaving approximately 324
+bytes.  A sparse $(A,b)$ exchange without physical-worker aggregation also
+costs approximately 324 bytes: 252 bytes upward and 72 bytes downward.  It is
+therefore byte-neutral when every logical cluster resides on a distinct remote
+worker.  Its network-volume advantage comes from combining repeated camera
+incidences when one physical worker hosts several logical clusters.  Exact
+full-block consensus does not eliminate the metric information across remote
+machines.
+
+\section{Centralized and decentralized exact consensus}
+
+The consensus projection admits two execution topologies without changing its
+mathematical definition.  In the centralized topology, every worker sends its
+sparse camera contributions to one coordinator, which forms $(A_i,b_i)$ and
+solves for every $v_i$.  This topology is simple and provides a transparent
+reference implementation, but its receive bandwidth, reduction work, and
+consensus solves are concentrated on one machine.
+
+In the decentralized topology, each global camera is assigned to a
+deterministic owner, for example
+\begin{equation}
+  \operatorname{owner}(i)=h(i)\bmod P,
+\end{equation}
+where $P$ is the number of reducer nodes.  A worker sends $(M_{ki},b_{ki})$
+directly to the owner of camera $i$.  That owner forms $(A_i,b_i)$, solves for
+$v_i$, and returns $v_i$ only to workers containing camera $i$.  Consensus CPU,
+receive bandwidth, and memory are thereby distributed by camera, and no node
+must receive all metric blocks.  The aggregate numeric payload is not
+necessarily smaller, but the centralized bottleneck is removed and sparse
+downward routing avoids broadcasting unrelated cameras.
+
+This is a distributed exact reduction, not iterative graph gossip.  It
+therefore produces the same one-shot block-metric projection as the centralized
+topology and does not introduce a consensus tolerance or additional algorithmic
+iterations.  Deterministic camera ownership and fixed contributor order permit
+direct comparison with the centralized reference.
+
+All experiments in this work are conducted on one physical machine.  Two
+execution modes are consequently retained.  The \emph{coordinator} mode keeps
+the current worker--coordinator message boundary and represents the protocol
+used by a one-cluster-per-node deployment; it supports transparent protocol and
+topology experiments, but does not reproduce real network latency or bandwidth.
+The \emph{single-node} mode uses the actual experimental placement: all logical
+clusters contribute through an in-process shared-memory reducer and only the
+resulting consensus and scalar diagnostics cross the Python--C++ control
+boundary.  This mode is intended for fast algorithm experiments.  Both modes
+use the same metric transformation, fixed cluster order, consensus solve, and
+safeguard quantities, and their trajectories are validated against each other.
+Runtime results from the single-node mode are reported as single-machine
+implementation performance rather than as distributed communication results.
+The implementation exposes these alternatives as
+\texttt{--consensus-execution coordinator} and
+\texttt{--consensus-execution single-node}.  The first remains the default and
+returns the sparse metric blocks to the Python coordinator.  The second performs
+the full-block reduction and consensus solves in the resident C++ process and
+returns only the consensus cameras and aggregate DRS quadratic diagnostics for
+the consensus stage.  The current implementation still returns local proximal
+cameras and accepts coordinator-owned centers because outer acceleration and
+recovery remain in Python; moving those controls into the resident process is a
+separate optimization.
+Because the two modes use NumPy/LAPACK and Eigen linear solves, respectively,
+validation uses the stated relative shadow tolerance rather than requiring
+bitwise equality of the solved camera values.
+
+\subsection{Remote-worker optimization priorities}
+
+The primary deployment assumption is that physical workers may reside on
+different machines.  Under that assumption, preserving optimizations are ranked
+as follows.
+\begin{enumerate}
+  \item Persistent landmark and camera ownership.  This removes repeated state
+    transfer without changing the distributed consensus model and is fully
+    validated above.
+  \item One batched message per physical worker and phase.  Batching does not
+    change the dominant numeric payload, but reduces protobuf framing,
+    socket operations, message count, and coordinator dispatch overhead.
+    Static camera identifiers should be established during setup rather
+    than repeated in every oracle message.
+  \item Hierarchical $(A,b)$ aggregation when a physical worker hosts multiple
+    logical clusters.  Contributions for repeated cameras are combined
+    before crossing the network.  The gain depends directly on the
+    within-worker camera-overlap factor; there is no byte reduction when
+    every worker hosts one logical cluster.
+    \item Packed request-side numeric buffers.  This optimization is implemented
+      for proximal camera/center and consensus-camera requests.  Protobuf
+      already packs repeated numeric values on the wire, so the measured gain
+      is lower serialization CPU rather than fewer network bytes.
+  \item Lossless compression only after measuring compressibility on metric and
+    vector payloads.  It is useful on bandwidth-limited links only when the
+    saved transfer time exceeds compression CPU and latency.  Reduced
+    precision is excluded from the preserving path because it can change
+    safeguard decisions and trajectories.
+\end{enumerate}
+For one logical cluster per remote machine, the remaining full-block metric
+exchange is not an obvious low-hanging byte reduction: either the raw local
+camera and metric, or the equivalent $(A,b)$ information and consensus return,
+must cross machine boundaries.  Future work should therefore report message
+count and synchronization latency in addition to bytes.
+
+\section{Synchronization model}
+
+A conservative distributed oracle uses the following rounds:
+\begin{enumerate}
+  \item the coordinator sends a compact versioned solve command;
+  \item workers solve and send packed sparse $(A,b)$ contributions;
+  \item the reducer broadcasts consensus cameras;
+  \item workers return scalar objective and DRS diagnostics;
+  \item the coordinator sends a commit or restore decision.
+\end{enumerate}
+The implementation should report both bytes and synchronization rounds.  Setup
+traffic, routine algorithm traffic, diagnostics, and final state materialization
+must be recorded separately.  Message count scales with physical workers rather
+than logical clusters.
+
+\section{Single-node option}
+
+When all logical clusters occupy one C++ process, the same reduction interface
+may use shared memory.  Metric blocks, local cameras, and centers remain inside
+the process; an internal barrier is followed by deterministic accumulation and
+batched consensus solves.  This removes protobuf serialization and reduces
+coordinator overhead, but it is reported only as a single-node optimization.
+It must not be presented as eliminating the communication required by remote
+full-block consensus.
+Nevertheless, it provides a useful upper bound on additional implementation
+gains: placing all logical clusters in one process permits shared-memory
+consensus and removes the remote serialization and network rounds entirely.
+These gains are reported separately and are not assumed by the distributed
+method.
+
+\section{Validation protocol}
+
+Each stage is introduced behind an explicit mode and first run in shadow form.
+The gate requires:
+\begin{itemize}
+  \item equality of accepted and rejected decisions, acceleration choices, and
+        proximal-oracle counts;
+  \item bitwise equality of saved cameras and landmarks where the legacy
+        arithmetic order can be reproduced;
+  \item equality of final objective and quality metrics;
+  \item fixed-order metric accumulation matching the coordinator reference;
+  \item explicit measurements of setup bytes, per-oracle bytes, message counts,
+        synchronization rounds, runtime, and worker/coordinator memory.
+\end{itemize}
+Only after this gate passes are raw local-camera and metric replies disabled.
+

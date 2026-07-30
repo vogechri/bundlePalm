@@ -23,6 +23,7 @@ CAMERA_SCALING=${CAMERA_SCALING:-jacobi_initial}
 CLUSTERING=${CLUSTERING:-${BUNDLE_PALM_CLUSTERING:-landmark_scalable}}
 PROXIMAL_METRIC=${PROXIMAL_METRIC:-block}
 CONSENSUS_METRIC=${CONSENSUS_METRIC:-${BUNDLE_PALM_DRS_CONSENSUS_METRIC:-full}}
+CONSENSUS_EXECUTION=${CONSENSUS_EXECUTION:-coordinator}
 BLOCK_REGULARIZATION=${BLOCK_REGULARIZATION:-5e-5}
 BLOCK_CURVATURE_MULTIPLIER=${BLOCK_CURVATURE_MULTIPLIER:-0}
 BLOCK_RECOVERY_MODE=${BLOCK_RECOVERY_MODE:-regularization}
@@ -33,6 +34,9 @@ METRIC_DIAGNOSTIC_ITERATIONS=${METRIC_DIAGNOSTIC_ITERATIONS:-0}
 WORKER_SSE_SHADOW=${WORKER_SSE_SHADOW:-0}
 SUPPRESS_ACCELERATED_LANDMARK_REPLIES=${SUPPRESS_ACCELERATED_LANDMARK_REPLIES:-0}
 WORKER_OWNED_LANDMARKS=${WORKER_OWNED_LANDMARKS:-1}
+WORKER_OWNED_CAMERAS=${WORKER_OWNED_CAMERAS:-1}
+WORKER_CONSENSUS_SHADOW=${WORKER_CONSENSUS_SHADOW:-0}
+PACKED_REQUEST_BUFFERS=${PACKED_REQUEST_BUFFERS:-1}
 LANDMARK_REFINEMENT_STEPS=${LANDMARK_REFINEMENT_STEPS:-0}
 CONSENSUS_LANDMARK_REFINEMENT_STEPS=${CONSENSUS_LANDMARK_REFINEMENT_STEPS:-0}
 CONSENSUS_LANDMARK_REFINEMENT_POLICY=${CONSENSUS_LANDMARK_REFINEMENT_POLICY:-safeguard}
@@ -59,6 +63,9 @@ if [[ "$OUTER_ACCELERATION" != "none" ]]; then
   grid_name=${LINE_SEARCH_GRID//,/}
   grid_name=${grid_name//./p}
   VARIANT_NAME="${OUTER_ACCELERATION}_ls${grid_name}_${PROXIMAL_METRIC}_${CONSENSUS_METRIC}"
+fi
+if [[ "$CONSENSUS_EXECUTION" != "coordinator" ]]; then
+  VARIANT_NAME="${VARIANT_NAME}_${CONSENSUS_EXECUTION}"
 fi
 if [[ "$CLUSTERING" != "landmark_scalable" ]]; then
   VARIANT_NAME="${VARIANT_NAME}_${CLUSTERING}"
@@ -102,13 +109,17 @@ if [[ ! -x "$WORKER" ]]; then
   exit 2
 fi
 
-for flag in LIVE_OUTPUT DEBUG_OUTPUT OVERWRITE PERSISTENT_TRUST_REGION ALL_PROBLEMS WORKER_SSE_SHADOW SUPPRESS_ACCELERATED_LANDMARK_REPLIES WORKER_OWNED_LANDMARKS; do
+for flag in LIVE_OUTPUT DEBUG_OUTPUT OVERWRITE PERSISTENT_TRUST_REGION ALL_PROBLEMS WORKER_SSE_SHADOW SUPPRESS_ACCELERATED_LANDMARK_REPLIES WORKER_OWNED_LANDMARKS WORKER_OWNED_CAMERAS WORKER_CONSENSUS_SHADOW PACKED_REQUEST_BUFFERS; do
   value=${!flag}
   if [[ "$value" != "0" && "$value" != "1" ]]; then
     echo "$flag must be 0 or 1" >&2
     exit 2
   fi
 done
+if [[ "$CONSENSUS_EXECUTION" != "coordinator" && "$CONSENSUS_EXECUTION" != "single-node" ]]; then
+  echo "CONSENSUS_EXECUTION must be coordinator or single-node" >&2
+  exit 2
+fi
 
 PROBLEMS=(
   "52|problem-52-64053-pre.txt"
@@ -275,6 +286,9 @@ for problem in "${PROBLEMS[@]}"; do
     [[ "$WORKER_SSE_SHADOW" == "1" ]] && worker_sse_args+=(--worker-sse-shadow)
     [[ "$SUPPRESS_ACCELERATED_LANDMARK_REPLIES" == "1" ]] && worker_sse_args+=(--suppress-accelerated-landmark-replies)
     [[ "$WORKER_OWNED_LANDMARKS" == "1" ]] && worker_sse_args+=(--worker-owned-landmarks)
+    [[ "$WORKER_OWNED_CAMERAS" == "1" ]] && worker_sse_args+=(--worker-owned-cameras)
+    [[ "$WORKER_CONSENSUS_SHADOW" == "1" ]] && worker_sse_args+=(--worker-consensus-shadow)
+    [[ "$PACKED_REQUEST_BUFFERS" == "1" ]] && worker_sse_args+=(--packed-request-buffers)
     start_seconds=$SECONDS
     set +e
     if [[ "$LIVE_OUTPUT" == "1" ]]; then
@@ -298,6 +312,7 @@ for problem in "${PROBLEMS[@]}"; do
             --acceleration-restart-after "$ACCELERATION_RESTART_AFTER" \
             --proximal-metric "$PROXIMAL_METRIC" \
             --consensus-metric "$CONSENSUS_METRIC" \
+            --consensus-execution "$CONSENSUS_EXECUTION" \
             --block-regularization "$BLOCK_REGULARIZATION" \
             --block-curvature-multiplier "$BLOCK_CURVATURE_MULTIPLIER" \
             --block-recovery-mode "$BLOCK_RECOVERY_MODE" \
@@ -341,6 +356,7 @@ for problem in "${PROBLEMS[@]}"; do
             --acceleration-restart-after "$ACCELERATION_RESTART_AFTER" \
             --proximal-metric "$PROXIMAL_METRIC" \
             --consensus-metric "$CONSENSUS_METRIC" \
+            --consensus-execution "$CONSENSUS_EXECUTION" \
             --block-regularization "$BLOCK_REGULARIZATION" \
             --block-curvature-multiplier "$BLOCK_CURVATURE_MULTIPLIER" \
             --block-recovery-mode "$BLOCK_RECOVERY_MODE" \
