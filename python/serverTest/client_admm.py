@@ -177,6 +177,7 @@ class AdmmWorkerClient:
         return_landmarks=True,
         worker_owned_cameras=False,
         return_consensus_rhs=False,
+        packed_request_buffers=False,
     ):
         if return_consensus_rhs and not return_metric_blocks:
             raise ValueError(
@@ -232,10 +233,21 @@ class AdmmWorkerClient:
                     worker_owned_cameras and int(revert_landmarks) != 3
                 )
                 if not retain_worker_cameras:
-                    update.cameras[:] = local_cameras[cluster_id][
-                        unique_cameras].ravel()
-                update.cameras_s[:] = centers[cluster_id][
-                    unique_cameras].ravel()
+                    request_cameras = np.ascontiguousarray(
+                        local_cameras[cluster_id][unique_cameras],
+                        dtype="<f8",
+                    )
+                    if packed_request_buffers:
+                        update.cameras_f64 = request_cameras.tobytes()
+                    else:
+                        update.cameras[:] = request_cameras.ravel()
+                request_centers = np.ascontiguousarray(
+                    centers[cluster_id][unique_cameras], dtype="<f8"
+                )
+                if packed_request_buffers:
+                    update.cameras_s_f64 = request_centers.tobytes()
+                else:
+                    update.cameras_s[:] = request_centers.ravel()
                 update.retain_cameras = retain_worker_cameras
                 update.revert_cameras = (
                     worker_owned_cameras and int(revert_landmarks) == 1
@@ -480,6 +492,7 @@ class AdmmWorkerClient:
         refinement_steps,
         use_landmark_state=False,
         preserve_cameras=False,
+        packed_request_buffers=False,
     ):
         self.phase_id += 1
         phase_id = self.phase_id
@@ -488,7 +501,13 @@ class AdmmWorkerClient:
             unique_points = np.unique(point_indices_in_cluster[cluster_id])
             request = test_pb2.request_proto()
             update = request.cost_update
-            update.cameras[:] = consensus[unique_cameras].ravel()
+            request_cameras = np.ascontiguousarray(
+                consensus[unique_cameras], dtype="<f8"
+            )
+            if packed_request_buffers:
+                update.cameras_f64 = request_cameras.tobytes()
+            else:
+                update.cameras[:] = request_cameras.ravel()
             if use_landmark_state:
                 update.landmarks[:] = landmarks[unique_points].ravel()
             update.cluster_id = cluster_id
@@ -531,6 +550,7 @@ class AdmmWorkerClient:
         consensus,
         cluster_count,
         preserve_cameras=False,
+        packed_request_buffers=False,
     ):
         """Evaluate consensus cameras against worker-owned landmark states."""
         self.phase_id += 1
@@ -539,7 +559,13 @@ class AdmmWorkerClient:
             unique_cameras = np.unique(camera_indices_in_cluster[cluster_id])
             request = test_pb2.request_proto()
             update = request.cost_update
-            update.cameras[:] = consensus[unique_cameras].ravel()
+            request_cameras = np.ascontiguousarray(
+                consensus[unique_cameras], dtype="<f8"
+            )
+            if packed_request_buffers:
+                update.cameras_f64 = request_cameras.tobytes()
+            else:
+                update.cameras[:] = request_cameras.ravel()
             update.cluster_id = cluster_id
             update.run_id = self.run_id
             update.phase_id = phase_id

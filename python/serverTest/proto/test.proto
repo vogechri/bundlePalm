@@ -80,6 +80,8 @@ message prox_cluster_proto {
   bool retain_cameras = 22; // use the current worker-owned local camera state
   bool revert_cameras = 23; // restore the pre-oracle local camera state
   bool return_consensus_rhs = 24; // packed M(2u-s) shadow contribution
+  bytes cameras_f64 = 25; // optional packed little-endian float64 camera state
+  bytes cameras_s_f64 = 26; // optional packed little-endian float64 DRS centers
   // clustering: lms by cam. # lms that can fill up cam in cl.
 }
 
@@ -120,6 +122,7 @@ message cost_proto {
   int32 landmark_refinement_steps = 7;
   bool omit_landmarks = 8; // return only the precise cost for routine evaluation
   bool preserve_cameras = 9; // restore resident local cameras after evaluation
+  bytes cameras_f64 = 10; // optional packed little-endian float64 camera state
 }
 
 message return_cost_proto {

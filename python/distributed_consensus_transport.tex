@@ -118,6 +118,22 @@ shadow disabled produced bitwise-identical saved cameras and landmarks and
 identical quality metrics.  The additional 526,536 received bytes are
 validation traffic only and disappear when raw replies are replaced.
 
+Request-side camera and center arrays are now encoded as contiguous
+little-endian double-precision byte fields, with the previous repeated-double
+fields retained as a compatibility fallback.  The worker rejects mixed
+representations and validates exact byte lengths before copying into resident
+state.  An isolated protobuf benchmark with 89 cameras reduced request
+construction from $44.82~\mu$s to $0.46~\mu$s, a factor of 97.5, while changing
+the serialized request by one byte.  On the frozen ten-scene cohort, packing
+proximal camera and center requests preserved all saved states, decisions, and
+quality metrics; aggregate optimization time decreased from 182.460~s to
+179.082~s (1.85 percent) and overall time from 222.003~s to 219.329~s
+(1.20 percent).  Aggregate sent traffic increased by only 0.004 percent.
+Packing the remaining consensus-objective camera requests was also bitwise
+exact on the 90-iteration scene-89 gate and did not change measured wire bytes.
+Its additional wall-time benefit requires a repeated cohort measurement before
+being reported independently.
+
 \section{Sparse batched reduction}
 
 After persistent camera-state validation, each physical worker forms one packed
@@ -171,11 +187,10 @@ as follows.
     before crossing the network.  The gain depends directly on the
     within-worker camera-overlap factor; there is no byte reduction when
     every worker hosts one logical cluster.
-  \item Packed request-side numeric buffers.  Centers and consensus vectors can
-    be decoded from contiguous byte fields rather than populated through
-    language-level repeated-field APIs.  Protobuf already packs repeated
-    numeric values on the wire, so this primarily reduces serialization
-    CPU rather than network bytes.
+    \item Packed request-side numeric buffers.  This optimization is implemented
+      for proximal camera/center and consensus-camera requests.  Protobuf
+      already packs repeated numeric values on the wire, so the measured gain
+      is lower serialization CPU rather than fewer network bytes.
   \item Lossless compression only after measuring compressibility on metric and
     vector payloads.  It is useful on bandwidth-limited links only when the
     saved transfer time exceeds compression CPU and latency.  Reduced

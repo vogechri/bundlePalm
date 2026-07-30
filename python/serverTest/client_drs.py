@@ -158,6 +158,7 @@ def parse_arguments():
     parser.add_argument("--worker-owned-landmarks", action="store_true")
     parser.add_argument("--worker-owned-cameras", action="store_true")
     parser.add_argument("--worker-consensus-shadow", action="store_true")
+    parser.add_argument("--packed-request-buffers", action="store_true")
     parser.add_argument("--landmark-refinement-steps", type=int, default=0)
     parser.add_argument(
         "--consensus-landmark-refinement-steps", type=int, default=0
@@ -680,6 +681,7 @@ def main():
                 return_landmarks=not arguments.worker_owned_landmarks,
                 worker_owned_cameras=arguments.worker_owned_cameras,
                 return_consensus_rhs=arguments.worker_consensus_shadow,
+                packed_request_buffers=arguments.packed_request_buffers,
             )
             if arguments.worker_owned_landmarks:
                 suppressed_routine_landmark_replies += cluster_count
@@ -751,6 +753,7 @@ def main():
                     candidate_consensus,
                     cluster_count,
                     preserve_cameras=arguments.worker_owned_cameras,
+                    packed_request_buffers=arguments.packed_request_buffers,
                 )
                 unrefined_candidate_metrics = {
                     "sumSquaredError": worker_sse,
@@ -770,6 +773,7 @@ def main():
                     candidate_consensus,
                     cluster_count,
                     preserve_cameras=arguments.worker_owned_cameras,
+                    packed_request_buffers=arguments.packed_request_buffers,
                 )
                 worker_sse_relative_error = abs(
                     worker_sse
@@ -803,6 +807,7 @@ def main():
                     cluster_count,
                     arguments.consensus_landmark_refinement_steps,
                     preserve_cameras=arguments.worker_owned_cameras,
+                    packed_request_buffers=arguments.packed_request_buffers,
                 )
                 refined_candidate_metrics = evaluate_bal_state(
                     physical_candidate,
@@ -1017,6 +1022,7 @@ def main():
                             and not arguments.worker_owned_landmarks
                         ),
                         worker_owned_cameras=arguments.worker_owned_cameras,
+                        packed_request_buffers=arguments.packed_request_buffers,
                     )
                     if (
                         arguments.suppress_accelerated_landmark_replies
@@ -1065,6 +1071,7 @@ def main():
                             trial_consensus,
                             cluster_count,
                             preserve_cameras=arguments.worker_owned_cameras,
+                            packed_request_buffers=arguments.packed_request_buffers,
                         )
                         trial_sse = worker_sse
                     else:
@@ -1082,6 +1089,7 @@ def main():
                             trial_consensus,
                             cluster_count,
                             preserve_cameras=arguments.worker_owned_cameras,
+                            packed_request_buffers=arguments.packed_request_buffers,
                         )
                         worker_sse_relative_error = abs(
                             worker_sse - trial_metrics["sumSquaredError"]
@@ -1333,6 +1341,7 @@ def main():
                         nominal_trial["candidate_consensus"],
                         cluster_count,
                         preserve_cameras=arguments.worker_owned_cameras,
+                        packed_request_buffers=arguments.packed_request_buffers,
                     )
                     restored_relative_error = abs(
                         restored_worker_sse - nominal_trial["candidate_sse"]
@@ -1678,6 +1687,7 @@ def main():
                 arguments.consensus_landmark_refinement_steps,
                 use_landmark_state=True,
                 preserve_cameras=arguments.worker_owned_cameras,
+                packed_request_buffers=arguments.packed_request_buffers,
             )
             refined_metrics = evaluate_bal_state(
                 best_cameras,
@@ -1741,6 +1751,7 @@ def main():
         "workerOwnedLandmarks": arguments.worker_owned_landmarks,
         "workerOwnedCameras": arguments.worker_owned_cameras,
         "workerConsensusShadow": arguments.worker_consensus_shadow,
+        "packedRequestBuffers": arguments.packed_request_buffers,
         "suppressedRoutineLandmarkReplies": (
             suppressed_routine_landmark_replies
         ),

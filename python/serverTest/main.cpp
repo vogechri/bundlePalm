@@ -11,6 +11,7 @@
 #include <zmq.hpp>
 #include <cerrno>
 #include <cmath>
+#include <cstring>
 #include <cstdlib>
 #include <array>
 #include <algorithm>
@@ -1342,12 +1343,22 @@ public:
 
     void UpdateCostState(const cost_proto& costProto) {
       // std::cout << "Update cluster " << cluster_id << " update proto id:" << update.cluster_id() << "\n";
-      THROW_IF(costProto.cameras_size() != cameras.size());
+      const bool packed_cameras = !costProto.cameras_f64().empty();
+      THROW_IF(packed_cameras && costProto.cameras_size() != 0);
+      THROW_IF(packed_cameras
+          ? costProto.cameras_f64().size()
+              != cameras.size() * sizeof(double)
+          : costProto.cameras_size() != cameras.size());
       THROW_IF(costProto.cluster_id() != cluster_id);
 
       int id = 0; // fill existing buffer
-      for (const auto &v : costProto.cameras()) {
-        cameras[id++] = v;
+      if (packed_cameras) {
+        std::memcpy(cameras.data(), costProto.cameras_f64().data(),
+            costProto.cameras_f64().size());
+      } else {
+        for (const auto &v : costProto.cameras()) {
+          cameras[id++] = v;
+        }
       }
       if (costProto.landmarks_size() > 0) {
         THROW_IF(costProto.landmarks_size() != landmarks.size());
@@ -1425,21 +1436,41 @@ public:
 
     void UpdateData(const prox_cluster_proto &update) {
       // std::cout << "Update cluster " << cluster_id << " update proto id:" << update.cluster_id() << "\n";
-        THROW_IF(update.retain_cameras()
-          ? update.cameras_size() != 0
-          : update.cameras_size() != cameras.size());
-      THROW_IF(update.cameras_s_size() != cameras_s.size());
+      const bool packed_cameras = !update.cameras_f64().empty();
+      const bool packed_centers = !update.cameras_s_f64().empty();
+      THROW_IF(packed_cameras && update.cameras_size() != 0);
+      THROW_IF(packed_centers && update.cameras_s_size() != 0);
+      THROW_IF(update.retain_cameras()
+          ? packed_cameras || update.cameras_size() != 0
+          : (packed_cameras
+              ? update.cameras_f64().size()
+                  != cameras.size() * sizeof(double)
+              : update.cameras_size() != cameras.size()));
+      THROW_IF(packed_centers
+          ? update.cameras_s_f64().size()
+              != cameras_s.size() * sizeof(double)
+          : update.cameras_s_size() != cameras_s.size());
       THROW_IF(update.cluster_id() != cluster_id);
 
       int id = 0; // fill existing buffer
       if (!update.retain_cameras()) {
-        for (const auto &v : update.cameras()) {
-          cameras[id++] = v;
+        if (packed_cameras) {
+          std::memcpy(cameras.data(), update.cameras_f64().data(),
+              update.cameras_f64().size());
+        } else {
+          for (const auto &v : update.cameras()) {
+            cameras[id++] = v;
+          }
         }
       }
-      id = 0;
-      for (const auto &v : update.cameras_s()) {
-        cameras_s[id++] = v;
+      if (packed_centers) {
+        std::memcpy(cameras_s.data(), update.cameras_s_f64().data(),
+            update.cameras_s_f64().size());
+      } else {
+        id = 0;
+        for (const auto &v : update.cameras_s()) {
+          cameras_s[id++] = v;
+        }
       }
       current_be = update.be();
       scalar_proximal_prior = update.scalar_proximal_prior();
