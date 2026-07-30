@@ -23,6 +23,7 @@ CAMERA_SCALING=${CAMERA_SCALING:-jacobi_initial}
 CLUSTERING=${CLUSTERING:-${BUNDLE_PALM_CLUSTERING:-landmark_scalable}}
 PROXIMAL_METRIC=${PROXIMAL_METRIC:-block}
 CONSENSUS_METRIC=${CONSENSUS_METRIC:-${BUNDLE_PALM_DRS_CONSENSUS_METRIC:-full}}
+CONSENSUS_EXECUTION=${CONSENSUS_EXECUTION:-coordinator}
 BLOCK_REGULARIZATION=${BLOCK_REGULARIZATION:-5e-5}
 BLOCK_CURVATURE_MULTIPLIER=${BLOCK_CURVATURE_MULTIPLIER:-0}
 BLOCK_RECOVERY_MODE=${BLOCK_RECOVERY_MODE:-regularization}
@@ -62,6 +63,9 @@ if [[ "$OUTER_ACCELERATION" != "none" ]]; then
   grid_name=${LINE_SEARCH_GRID//,/}
   grid_name=${grid_name//./p}
   VARIANT_NAME="${OUTER_ACCELERATION}_ls${grid_name}_${PROXIMAL_METRIC}_${CONSENSUS_METRIC}"
+fi
+if [[ "$CONSENSUS_EXECUTION" != "coordinator" ]]; then
+  VARIANT_NAME="${VARIANT_NAME}_${CONSENSUS_EXECUTION}"
 fi
 if [[ "$CLUSTERING" != "landmark_scalable" ]]; then
   VARIANT_NAME="${VARIANT_NAME}_${CLUSTERING}"
@@ -112,6 +116,10 @@ for flag in LIVE_OUTPUT DEBUG_OUTPUT OVERWRITE PERSISTENT_TRUST_REGION ALL_PROBL
     exit 2
   fi
 done
+if [[ "$CONSENSUS_EXECUTION" != "coordinator" && "$CONSENSUS_EXECUTION" != "single-node" ]]; then
+  echo "CONSENSUS_EXECUTION must be coordinator or single-node" >&2
+  exit 2
+fi
 
 PROBLEMS=(
   "52|problem-52-64053-pre.txt"
@@ -304,6 +312,7 @@ for problem in "${PROBLEMS[@]}"; do
             --acceleration-restart-after "$ACCELERATION_RESTART_AFTER" \
             --proximal-metric "$PROXIMAL_METRIC" \
             --consensus-metric "$CONSENSUS_METRIC" \
+            --consensus-execution "$CONSENSUS_EXECUTION" \
             --block-regularization "$BLOCK_REGULARIZATION" \
             --block-curvature-multiplier "$BLOCK_CURVATURE_MULTIPLIER" \
             --block-recovery-mode "$BLOCK_RECOVERY_MODE" \
@@ -347,6 +356,7 @@ for problem in "${PROBLEMS[@]}"; do
             --acceleration-restart-after "$ACCELERATION_RESTART_AFTER" \
             --proximal-metric "$PROXIMAL_METRIC" \
             --consensus-metric "$CONSENSUS_METRIC" \
+            --consensus-execution "$CONSENSUS_EXECUTION" \
             --block-regularization "$BLOCK_REGULARIZATION" \
             --block-curvature-multiplier "$BLOCK_CURVATURE_MULTIPLIER" \
             --block-recovery-mode "$BLOCK_RECOVERY_MODE" \

@@ -20,6 +20,7 @@ from clustering import (
     cluster_by_landmark_scalable_stable,
 )
 from drs_consensus import (
+    DrsResiduals,
     complete_douglas_rachford_envelope,
     dre_splitting_term,
     drs_step,
@@ -43,6 +44,31 @@ from admm_scaling import (
 
 WORKER_SSE_RELATIVE_TOLERANCE = 1e-9
 WORKER_CONSENSUS_RELATIVE_TOLERANCE = 1e-11
+
+
+def apply_single_node_consensus(
+    local_cameras, centers, camera_masks, summary, relaxation
+):
+    """Apply a worker-reduced consensus result to coordinator-owned state."""
+    consensus = np.asarray(summary.consensus, dtype=np.float64)
+    if consensus.shape != local_cameras.shape[1:]:
+        raise ValueError("single-node consensus has an invalid shape")
+    active = np.asarray(camera_masks, dtype=bool)[:, :, None]
+    reflected = 2.0 * local_cameras - centers
+    next_centers = centers + active * relaxation * (
+        consensus[None, :, :] - local_cameras
+    )
+    residuals = DrsResiduals(
+        fixed_point_squared=summary.fixed_point_squared,
+        proximal_displacement_squared=(
+            summary.proximal_displacement_squared
+        ),
+        reflection_projection_squared=(
+            summary.reflection_projection_squared
+        ),
+        center_step_squared=summary.center_step_squared,
+    )
+    return consensus, next_centers, reflected, residuals
 
 
 def validate_worker_consensus_rhs(
@@ -158,6 +184,11 @@ def parse_arguments():
     parser.add_argument("--worker-owned-landmarks", action="store_true")
     parser.add_argument("--worker-owned-cameras", action="store_true")
     parser.add_argument("--worker-consensus-shadow", action="store_true")
+    parser.add_argument(
+        "--consensus-execution",
+        choices=("coordinator", "single-node"),
+        default="coordinator",
+    )
     parser.add_argument("--packed-request-buffers", action="store_true")
     parser.add_argument("--landmark-refinement-steps", type=int, default=0)
     parser.add_argument(
@@ -242,6 +273,20 @@ def validate_arguments(arguments):
     ):
         raise ValueError(
             "worker consensus shadow requires block/full metrics without acceleration"
+        )
+    if arguments.consensus_execution == "single-node" and not (
+        arguments.proximal_metric == "block"
+        and arguments.consensus_metric == "full"
+    ):
+        raise ValueError(
+            "single-node consensus currently requires block/full metrics"
+        )
+    if (
+        arguments.consensus_execution == "single-node"
+        and arguments.worker_consensus_shadow
+    ):
+        raise ValueError(
+            "single-node consensus and worker consensus shadow are separate modes"
         )
     if arguments.penalty_multiplier <= 0.0:
         raise ValueError("penalty multiplier must be positive")
@@ -351,6 +396,7 @@ def print_setup(arguments, camera_count, point_count, observation_count, metrics
         f"local_steps={arguments.local_steps}\n"
         f"proximal_metric={arguments.proximal_metric} "
         f"consensus_metric={arguments.consensus_metric} "
+        f"consensus_execution={arguments.consensus_execution} "
         f"block_regularization={arguments.block_regularization:g} "
         f"block_curvature_multiplier="
         f"{arguments.block_curvature_multiplier:g} "
@@ -682,17 +728,27 @@ def main():
                 worker_owned_cameras=arguments.worker_owned_cameras,
                 return_consensus_rhs=arguments.worker_consensus_shadow,
                 packed_request_buffers=arguments.packed_request_buffers,
+                single_node_consensus=(
+                    arguments.consensus_execution == "single-node"
+                ),
+                consensus_relaxation=arguments.relaxation,
             )
             if arguments.worker_owned_landmarks:
                 suppressed_routine_landmark_replies += cluster_count
             proximal_oracle_calls += 1
             override_landmarks = False
             worker_consensus_rhs = None
+            single_node_summary = None
             if (
                 arguments.proximal_metric == "block"
                 and arguments.metric_diagnostic_iterations > 0
             ):
-                if arguments.worker_consensus_shadow:
+                if arguments.consensus_execution == "single-node":
+                    prox_costs, single_node_summary, metric_diagnostics = (
+                        prox_result
+                    )
+                    raw_metric_blocks = None
+                elif arguments.worker_consensus_shadow:
                     (
                         prox_costs,
                         raw_metric_blocks,
@@ -702,7 +758,10 @@ def main():
                 else:
                     prox_costs, raw_metric_blocks, metric_diagnostics = prox_result
             elif arguments.proximal_metric == "block":
-                if arguments.worker_consensus_shadow:
+                if arguments.consensus_execution == "single-node":
+                    prox_costs, single_node_summary = prox_result
+                    raw_metric_blocks = None
+                elif arguments.worker_consensus_shadow:
                     prox_costs, raw_metric_blocks, worker_consensus_rhs = prox_result
                 else:
                     prox_costs, raw_metric_blocks = prox_result
@@ -714,21 +773,36 @@ def main():
             revert_landmark_mode = 0
             trust_region_recovery_ratio = 1.0
 
-            (
-                candidate_consensus,
-                candidate_centers,
-                _,
-                residuals,
-                selected_metric_blocks,
-            ) = drs_step(
-                local_cameras,
-                centers,
-                camera_masks,
-                consensus,
-                relaxation=arguments.relaxation,
-                metric_blocks=raw_metric_blocks,
-                metric_mode=arguments.consensus_metric,
-            )
+            if single_node_summary is not None:
+                (
+                    candidate_consensus,
+                    candidate_centers,
+                    _,
+                    residuals,
+                ) = apply_single_node_consensus(
+                    local_cameras,
+                    centers,
+                    camera_masks,
+                    single_node_summary,
+                    arguments.relaxation,
+                )
+                selected_metric_blocks = None
+            else:
+                (
+                    candidate_consensus,
+                    candidate_centers,
+                    _,
+                    residuals,
+                    selected_metric_blocks,
+                ) = drs_step(
+                    local_cameras,
+                    centers,
+                    camera_masks,
+                    consensus,
+                    relaxation=arguments.relaxation,
+                    metric_blocks=raw_metric_blocks,
+                    metric_mode=arguments.consensus_metric,
+                )
             if arguments.worker_consensus_shadow:
                 rhs_error, consensus_error = validate_worker_consensus_rhs(
                     local_cameras,
@@ -841,19 +915,27 @@ def main():
                 )
             else:
                 splitting_scale = 1.0
-                proximal_displacement_cost = metric_quadratic_sum(
-                    local_cameras - centers,
-                    raw_metric_blocks,
-                    camera_masks,
+                proximal_displacement_cost = (
+                    single_node_summary.proximal_displacement_squared
+                    if single_node_summary is not None
+                    else metric_quadratic_sum(
+                        local_cameras - centers,
+                        raw_metric_blocks,
+                        camera_masks,
+                    )
                 )
                 local_data_objective = float(np.sum(prox_costs))
-            splitting_term = dre_splitting_term(
-                local_cameras,
-                candidate_consensus,
-                centers,
-                camera_masks,
-                splitting_scale,
-                metric_blocks=selected_metric_blocks,
+            splitting_term = (
+                single_node_summary.splitting_term
+                if single_node_summary is not None
+                else dre_splitting_term(
+                    local_cameras,
+                    candidate_consensus,
+                    centers,
+                    camera_masks,
+                    splitting_scale,
+                    metric_blocks=selected_metric_blocks,
+                )
             )
             dre_model_envelope, douglas_rachford_envelope = (
                 complete_douglas_rachford_envelope(
@@ -942,7 +1024,10 @@ def main():
                 "candidate_consensus": candidate_consensus.copy(),
                 "candidate_centers": candidate_centers.copy(),
                 "residuals": residuals,
-                "selected_metric_blocks": selected_metric_blocks.copy(),
+                "selected_metric_blocks": (
+                    selected_metric_blocks.copy()
+                    if selected_metric_blocks is not None else None
+                ),
                 "candidate_metrics": candidate_metrics,
                 "candidate_sse": candidate_sse,
                 "splitting_scale": splitting_scale,
@@ -1023,6 +1108,10 @@ def main():
                         ),
                         worker_owned_cameras=arguments.worker_owned_cameras,
                         packed_request_buffers=arguments.packed_request_buffers,
+                        single_node_consensus=(
+                            arguments.consensus_execution == "single-node"
+                        ),
+                        consensus_relaxation=arguments.relaxation,
                     )
                     if (
                         arguments.suppress_accelerated_landmark_replies
@@ -1033,29 +1122,63 @@ def main():
                         arguments.proximal_metric == "block"
                         and arguments.metric_diagnostic_iterations > 0
                     ):
-                        trial_prox_costs, trial_raw_blocks, trial_diagnostics = trial_result
+                        if arguments.consensus_execution == "single-node":
+                            (
+                                trial_prox_costs,
+                                trial_single_node_summary,
+                                trial_diagnostics,
+                            ) = trial_result
+                            trial_raw_blocks = None
+                        else:
+                            (
+                                trial_prox_costs,
+                                trial_raw_blocks,
+                                trial_diagnostics,
+                            ) = trial_result
                     elif arguments.proximal_metric == "block":
-                        trial_prox_costs, trial_raw_blocks = trial_result
+                        if arguments.consensus_execution == "single-node":
+                            trial_prox_costs, trial_single_node_summary = (
+                                trial_result
+                            )
+                            trial_raw_blocks = None
+                        else:
+                            trial_prox_costs, trial_raw_blocks = trial_result
                         trial_diagnostics = None
                     else:
                         trial_prox_costs = trial_result
                         trial_raw_blocks = None
                         trial_diagnostics = None
-                    (
-                        trial_consensus,
-                        trial_next_centers,
-                        _,
-                        trial_residuals,
-                        trial_selected_blocks,
-                    ) = drs_step(
-                        trial_local_cameras,
-                        trial_centers,
-                        camera_masks,
-                        oracle_input_consensus,
-                        relaxation=arguments.relaxation,
-                        metric_blocks=trial_raw_blocks,
-                        metric_mode=arguments.consensus_metric,
-                    )
+                        trial_single_node_summary = None
+                    if arguments.consensus_execution == "single-node":
+                        (
+                            trial_consensus,
+                            trial_next_centers,
+                            _,
+                            trial_residuals,
+                        ) = apply_single_node_consensus(
+                            trial_local_cameras,
+                            trial_centers,
+                            camera_masks,
+                            trial_single_node_summary,
+                            arguments.relaxation,
+                        )
+                        trial_selected_blocks = None
+                    else:
+                        (
+                            trial_consensus,
+                            trial_next_centers,
+                            _,
+                            trial_residuals,
+                            trial_selected_blocks,
+                        ) = drs_step(
+                            trial_local_cameras,
+                            trial_centers,
+                            camera_masks,
+                            oracle_input_consensus,
+                            relaxation=arguments.relaxation,
+                            metric_blocks=trial_raw_blocks,
+                            metric_mode=arguments.consensus_metric,
+                        )
                     if acceleration_weight == 1.0:
                         accelerator.observe_first_trial(
                             trial_centers - trial_next_centers
@@ -1124,19 +1247,27 @@ def main():
                         )
                     else:
                         trial_splitting_scale = 1.0
-                        trial_displacement_cost = metric_quadratic_sum(
-                            trial_local_cameras - trial_centers,
-                            trial_raw_blocks,
-                            camera_masks,
+                        trial_displacement_cost = (
+                            trial_single_node_summary.proximal_displacement_squared
+                            if arguments.consensus_execution == "single-node"
+                            else metric_quadratic_sum(
+                                trial_local_cameras - trial_centers,
+                                trial_raw_blocks,
+                                camera_masks,
+                            )
                         )
                         trial_local_objective = float(np.sum(trial_prox_costs))
-                    trial_splitting_term = dre_splitting_term(
-                        trial_local_cameras,
-                        trial_consensus,
-                        trial_centers,
-                        camera_masks,
-                        trial_splitting_scale,
-                        metric_blocks=trial_selected_blocks,
+                    trial_splitting_term = (
+                        trial_single_node_summary.splitting_term
+                        if arguments.consensus_execution == "single-node"
+                        else dre_splitting_term(
+                            trial_local_cameras,
+                            trial_consensus,
+                            trial_centers,
+                            camera_masks,
+                            trial_splitting_scale,
+                            metric_blocks=trial_selected_blocks,
+                        )
                     )
                     trial_model_dre, trial_dre = complete_douglas_rachford_envelope(
                         trial_local_objective,
@@ -1590,6 +1721,7 @@ def main():
                 ),
                 "proximalMetric": arguments.proximal_metric,
                 "consensusMetric": arguments.consensus_metric,
+                "consensusExecution": arguments.consensus_execution,
                 "blockRegularization": proximal_block_regularization,
                 "blockCurvatureMultiplier": (
                     proximal_block_curvature_multiplier
@@ -1734,6 +1866,7 @@ def main():
         "proximalOracleCalls": proximal_oracle_calls,
         "proximalMetric": arguments.proximal_metric,
         "consensusMetric": arguments.consensus_metric,
+        "consensusExecution": arguments.consensus_execution,
         "initialBlockRegularization": arguments.block_regularization,
         "finalBlockRegularization": block_regularization,
         "initialBlockCurvatureMultiplier": (

@@ -168,6 +168,61 @@ incidences when one physical worker hosts several logical clusters.  Exact
 full-block consensus does not eliminate the metric information across remote
 machines.
 
+\section{Centralized and decentralized exact consensus}
+
+The consensus projection admits two execution topologies without changing its
+mathematical definition.  In the centralized topology, every worker sends its
+sparse camera contributions to one coordinator, which forms $(A_i,b_i)$ and
+solves for every $v_i$.  This topology is simple and provides a transparent
+reference implementation, but its receive bandwidth, reduction work, and
+consensus solves are concentrated on one machine.
+
+In the decentralized topology, each global camera is assigned to a
+deterministic owner, for example
+\begin{equation}
+  \operatorname{owner}(i)=h(i)\bmod P,
+\end{equation}
+where $P$ is the number of reducer nodes.  A worker sends $(M_{ki},b_{ki})$
+directly to the owner of camera $i$.  That owner forms $(A_i,b_i)$, solves for
+$v_i$, and returns $v_i$ only to workers containing camera $i$.  Consensus CPU,
+receive bandwidth, and memory are thereby distributed by camera, and no node
+must receive all metric blocks.  The aggregate numeric payload is not
+necessarily smaller, but the centralized bottleneck is removed and sparse
+downward routing avoids broadcasting unrelated cameras.
+
+This is a distributed exact reduction, not iterative graph gossip.  It
+therefore produces the same one-shot block-metric projection as the centralized
+topology and does not introduce a consensus tolerance or additional algorithmic
+iterations.  Deterministic camera ownership and fixed contributor order permit
+direct comparison with the centralized reference.
+
+All experiments in this work are conducted on one physical machine.  Two
+execution modes are consequently retained.  The \emph{coordinator} mode keeps
+the current worker--coordinator message boundary and represents the protocol
+used by a one-cluster-per-node deployment; it supports transparent protocol and
+topology experiments, but does not reproduce real network latency or bandwidth.
+The \emph{single-node} mode uses the actual experimental placement: all logical
+clusters contribute through an in-process shared-memory reducer and only the
+resulting consensus and scalar diagnostics cross the Python--C++ control
+boundary.  This mode is intended for fast algorithm experiments.  Both modes
+use the same metric transformation, fixed cluster order, consensus solve, and
+safeguard quantities, and their trajectories are validated against each other.
+Runtime results from the single-node mode are reported as single-machine
+implementation performance rather than as distributed communication results.
+The implementation exposes these alternatives as
+\texttt{--consensus-execution coordinator} and
+\texttt{--consensus-execution single-node}.  The first remains the default and
+returns the sparse metric blocks to the Python coordinator.  The second performs
+the full-block reduction and consensus solves in the resident C++ process and
+returns only the consensus cameras and aggregate DRS quadratic diagnostics for
+the consensus stage.  The current implementation still returns local proximal
+cameras and accepts coordinator-owned centers because outer acceleration and
+recovery remain in Python; moving those controls into the resident process is a
+separate optimization.
+Because the two modes use NumPy/LAPACK and Eigen linear solves, respectively,
+validation uses the stated relative shadow tolerance rather than requiring
+bitwise equality of the solved camera values.
+
 \subsection{Remote-worker optimization priorities}
 
 The primary deployment assumption is that physical workers may reside on

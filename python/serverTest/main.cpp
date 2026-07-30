@@ -19,6 +19,8 @@
 #include <iostream>
 #include <thread>
 #include <mutex>
+#include <condition_variable>
+#include <memory>
 #include <omp.h>
 #include <chrono>
 #include "test.pb.h"
@@ -38,6 +40,22 @@ using Eigen::VectorXi;
 using Eigen::RowMajor;
 using Eigen::Matrix;
 using Eigen::Map;
+
+struct SingleNodeConsensusContribution {
+  std::vector<std::uint32_t> global_camera_ids;
+  std::vector<std::array<double, 81>> metrics;
+  std::vector<std::array<double, 9>> cameras;
+  std::vector<std::array<double, 9>> centers;
+};
+
+struct SingleNodeConsensusResult {
+  std::vector<double> consensus;
+  double fixed_point_squared = 0.;
+  double proximal_displacement_squared = 0.;
+  double reflection_projection_squared = 0.;
+  double center_step_squared = 0.;
+  double splitting_term = 0.;
+};
 
 #ifdef BUNDLE_PALM_VERBOSE_LOGGING
 #define WORKER_LOG(expression) do { std::cout << expression; } while (false)
@@ -885,11 +903,42 @@ public:
 
     int ClusterId() { return cluster_id; }
 
+    int ClusterCount() const { return num_clusters; }
+
+    SingleNodeConsensusContribution BuildSingleNodeConsensusContribution()
+        const {
+      THROW_IF(global_camera_ids.size() != static_cast<size_t>(numCameras));
+      THROW_IF(cameras.size() != static_cast<size_t>(9 * numCameras));
+      THROW_IF(cameras_s.size() != cameras.size());
+      THROW_IF(full_stepSize.size() != static_cast<size_t>(81 * numCameras));
+      SingleNodeConsensusContribution contribution;
+      contribution.global_camera_ids = global_camera_ids;
+      contribution.metrics.resize(numCameras);
+      contribution.cameras.resize(numCameras);
+      contribution.centers.resize(numCameras);
+      for (int camera = 0; camera < numCameras; ++camera) {
+        for (int row = 0; row < 9; ++row) {
+          contribution.cameras[camera][row] = cameras[9 * camera + row];
+          contribution.centers[camera][row] = cameras_s[9 * camera + row];
+          for (int column = 0; column < 9; ++column) {
+            contribution.metrics[camera][9 * row + column] =
+              static_cast<float>(
+                full_stepSize[81 * camera + 9 * row + column]);
+          }
+        }
+      }
+      return contribution;
+    }
+
     void ResetProgram(const program_proto &pro) {
       Init(pro.num_clusters());
       numCameras = pro.cameras_size() / 9;
       numLandmarks = pro.landmarks_size() / 3;
       numResiduals =  pro.observations_size() / 2;
+      global_camera_ids.assign(
+        pro.global_camera_id().begin(), pro.global_camera_id().end());
+      THROW_IF(!global_camera_ids.empty()
+          && global_camera_ids.size() != static_cast<size_t>(numCameras));
       local_iterations = std::max(1, std::min(20, pro.iterations()));
       scalar_proximal_prior = pro.scalar_proximal_prior();
       block_curvature_multiplier = pro.block_curvature_multiplier();
@@ -1241,7 +1290,8 @@ public:
     
     return_cluster_proto FillReturnProto(
       bool include_landmarks = true,
-      bool include_consensus_rhs = false) {
+      bool include_consensus_rhs = false,
+      bool include_metric_blocks = true) {
       return_cluster_proto return_proto = return_cluster_proto();
       return_proto.set_cameras_f64(
           reinterpret_cast<const char*>(cameras.data()),
@@ -1258,24 +1308,26 @@ public:
         reinterpret_cast<const char*>(physical_landmarks.data()),
         physical_landmarks.size() * sizeof(double));
       }
-      std::vector<float> metric_upper_blocks;
-      metric_upper_blocks.reserve(45 * numCameras);
-      for (int camera = 0; camera < numCameras; ++camera) {
-        const int offset = 81 * camera;
-        for (int row = 0; row < 9; ++row) {
-          for (int column = row; column < 9; ++column) {
-            const float upper = static_cast<float>(
-                full_stepSize[offset + 9 * row + column]);
-            const float lower = static_cast<float>(
-                full_stepSize[offset + 9 * column + row]);
-            THROW_IF(upper != lower);
-            metric_upper_blocks.push_back(upper);
+      if (include_metric_blocks) {
+        std::vector<float> metric_upper_blocks;
+        metric_upper_blocks.reserve(45 * numCameras);
+        for (int camera = 0; camera < numCameras; ++camera) {
+          const int offset = 81 * camera;
+          for (int row = 0; row < 9; ++row) {
+            for (int column = row; column < 9; ++column) {
+              const float upper = static_cast<float>(
+                  full_stepSize[offset + 9 * row + column]);
+              const float lower = static_cast<float>(
+                  full_stepSize[offset + 9 * column + row]);
+              THROW_IF(upper != lower);
+              metric_upper_blocks.push_back(upper);
+            }
           }
         }
+        return_proto.set_step_size_upper_f32(
+            reinterpret_cast<const char*>(metric_upper_blocks.data()),
+            metric_upper_blocks.size() * sizeof(float));
       }
-      return_proto.set_step_size_upper_f32(
-          reinterpret_cast<const char*>(metric_upper_blocks.data()),
-          metric_upper_blocks.size() * sizeof(float));
       if (include_consensus_rhs) {
         std::vector<double> consensus_rhs(9 * numCameras, 0.);
         for (int camera = 0; camera < numCameras; ++camera) {
@@ -2610,6 +2662,7 @@ private:
       numCameras = 0;
       numLandmarks = 0;
       numResiduals = 0;
+      num_clusters = numClusters;
       firstIteration = true;
       //new_best_cost = false;
       current_be = init_be;
@@ -2649,7 +2702,9 @@ private:
   }
 
   int cluster_id;
+  int num_clusters = 1;
   int numCameras = 0;
+  std::vector<std::uint32_t> global_camera_ids;
   int local_solve_sequence = 0;
   int numLandmarks = 0;
   int numResiduals = 0;
@@ -2719,6 +2774,145 @@ private:
 };
 ///////////////////////////////////////////////////////
 
+class SingleNodeConsensusReducer {
+public:
+  std::shared_ptr<const SingleNodeConsensusResult> Submit(
+      std::uint64_t run_id, std::uint64_t phase_id, int cluster_id,
+      int cluster_count, double relaxation,
+      SingleNodeConsensusContribution contribution) {
+    std::unique_lock<std::mutex> lock(mutex_);
+    if (contributions_.empty()) {
+      run_id_ = run_id;
+      phase_id_ = phase_id;
+      cluster_count_ = cluster_count;
+      relaxation_ = relaxation;
+      result_.reset();
+      readers_ = 0;
+    }
+    THROW_IF(run_id != run_id_ || phase_id != phase_id_);
+    THROW_IF(cluster_count != cluster_count_ || cluster_count <= 0);
+    THROW_IF(cluster_id < 0 || cluster_id >= cluster_count);
+    THROW_IF(relaxation != relaxation_ || !(relaxation > 0.)
+        || !(relaxation < 2.));
+    THROW_IF(contributions_.count(cluster_id) != 0);
+    contributions_.emplace(cluster_id, std::move(contribution));
+    if (contributions_.size() == static_cast<size_t>(cluster_count_)) {
+      result_ = std::make_shared<SingleNodeConsensusResult>(Reduce());
+      condition_.notify_all();
+    } else {
+      condition_.wait(lock, [this]() { return result_ != nullptr; });
+    }
+    const auto result = result_;
+    if (++readers_ == cluster_count_) {
+      contributions_.clear();
+      result_.reset();
+    }
+    return result;
+  }
+
+private:
+  SingleNodeConsensusResult Reduce() const {
+    std::uint32_t maximum_camera_id = 0;
+    bool has_camera = false;
+    for (int cluster = 0; cluster < cluster_count_; ++cluster) {
+      const auto& contribution = contributions_.at(cluster);
+      THROW_IF(contribution.global_camera_ids.size()
+          != contribution.metrics.size());
+      THROW_IF(contribution.cameras.size() != contribution.metrics.size());
+      THROW_IF(contribution.centers.size() != contribution.metrics.size());
+      for (const std::uint32_t camera : contribution.global_camera_ids) {
+        maximum_camera_id = std::max(maximum_camera_id, camera);
+        has_camera = true;
+      }
+    }
+    THROW_IF(!has_camera);
+    const size_t camera_count = static_cast<size_t>(maximum_camera_id) + 1;
+    std::vector<Eigen::Matrix<double, 9, 9>> metric_sums(
+      camera_count, Eigen::Matrix<double, 9, 9>::Zero());
+    std::vector<Eigen::Matrix<double, 9, 1>> right_hand_sides(
+      camera_count, Eigen::Matrix<double, 9, 1>::Zero());
+    std::vector<bool> present(camera_count, false);
+    for (int cluster = 0; cluster < cluster_count_; ++cluster) {
+      const auto& contribution = contributions_.at(cluster);
+      for (size_t local_camera = 0;
+           local_camera < contribution.global_camera_ids.size();
+           ++local_camera) {
+        const size_t camera = contribution.global_camera_ids[local_camera];
+        Eigen::Matrix<double, 9, 9> metric;
+        Eigen::Matrix<double, 9, 1> reflection;
+        for (int row = 0; row < 9; ++row) {
+          reflection(row) = 2. * contribution.cameras[local_camera][row]
+            - contribution.centers[local_camera][row];
+          for (int column = 0; column < 9; ++column) {
+            metric(row, column) =
+              contribution.metrics[local_camera][9 * row + column];
+          }
+        }
+        metric_sums[camera] += metric;
+        right_hand_sides[camera] += metric * reflection;
+        present[camera] = true;
+      }
+    }
+    SingleNodeConsensusResult result;
+    result.consensus.resize(9 * camera_count);
+    for (size_t camera = 0; camera < camera_count; ++camera) {
+      THROW_IF(!present[camera]);
+      const Eigen::Matrix<double, 9, 1> consensus =
+        metric_sums[camera].partialPivLu().solve(right_hand_sides[camera]);
+      THROW_IF(!consensus.allFinite());
+      for (int row = 0; row < 9; ++row) {
+        result.consensus[9 * camera + row] = consensus(row);
+      }
+    }
+    for (int cluster = 0; cluster < cluster_count_; ++cluster) {
+      const auto& contribution = contributions_.at(cluster);
+      for (size_t local_camera = 0;
+           local_camera < contribution.global_camera_ids.size();
+           ++local_camera) {
+        const size_t camera = contribution.global_camera_ids[local_camera];
+        Eigen::Matrix<double, 9, 9> metric;
+        Eigen::Matrix<double, 9, 1> local;
+        Eigen::Matrix<double, 9, 1> center;
+        Eigen::Matrix<double, 9, 1> consensus;
+        for (int row = 0; row < 9; ++row) {
+          local(row) = contribution.cameras[local_camera][row];
+          center(row) = contribution.centers[local_camera][row];
+          consensus(row) = result.consensus[9 * camera + row];
+          for (int column = 0; column < 9; ++column) {
+            metric(row, column) =
+              contribution.metrics[local_camera][9 * row + column];
+          }
+        }
+        const Eigen::Matrix<double, 9, 1> fixed_point = local - consensus;
+        const Eigen::Matrix<double, 9, 1> displacement = local - center;
+        const Eigen::Matrix<double, 9, 1> reflection_projection =
+          2. * local - center - consensus;
+        const Eigen::Matrix<double, 9, 1> center_step =
+          -relaxation_ * fixed_point;
+        result.fixed_point_squared += fixed_point.dot(metric * fixed_point);
+        result.proximal_displacement_squared +=
+          displacement.dot(metric * displacement);
+        result.reflection_projection_squared +=
+          reflection_projection.dot(metric * reflection_projection);
+        result.center_step_squared += center_step.dot(metric * center_step);
+        result.splitting_term += 0.5 * fixed_point.dot(
+          metric * (fixed_point + 2. * displacement));
+      }
+    }
+    return result;
+  }
+
+  mutable std::mutex mutex_;
+  std::condition_variable condition_;
+  std::map<int, SingleNodeConsensusContribution> contributions_;
+  std::shared_ptr<const SingleNodeConsensusResult> result_;
+  std::uint64_t run_id_ = 0;
+  std::uint64_t phase_id_ = 0;
+  int cluster_count_ = 0;
+  int readers_ = 0;
+  double relaxation_ = 1.;
+};
+
 int main() {
   // Initialize the context
   zmq::context_t context(1);
@@ -2740,6 +2934,7 @@ int main() {
   push_socket.bind("tcp://*:" + result_port);
 
   std::map<int, CeresProgram> cluster_to_program;
+  SingleNodeConsensusReducer single_node_consensus_reducer;
 
   while (true) {
     zmq::message_t request;
@@ -2779,8 +2974,11 @@ int main() {
 
       // Define a Lambda Expression
       auto update_lambda = [&push_socket, &cluster_to_program,
+                &single_node_consensus_reducer,
                 &mtx](int cluster_id, bool omit_landmarks,
                   bool return_consensus_rhs,
+                  bool single_node_consensus,
+                  double consensus_relaxation,
                   std::uint64_t run_id, std::uint64_t phase_id) {
         CeresProgram &program = cluster_to_program[cluster_id];
         // std::cout << cluster_id << " Update "<< "\n";
@@ -2799,8 +2997,31 @@ int main() {
           }
 #endif
   }
-        return_cluster_proto return_proto =
-          program.FillReturnProto(!omit_landmarks, return_consensus_rhs);
+        std::shared_ptr<const SingleNodeConsensusResult> consensus_result;
+        if (single_node_consensus) {
+          consensus_result = single_node_consensus_reducer.Submit(
+            run_id, phase_id, cluster_id, program.ClusterCount(),
+            consensus_relaxation,
+            program.BuildSingleNodeConsensusContribution());
+        }
+        return_cluster_proto return_proto = program.FillReturnProto(
+          !omit_landmarks, return_consensus_rhs, !single_node_consensus);
+        if (single_node_consensus && cluster_id == 0) {
+          return_proto.set_consensus_f64(
+            reinterpret_cast<const char*>(consensus_result->consensus.data()),
+            consensus_result->consensus.size() * sizeof(double));
+          return_proto.set_consensus_fixed_point_squared(
+            consensus_result->fixed_point_squared);
+          return_proto.set_consensus_proximal_displacement_squared(
+            consensus_result->proximal_displacement_squared);
+          return_proto.set_consensus_reflection_projection_squared(
+            consensus_result->reflection_projection_squared);
+          return_proto.set_consensus_center_step_squared(
+            consensus_result->center_step_squared);
+          return_proto.set_consensus_splitting_term(
+            consensus_result->splitting_term);
+          return_proto.set_has_single_node_consensus(true);
+        }
         return_proto.set_run_id(run_id);
         return_proto.set_phase_id(phase_id);
         const double cost = return_proto.cost();
@@ -2819,6 +3040,7 @@ int main() {
       // std::cref(update));
       std::thread update_thread(update_lambda, cluster_id,
         update.omit_landmarks(), update.return_consensus_rhs(),
+        update.single_node_consensus(), update.consensus_relaxation(),
         update.run_id(),
             update.phase_id());//, keep_cameras_fixed);
       update_thread.detach();

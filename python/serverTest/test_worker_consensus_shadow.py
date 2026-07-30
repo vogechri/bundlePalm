@@ -1,8 +1,14 @@
 import numpy as np
 import pytest
 
-from client_drs import validate_worker_consensus_rhs
-from drs_consensus import ActiveCameraMetricBlocks, project_consensus
+from client_admm import SingleNodeConsensusSummary
+from client_drs import apply_single_node_consensus, validate_worker_consensus_rhs
+from drs_consensus import (
+    ActiveCameraMetricBlocks,
+    dre_splitting_term,
+    drs_step,
+    project_consensus,
+)
 
 
 def _shadow_fixture():
@@ -54,3 +60,39 @@ def test_worker_consensus_rhs_rejects_modified_contribution():
         validate_worker_consensus_rhs(
             local, centers, metrics, rhs, consensus
         )
+
+
+def test_single_node_summary_matches_coordinator_state_update():
+    local, centers, metrics, _, _ = _shadow_fixture()
+    masks = np.ones((2, 2), dtype=bool)
+    relaxation = 1.25
+    consensus, next_centers, reflected, residuals, selected = drs_step(
+        local,
+        centers,
+        masks,
+        np.zeros((2, 9)),
+        relaxation=relaxation,
+        metric_blocks=metrics,
+        metric_mode="full",
+    )
+    summary = SingleNodeConsensusSummary(
+        consensus=consensus,
+        fixed_point_squared=residuals.fixed_point_squared,
+        proximal_displacement_squared=(
+            residuals.proximal_displacement_squared
+        ),
+        reflection_projection_squared=(
+            residuals.reflection_projection_squared
+        ),
+        center_step_squared=residuals.center_step_squared,
+        splitting_term=dre_splitting_term(
+            local, consensus, centers, masks, metric_blocks=selected
+        ),
+    )
+    actual = apply_single_node_consensus(
+        local, centers, masks, summary, relaxation
+    )
+    np.testing.assert_array_equal(actual[0], consensus)
+    np.testing.assert_array_equal(actual[1], next_centers)
+    np.testing.assert_array_equal(actual[2], reflected)
+    assert actual[3] == residuals
