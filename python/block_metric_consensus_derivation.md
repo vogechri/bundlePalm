@@ -125,6 +125,88 @@ $$
 
 If all scalar weights are equal, it reduces further to arithmetic averaging.
 
+## Proposal-Disagreement Damping
+
+The optional proposal-disagreement scale acts after the local proximal solves
+and before the DRS reflection. For camera $c$, first project the unreflected
+local proposals onto metric consensus:
+
+$$
+\bar u_c=P_Du_c
+=\left(\sum_{i\in\mathcal I_c}D_{i,c}\right)^{-1}
+\sum_{i\in\mathcal I_c}D_{i,c}u_{i,c}.
+$$
+
+For a configured scale $\alpha\in[0,1]$, replace every active local copy by
+
+$$
+\boxed{
+u_{i,c}^{(\alpha)}
+=\bar u_c+\alpha(u_{i,c}-\bar u_c)}.
+$$
+
+In product-space operator notation this is
+
+$$
+\boxed{
+u^{(\alpha)}=
+\left[P_D+\alpha(I-P_D)\right]u}.
+$$
+
+Thus $\alpha=1$ leaves the proximal proposals unchanged, $\alpha=0.5$ halves
+their disagreement component, and $\alpha=0$ collapses all copies to metric
+consensus. The correction preserves the metric projection because
+
+$$
+\sum_iD_{i,c}(u_{i,c}^{(\alpha)}-\bar u_c)
+=\alpha\sum_iD_{i,c}(u_{i,c}-\bar u_c)=0,
+$$
+
+and hence $P_Du^{(\alpha)}=P_Du$. Consequently the current reflected consensus
+point is also unchanged:
+
+$$
+P_D(2u^{(\alpha)}-s)
+=2P_Du^{(\alpha)}-P_Ds
+=2P_Du-P_Ds
+=P_D(2u-s)=v.
+$$
+
+The operation is nevertheless not neutral to DRS. It changes the center update
+from
+
+$$
+s^+=s+\lambda(v-u)
+$$
+
+to
+
+$$
+\boxed{
+s_\alpha^+
+=s+\lambda(v-u^{(\alpha)})
+=s_1^++\lambda(1-\alpha)(u-P_Du)}.
+$$
+
+It therefore filters only the product-space disagreement mode entering the
+next local proximal problems, while preserving the current projected camera.
+This is disagreement-mode damping, not a uniform local step-size reduction.
+
+The reported normalized proposal-disagreement statistic is
+
+$$
+r=\frac{
+\sum_{i,c}\lVert u_{i,c}-P_Du_c\rVert_{D_{i,c}}^2
+}{
+\sum_{i,c}\lVert u_{i,c}-s_{i,c}\rVert_{D_{i,c}}^2
+}.
+$$
+
+It measures the fraction of metric proximal displacement energy associated
+with disagreement among camera copies. When a nonnegative disagreement
+threshold is configured, damping is applied only when $r$ reaches that
+threshold.
+
 ## Why A Single Scalar Is Weak For BA
 
 The nine Snavely camera coordinates have different units, scales, and local

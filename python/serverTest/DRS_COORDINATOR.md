@@ -92,6 +92,24 @@ DRE splitting term. Scalar proximal mode intentionally permits only arithmetic
 consensus: its worker reply is `rho I`, not a Gauss-Newton block, so exposing
 the weighted names there would not represent distinct algorithms.
 
+`--metric-proposal-disagreement-scale alpha` optionally filters the local
+proposal disagreement before reflection:
+
+\[
+ u^{(\alpha)}=[P_D+\alpha(I-P_D)]u.
+\]
+
+This preserves both `P_D u` and the current reflected projection
+`P_D(2u-s)`, but changes the center update to
+
+\[
+ s_\alpha^+=s_1^++\lambda(1-\alpha)(u-P_Du).
+\]
+
+It is therefore disagreement-mode damping rather than uniform step damping.
+The full derivation and normalized disagreement statistic are in
+`block_metric_consensus_derivation.md`.
+
 ## Relative safeguard
 
 The default safeguard matches the relative conjunction used by `client_acc.py`:
