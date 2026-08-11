@@ -99,6 +99,7 @@ OUTER_ACCELERATION=${OUTER_ACCELERATION:-none}
 LINE_SEARCH_GRID=${LINE_SEARCH_GRID:-0,1}
 ACCELERATION_RESTART_AFTER=${ACCELERATION_RESTART_AFTER:-3}
 PENALTY_MULTIPLIER=${PENALTY_MULTIPLIER:-1.0}
+HUBER_DELTA=${HUBER_DELTA:-0}
 SAFEGUARD_MODE=${SAFEGUARD_MODE:-relative}
 DRE_RELATIVE_INCREASE=${DRE_RELATIVE_INCREASE:-0.01}
 MINIMUM_PRIMAL_RATIO=${MINIMUM_PRIMAL_RATIO:-1.001}
@@ -249,6 +250,9 @@ if [[ "$CONSENSUS_LANDMARK_REFINEMENT_STEPS" != "0" ]]; then
 fi
 if [[ "$CONSENSUS_LANDMARK_REFINEMENT_POLICY" != "safeguard" ]]; then
   VARIANT_NAME="${VARIANT_NAME}_${CONSENSUS_LANDMARK_REFINEMENT_POLICY}"
+fi
+if [[ "$HUBER_DELTA" != "0" && "$HUBER_DELTA" != "0.0" ]]; then
+  VARIANT_NAME="${VARIANT_NAME}_huber${HUBER_DELTA}"
 fi
 if [[ -n "$VARIANT_TAG" ]]; then
   if [[ ! "$VARIANT_TAG" =~ ^[a-zA-Z0-9._-]+$ ]]; then
@@ -609,6 +613,7 @@ for problem in "${PROBLEMS[@]}"; do
             --maximum-block-regularization "$MAXIMUM_BLOCK_REGULARIZATION" \
             --relaxation "$RELAXATION" \
             --penalty-multiplier "$PENALTY_MULTIPLIER" \
+            --huber-delta "$HUBER_DELTA" \
             --safeguard-mode "$SAFEGUARD_MODE" \
             --dre-relative-increase "$DRE_RELATIVE_INCREASE" \
             --minimum-primal-ratio "$MINIMUM_PRIMAL_RATIO" \
@@ -691,6 +696,7 @@ for problem in "${PROBLEMS[@]}"; do
             --maximum-block-regularization "$MAXIMUM_BLOCK_REGULARIZATION" \
             --relaxation "$RELAXATION" \
             --penalty-multiplier "$PENALTY_MULTIPLIER" \
+            --huber-delta "$HUBER_DELTA" \
             --safeguard-mode "$SAFEGUARD_MODE" \
             --dre-relative-increase "$DRE_RELATIVE_INCREASE" \
             --minimum-primal-ratio "$MINIMUM_PRIMAL_RATIO" \

@@ -3741,6 +3741,69 @@
     },
     "report": "benchmark_results/stage_c_final_all15_all29_k24_i30/comparison_to_ceres_and_plain_drs.md"
   },
+  "huber_sentinel": {
+    "ceres": {
+      "bal3068": {
+        "artifact": "benchmark_results/stage_c_huber_sentinel_ceres/bal/results.jsonl",
+        "native_objective_relative_error": 4.0576879851206393e-16,
+        "native_solve_seconds": 54.471305471,
+        "objective_value": 860701.8744700771,
+        "sum_squared_error": 4784955.065716006
+      },
+      "bal52": {
+        "artifact": "benchmark_results/stage_c_huber_sentinel_ceres/bal/results.jsonl",
+        "native_objective_relative_error": 1.7330032912216244e-15,
+        "native_solve_seconds": 8.831027624,
+        "objective_value": 117557.08383769158,
+        "sum_squared_error": 900482.9987493936
+      },
+      "roman_forum": {
+        "artifact": "benchmark_results/stage_c_huber_sentinel_ceres/1dsfm/results.jsonl",
+        "native_objective_relative_error": 6.446100523900373e-11,
+        "native_solve_seconds": 38.293996464,
+        "objective_value": 261534.42812986288,
+        "sum_squared_error": 3986577.4068667935
+      },
+      "trafalgar": {
+        "artifact": "benchmark_results/stage_c_huber_sentinel_ceres/1dsfm/results.jsonl",
+        "native_objective_relative_error": 1.5768530067807748e-11,
+        "native_solve_seconds": 60.188492458,
+        "objective_value": 950877.7381827503,
+        "sum_squared_error": 22058122.10319549
+      }
+    },
+    "decision": "validated capability; current schedules not promoted",
+    "drs": {
+      "bal3068": {
+        "artifact": "benchmark_results/stage_c_huber_irls_sentinel_drs/bal/c1_c5/themelis_nesterov_ls01_block_full_se3_left_persistent_tr_adaptl1-2_h0.35_l0.20_w3_start5_huber0.5_stage_c_final_c1_c5.jsonl",
+        "objective_value": 1166345.6204075268,
+        "optimization_seconds": 41.74647586199717,
+        "sum_squared_error": 166093488.52081951
+      },
+      "bal52": {
+        "artifact": "benchmark_results/stage_c_huber_irls_sentinel_drs/bal/c1_c5/themelis_nesterov_ls01_block_full_se3_left_persistent_tr_adaptl1-2_h0.35_l0.20_w3_start5_huber0.5_stage_c_final_c1_c5.jsonl",
+        "objective_value": 139352.67796632595,
+        "optimization_seconds": 7.472355958001572,
+        "sum_squared_error": 601764.565172202
+      },
+      "roman_forum": {
+        "artifact": "benchmark_results/stage_c_huber_irls_sentinel_drs/1dsfm/c1_c5/themelis_nesterov_ls01_block_full_se3_left_persistent_tr_adaptl1-2_h0.35_l0.20_w3_start5_huber0.5_stage_c_final_c1_c5.jsonl",
+        "objective_value": 2419580.4852061504,
+        "optimization_seconds": 12.321326815996144,
+        "sum_squared_error": 33881073.8767761
+      },
+      "trafalgar": {
+        "artifact": "benchmark_results/stage_c_huber_irls_sentinel_drs/1dsfm/c1_c5/themelis_nesterov_ls01_block_full_se3_left_persistent_tr_adaptl1-2_h0.35_l0.20_w3_start5_huber0.5_stage_c_final_c1_c5.jsonl",
+        "objective_value": 6253448.972174842,
+        "optimization_seconds": 30.75820971399662,
+        "sum_squared_error": 296797981.81307423
+      }
+    },
+    "huber_delta": 0.5,
+    "objective": "observation-level Huber pixel reprojection loss",
+    "raw_sse_reported_separately": true,
+    "report": "benchmark_results/stage_c_huber_sentinel_report.md"
+  },
   "methods": {
     "c1": {
       "1dsfm": {
@@ -5179,7 +5242,7 @@
   },
   "repository": {
     "branch": "user/chvogel/notSamePerformanceNew2c",
-    "commit": "9b8b2f0837f597e85a3e6da5a9d5a7b03cc0f10e",
+    "commit": "8286223dc6b711c5485908d140db8cf4e6725be7",
     "working_tree_clean": false
   },
   "schema_version": 1,

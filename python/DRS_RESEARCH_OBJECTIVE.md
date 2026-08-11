@@ -157,6 +157,24 @@ C1+C5/plain is `0.847890x` and `0.983275x`, W/T/L `14/0/1` and `28/0/1`.
 Promote tuned C1+C5 as the final Stage-C stack, with C1 and C5 retained as
 independent switches. No scene-specific settings are used.
 
+Deterministic repeat gate (2026-08-11): after one warm-up, three tuned C1+C5
+repeats on Roman, Trafalgar, BAL52, and BAL3068 are endpoint-bitwise identical,
+including rejection and oracle counts. Optimization-time CV is `1.1%--2.4%`
+and overall-time CV is `0.9%--2.5%`. The tuned L2 stack is frozen. The active
+next gate is an identical Huber objective contract across distributed worker,
+coordinator safeguards/evaluator, and Ceres reference; evaluation-only Huber
+scoring is not sufficient.
+
+Huber gate result (2026-08-11): the shared delta-`0.5` contract is implemented
+and validated. The custom worker uses explicit observation-level IRLS weights
+and exact robust trust costs; worker/coordinator and Ceres/evaluator objectives
+agree numerically. Raw-start Huber I30 remains far behind Ceres (`7.8002x`
+1DSfM, `1.2674x` BAL on the sentinel pairs). L2-to-Huber continuation gains
+only `0.997919x` over its start on 1DSfM and `0.990092x` on BAL while adding 30
+outer iterations, and remains `2.5698x`/`1.1679x` Ceres. Retain robust support,
+but do not broaden either current policy. Tuned L2 C1+C5 remains promoted.
+See `benchmark_results/stage_c_huber_sentinel_report.md`.
+
 Loss-factorial clarification (2026-08-11): fallback safety does not imply
 endpoint dominance over a separately run plain trajectory. Roman's C1 and C5
 main effects both lose but interact beneficially; Yorkminster's main effects

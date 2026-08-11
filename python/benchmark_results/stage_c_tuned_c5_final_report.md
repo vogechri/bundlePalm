@@ -20,3 +20,10 @@ One global C5 policy is used everywhere: start I5, high/low thresholds `0.35/0.2
 ## Decision
 
 Promote the tuned C1+C5 stack as the final Stage-C configuration. It improves the accepted C1 rung geometrically on both complete families and uses one common policy. Keep C1 and C5 independently switchable for ablations. No scene-specific settings are used.
+
+## Deterministic repeats
+
+After one excluded warm-up, three measured repeats on Roman, Trafalgar, BAL52,
+and BAL3068 have zero endpoint SSE spread and identical rejection/oracle counts.
+Optimization-time CV is `1.1%--2.4%`; overall-time CV is `0.9%--2.5%`. See
+`stage_c_tuned_repeats_k24_i30/report.md`.

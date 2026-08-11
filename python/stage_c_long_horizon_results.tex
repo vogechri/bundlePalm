@@ -124,6 +124,23 @@ $0.999486$ on all-29 BAL; tuned C1+C5/plain is $0.847890$ and $0.983275$, with
 W/T/L $14/0/1$ and $28/0/1$.  We promote this single global C1+C5 policy while
 retaining C1 and C5 as independent ablation switches.
 
+After one excluded warm-up, three measured repeats cover Roman, Trafalgar, and
+BAL scenes 52 and 3068.  Endpoint SSE, safeguard counts, and oracle counts are
+identical.  Optimization-time coefficients of variation range from
+$1.1\%$ to $2.4\%$, and overall-time coefficients range from $0.9\%$ to
+$2.5\%$.
+
+We also implement an identical observation-level Huber objective with pixel
+scale $0.5$ in the worker, coordinator safeguards, state evaluator, and
+left-$\mathrm{SE}(3)$ Ceres reference.  Explicit IRLS weights provide a
+positive-semidefinite custom Gauss--Newton model, while exact robust costs drive
+trust acceptance.  On Roman/Trafalgar and BAL52/BAL3068, raw-start Huber I30 is
+$7.8002\times$ and $1.2674\times$ Ceres geometrically.  Adding 30 Huber
+iterations after the tuned L2 state improves that state by only $0.21\%$ and
+$0.99\%$, respectively, and remains $2.5698\times$/$1.1679\times$ Ceres.  We
+therefore retain robust-objective support but do not promote either current
+Huber schedule.
+
 \subsection{Coordinate and finite-solver interactions}
 
 The remaining components are reported as factorials because their effects are

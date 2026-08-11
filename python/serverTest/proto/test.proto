@@ -44,6 +44,7 @@ message program_proto {
   int32 outer_iteration = 39;
   int32 oracle_kind = 40; // 0=bootstrap/other, 1=nominal, 2=accelerated trial
   bool collect_camera_diagonal_metrics = 41;
+  double huber_delta = 42; // 0=L2, >0=Huber scale in pixel units
 }
 
 // sent once
@@ -173,6 +174,7 @@ message return_cost_proto {
   uint64 phase_id = 4;
   repeated double landmarks = 5; // physical landmarks used for this cost
   double precise_cost = 6;
+  double precise_l2_cost = 7;
 }
 
 message best_cost_proto {

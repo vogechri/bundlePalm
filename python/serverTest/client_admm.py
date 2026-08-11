@@ -204,6 +204,7 @@ class AdmmWorkerClient:
         self.last_trust_region_radii = np.empty(0, dtype=np.float64)
         self.last_linear_iterations = np.empty(0, dtype=np.int32)
         self.last_linear_relative_residuals = np.empty(0, dtype=np.float64)
+        self.last_consensus_l2_sse = float("nan")
         self.last_consensus_metric_blocks = None
         self.operation_seconds = {
             "solveBatch": 0.0,
@@ -300,6 +301,7 @@ class AdmmWorkerClient:
         collect_camera_diagonal_metrics=False,
         schur_observability_diagnostic=False,
         schur_offdiagonal_majorizer=False,
+        huber_delta=0.0,
     ):
         batch_setup_started_at = time.perf_counter()
         self.last_consensus_metric_blocks = None
@@ -387,6 +389,7 @@ class AdmmWorkerClient:
                 program.collect_camera_diagonal_metrics = (
                     collect_camera_diagonal_metrics
                 )
+                program.huber_delta = huber_delta
                 program.cluster_id = cluster_id
                 program.num_clusters = cluster_count
                 program.run_id = self.run_id
@@ -944,6 +947,7 @@ class AdmmWorkerClient:
 
         pending = set(range(cluster_count))
         costs = np.zeros(cluster_count, dtype=np.float64)
+        l2_costs = np.zeros(cluster_count, dtype=np.float64)
         while pending:
             payload = self.pull_socket.recv()
             self.received_bytes += len(payload)
@@ -960,6 +964,8 @@ class AdmmWorkerClient:
             if reply.landmarks:
                 raise RuntimeError("worker unexpectedly returned landmarks")
             costs[cluster_id] = reply.precise_cost
+            l2_costs[cluster_id] = reply.precise_l2_cost
+        self.last_consensus_l2_sse = float(np.sum(l2_costs))
         return float(np.sum(costs))
 
     @_timed_operation("controlLandmarkState")

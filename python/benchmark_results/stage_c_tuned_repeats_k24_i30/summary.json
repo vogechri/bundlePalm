@@ -1,0 +1,82 @@
+[
+  {
+    "family": "1dsfm",
+    "optimization_cv": 0.017779208268580465,
+    "optimization_mean": 8.925308665333432,
+    "oracles": [
+      49,
+      49,
+      49
+    ],
+    "overall_cv": 0.02054048222472498,
+    "overall_mean": 13.828552275335824,
+    "rejections": [
+      6,
+      6,
+      6
+    ],
+    "scene": "roman_forum",
+    "sse_mean": 6779649.813809861,
+    "sse_relative_spread": 0.0
+  },
+  {
+    "family": "1dsfm",
+    "optimization_cv": 0.011150947096019366,
+    "optimization_mean": 20.93578395666312,
+    "oracles": [
+      49,
+      49,
+      49
+    ],
+    "overall_cv": 0.020795835907401996,
+    "overall_mean": 31.47725876000186,
+    "rejections": [
+      6,
+      6,
+      6
+    ],
+    "scene": "trafalgar",
+    "sse_mean": 17306753.67056261,
+    "sse_relative_spread": 0.0
+  },
+  {
+    "family": "bal",
+    "optimization_cv": 0.0235313241526851,
+    "optimization_mean": 4.601779810999385,
+    "oracles": [
+      58,
+      58,
+      58
+    ],
+    "overall_cv": 0.008743957225664593,
+    "overall_mean": 7.991910102665618,
+    "rejections": [
+      0,
+      0,
+      0
+    ],
+    "scene": "bal52",
+    "sse_mean": 477621.14241490356,
+    "sse_relative_spread": 0.0
+  },
+  {
+    "family": "bal",
+    "optimization_cv": 0.01856985234576476,
+    "optimization_mean": 21.719684151333542,
+    "oracles": [
+      43,
+      43,
+      43
+    ],
+    "overall_cv": 0.02501459412797591,
+    "overall_mean": 37.245637322332186,
+    "rejections": [
+      12,
+      12,
+      12
+    ],
+    "scene": "bal3068",
+    "sse_mean": 3634324.7139328388,
+    "sse_relative_spread": 0.0
+  }
+]

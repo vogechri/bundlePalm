@@ -101,6 +101,8 @@ def test_evaluate_bal_state_reports_explicit_metric_conventions():
     assert metrics["meanReprojectionError"] == pytest.approx(np.sqrt(1.25))
     assert metrics["huberCeresCost"] == pytest.approx(
         0.5 * (np.sqrt(1.25) - 0.25))
+    assert metrics["objectiveValue"] == pytest.approx(
+        2.0 * metrics["huberCeresCost"])
 
 
 def test_save_bal_state_round_trips_arrays_and_metadata(tmp_path):

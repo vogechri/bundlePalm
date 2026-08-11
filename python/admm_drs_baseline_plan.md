@@ -389,6 +389,11 @@ C1, and C5 rows as the final cumulative ablation ladder.
 8. Expand to Venice, Final, and verified 1DSfM.
 9. Repeat the winning L2 modes with Huber.
 
+The Huber `0.5` sentinel gate is complete. A shared worker/coordinator/evaluator/
+Ceres objective is validated, but raw-start Huber and 30-step L2-to-Huber
+continuation are off the quality/work frontier. Retain Huber capability for a
+future globalization mechanism; keep tuned L2 C1+C5 as the promoted stack.
+
 ## Claim Gate
 
 The proposed method must improve a Pareto frontier in at least one reproducible

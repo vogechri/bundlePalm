@@ -1223,6 +1223,7 @@ def parse_arguments():
     )
     parser.add_argument("--acceleration-restart-after", type=int, default=3)
     parser.add_argument("--penalty-multiplier", type=float, default=1.0)
+    parser.add_argument("--huber-delta", type=float, default=0.0)
     parser.add_argument(
         "--proximal-metric", choices=("scalar", "block"), default="scalar"
     )
@@ -1992,6 +1993,8 @@ def validate_arguments(arguments):
         raise ValueError("DRE relative increase must be nonnegative")
     if arguments.minimum_primal_ratio < 1.0:
         raise ValueError("minimum primal ratio must be at least one")
+    if not np.isfinite(arguments.huber_delta) or arguments.huber_delta < 0.0:
+        raise ValueError("Huber delta must be finite and nonnegative")
     if arguments.safeguard_annealing_iterations < 0:
         raise ValueError("safeguard annealing iterations must be nonnegative")
     if (
@@ -2222,7 +2225,18 @@ def main():
     )
     camera_count = len(cameras)
     point_count = len(points)
-    initial_metrics = evaluate_bal_state(
+    huber_delta = arguments.huber_delta if arguments.huber_delta > 0.0 else None
+    def evaluate_state(state_cameras, state_points, *_):
+        return evaluate_bal_state(
+            state_cameras,
+            state_points,
+            camera_indices,
+            point_indices,
+            observations,
+            huber_delta=huber_delta,
+        )
+
+    initial_metrics = evaluate_state(
         cameras, points, camera_indices, point_indices, observations
     )
     if arguments.debug_output:
@@ -2325,14 +2339,14 @@ def main():
     )
     block_regularization = arguments.block_regularization
     block_curvature_multiplier = arguments.block_curvature_multiplier
-    best_sse = initial_metrics["sumSquaredError"]
+    best_sse = initial_metrics["objectiveValue"]
     best_metrics = initial_metrics.copy()
     best_iteration = -1
     best_cameras = cameras.copy()
     best_points = points.copy()
     accepted_metrics = initial_metrics
-    accepted_dre = initial_metrics["sumSquaredError"]
-    accepted_model_dre = initial_metrics["sumSquaredError"]
+    accepted_dre = initial_metrics["objectiveValue"]
+    accepted_model_dre = initial_metrics["objectiveValue"]
     accepted_fixed_point_squared = 0.0
     accepted_consensus = consensus.copy()
     accepted_landmarks = landmarks.copy()
@@ -2453,6 +2467,7 @@ def main():
             diagonal_trust_damping=False,
             nesterov_relative_residual=False,
             camera_proximal_multipliers=camera_proximal_multipliers,
+            huber_delta=arguments.huber_delta,
         )
         worker.update_preconditioning(
             camera_indices_in_cluster,
@@ -2511,7 +2526,7 @@ def main():
             corrected_cameras = to_physical_cameras(
                 corrected_scaled_cameras, camera_scaling
             )
-            corrected_metrics = evaluate_bal_state(
+            corrected_metrics = evaluate_state(
                 corrected_cameras,
                 corrected_points,
                 camera_indices,
@@ -2692,7 +2707,7 @@ def main():
                 if arguments.adaptive_local_depth
                 else arguments.local_steps
             )
-            reference_sse = accepted_metrics["sumSquaredError"]
+            reference_sse = accepted_metrics["objectiveValue"]
             reference_dre = accepted_dre
             proximal_penalty = penalty
             proximal_block_regularization = block_regularization
@@ -2947,15 +2962,15 @@ def main():
                         metric_blocks=projection_metric_blocks,
                         metric_mode=arguments.consensus_metric,
                     )
-                    scaled_metrics = evaluate_bal_state(
+                    scaled_metrics = evaluate_state(
                         to_physical_cameras(scaled_consensus, camera_scaling),
                         scaled_landmarks,
                         camera_indices,
                         point_indices,
                         observations,
                     )
-                    if scaled_metrics["sumSquaredError"] < best_scale_sse:
-                        best_scale_sse = scaled_metrics["sumSquaredError"]
+                    if scaled_metrics["objectiveValue"] < best_scale_sse:
+                        best_scale_sse = scaled_metrics["objectiveValue"]
                         selected_local_camera_step_scale = camera_scale
                         selected_local_landmark_step_scale = landmark_scale
                 local_cameras[:] = centers + selected_local_camera_step_scale * (
@@ -2987,15 +3002,15 @@ def main():
                         metric_blocks=projection_metric_blocks,
                         metric_mode=arguments.consensus_metric,
                     )
-                    scaled_metrics = evaluate_bal_state(
+                    scaled_metrics = evaluate_state(
                         to_physical_cameras(scaled_consensus, camera_scaling),
                         landmarks,
                         camera_indices,
                         point_indices,
                         observations,
                     )
-                    if scaled_metrics["sumSquaredError"] < best_scale_sse:
-                        best_scale_sse = scaled_metrics["sumSquaredError"]
+                    if scaled_metrics["objectiveValue"] < best_scale_sse:
+                        best_scale_sse = scaled_metrics["objectiveValue"]
                         selected_local_camera_step_scale = scale
                 local_cameras[:, shared_cameras] = (
                     centers[:, shared_cameras]
@@ -3352,11 +3367,15 @@ def main():
                     packed_request_buffers=arguments.packed_request_buffers,
                 )
                 unrefined_candidate_metrics = {
-                    "sumSquaredError": worker_sse,
+                    "sumSquaredError": worker.last_consensus_l2_sse,
+                    "objectiveValue": worker_sse,
                     "meanReprojectionError": float("nan"),
                 }
+                if huber_delta is not None:
+                    unrefined_candidate_metrics["huberDelta"] = huber_delta
+                    unrefined_candidate_metrics["huberCeresCost"] = 0.5 * worker_sse
             else:
-                unrefined_candidate_metrics = evaluate_bal_state(
+                unrefined_candidate_metrics = evaluate_state(
                     physical_candidate,
                     landmarks,
                     camera_indices,
@@ -3373,9 +3392,9 @@ def main():
                 )
                 worker_sse_relative_error = abs(
                     worker_sse
-                    - unrefined_candidate_metrics["sumSquaredError"]
+                    - unrefined_candidate_metrics["objectiveValue"]
                 ) / max(
-                    abs(unrefined_candidate_metrics["sumSquaredError"]),
+                    abs(unrefined_candidate_metrics["objectiveValue"]),
                     np.finfo(np.float64).tiny,
                 )
                 maximum_worker_sse_relative_error = max(
@@ -3405,7 +3424,7 @@ def main():
                     preserve_cameras=arguments.worker_owned_cameras,
                     packed_request_buffers=arguments.packed_request_buffers,
                 )
-                refined_candidate_metrics = evaluate_bal_state(
+                refined_candidate_metrics = evaluate_state(
                     physical_candidate,
                     candidate_landmarks,
                     camera_indices,
@@ -3424,7 +3443,7 @@ def main():
                 if refined_candidate_metrics is not None
                 else candidate_metrics
             )
-            candidate_sse = candidate_metrics["sumSquaredError"]
+            candidate_sse = candidate_metrics["objectiveValue"]
             if arguments.proximal_metric == "scalar":
                 splitting_scale = proximal_penalty
                 proximal_displacement_cost = (
@@ -3974,15 +3993,23 @@ def main():
                             packed_request_buffers=arguments.packed_request_buffers,
                         )
                         trial_sse = worker_sse
+                        trial_metrics = {
+                            "sumSquaredError": worker.last_consensus_l2_sse,
+                            "objectiveValue": worker_sse,
+                            "meanReprojectionError": float("nan"),
+                        }
+                        if huber_delta is not None:
+                            trial_metrics["huberDelta"] = huber_delta
+                            trial_metrics["huberCeresCost"] = 0.5 * worker_sse
                     else:
-                        trial_metrics = evaluate_bal_state(
+                        trial_metrics = evaluate_state(
                             to_physical_cameras(trial_consensus, camera_scaling),
                             trial_landmarks,
                             camera_indices,
                             point_indices,
                             observations,
                         )
-                        trial_sse = trial_metrics["sumSquaredError"]
+                        trial_sse = trial_metrics["objectiveValue"]
                     if arguments.worker_sse_shadow and worker_sse is None:
                         worker_sse = worker.evaluate_consensus_sse(
                             camera_indices_in_cluster,
@@ -3992,9 +4019,9 @@ def main():
                             packed_request_buffers=arguments.packed_request_buffers,
                         )
                         worker_sse_relative_error = abs(
-                            worker_sse - trial_metrics["sumSquaredError"]
+                            worker_sse - trial_metrics["objectiveValue"]
                         ) / max(
-                            abs(trial_metrics["sumSquaredError"]),
+                            abs(trial_metrics["objectiveValue"]),
                             np.finfo(np.float64).tiny,
                         )
                         maximum_worker_sse_relative_error = max(
@@ -4114,7 +4141,7 @@ def main():
                                 )
                             )
                             materialized_accelerated_landmark_states += 1
-                            trial_metrics = evaluate_bal_state(
+                            trial_metrics = evaluate_state(
                                 to_physical_cameras(
                                     trial_consensus, camera_scaling
                                 ),
@@ -4123,7 +4150,7 @@ def main():
                                 point_indices,
                                 observations,
                             )
-                            trial_sse = trial_metrics["sumSquaredError"]
+                            trial_sse = trial_metrics["objectiveValue"]
                             worker_sse_relative_error = abs(
                                 worker_sse - trial_sse
                             ) / max(
@@ -4290,13 +4317,13 @@ def main():
                 and not arguments.worker_owned_cameras
                 and not arguments.worker_owned_landmarks
             ):
-                proximal_point_sse = evaluate_bal_state(
+                proximal_point_sse = evaluate_state(
                     to_physical_cameras(local_cameras[0], camera_scaling),
                     landmarks,
                     camera_indices,
                     point_indices,
                     observations,
-                )["sumSquaredError"]
+                )["objectiveValue"]
 
             if (
                 evaluated_accelerated_trial
@@ -4933,9 +4960,9 @@ def main():
             trajectory.append(row)
             if (
                 not rejected
-                and reporting_candidate_metrics["sumSquaredError"] < best_sse
+                and reporting_candidate_metrics["objectiveValue"] < best_sse
             ):
-                best_sse = reporting_candidate_metrics["sumSquaredError"]
+                best_sse = reporting_candidate_metrics["objectiveValue"]
                 best_metrics = reporting_candidate_metrics.copy()
                 best_iteration = iteration
                 best_cameras = to_physical_cameras(consensus, camera_scaling).copy()
@@ -5071,14 +5098,14 @@ def main():
                     corrected_cameras = to_physical_cameras(
                         corrected_scaled_cameras, camera_scaling
                     )
-                    corrected_metrics = evaluate_bal_state(
+                    corrected_metrics = evaluate_state(
                         corrected_cameras,
                         corrected_points,
                         camera_indices,
                         point_indices,
                         observations,
                     )
-                    candidate_sse = corrected_metrics["sumSquaredError"]
+                    candidate_sse = corrected_metrics["objectiveValue"]
                     relative_decrease = (
                         (attempt_initial_sse - candidate_sse)
                         / max(
@@ -5246,14 +5273,14 @@ def main():
                 preserve_cameras=arguments.worker_owned_cameras,
                 packed_request_buffers=arguments.packed_request_buffers,
             )
-            refined_metrics = evaluate_bal_state(
+            refined_metrics = evaluate_state(
                 best_cameras,
                 refined_points,
                 camera_indices,
                 point_indices,
                 observations,
             )
-            final_polishing_refined_sse = refined_metrics["sumSquaredError"]
+            final_polishing_refined_sse = refined_metrics["objectiveValue"]
             if final_polishing_refined_sse < best_sse:
                 best_sse = final_polishing_refined_sse
                 best_points = refined_points
@@ -5265,7 +5292,7 @@ def main():
         transport_phase_seconds = worker.transport_phase_seconds.copy()
         worker.close()
 
-    final_metrics = evaluate_bal_state(
+    final_metrics = evaluate_state(
         best_cameras, best_points, camera_indices, point_indices, observations
     )
     result = {
@@ -5324,6 +5351,8 @@ def main():
         "uniqueCameraMetricScale": arguments.unique_camera_metric_scale,
         "uniqueCameraMetricSelector": arguments.unique_camera_metric_selector,
         "sharedOnlyCameraProximal": arguments.shared_only_camera_proximal,
+        "objectiveLoss": "huber" if arguments.huber_delta > 0.0 else "l2",
+        "huberDelta": arguments.huber_delta,
         "adaptiveLocalDepth": arguments.adaptive_local_depth,
         "adaptiveLocalDepthStart": arguments.adaptive_local_depth_start,
         "interiorDefectDiagnostic": arguments.interior_defect_diagnostic,

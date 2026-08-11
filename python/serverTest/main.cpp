@@ -1609,6 +1609,8 @@ public:
       }
       ceres_local_solver = pro.ceres_local_solver();
       objective_model = pro.objective_model();
+      huber_delta = pro.huber_delta();
+      THROW_IF(huber_delta < 0. || !std::isfinite(huber_delta));
       residual_dimension = objective_model == 1 ? 3 : 2;
       THROW_IF(objective_model != 0 && objective_model != 1);
       if (LocalSolveMetricsEnabled()) {
@@ -1765,7 +1767,9 @@ public:
               pro.observations(2 * i + 0), pro.observations(2 * i + 1),
               &(unorm[9 * camera_id]), &(vnorm[3 * landmark_id]),
               &(cameraTransform[81 * camera_id]));
-        problem.AddResidualBlock(cost_function, nullptr /* squared loss */,
+        ceres::LossFunction* loss = huber_delta > 0.
+          ? new ceres::HuberLoss(huber_delta) : nullptr;
+        problem.AddResidualBlock(cost_function, loss,
                      &(cameras[9 * camera_id]),
                      &(landmarks[3 * landmark_id]));
       }
@@ -1773,7 +1777,7 @@ public:
       WORKER_LOG("Added " << pro.observations_size() / 2 << " Residual blocks\n");
       function_residual_blocks.clear();
       problem.GetResidualBlocks(&function_residual_blocks);
-      normal_equation_evaluate_options.apply_loss_function = true;
+      normal_equation_evaluate_options.apply_loss_function = huber_delta == 0.;
       normal_equation_evaluate_options.residual_blocks = function_residual_blocks;
       normal_equation_evaluate_options.num_threads = options.num_threads;
       normal_equation_residuals.reserve(residual_dimension * numResiduals);
@@ -1800,9 +1804,10 @@ public:
       WORKER_LOG("Added " << numCameras << " Stepsize Residual blocks\n");
     }
 
-    double GetCost(bool revert_lm = false) {
+    double GetCost(bool revert_lm = false, bool apply_loss = true) {
 #ifndef __unweighted_system__
-      if (objective_model == 0 && BatchedEvaluationEnabled()) {
+      if (objective_model == 0 && (!apply_loss || huber_delta == 0.)
+        && BatchedEvaluationEnabled()) {
         if (revert_lm) {
           std::vector<double> temp_landmarks = landmarks;
           landmarks = best_landmarks;
@@ -1815,7 +1820,7 @@ public:
 #endif
       // 1st get Jacobian(s):
       ceres::Problem::EvaluateOptions evalOptions;
-      evalOptions.apply_loss_function = true;
+      evalOptions.apply_loss_function = apply_loss;
       // evalOpt.parameter_blocks = {};
       evalOptions.residual_blocks = function_residual_blocks;
       evalOptions.num_threads = options.num_threads;
@@ -2680,8 +2685,8 @@ public:
             for (int column = row; column < 9; ++column) {
               const double upper = full_stepSize[offset + 9 * row + column];
               const double lower = full_stepSize[offset + 9 * column + row];
-              THROW_IF(upper != lower);
-              metric_upper_blocks.push_back(upper);
+              THROW_IF(!std::isfinite(upper) || !std::isfinite(lower));
+              metric_upper_blocks.push_back(0.5 * (upper + lower));
             }
           }
         }
@@ -4060,7 +4065,8 @@ void UpdateStepSizeAndSolve() {//bool keep_cameras_fixed = false) { // Recompute
   double inv_tr_radius = 0;
 
   const int power_iterations = nesterov_max_iterations;
-  const double costStart = residual.squaredNorm();
+  const double costStart = huber_delta > 0.
+      ? 2. * GetCost() : residual.squaredNorm();
   const Eigen::VectorXd& bl = normalEquations.landmark_gradient;
   Matrix<double, Eigen::Dynamic, 1> proximalOffset(9 * numCameras);
   for (int id = 0; id < proximalOffset.size(); ++id) {
@@ -4766,7 +4772,7 @@ private:
 
   NormalEquations GetNormalEquations() {
 #ifndef __unweighted_system__
-    if (objective_model == 0 && BatchedEvaluationEnabled()) {
+    if (objective_model == 0 && huber_delta == 0. && BatchedEvaluationEnabled()) {
       return GetBatchedNormalEquations(false);
     }
 #endif
@@ -4792,6 +4798,19 @@ private:
     result.landmark_gradient = Eigen::VectorXd::Zero(3 * numLandmarks);
     result.residual = Eigen::Map<Eigen::VectorXd>(normal_equation_residuals.data(),
                                                   normal_equation_residuals.size());
+    Eigen::VectorXd robust_sqrt_weight = Eigen::VectorXd::Ones(numResiduals);
+    if (huber_delta > 0.) {
+      for (int observation = 0; observation < numResiduals; ++observation) {
+        const double x = normal_equation_residuals[2 * observation];
+        const double y = normal_equation_residuals[2 * observation + 1];
+        const double norm = std::hypot(x, y);
+        if (norm > huber_delta) {
+          robust_sqrt_weight[observation] = std::sqrt(huber_delta / norm);
+        }
+        result.residual.segment<2>(2 * observation) *=
+            robust_sqrt_weight[observation];
+      }
+    }
 
     for (int observation = 0; observation < numResiduals; ++observation) {
       const int lm_id = lm_obs[observation];
@@ -4803,25 +4822,31 @@ private:
         const Eigen::Index begin = normal_equation_jacobian.rows[row];
         const Eigen::Index end = normal_equation_jacobian.rows[row + 1];
         THROW_IF(end - begin != 12);
-        const double residual = normal_equation_residuals[row];
+        const double sqrt_weight = robust_sqrt_weight[observation];
+        const double residual = sqrt_weight * normal_equation_residuals[row];
         for (int i = 0; i < 9; ++i) {
-          const double cameraValue = normal_equation_jacobian.values[begin + i];
+          const double cameraValue =
+              sqrt_weight * normal_equation_jacobian.values[begin + i];
           result.camera_gradient[9 * cam_id + i] += cameraValue * residual;
           for (int j = 0; j < 9; ++j) {
             normal_equation_camera_blocks[81 * cam_id + 9 * i + j] +=
-                cameraValue * normal_equation_jacobian.values[begin + j];
+                cameraValue * sqrt_weight
+                * normal_equation_jacobian.values[begin + j];
           }
           for (int j = 0; j < 3; ++j) {
             edgeValues[3 * i + j] +=
-                cameraValue * normal_equation_jacobian.values[begin + 9 + j];
+                cameraValue * sqrt_weight
+                * normal_equation_jacobian.values[begin + 9 + j];
           }
         }
         for (int i = 0; i < 3; ++i) {
-          const double landmarkValue = normal_equation_jacobian.values[begin + 9 + i];
+            const double landmarkValue =
+              sqrt_weight * normal_equation_jacobian.values[begin + 9 + i];
           result.landmark_gradient[3 * lm_id + i] += landmarkValue * residual;
           for (int j = 0; j < 3; ++j) {
             normal_equation_landmark_blocks[9 * lm_id + 3 * i + j] +=
-                landmarkValue * normal_equation_jacobian.values[begin + 9 + j];
+                landmarkValue * sqrt_weight
+                * normal_equation_jacobian.values[begin + 9 + j];
           }
         }
       }
@@ -4983,6 +5008,7 @@ private:
   int local_linear_solver = 0;
   int trust_region_policy = 0;
   int objective_model = 0;
+  double huber_delta = 0.;
   int residual_dimension = 2;
   bool persistent_trust_region = false;
   bool persistent_trust_region_active = false;
@@ -5488,9 +5514,11 @@ int main() {
           ? program.EvaluateRefinedLandmarkCost(
             landmark_refinement_steps, return_proto)
           : 2 * program.GetCost(revert_lms);
+        const double l2_cost = 2 * program.GetCost(revert_lms, false);
         WORKER_LOG(cluster_id << ". Cost from cost: " << cost << "\n");
         return_proto.set_cost(cost);
         return_proto.set_precise_cost(cost);
+        return_proto.set_precise_l2_cost(l2_cost);
         return_proto.set_cluster_id(cluster_id);
         return_proto.set_run_id(run_id);
         return_proto.set_phase_id(phase_id);

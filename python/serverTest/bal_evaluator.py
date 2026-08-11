@@ -109,6 +109,7 @@ def evaluate_bal_state(
         "p90ReprojectionError": float(np.percentile(errors, 90)),
         "p95ReprojectionError": float(np.percentile(errors, 95)),
         "maxReprojectionError": float(np.max(errors)),
+        "objectiveValue": sum_squared_error,
     }
 
     if huber_delta is not None:
@@ -122,6 +123,7 @@ def evaluate_bal_state(
         )
         metrics["huberDelta"] = float(huber_delta)
         metrics["huberCeresCost"] = 0.5 * float(np.sum(rho))
+        metrics["objectiveValue"] = float(np.sum(rho))
 
     return metrics
 

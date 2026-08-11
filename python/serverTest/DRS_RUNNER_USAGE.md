@@ -113,6 +113,9 @@ Important differences from relying on defaults:
 - `OUTER_ACCELERATION=nesterov` accelerates the **outer DRS iteration**.
   `LOCAL_SOLVER=nesterov` and the `NESTEROV_*` settings control the distinct
   **inner local linear solve**.
+- `HUBER_DELTA=0` selects L2. A positive value selects one observation-level
+  Huber loss in the worker, coordinator safeguards, evaluator, and result
+  metadata. Raw SSE remains reported separately from the robust objective.
 
 ## Adaptive local nonlinear depth
 

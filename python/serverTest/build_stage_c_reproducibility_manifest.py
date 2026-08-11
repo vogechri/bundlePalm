@@ -285,6 +285,7 @@ def build_manifest():
         "c4_inner_solver": {},
         "final_cross_family_confirmation": {},
         "tuned_c5_final": {},
+        "huber_sentinel": {},
         "relative_summaries": {},
     }
 
@@ -524,6 +525,45 @@ def build_manifest():
     manifest["tuned_c5_final"]["report"] = (
         "benchmark_results/stage_c_tuned_c5_final_report.md"
     )
+
+    huber_drs, huber_drs_sources = load_rows((
+        "stage_c_huber_irls_sentinel_drs/1dsfm/c1_c5",
+        "stage_c_huber_irls_sentinel_drs/bal/c1_c5",
+    ))
+    huber_ceres, huber_ceres_sources = load_rows((
+        "stage_c_huber_sentinel_ceres/1dsfm",
+        "stage_c_huber_sentinel_ceres/bal",
+    ))
+    if huber_drs.keys() != huber_ceres.keys() or len(huber_drs) != 4:
+        raise ValueError("Huber sentinel coverage mismatch")
+    manifest["huber_sentinel"] = {
+        "huber_delta": 0.5,
+        "objective": "observation-level Huber pixel reprojection loss",
+        "raw_sse_reported_separately": True,
+        "drs": {
+            scene: {
+                "artifact": huber_drs_sources[scene],
+                "objective_value": row["qualityMetrics"]["objectiveValue"],
+                "sum_squared_error": row["qualityMetrics"]["sumSquaredError"],
+                "optimization_seconds": row["optimizationSeconds"],
+            }
+            for scene, row in sorted(huber_drs.items())
+        },
+        "ceres": {
+            scene: {
+                "artifact": huber_ceres_sources[scene],
+                "objective_value": row["qualityMetrics"]["objectiveValue"],
+                "sum_squared_error": row["qualityMetrics"]["sumSquaredError"],
+                "native_solve_seconds": row["native"]["solveSeconds"],
+                "native_objective_relative_error": row[
+                    "nativeObjectiveRelativeError"
+                ],
+            }
+            for scene, row in sorted(huber_ceres.items())
+        },
+        "decision": "validated capability; current schedules not promoted",
+        "report": "benchmark_results/stage_c_huber_sentinel_report.md",
+    }
     return manifest
 
 
