@@ -287,6 +287,7 @@ def build_manifest():
         "tuned_c5_final": {},
         "huber_sentinel": {},
         "scaling_confirmation": {},
+        "scaling_repeatability": {},
         "relative_summaries": {},
     }
 
@@ -597,6 +598,28 @@ def build_manifest():
             "benchmark_results/"
             "stage_c_scaling_confirmation_k4_16_i30/report.md"
         ),
+    }
+
+    repeat_path = RESULTS / "stage_c_scaling_repeats_k4_16_i30/summary.json"
+    repeats = json.loads(repeat_path.read_text(encoding="utf-8"))
+    repeatability = repeats.get("repeatability", {})
+    if repeatability.get("total_cases") != 8:
+        raise ValueError("scaling repeat case coverage mismatch")
+    if repeatability.get("maximum_sse_relative_spread", math.inf) >= 1e-8:
+        raise ValueError("scaling endpoint repeatability exceeds 1e-8")
+    if repeatability.get("maximum_optimization_cv", math.inf) >= 0.02:
+        raise ValueError("scaling optimization timing CV exceeds 2%")
+    if not repeatability.get("work_counts_deterministic"):
+        raise ValueError("scaling repeat work counts are not deterministic")
+    manifest["scaling_repeatability"] = {
+        "configuration": "frozen tuned L2 C1+C5 at K4 and K16",
+        "warmups_excluded": 1,
+        "measured_repeats": 3,
+        "scenes": ["roman_forum", "trafalgar", "bal52", "bal3068"],
+        "repeatability": repeatability,
+        "endpoint_ratios": repeats["endpoint_ratios"],
+        "summary": str(repeat_path.relative_to(ROOT)),
+        "report": "benchmark_results/stage_c_scaling_repeats_k4_16_i30/report.md",
     }
     return manifest
 

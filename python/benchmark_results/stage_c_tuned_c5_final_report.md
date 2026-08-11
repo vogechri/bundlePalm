@@ -36,3 +36,9 @@ the resource endpoint; K16 is the latency endpoint. K16/K4 geometric SSE is
 `0.953599x` on 1DSfM and `1.002768x` on BAL, while optimization time is
 `0.584x`/`0.510x`. No scene-specific K routing is used. See
 `stage_c_scaling_confirmation_k4_16_i30/report.md`.
+
+Three measured K4/K16 repeats after one excluded warm-up preserve identical
+rejection/oracle counts and are SSE-bitwise identical in `7/8` cases; maximum
+relative SSE spread is `2.956e-09` and maximum optimization-time CV is `1.75%`.
+Mean K16/K4 optimization ratios are `0.5158x` on 1DSfM and `0.4190x` on BAL.
+See `stage_c_scaling_repeats_k4_16_i30/report.md`.

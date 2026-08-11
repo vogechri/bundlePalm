@@ -185,6 +185,15 @@ global latency endpoint. These are two deployment budgets, not per-scene
 settings. K24 is not promoted. See
 `benchmark_results/stage_c_scaling_confirmation_k4_16_i30/report.md`.
 
+K4/K16 repeat gate (2026-08-11): after one excluded warm-up, three measured
+repeats on Roman, Trafalgar, BAL52, and BAL3068 are SSE-bitwise identical in
+`7/8` `(scene,K)` cases; the sole Trafalgar K16 variation is `2.956e-09`
+relative. Rejection/oracle counts and traffic are identical throughout, and
+maximum optimization-time CV is `1.75%`. Mean K16/K4 optimization ratios are
+`0.5158x` on 1DSfM and `0.4190x` on BAL with ratio CV below `0.5%`. Keep K4 and
+K16 frozen as the global resource and latency endpoints. See
+`benchmark_results/stage_c_scaling_repeats_k4_16_i30/report.md`.
+
 Loss-factorial clarification (2026-08-11): fallback safety does not imply
 endpoint dominance over a separately run plain trajectory. Roman's C1 and C5
 main effects both lose but interact beneficially; Yorkminster's main effects

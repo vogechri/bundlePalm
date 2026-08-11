@@ -149,6 +149,13 @@ $0.584$ and $0.510$.  Its worker CPU rises to $1.456$/$1.568$ and transport to
 $1.927$/$1.985$.  We therefore retain $K=4$ as the resource endpoint and
 $K=16$ as the latency endpoint, without scene-specific routing.
 
+After one excluded warm-up, three measured repeats of both endpoints on four
+sentinels are SSE-bitwise identical in seven of eight scene--$K$ cases; the
+maximum relative SSE spread is $2.956\times10^{-9}$.  Rejection and oracle
+counts are identical, and the maximum optimization-time coefficient of
+variation is $1.75\%$.  Mean $K=16$/$K=4$ optimization-time ratios are $0.5158$
+on 1DSfM and $0.4190$ on BAL, with ratio CV below $0.5\%$.
+
 \subsection{Coordinate and finite-solver interactions}
 
 The remaining components are reported as factorials because their effects are

@@ -5242,7 +5242,7 @@
   },
   "repository": {
     "branch": "user/chvogel/notSamePerformanceNew2c",
-    "commit": "9225db21afd851ce55a1e63ae579b70cf8fd3e8e",
+    "commit": "9b8e03a137eb56271a8bf95cfcf4557af8e1425a",
     "working_tree_clean": false
   },
   "scaling_confirmation": {
@@ -5359,6 +5359,86 @@
     "report": "benchmark_results/stage_c_scaling_confirmation_k4_16_i30/report.md",
     "summary": "benchmark_results/stage_c_scaling_confirmation_k4_16_i30/summary.json",
     "threads_per_cluster": 1
+  },
+  "scaling_repeatability": {
+    "configuration": "frozen tuned L2 C1+C5 at K4 and K16",
+    "endpoint_ratios": [
+      {
+        "family": "1dsfm",
+        "optimization_k16_over_k4": [
+          0.5127753814296352,
+          0.5172507004789321,
+          0.5172588434625668
+        ],
+        "optimization_ratio_cv": 0.005014294065511389,
+        "optimization_ratio_mean": 0.515761641790378,
+        "overall_k16_over_k4": [
+          0.544584730664157,
+          0.5441432361471125,
+          0.5488369588613403
+        ],
+        "overall_ratio_cv": 0.004748314400825837,
+        "overall_ratio_mean": 0.5458549752242033,
+        "traffic_k16_over_k4": [
+          1.6734291712852172,
+          1.6734291712852172,
+          1.6734291712852172
+        ],
+        "traffic_ratio_mean": 1.673429171285217,
+        "worker_cpu_k16_over_k4": [
+          1.5135702395599624,
+          1.5133837649112596,
+          1.505481739635519
+        ],
+        "worker_cpu_ratio_mean": 1.510811914702247
+      },
+      {
+        "family": "bal",
+        "optimization_k16_over_k4": [
+          0.41710316447313805,
+          0.4200594600460804,
+          0.4197394733042343
+        ],
+        "optimization_ratio_cv": 0.0038722687050389585,
+        "optimization_ratio_mean": 0.41896736594115086,
+        "overall_k16_over_k4": [
+          0.45614195945823177,
+          0.45989628393414,
+          0.47310977634285395
+        ],
+        "overall_ratio_cv": 0.019247453479447493,
+        "overall_ratio_mean": 0.4630493399117419,
+        "traffic_k16_over_k4": [
+          1.6894878513136402,
+          1.6894878513136402,
+          1.6894878513136402
+        ],
+        "traffic_ratio_mean": 1.6894878513136404,
+        "worker_cpu_k16_over_k4": [
+          1.2887965162311954,
+          1.2979440735109407,
+          1.3037022371807563
+        ],
+        "worker_cpu_ratio_mean": 1.296814275640964
+      }
+    ],
+    "measured_repeats": 3,
+    "repeatability": {
+      "exact_sse_cases": 7,
+      "maximum_optimization_cv": 0.017458383677484632,
+      "maximum_sse_relative_spread": 2.955584864229518e-09,
+      "total_cases": 8,
+      "work_counts_deterministic": true
+    },
+    "report": "benchmark_results/stage_c_scaling_repeats_k4_16_i30/report.md",
+    "scenes": [
+      "roman_forum",
+      "trafalgar",
+      "bal52",
+      "bal3068"
+    ],
+    "summary": "benchmark_results/stage_c_scaling_repeats_k4_16_i30/summary.json",
+    "warmups_excluded": 1
   },
   "schema_version": 1,
   "tuned_c5_final": {
