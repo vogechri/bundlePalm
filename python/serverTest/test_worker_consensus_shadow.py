@@ -2,7 +2,11 @@ import numpy as np
 import pytest
 
 from client_admm import SingleNodeConsensusSummary
-from client_drs import apply_single_node_consensus, validate_worker_consensus_rhs
+from client_drs import (
+    apply_single_node_consensus,
+    diagonal_trust_is_active,
+    validate_worker_consensus_rhs,
+)
 from drs_consensus import (
     ActiveCameraMetricBlocks,
     dre_splitting_term,
@@ -41,6 +45,17 @@ def _shadow_fixture():
         metrics,
     )
     return local, centers, metrics, rhs, consensus
+
+
+def test_diagonal_trust_environment_request_persists(monkeypatch):
+    monkeypatch.setenv("BUNDLE_PALM_DIAGONAL_TRUST_DAMPING", "1")
+    assert diagonal_trust_is_active(100, 0)
+
+
+def test_diagonal_trust_staging_stops_at_cutoff(monkeypatch):
+    monkeypatch.delenv("BUNDLE_PALM_DIAGONAL_TRUST_DAMPING", raising=False)
+    assert diagonal_trust_is_active(2, 3)
+    assert not diagonal_trust_is_active(3, 3)
 
 
 def test_worker_consensus_rhs_matches_reference_reduction():

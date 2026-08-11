@@ -2,11 +2,14 @@
 
 import argparse
 import json
+import os
 import sys
 import time
 from pathlib import Path
 
 import numpy as np
+from scipy import sparse
+from scipy.sparse import linalg as sparse_linalg
 
 from bal_evaluator import (
     canonicalize_bal_problem,
@@ -14,22 +17,37 @@ from bal_evaluator import (
     read_bal_problem,
     save_bal_state,
 )
+from camera_tangent_diagnostics import (
+    diagonal_weighted_tangent_alignment,
+    left_se3_camera_minus,
+    left_se3_camera_plus,
+    tangent_alignment,
+)
 from client_admm import AdmmWorkerClient as DrsWorkerClient
 from clustering import (
+    cluster_by_daba_louvain,
     cluster_by_landmark_scalable,
     cluster_by_landmark_scalable_stable,
 )
 from drs_consensus import (
+    ActiveCameraMetricBlocks,
     DrsResiduals,
     complete_douglas_rachford_envelope,
     dre_splitting_term,
     drs_step,
+    drs_state_for_consensus,
     metric_quadratic_sum,
+    proximal_point_step,
+    project_consensus,
     recover_local_data_objective,
+    reduce_metric_tensor,
     reset_to_consensus,
+    shared_floor_prior_blocks,
 )
 from drs_consensus_metrics import CONSENSUS_METRIC_MODES
+from drs_factorized_metrics import FactorizedCameraMetric
 from drs_safeguards import (
+    bootstrap_basin_guard_decision,
     exceeds_with_relative_deadband,
     increase_recovery_parameter,
     relative_safeguard_ratios,
@@ -46,6 +64,860 @@ from admm_scaling import (
 
 WORKER_SSE_RELATIVE_TOLERANCE = 1e-9
 WORKER_CONSENSUS_RELATIVE_TOLERANCE = 1e-11
+
+
+def snapshot_metric_blocks(metric_blocks):
+    """Snapshot mutable metrics while sharing immutable factorized storage."""
+    if metric_blocks is None or isinstance(
+        metric_blocks, FactorizedCameraMetric
+    ):
+        return metric_blocks
+    return metric_blocks.copy()
+
+
+def model_ratio_damping_factor(gain_ratio):
+    return max(1.0 / 3.0, 1.0 - (2.0 * gain_ratio - 1.0) ** 3)
+
+
+def rejected_schur_damping(
+    camera_damping,
+    landmark_damping,
+    attempt,
+    damping_factor,
+    fallback_camera_damping=-1.0,
+    fallback_landmark_damping=-1.0,
+):
+    if (
+        attempt == 0
+        and fallback_camera_damping > 0.0
+        and (
+            camera_damping < fallback_camera_damping
+            or landmark_damping < fallback_landmark_damping
+        )
+    ):
+        return fallback_camera_damping, fallback_landmark_damping
+    return (
+        camera_damping * damping_factor,
+        landmark_damping * damping_factor,
+    )
+
+
+def evaluate_global_schur_direction(
+    systems, camera_count, camera_damping, tangent_step
+):
+    tangent_step = np.asarray(tangent_step, dtype=np.float64)
+    if tangent_step.shape != (camera_count, 9):
+        raise ValueError("Schur diagnostic tangent has an invalid shape")
+    gradient = np.zeros((camera_count, 9), dtype=np.float64)
+    camera_diagonal = np.zeros((camera_count, 9, 9), dtype=np.float64)
+    landmark_model_reduction = 0.0
+    undamped_action = np.zeros_like(tangent_step)
+    for system in systems:
+        np.add.at(gradient, system.camera_ids, system.reduced_gradient)
+        np.add.at(camera_diagonal, system.camera_ids, system.camera_diagonal)
+        landmark_model_reduction += system.landmark_model_reduction
+        action = np.einsum(
+            "bij,bj->bi",
+            system.blocks,
+            tangent_step[system.block_columns],
+        )
+        np.add.at(undamped_action, system.block_rows, action)
+        off_diagonal = system.block_rows != system.block_columns
+        if np.any(off_diagonal):
+            transpose_action = np.einsum(
+                "bji,bj->bi",
+                system.blocks[off_diagonal],
+                tangent_step[system.block_rows[off_diagonal]],
+            )
+            np.add.at(
+                undamped_action,
+                system.block_columns[off_diagonal],
+                transpose_action,
+            )
+    damping_diagonal = np.diagonal(
+        camera_diagonal, axis1=1, axis2=2
+    )
+    positive_diagonal = damping_diagonal[damping_diagonal > 0.0]
+    diagonal_floor = (
+        np.median(positive_diagonal) * 1e-12
+        if positive_diagonal.size else 1e-12
+    )
+    damping_diagonal = np.maximum(damping_diagonal, diagonal_floor)
+    damping_action = camera_damping * damping_diagonal * tangent_step
+    gradient_action = float(np.sum(gradient * tangent_step))
+    undamped_quadratic = float(np.sum(tangent_step * undamped_action))
+    damped_quadratic = undamped_quadratic + float(np.sum(
+        tangent_step * damping_action
+    ))
+    return {
+        "gradientAction": gradient_action,
+        "undampedQuadratic": undamped_quadratic,
+        "dampedQuadratic": damped_quadratic,
+        "landmarkModelReduction": float(landmark_model_reduction),
+        "undampedPredictedReduction": float(
+            landmark_model_reduction
+            - gradient_action
+            - 0.5 * undamped_quadratic
+        ),
+        "dampedPredictedReduction": float(
+            landmark_model_reduction
+            - gradient_action
+            - 0.5 * damped_quadratic
+        ),
+    }
+
+
+def solve_global_schur_system(
+    systems,
+    camera_count,
+    camera_damping,
+    step_scale,
+    linear_solver="direct",
+    relative_tolerance=1e-6,
+    maximum_iterations=500,
+    initial_step=None,
+    operator_mode="python",
+):
+    if camera_damping <= 0.0:
+        raise ValueError("camera damping must be positive")
+    if not 0.0 < step_scale <= 1.0:
+        raise ValueError("Schur step scale must be in (0, 1]")
+    if linear_solver not in ("direct", "cg"):
+        raise ValueError("Schur linear solver must be direct or cg")
+    if not 0.0 < relative_tolerance < 1.0:
+        raise ValueError("Schur relative tolerance must be in (0, 1)")
+    if maximum_iterations <= 0:
+        raise ValueError("Schur maximum iterations must be positive")
+    if operator_mode not in ("python", "bsr", "bsr_low_memory"):
+        raise ValueError(
+            "Schur operator must be python, bsr, or bsr_low_memory"
+        )
+    gradient = np.zeros((camera_count, 9), dtype=np.float64)
+    camera_diagonal = np.zeros((camera_count, 9, 9), dtype=np.float64)
+    landmark_model_reduction = 0.0
+    block_count = 0
+    for system in systems:
+        np.add.at(gradient, system.camera_ids, system.reduced_gradient)
+        np.add.at(camera_diagonal, system.camera_ids, system.camera_diagonal)
+        landmark_model_reduction += system.landmark_model_reduction
+        block_count += system.blocks.shape[0]
+    dimension = 9 * camera_count
+    initial_vector = None
+    if initial_step is not None:
+        initial_step = np.asarray(initial_step, dtype=np.float64)
+        if initial_step.shape != (camera_count, 9):
+            raise ValueError("initial Schur step has an invalid shape")
+        if not np.all(np.isfinite(initial_step)):
+            raise ValueError("initial Schur step must be finite")
+        initial_vector = initial_step.ravel()
+    damping_diagonal = np.diagonal(
+        camera_diagonal, axis1=1, axis2=2
+    )
+    positive_diagonal = damping_diagonal[damping_diagonal > 0.0]
+    diagonal_floor = (
+        np.median(positive_diagonal) * 1e-12
+        if positive_diagonal.size else 1e-12
+    )
+    damping_diagonal = np.maximum(damping_diagonal, diagonal_floor)
+
+    if linear_solver == "direct":
+        scalar_rows = []
+        scalar_columns = []
+        scalar_values = []
+        parameter_offsets = np.arange(9, dtype=np.int64)
+        for system in systems:
+            block_rows = (
+                9 * system.block_rows[:, None, None]
+                + parameter_offsets[None, :, None]
+            )
+            block_columns = (
+                9 * system.block_columns[:, None, None]
+                + parameter_offsets[None, None, :]
+            )
+            scalar_rows.append(np.broadcast_to(
+                block_rows, system.blocks.shape
+            ).ravel())
+            scalar_columns.append(np.broadcast_to(
+                block_columns, system.blocks.shape
+            ).ravel())
+            scalar_values.append(system.blocks.ravel())
+            off_diagonal = system.block_rows != system.block_columns
+            if np.any(off_diagonal):
+                scalar_rows.append(np.broadcast_to(
+                    block_columns[off_diagonal],
+                    system.blocks[off_diagonal].shape,
+                ).ravel())
+                scalar_columns.append(np.broadcast_to(
+                    block_rows[off_diagonal],
+                    system.blocks[off_diagonal].shape,
+                ).ravel())
+                scalar_values.append(
+                    np.swapaxes(
+                        system.blocks[off_diagonal], 1, 2
+                    ).ravel()
+                )
+        schur = sparse.coo_matrix(
+            (
+                np.concatenate(scalar_values),
+                (
+                    np.concatenate(scalar_rows),
+                    np.concatenate(scalar_columns),
+                ),
+            ),
+            shape=(dimension, dimension),
+        ).tocsr()
+        schur = 0.5 * (schur + schur.T)
+        damped_schur = schur + camera_damping * sparse.diags(
+            damping_diagonal.ravel()
+        )
+        tangent_step = -sparse_linalg.spsolve(
+            damped_schur.tocsc(), gradient.ravel()
+        )
+        residual = damped_schur @ tangent_step + gradient.ravel()
+        def damped_matrix_vector_product(flat_vector):
+            return damped_schur @ flat_vector
+        iterations = 1
+        termination = 0
+        scalar_nonzeros = int(schur.nnz)
+    else:
+        preconditioner_blocks = np.zeros(
+            (camera_count, 9, 9), dtype=np.float64
+        )
+        scalar_nonzeros = 0
+        for system in systems:
+            diagonal = system.block_rows == system.block_columns
+            np.add.at(
+                preconditioner_blocks,
+                system.block_rows[diagonal],
+                system.blocks[diagonal],
+            )
+            scalar_nonzeros += 81 * int(
+                np.sum(diagonal) + 2 * np.sum(~diagonal)
+            )
+        diagonal_indices = np.arange(9)
+        preconditioner_blocks[
+            :, diagonal_indices, diagonal_indices
+        ] += camera_damping * damping_diagonal
+        preconditioner_blocks = 0.5 * (
+            preconditioner_blocks
+            + np.swapaxes(preconditioner_blocks, 1, 2)
+        )
+        eigenvalues, eigenvectors = np.linalg.eigh(preconditioner_blocks)
+        eigenvalue_floor = max(
+            float(np.median(eigenvalues[eigenvalues > 0.0])) * 1e-12,
+            np.finfo(np.float64).tiny,
+        )
+        inverse_blocks = np.einsum(
+            "bij,bj,bkj->bik",
+            eigenvectors,
+            1.0 / np.maximum(eigenvalues, eigenvalue_floor),
+            eigenvectors,
+        )
+
+        if operator_mode == "python":
+            def matrix_vector_product(flat_vector):
+                vector = flat_vector.reshape((camera_count, 9))
+                output = camera_damping * damping_diagonal * vector
+                for system in systems:
+                    action = np.einsum(
+                        "bij,bj->bi",
+                        system.blocks,
+                        vector[system.block_columns],
+                    )
+                    np.add.at(output, system.block_rows, action)
+                    off_diagonal = system.block_rows != system.block_columns
+                    if np.any(off_diagonal):
+                        transpose_action = np.einsum(
+                            "bji,bj->bi",
+                            system.blocks[off_diagonal],
+                            vector[system.block_rows[off_diagonal]],
+                        )
+                        np.add.at(
+                            output,
+                            system.block_columns[off_diagonal],
+                            transpose_action,
+                        )
+                return output.ravel()
+        else:
+            block_rows = []
+            block_columns = []
+            block_sources = []
+            for system in systems:
+                block_rows.append(system.block_rows)
+                block_columns.append(system.block_columns)
+                block_sources.append(system.blocks)
+                off_diagonal = system.block_rows != system.block_columns
+                if np.any(off_diagonal):
+                    block_rows.append(system.block_columns[off_diagonal])
+                    block_columns.append(system.block_rows[off_diagonal])
+                    block_sources.append(np.swapaxes(
+                        system.blocks[off_diagonal], 1, 2
+                    ))
+            block_rows.append(np.arange(camera_count, dtype=np.int64))
+            block_columns.append(np.arange(camera_count, dtype=np.int64))
+            damping_blocks = np.zeros(
+                (camera_count, 9, 9), dtype=np.float64
+            )
+            damping_blocks[:, np.arange(9), np.arange(9)] = (
+                camera_damping * damping_diagonal
+            )
+            block_sources.append(damping_blocks)
+            block_rows = np.concatenate(block_rows)
+            block_columns = np.concatenate(block_columns)
+            block_keys = block_rows * camera_count + block_columns
+            if operator_mode == "bsr":
+                block_values = np.concatenate(block_sources)
+                order = np.argsort(block_keys, kind="stable")
+                block_keys = block_keys[order]
+                block_values = block_values[order]
+                unique = np.concatenate((
+                    np.array([True]), block_keys[1:] != block_keys[:-1]
+                ))
+                starts = np.flatnonzero(unique)
+                block_values = np.add.reduceat(
+                    block_values, starts, axis=0
+                )
+                block_keys = block_keys[starts]
+            else:
+                block_keys, inverse = np.unique(
+                    block_keys, return_inverse=True
+                )
+                block_values = np.zeros(
+                    (block_keys.size, 9, 9), dtype=np.float64
+                )
+                source_offset = 0
+                for source in block_sources:
+                    source_end = source_offset + source.shape[0]
+                    np.add.at(
+                        block_values,
+                        inverse[source_offset:source_end],
+                        source,
+                    )
+                    source_offset = source_end
+            block_rows = block_keys // camera_count
+            block_columns = block_keys % camera_count
+            row_counts = np.bincount(
+                block_rows, minlength=camera_count
+            )
+            indptr = np.empty(camera_count + 1, dtype=np.int64)
+            indptr[0] = 0
+            np.cumsum(row_counts, out=indptr[1:])
+            bsr_operator = sparse.bsr_matrix(
+                (block_values, block_columns, indptr),
+                shape=(dimension, dimension),
+            )
+            scalar_nonzeros = int(bsr_operator.nnz)
+
+            def matrix_vector_product(flat_vector):
+                return bsr_operator @ flat_vector
+
+        operator = sparse_linalg.LinearOperator(
+            (dimension, dimension), matvec=matrix_vector_product
+        )
+
+        def apply_preconditioner(flat_vector):
+            vector = flat_vector.reshape((camera_count, 9))
+            return np.einsum(
+                "bij,bj->bi",
+                inverse_blocks,
+                vector,
+            ).ravel()
+
+        preconditioner = sparse_linalg.LinearOperator(
+            (dimension, dimension),
+            matvec=apply_preconditioner,
+        )
+        iterations = 0
+
+        def count_iteration(_):
+            nonlocal iterations
+            iterations += 1
+
+        tangent_step, termination = sparse_linalg.cg(
+            operator,
+            -gradient.ravel(),
+            x0=initial_vector,
+            M=preconditioner,
+            rtol=relative_tolerance,
+            atol=0.0,
+            maxiter=maximum_iterations,
+            callback=count_iteration,
+        )
+        residual = operator @ tangent_step + gradient.ravel()
+    if not np.all(np.isfinite(tangent_step)):
+        raise RuntimeError("global Schur solve produced a non-finite step")
+    scaled_step = step_scale * tangent_step
+    damped_action = (
+        damped_matrix_vector_product(scaled_step)
+        if linear_solver == "direct"
+        else matrix_vector_product(scaled_step)
+    )
+    damping_action = (
+        camera_damping * damping_diagonal.ravel() * scaled_step
+    )
+    gradient_action = float(np.dot(gradient.ravel(), scaled_step))
+    damped_predicted_reduction = float(
+        landmark_model_reduction
+        - gradient_action
+        - 0.5 * np.dot(scaled_step, damped_action)
+    )
+    undamped_predicted_reduction = float(
+        landmark_model_reduction
+        - gradient_action
+        - 0.5 * np.dot(scaled_step, damped_action - damping_action)
+    )
+    return scaled_step.reshape((-1, 9)), {
+        "blockCount": block_count,
+        "nonzeros": scalar_nonzeros,
+        "gradientNorm": float(np.linalg.norm(gradient)),
+        "stepNorm": float(np.linalg.norm(tangent_step)),
+        "linearSolver": linear_solver,
+        "preconditioner": "jacobi",
+        "operator": operator_mode,
+        "linearIterations": iterations,
+        "linearTermination": int(termination),
+        "relativeResidual": float(
+            np.linalg.norm(residual)
+            / max(np.linalg.norm(gradient), np.finfo(np.float64).tiny)
+        ),
+        "landmarkModelReduction": float(landmark_model_reduction),
+        "dampedPredictedReduction": damped_predicted_reduction,
+        "undampedPredictedReduction": undamped_predicted_reduction,
+    }
+
+
+def camera_metric_multipliers(
+    camera_copy_count, shared_camera_metric_beta, unique_camera_metric_scale
+):
+    copy_count = np.asarray(camera_copy_count)
+    return np.where(
+        copy_count == 1,
+        unique_camera_metric_scale,
+        1.0 + shared_camera_metric_beta * (copy_count - 1.0),
+    )
+
+
+def select_global_schur_majorizer(observability_fractions, threshold):
+    fractions = np.asarray(observability_fractions, dtype=np.float64)
+    if fractions.ndim != 2 or fractions.shape[1] != 3:
+        raise ValueError("Schur observability fractions must have shape (K, 3)")
+    if not 0.0 <= threshold <= 1.0:
+        raise ValueError("Schur observability threshold must be in [0, 1]")
+    valid = np.all(np.isfinite(fractions), axis=1)
+    if not np.any(valid):
+        return False, float("nan"), 0
+    cluster_means = np.mean(fractions[valid], axis=1)
+    statistic = float(np.median(cluster_means))
+    return statistic > threshold, statistic, int(np.sum(valid))
+
+
+def damp_shared_camera_disagreement(
+    local_cameras, centers, camera_masks, scale
+):
+    """Preserve mean shared-camera motion while damping copy disagreement."""
+    if not 0.0 <= scale <= 1.0:
+        raise ValueError("shared camera disagreement scale must be in [0, 1]")
+    active = np.asarray(camera_masks, dtype=bool)
+    copy_count = np.sum(active, axis=0)
+    shared = copy_count > 1
+    if not np.any(shared) or scale == 1.0:
+        return
+    displacement = local_cameras[:, shared] - centers[:, shared]
+    shared_active = active[:, shared, None]
+    mean_displacement = np.sum(
+        np.where(shared_active, displacement, 0.0), axis=0
+    ) / copy_count[shared, None]
+    corrected = mean_displacement[None, :, :] + scale * (
+        displacement - mean_displacement[None, :, :]
+    )
+    local_cameras[:, shared] = np.where(
+        shared_active,
+        centers[:, shared] + corrected,
+        local_cameras[:, shared],
+    )
+
+
+def damp_metric_projected_camera_proposals(
+    local_cameras,
+    centers,
+    camera_masks,
+    previous_consensus,
+    metric_blocks,
+    metric_mode,
+    scale,
+    disagreement_threshold=None,
+    prior_blocks=None,
+):
+    """Damp shared proposal residuals while preserving their metric projection."""
+    if not 0.0 <= scale <= 1.0:
+        raise ValueError("metric proposal disagreement scale must be in [0, 1]")
+    active = np.asarray(camera_masks, dtype=bool)
+    shared = np.sum(active, axis=0) > 1
+    if not np.any(shared) or scale == 1.0:
+        return float("nan"), 1.0
+    disagreement_ratio, projected = shared_camera_compatibility_ratio(
+        local_cameras,
+        centers,
+        active,
+        previous_consensus,
+        metric_blocks,
+        metric_mode,
+        prior_blocks=prior_blocks,
+    )
+    if not np.isfinite(disagreement_ratio):
+        return disagreement_ratio, 1.0
+    shared = np.sum(active, axis=0) > 1
+    applied_scale = (
+        scale
+        if disagreement_threshold is None
+        or disagreement_ratio >= disagreement_threshold
+        else 1.0
+    )
+    shared_active = active[:, shared, None]
+    corrected = projected[None, shared] + applied_scale * (
+        local_cameras[:, shared] - projected[None, shared]
+    )
+    local_cameras[:, shared] = np.where(
+        shared_active, corrected, local_cameras[:, shared]
+    )
+    return disagreement_ratio, applied_scale
+
+
+def shared_camera_compatibility_ratio(
+    local_cameras,
+    centers,
+    camera_masks,
+    previous_consensus,
+    metric_blocks,
+    metric_mode,
+    prior_blocks=None,
+):
+    """Return shared-copy disagreement energy relative to proposal motion."""
+    active = np.asarray(camera_masks, dtype=bool)
+    shared = np.sum(active, axis=0) > 1
+    if not np.any(shared):
+        return float("nan"), np.asarray(previous_consensus).copy()
+    selected_metrics = reduce_metric_tensor(
+        metric_blocks, active, metric_mode, local_cameras.shape[2]
+    )
+    projected = project_consensus(
+        local_cameras,
+        active,
+        previous_consensus,
+        selected_metrics,
+        prior_blocks=prior_blocks,
+        prior_center=previous_consensus,
+        direct_singletons=local_cameras,
+    )
+    projected[~shared] = previous_consensus[~shared]
+    shared_active = active & shared[None, :]
+    proposal_residual = np.where(
+        shared_active[:, :, None],
+        local_cameras - projected[None, :, :],
+        0.0,
+    )
+    proposal_displacement = np.where(
+        shared_active[:, :, None], local_cameras - centers, 0.0
+    )
+    residual_squared = metric_quadratic_sum(
+        proposal_residual, selected_metrics, active
+    )
+    displacement_squared = metric_quadratic_sum(
+        proposal_displacement, selected_metrics, active
+    )
+    disagreement_ratio = residual_squared / max(
+        displacement_squared, np.finfo(np.float64).tiny
+    )
+    return disagreement_ratio, projected
+
+
+def prefer_metric_selector_trial(
+    nominal_rejected,
+    nominal_dre,
+    nominal_sse,
+    trial_rejected,
+    trial_dre,
+    trial_sse,
+):
+    """Prefer an admissible reduced-metric trial with lower DRE then SSE."""
+    return not trial_rejected and (
+        nominal_rejected
+        or (trial_dre, trial_sse) < (nominal_dre, nominal_sse)
+    )
+
+
+def camera_copy_disagreement_diagnostics(
+    local_cameras,
+    camera_masks,
+    previous_consensus,
+    metric_blocks,
+    metric_mode,
+    camera_scaling,
+    camera_ids,
+):
+    """Summarize selected camera copies before proposal damping."""
+    active = np.asarray(camera_masks, dtype=bool)
+    selected_metrics = reduce_metric_tensor(
+        metric_blocks, active, metric_mode, local_cameras.shape[2]
+    )
+    projected = project_consensus(
+        local_cameras, active, previous_consensus, selected_metrics
+    )
+    diagnostics = []
+    for camera_id in camera_ids:
+        if camera_id < 0 or camera_id >= local_cameras.shape[1]:
+            continue
+        clusters = np.flatnonzero(active[:, camera_id])
+        if clusters.size <= 1:
+            continue
+        scaled_copies = local_cameras[clusters, camera_id]
+        physical_copies = to_physical_cameras(
+            scaled_copies, camera_scaling[camera_id]
+        )
+        physical_projection = to_physical_cameras(
+            projected[camera_id], camera_scaling[camera_id]
+        )
+        physical_residual = physical_copies - physical_projection
+        if isinstance(selected_metrics, ActiveCameraMetricBlocks):
+            selected = selected_metrics.camera_indices == camera_id
+            blocks = selected_metrics.blocks[selected]
+            metric_clusters = selected_metrics.cluster_indices[selected]
+            order = np.argsort(metric_clusters)
+            blocks = blocks[order]
+            metric_clusters = metric_clusters[order]
+            if not np.array_equal(metric_clusters, clusters):
+                raise RuntimeError("camera diagnostic metric copies are misordered")
+        else:
+            blocks = selected_metrics[clusters, camera_id]
+        scaled_residual = scaled_copies - projected[camera_id]
+        copy_energies = np.einsum(
+            "bi,bij,bj->b", scaled_residual, blocks, scaled_residual
+        )
+        physical_metrics = (
+            camera_scaling[camera_id][None, :, None]
+            * blocks
+            * camera_scaling[camera_id][None, None, :]
+        )
+        metric_sum = np.sum(blocks, axis=0)
+        metric_sum_eigenvalues = np.linalg.eigvalsh(
+            0.5 * (metric_sum + metric_sum.T)
+        )
+        positive_eigenvalues = metric_sum_eigenvalues[
+            metric_sum_eigenvalues > 0.0
+        ]
+        metric_sum_condition = (
+            float(np.max(positive_eigenvalues) / np.min(positive_eigenvalues))
+            if positive_eigenvalues.size == metric_sum_eigenvalues.size
+            else float("inf")
+        )
+        group_ranges = []
+        group_rms = []
+        group_metric_diagonal = []
+        for start in (0, 3, 6):
+            group = physical_copies[:, start:start + 3]
+            residual_group = physical_residual[:, start:start + 3]
+            group_ranges.append(float(np.max(np.ptp(group, axis=0))))
+            group_rms.append(float(np.sqrt(np.mean(residual_group**2))))
+            diagonals = np.diagonal(
+                physical_metrics[:, start:start + 3, start:start + 3],
+                axis1=1,
+                axis2=2,
+            )
+            group_metric_diagonal.append([
+                float(np.min(diagonals)), float(np.max(diagonals))
+            ])
+        diagnostics.append({
+            "camera": int(camera_id),
+            "clusters": clusters.tolist(),
+            "copies": int(clusters.size),
+            "translationRange": group_ranges[0],
+            "rotationRange": group_ranges[1],
+            "intrinsicsRange": group_ranges[2],
+            "translationRms": group_rms[0],
+            "rotationRms": group_rms[1],
+            "intrinsicsRms": group_rms[2],
+            "copyMetricEnergies": copy_energies.tolist(),
+            "metricEnergy": float(np.sum(copy_energies)),
+            "metricSumEigenvalueMinimum": float(
+                np.min(metric_sum_eigenvalues)
+            ),
+            "metricSumEigenvalueMaximum": float(
+                np.max(metric_sum_eigenvalues)
+            ),
+            "metricSumCondition": metric_sum_condition,
+            "physicalMetricDiagonalRanges": group_metric_diagonal,
+        })
+    return diagnostics
+
+
+def select_metric_proposal_hysteresis_scale(
+    disagreement_ratio,
+    current_scale,
+    strong_scale,
+    normal_scale,
+    low_threshold,
+    high_threshold,
+):
+    """Select proposal damping with two-threshold hysteresis."""
+    if current_scale == normal_scale and disagreement_ratio >= high_threshold:
+        return strong_scale
+    if current_scale == strong_scale and disagreement_ratio <= low_threshold:
+        return normal_scale
+    return current_scale
+
+
+def damp_metric_projected_camera_proposals_hysteresis(
+    local_cameras,
+    centers,
+    camera_masks,
+    previous_consensus,
+    metric_blocks,
+    metric_mode,
+    current_scale,
+    strong_scale,
+    normal_scale,
+    low_threshold,
+    high_threshold,
+):
+    """Apply proposal damping selected from the pre-damping disagreement."""
+    original = local_cameras.copy()
+    disagreement_ratio, _ = damp_metric_projected_camera_proposals(
+        local_cameras,
+        centers,
+        camera_masks,
+        previous_consensus,
+        metric_blocks,
+        metric_mode,
+        scale=current_scale,
+    )
+    selected_scale = select_metric_proposal_hysteresis_scale(
+        disagreement_ratio,
+        current_scale,
+        strong_scale,
+        normal_scale,
+        low_threshold,
+        high_threshold,
+    )
+    if selected_scale != current_scale:
+        local_cameras[:] = original
+        disagreement_ratio, _ = damp_metric_projected_camera_proposals(
+            local_cameras,
+            centers,
+            camera_masks,
+            previous_consensus,
+            metric_blocks,
+            metric_mode,
+            scale=selected_scale,
+        )
+    return disagreement_ratio, selected_scale
+
+
+def damp_metric_projected_camera_subspaces(
+    local_cameras,
+    camera_masks,
+    previous_consensus,
+    metric_blocks,
+    metric_mode,
+    scales,
+):
+    """Damp coordinate groups and recenter to preserve metric projection."""
+    scales = np.asarray(scales, dtype=np.float64)
+    if scales.shape != (3,) or np.any(scales < 0.0) or np.any(scales > 1.0):
+        raise ValueError("metric proposal subspace scales must be three values in [0, 1]")
+    active = np.asarray(camera_masks, dtype=bool)
+    selected_metrics = reduce_metric_tensor(
+        metric_blocks, active, metric_mode, local_cameras.shape[2]
+    )
+    projected = project_consensus(
+        local_cameras, active, previous_consensus, selected_metrics
+    )
+    residual = np.where(
+        active[:, :, None], local_cameras - projected[None, :, :], 0.0
+    )
+    group_energies = np.empty(3, dtype=np.float64)
+    for group, start in enumerate((0, 3, 6)):
+        group_residual = residual[..., start:start + 3]
+        if hasattr(selected_metrics, "blocks"):
+            blocks = selected_metrics.blocks[:, start:start + 3, start:start + 3]
+            vectors = group_residual[
+                selected_metrics.cluster_indices,
+                selected_metrics.camera_indices,
+            ]
+        else:
+            blocks = selected_metrics[..., start:start + 3, start:start + 3][active]
+            vectors = group_residual[active]
+        group_energies[group] = np.einsum(
+            "bi,bij,bj->", vectors, blocks, vectors
+        )
+    energy_sum = max(float(np.sum(group_energies)), np.finfo(np.float64).tiny)
+    energy_fractions = group_energies / energy_sum
+
+    parameter_scales = np.repeat(scales, 3)
+    corrected = projected[None, :, :] + residual * parameter_scales
+    corrected_projection = project_consensus(
+        corrected, active, previous_consensus, selected_metrics
+    )
+    corrected += projected[None, :, :] - corrected_projection[None, :, :]
+    local_cameras[:] = np.where(active[:, :, None], corrected, local_cameras)
+    return energy_fractions
+
+
+def select_metric_proposal_scale(
+    local_cameras,
+    centers,
+    camera_masks,
+    previous_consensus,
+    metric_blocks,
+    metric_mode,
+    scales,
+    undamped_local_objective,
+    evaluate_local_objective,
+):
+    """Select a projection-preserving proposal scale by corrected model DRE."""
+    selected_metrics = reduce_metric_tensor(
+        metric_blocks, camera_masks, metric_mode, local_cameras.shape[2]
+    )
+    projected_reflection = project_consensus(
+        2.0 * local_cameras - centers,
+        camera_masks,
+        previous_consensus,
+        selected_metrics,
+    )
+    best = None
+    for scale in scales:
+        candidate = local_cameras.copy()
+        disagreement_ratio = float("nan")
+        if scale != 1.0:
+            disagreement_ratio, _ = damp_metric_projected_camera_proposals(
+                candidate,
+                centers,
+                camera_masks,
+                previous_consensus,
+                metric_blocks,
+                metric_mode,
+                scale,
+            )
+            local_objective = evaluate_local_objective(candidate)
+        else:
+            local_objective = undamped_local_objective
+        splitting_term = dre_splitting_term(
+            candidate,
+            projected_reflection,
+            centers,
+            camera_masks,
+            1.0,
+            metric_blocks=selected_metrics,
+        )
+        score = local_objective + splitting_term
+        if best is None or score < best[0]:
+            best = (
+                score,
+                candidate,
+                scale,
+                disagreement_ratio,
+                local_objective,
+            )
+    return best[1:]
 
 
 def apply_single_node_consensus(
@@ -130,14 +1002,192 @@ def parse_arguments():
     parser.add_argument("dataset")
     parser.add_argument("--iterations", type=int, default=30)
     parser.add_argument("--clusters", type=int, default=10)
+    parser.add_argument("--single-cluster-proximal", action="store_true")
     parser.add_argument("--local-steps", type=int, default=1)
+    parser.add_argument("--local-camera-step-scale", type=float, default=1.0)
+    parser.add_argument(
+        "--local-camera-step-grid",
+        choices=("1", "0.25,0.5,1"),
+        default="1",
+    )
+    parser.add_argument(
+        "--shared-camera-step-grid",
+        choices=("1", "0.25,0.5,1"),
+        default="1",
+    )
+    parser.add_argument("--shared-camera-step-scale", type=float, default=1.0)
+    parser.add_argument(
+        "--shared-camera-disagreement-scale", type=float, default=1.0
+    )
+    parser.add_argument(
+        "--metric-proposal-disagreement-scale", type=float, default=1.0
+    )
+    parser.add_argument(
+        "--metric-proposal-disagreement-grid",
+        default="1",
+    )
+    parser.add_argument(
+        "--metric-proposal-subspace-scales",
+        choices=(
+            "1,1,1",
+            "0.6,1,1",
+            "1,0.6,1",
+            "1,1,0.6",
+            "0.6,0.6,1",
+        ),
+        default="1,1,1",
+    )
+    parser.add_argument(
+        "--metric-proposal-disagreement-threshold", type=float, default=-1.0
+    )
+    parser.add_argument(
+        "--metric-proposal-disagreement-hysteresis",
+        default="",
+        help="strong,normal,low,high proposal damping hysteresis",
+    )
+    parser.add_argument(
+        "--camera-diagonal-quantile-iterations",
+        default="",
+        help="comma-separated one-based nominal outer iterations",
+    )
+    parser.add_argument(
+        "--camera-disagreement-diagnostic-ids",
+        default="",
+        help="comma-separated global camera IDs for copy diagnostics",
+    )
+    parser.add_argument(
+        "--camera-disagreement-diagnostic-iterations",
+        default="",
+        help="comma-separated one-based nominal outer iterations",
+    )
+    parser.add_argument(
+        "--schur-alignment-diagnostic-iterations",
+        default="",
+        help="comma-separated one-based nominal outer iterations",
+    )
+    parser.add_argument(
+        "--schur-alignment-camera-damping", type=float, default=3.0
+    )
+    parser.add_argument(
+        "--schur-alignment-landmark-damping", type=float, default=3.0
+    )
+    parser.add_argument(
+        "--schur-model-consensus-clipping", action="store_true"
+    )
+    parser.add_argument(
+        "--schur-model-consensus-clipping-minimum-scale",
+        type=float,
+        default=0.01,
+    )
+    parser.add_argument(
+        "--schur-model-consensus-clipping-maximum-scale",
+        type=float,
+        default=1.0,
+    )
+    parser.add_argument("--shared-camera-metric-beta", type=float, default=0.0)
+    parser.add_argument("--adaptive-local-depth", action="store_true")
+    parser.add_argument("--interior-defect-diagnostic", action="store_true")
+    parser.add_argument("--adaptive-local-depth-start", type=int, default=0)
+    parser.add_argument("--adaptive-local-depth-maximum", type=int, default=2)
+    parser.add_argument("--adaptive-local-depth-high", type=float, default=0.3)
+    parser.add_argument("--adaptive-local-depth-low", type=float, default=0.15)
+    parser.add_argument("--adaptive-local-depth-window", type=int, default=3)
+    parser.add_argument("--adaptive-local-depth-dwell", type=int, default=3)
+    parser.add_argument("--initial-shared-schur-correction", action="store_true")
+    parser.add_argument("--initial-shared-schur-basin-guard", action="store_true")
+    parser.add_argument(
+        "--initial-shared-schur-rebase-trust-state", action="store_true"
+    )
+    parser.add_argument(
+        "--initial-shared-schur-operator",
+        choices=("inherit", "python", "bsr", "bsr_low_memory"),
+        default="inherit",
+    )
+    parser.add_argument(
+        "--initial-shared-schur-maximum-iterations", type=int, default=0
+    )
+    parser.add_argument("--final-shared-schur-correction", action="store_true")
+    parser.add_argument(
+        "--shared-schur-landmark-damping", type=float, default=3.0
+    )
+    parser.add_argument(
+        "--shared-schur-camera-damping", type=float, default=3.0
+    )
+    parser.add_argument("--shared-schur-step-scale", type=float, default=1.0)
+    parser.add_argument(
+        "--shared-schur-landmark-refinement-steps", type=int, default=3
+    )
+    parser.add_argument(
+        "--shared-schur-linear-solver", choices=("direct", "cg"), default="cg"
+    )
+    parser.add_argument(
+        "--shared-schur-relative-tolerance", type=float, default=1e-6
+    )
+    parser.add_argument(
+        "--shared-schur-maximum-iterations", type=int, default=500
+    )
+    parser.add_argument(
+        "--shared-schur-maximum-corrections", type=int, default=1
+    )
+    parser.add_argument(
+        "--shared-schur-python-confirmation-corrections", type=int, default=0
+    )
+    parser.add_argument(
+        "--shared-schur-confirmation-camera-damping", type=float, default=-1.0
+    )
+    parser.add_argument(
+        "--shared-schur-confirmation-landmark-damping", type=float, default=-1.0
+    )
+    parser.add_argument(
+        "--shared-schur-confirmation-after-screening-budget",
+        action="store_true",
+    )
+    parser.add_argument(
+        "--shared-schur-maximum-attempts", type=int, default=6
+    )
+    parser.add_argument(
+        "--shared-schur-fallback-camera-damping", type=float, default=-1.0
+    )
+    parser.add_argument(
+        "--shared-schur-fallback-landmark-damping", type=float, default=-1.0
+    )
+    parser.add_argument(
+        "--shared-schur-damping-increase", type=float, default=2.0
+    )
+    parser.add_argument(
+        "--shared-schur-damping-decrease", type=float, default=0.5
+    )
+    parser.add_argument(
+        "--shared-schur-damping-policy",
+        choices=("geometric", "model_ratio"),
+        default="geometric",
+    )
+    parser.add_argument(
+        "--shared-schur-minimum-gain-ratio", type=float, default=1e-4
+    )
+    parser.add_argument(
+        "--shared-schur-minimum-relative-decrease", type=float, default=1e-4
+    )
+    parser.add_argument("--shared-schur-warm-start", action="store_true")
+    parser.add_argument(
+        "--shared-schur-operator",
+        choices=("python", "bsr", "bsr_low_memory"),
+        default="python",
+    )
     parser.add_argument("--threads-per-cluster", type=int, default=1)
     parser.add_argument("--nesterov-max-iterations", type=int, default=100)
+    parser.add_argument("--enhanced-inner-max-iterations", type=int, default=300)
     parser.add_argument("--nesterov-min-iterations", type=int, default=1)
     parser.add_argument("--nesterov-stop-tolerance", type=float, default=1e-2)
+    parser.add_argument("--enhanced-inner-until", type=int, default=0)
+    parser.add_argument("--diagonal-trust-until", type=int, default=0)
+    parser.add_argument("--relative-residual-until", type=int, default=0)
     parser.add_argument(
         "--local-solver",
-        choices=("ceres_pcg", "schur_pcg", "nesterov"),
+        choices=(
+            "ceres_pcg", "ceres_se3", "ceres_prox_se3", "poba_power",
+            "schur_pcg", "nesterov",
+        ),
         default="nesterov",
     )
     parser.add_argument(
@@ -145,6 +1195,10 @@ def parse_arguments():
     )
     parser.add_argument("--persistent-trust-region", action="store_true")
     parser.add_argument("--trust-region-recovery-ratio", type=float, default=0.5)
+    parser.add_argument("--shared-trust-region-until", type=int, default=0)
+    parser.add_argument(
+        "--shared-trust-region-initial-radius", type=float, default=1e6
+    )
     parser.add_argument(
         "--camera-scaling", choices=("none", "jacobi_initial"), default="jacobi_initial"
     )
@@ -157,11 +1211,11 @@ def parse_arguments():
     parser.add_argument("--camera-scaling-clipping-percentile", type=float)
     parser.add_argument("--camera-diagonal-relative-floor", type=float, default=1e-48)
     parser.add_argument("--camera-trust-diagonal-scale", type=float, default=1e-4)
-    parser.add_argument("--camera-diagonal-metric-scale", type=float, default=1e1)
+    parser.add_argument("--camera-diagonal-metric-scale", type=float, default=25.0)
     parser.add_argument("--relaxation", type=float, default=1.0)
     parser.add_argument(
         "--outer-acceleration",
-        choices=("none", "nesterov", "lbfgs", "anderson"),
+        choices=("none", "nesterov", "themelis_nesterov", "lbfgs", "anderson"),
         default="none",
     )
     parser.add_argument(
@@ -178,7 +1232,23 @@ def parse_arguments():
         default="arithmetic",
     )
     parser.add_argument("--block-regularization", type=float, default=5e-5)
+    parser.add_argument("--shared-only-camera-proximal", action="store_true")
+    parser.add_argument(
+        "--factorized-coupled-schur-proximal-metric", action="store_true"
+    )
+    parser.add_argument("--unique-camera-metric-scale", type=float, default=1.0)
+    parser.add_argument(
+        "--unique-camera-metric-selector",
+        default="",
+        help="reduced_scale,compatibility_threshold",
+    )
     parser.add_argument("--block-curvature-multiplier", type=float, default=0.0)
+    parser.add_argument(
+        "--global-schur-majorizer-observability-threshold",
+        type=float,
+        default=-1.0,
+    )
+    parser.add_argument("--global-schur-majorizer-until", type=int, default=0)
     parser.add_argument(
         "--block-recovery-mode",
         choices=("regularization", "curvature", "measured_curvature"),
@@ -187,6 +1257,12 @@ def parse_arguments():
     parser.add_argument(
         "--maximum-block-curvature-multiplier", type=float, default=16.0
     )
+    parser.add_argument(
+        "--recovery-exhaustion-policy",
+        choices=("stop", "restart_best_relaxed"),
+        default="stop",
+    )
+    parser.add_argument("--recovery-relaxed-iterations", type=int, default=1)
     parser.add_argument("--curvature-decay-after", type=int, default=0)
     parser.add_argument("--curvature-decay-ratio", type=float, default=0.5)
     parser.add_argument("--metric-diagnostic-iterations", type=int, default=0)
@@ -201,6 +1277,9 @@ def parse_arguments():
         "--consensus-execution",
         choices=("coordinator", "single-node"),
         default="coordinator",
+    )
+    parser.add_argument(
+        "--consensus-shared-floor-prior-scale", type=float, default=0.0
     )
     parser.add_argument("--packed-request-buffers", action="store_true")
     parser.add_argument("--landmark-refinement-steps", type=int, default=0)
@@ -225,19 +1304,28 @@ def parse_arguments():
     )
     parser.add_argument("--dre-relative-increase", type=float, default=0.01)
     parser.add_argument("--minimum-primal-ratio", type=float, default=1.001)
+    parser.add_argument("--safeguard-annealing-iterations", type=int, default=0)
     parser.add_argument("--safeguard-relative-deadband", type=float, default=0.0)
     parser.add_argument("--catastrophic-ratio", type=float, default=1e6)
     parser.add_argument("--recovery-penalty-ratio", type=float, default=2.0)
     parser.add_argument("--maximum-penalty", type=float, default=1e12)
     parser.add_argument("--results", default="results_drs.jsonl")
     parser.add_argument("--state")
+    parser.add_argument(
+        "--initial-state",
+        help="NPZ cameras/points in the raw dataset BAL coordinate frame",
+    )
     parser.add_argument("--variant-name", default="plain_drs")
     parser.add_argument("--residual-balance-slack", type=float, default=0.01)
     parser.add_argument("--minimum-camera-landmarks", type=int, default=20)
     parser.add_argument("--max-refinement-passes", type=int, default=3)
     parser.add_argument(
         "--clustering",
-        choices=("landmark_scalable", "landmark_scalable_stable"),
+        choices=(
+            "landmark_scalable",
+            "landmark_scalable_stable",
+            "daba_louvain",
+        ),
         default="landmark_scalable",
     )
     parser.add_argument(
@@ -252,18 +1340,507 @@ def parse_arguments():
 
 
 def validate_arguments(arguments):
-    if arguments.iterations <= 0 or arguments.clusters <= 0:
-        raise ValueError("iterations and clusters must be positive")
+    if arguments.iterations < 0 or arguments.clusters <= 0:
+        raise ValueError("iterations must be nonnegative and clusters positive")
+    if arguments.iterations == 0 and not arguments.final_shared_schur_correction:
+        raise ValueError("zero iterations require final shared Schur correction")
     if arguments.local_steps <= 0 or arguments.threads_per_cluster <= 0:
         raise ValueError("local steps and threads must be positive")
+    if not 0.0 < arguments.local_camera_step_scale <= 1.0:
+        raise ValueError("local camera step scale must be in (0, 1]")
+    if arguments.local_camera_step_scale != 1.0:
+        if arguments.worker_owned_cameras:
+            raise ValueError(
+                "scaled local camera steps require coordinator-owned cameras"
+            )
+        if arguments.outer_acceleration != "none":
+            raise ValueError(
+                "scaled local camera steps currently forbid outer acceleration"
+            )
+        if arguments.safeguard_mode != "none":
+            raise ValueError(
+                "scaled local camera steps currently require safeguard mode none"
+            )
+    if arguments.local_camera_step_grid != "1":
+        if arguments.proximal_metric != "block":
+            raise ValueError("local camera step grid requires block metrics")
+        if arguments.local_camera_step_scale != 1.0:
+            raise ValueError("local camera step scale and grid are mutually exclusive")
+        if arguments.worker_owned_cameras or arguments.worker_owned_landmarks:
+            raise ValueError(
+                "local camera step grid requires coordinator-owned state"
+            )
+        if arguments.outer_acceleration != "none":
+            raise ValueError("local camera step grid forbids outer acceleration")
+        if arguments.safeguard_mode != "none":
+            raise ValueError("local camera step grid requires safeguard mode none")
+        if arguments.consensus_execution != "coordinator":
+            raise ValueError("local camera step grid requires coordinator consensus")
+        if arguments.consensus_landmark_refinement_steps != 0:
+            raise ValueError("local camera step grid forbids consensus refinement")
+    if arguments.shared_camera_step_grid != "1":
+        if arguments.local_camera_step_grid != "1":
+            raise ValueError("local and shared camera step grids are mutually exclusive")
+        if arguments.proximal_metric != "block":
+            raise ValueError("shared camera step grid requires block metrics")
+        if arguments.worker_owned_cameras or arguments.worker_owned_landmarks:
+            raise ValueError("shared camera step grid requires coordinator-owned state")
+        if arguments.outer_acceleration != "none":
+            raise ValueError("shared camera step grid forbids outer acceleration")
+        if arguments.safeguard_mode != "none":
+            raise ValueError("shared camera step grid requires safeguard mode none")
+        if arguments.consensus_execution != "coordinator":
+            raise ValueError("shared camera step grid requires coordinator consensus")
+        if arguments.consensus_landmark_refinement_steps != 0:
+            raise ValueError("shared camera step grid forbids consensus refinement")
+    if not 0.0 < arguments.shared_camera_step_scale <= 1.0:
+        raise ValueError("shared camera step scale must be in (0, 1]")
+    if arguments.shared_camera_step_scale != 1.0:
+        if arguments.shared_camera_step_grid != "1":
+            raise ValueError("shared camera step scale and grid are mutually exclusive")
+        if arguments.local_camera_step_grid != "1" or arguments.local_camera_step_scale != 1.0:
+            raise ValueError("shared and global local step scaling are mutually exclusive")
+        if arguments.worker_owned_cameras:
+            raise ValueError("shared camera step scale requires coordinator-owned cameras")
+    if not 0.0 <= arguments.shared_camera_disagreement_scale <= 1.0:
+        raise ValueError("shared camera disagreement scale must be in [0, 1]")
+    if arguments.shared_camera_disagreement_scale != 1.0:
+        if (
+            arguments.shared_camera_step_grid != "1"
+            or arguments.shared_camera_step_scale != 1.0
+            or arguments.local_camera_step_grid != "1"
+            or arguments.local_camera_step_scale != 1.0
+        ):
+            raise ValueError(
+                "shared camera disagreement damping and step scaling are mutually exclusive"
+            )
+        if arguments.worker_owned_cameras:
+            raise ValueError(
+                "shared camera disagreement damping requires coordinator-owned cameras"
+            )
+        if arguments.consensus_execution != "coordinator":
+            raise ValueError(
+                "shared camera disagreement damping requires coordinator consensus"
+            )
+        if arguments.worker_consensus_shadow:
+            raise ValueError(
+                "shared camera disagreement damping forbids worker consensus shadow"
+            )
+    if not 0.0 <= arguments.metric_proposal_disagreement_scale <= 1.0:
+        raise ValueError("metric proposal disagreement scale must be in [0, 1]")
+    if arguments.metric_proposal_disagreement_scale != 1.0:
+        if arguments.proximal_metric != "block":
+            raise ValueError(
+                "metric proposal disagreement damping requires block metrics"
+            )
+        if arguments.consensus_execution != "coordinator":
+            raise ValueError(
+                "metric proposal disagreement damping requires coordinator consensus"
+            )
+        if arguments.worker_owned_cameras:
+            raise ValueError(
+                "metric proposal disagreement damping requires coordinator-owned cameras"
+            )
+        if arguments.worker_consensus_shadow:
+            raise ValueError(
+                "metric proposal disagreement damping forbids worker consensus shadow"
+            )
+        if (
+            arguments.shared_camera_disagreement_scale != 1.0
+            or arguments.shared_camera_step_grid != "1"
+            or arguments.shared_camera_step_scale != 1.0
+            or arguments.local_camera_step_grid != "1"
+            or arguments.local_camera_step_scale != 1.0
+        ):
+            raise ValueError(
+                "metric proposal disagreement damping and step scaling are mutually exclusive"
+            )
+    if arguments.metric_proposal_disagreement_grid != "1":
+        try:
+            proposal_grid = tuple(map(
+                float,
+                arguments.metric_proposal_disagreement_grid.split(","),
+            ))
+        except ValueError as error:
+            raise ValueError(
+                "metric proposal disagreement grid must contain numbers"
+            ) from error
+        if (
+            not proposal_grid
+            or any(not 0.0 <= value <= 1.0 for value in proposal_grid)
+        ):
+            raise ValueError(
+                "metric proposal disagreement grid values must be in [0, 1]"
+            )
+        if arguments.metric_proposal_disagreement_scale != 1.0:
+            raise ValueError(
+                "metric proposal disagreement scale and grid are mutually exclusive"
+            )
+        if arguments.metric_proposal_disagreement_threshold >= 0.0:
+            raise ValueError(
+                "metric proposal disagreement grid forbids adaptive thresholding"
+            )
+        if arguments.proximal_metric != "block":
+            raise ValueError("metric proposal disagreement grid requires block metrics")
+        if arguments.consensus_execution != "coordinator":
+            raise ValueError(
+                "metric proposal disagreement grid requires coordinator consensus"
+            )
+        if arguments.worker_owned_cameras:
+            raise ValueError(
+                "metric proposal disagreement grid requires coordinator-owned cameras"
+            )
+    if arguments.metric_proposal_subspace_scales != "1,1,1":
+        if (
+            arguments.metric_proposal_disagreement_scale != 1.0
+            or arguments.metric_proposal_disagreement_grid != "1"
+        ):
+            raise ValueError(
+                "metric proposal subspace and global damping are mutually exclusive"
+            )
+        if arguments.proximal_metric != "block":
+            raise ValueError("metric proposal subspace damping requires block metrics")
+        if arguments.consensus_execution != "coordinator":
+            raise ValueError(
+                "metric proposal subspace damping requires coordinator consensus"
+            )
+        if arguments.worker_owned_cameras:
+            raise ValueError(
+                "metric proposal subspace damping requires coordinator-owned cameras"
+            )
+    if arguments.metric_proposal_disagreement_threshold >= 0.0:
+        if arguments.metric_proposal_disagreement_scale == 1.0:
+            raise ValueError(
+                "adaptive metric proposal damping requires a nonunit scale"
+            )
+    proposal_hysteresis = None
+    if arguments.metric_proposal_disagreement_hysteresis:
+        try:
+            proposal_hysteresis = tuple(map(
+                float,
+                arguments.metric_proposal_disagreement_hysteresis.split(","),
+            ))
+        except ValueError as error:
+            raise ValueError(
+                "metric proposal hysteresis must contain four numbers"
+            ) from error
+        if len(proposal_hysteresis) != 4:
+            raise ValueError(
+                "metric proposal hysteresis must be strong,normal,low,high"
+            )
+        strong_scale, normal_scale, low_threshold, high_threshold = (
+            proposal_hysteresis
+        )
+        if not 0.0 <= strong_scale <= normal_scale <= 1.0:
+            raise ValueError(
+                "metric proposal hysteresis scales must satisfy "
+                "0 <= strong <= normal <= 1"
+            )
+        if not 0.0 <= low_threshold < high_threshold:
+            raise ValueError(
+                "metric proposal hysteresis thresholds must satisfy "
+                "0 <= low < high"
+            )
+        if (
+            arguments.metric_proposal_disagreement_scale != 1.0
+            or arguments.metric_proposal_disagreement_grid != "1"
+            or arguments.metric_proposal_disagreement_threshold >= 0.0
+            or arguments.metric_proposal_subspace_scales != "1,1,1"
+        ):
+            raise ValueError(
+                "metric proposal hysteresis is mutually exclusive with "
+                "other proposal damping modes"
+            )
+        if arguments.proximal_metric != "block":
+            raise ValueError("metric proposal hysteresis requires block metrics")
+        if arguments.consensus_execution != "coordinator":
+            raise ValueError(
+                "metric proposal hysteresis requires coordinator consensus"
+            )
+        if arguments.worker_owned_cameras:
+            raise ValueError(
+                "metric proposal hysteresis requires coordinator-owned cameras"
+            )
+        if arguments.worker_consensus_shadow:
+            raise ValueError(
+                "metric proposal hysteresis forbids worker consensus shadow"
+            )
+    if arguments.shared_camera_metric_beta < 0.0:
+        raise ValueError("shared camera metric beta must be nonnegative")
+    if not (
+        arguments.global_schur_majorizer_observability_threshold == -1.0
+        or 0.0
+        <= arguments.global_schur_majorizer_observability_threshold
+        <= 1.0
+    ):
+        raise ValueError(
+            "global Schur majorizer observability threshold must be -1 "
+            "or in [0, 1]"
+        )
+    if arguments.global_schur_majorizer_until < 0:
+        raise ValueError("global Schur majorizer until must be nonnegative")
+    if (
+        arguments.global_schur_majorizer_until > 0
+        and arguments.global_schur_majorizer_observability_threshold < 0.0
+    ):
+        raise ValueError(
+            "global Schur majorizer until requires observability selection"
+        )
+    if arguments.global_schur_majorizer_observability_threshold >= 0.0:
+        if not arguments.shared_only_camera_proximal:
+            raise ValueError(
+                "global Schur majorizer selection requires shared-only "
+                "camera proximal"
+            )
+        if os.environ.get("BUNDLE_PALM_SCHUR_PROXIMAL_METRIC", "0") == "1":
+            raise ValueError(
+                "global Schur majorizer selection forbids a pre-enabled "
+                "Schur proximal metric"
+            )
+    if not np.isfinite(arguments.unique_camera_metric_scale) or not (
+        0.0 < arguments.unique_camera_metric_scale <= 1.0
+    ):
+        raise ValueError("unique camera metric scale must be in (0, 1]")
+    if arguments.shared_only_camera_proximal:
+        if arguments.proximal_metric != "block":
+            raise ValueError("shared-only camera proximal requires block metrics")
+        if arguments.consensus_metric != "full":
+            raise ValueError("shared-only camera proximal requires full consensus")
+        if arguments.consensus_execution != "coordinator":
+            raise ValueError(
+                "shared-only camera proximal requires coordinator consensus"
+            )
+        if arguments.unique_camera_metric_scale != 1.0:
+            raise ValueError(
+                "shared-only and fixed unique camera metrics are mutually exclusive"
+            )
+        if arguments.unique_camera_metric_selector:
+            raise ValueError(
+                "shared-only camera proximal forbids the unique metric selector"
+            )
+        if arguments.worker_consensus_shadow:
+            raise ValueError(
+                "shared-only camera proximal forbids worker consensus shadow"
+            )
+        if arguments.consensus_shared_floor_prior_scale != 0.0:
+            raise ValueError(
+                "shared-only camera proximal forbids consensus floor priors"
+            )
+        if (
+            arguments.local_camera_step_scale != 1.0
+            or arguments.local_camera_step_grid != "1"
+            or arguments.shared_camera_step_grid != "1"
+            or arguments.shared_camera_step_scale != 1.0
+            or arguments.shared_camera_disagreement_scale != 1.0
+            or arguments.metric_proposal_disagreement_scale != 1.0
+            or arguments.metric_proposal_disagreement_grid != "1"
+            or arguments.metric_proposal_disagreement_hysteresis
+            or arguments.metric_proposal_subspace_scales != "1,1,1"
+        ):
+            raise ValueError(
+                "shared-only camera proximal forbids camera proposal controls"
+            )
+    unique_metric_selector = None
+    if arguments.unique_camera_metric_selector:
+        try:
+            unique_metric_selector = tuple(map(
+                float, arguments.unique_camera_metric_selector.split(",")
+            ))
+        except ValueError as error:
+            raise ValueError(
+                "unique camera metric selector must contain two numbers"
+            ) from error
+        if len(unique_metric_selector) != 2:
+            raise ValueError(
+                "unique camera metric selector must be reduced,threshold"
+            )
+        reduced_scale, threshold = unique_metric_selector
+        if not 0.0 < reduced_scale < 1.0 or threshold < 0.0:
+            raise ValueError(
+                "unique camera metric selector requires reduced in (0, 1) "
+                "and threshold >= 0"
+            )
+        if (
+            arguments.unique_camera_metric_scale != 1.0
+        ):
+            raise ValueError(
+                "unique camera metric selector is mutually exclusive with "
+                "other unique-camera metric controls"
+            )
+        if (
+            arguments.worker_owned_cameras
+            or arguments.worker_owned_landmarks
+            or arguments.persistent_trust_region
+        ):
+            raise ValueError(
+                "unique camera metric selector requires coordinator-owned "
+                "state and non-persistent trust"
+            )
+        if arguments.outer_acceleration != "none":
+            raise ValueError(
+                "unique camera metric selector forbids outer acceleration"
+            )
+    if arguments.shared_camera_metric_beta != 0.0 and arguments.proximal_metric != "block":
+        raise ValueError("shared camera metric beta requires block metrics")
+    if arguments.single_cluster_proximal:
+        if arguments.clusters != 1:
+            raise ValueError("single-cluster proximal mode requires clusters=1")
+        if arguments.outer_acceleration != "none":
+            raise ValueError("single-cluster proximal mode forbids outer acceleration")
+        if arguments.relaxation != 1.0:
+            raise ValueError("single-cluster proximal mode requires unit relaxation")
+        if arguments.safeguard_mode != "none":
+            raise ValueError("single-cluster proximal mode requires safeguard mode none")
+        if arguments.consensus_execution != "coordinator":
+            raise ValueError("single-cluster proximal mode bypasses consensus execution")
+        if arguments.worker_owned_cameras or arguments.worker_owned_landmarks:
+            raise ValueError("single-cluster proximal mode requires materialized state")
+        if arguments.consensus_landmark_refinement_steps != 0:
+            raise ValueError("single-cluster proximal mode forbids consensus refinement")
+    if arguments.local_solver == "ceres_se3" and not arguments.single_cluster_proximal:
+        raise ValueError("ceres_se3 is restricted to single-cluster proximal mode")
+    if arguments.local_solver == "ceres_se3":
+        if arguments.iterations != 1 or arguments.local_steps != 1:
+            raise ValueError("ceres_se3 requires one outer iteration and one local step")
+        if os.environ.get("BUNDLE_PALM_CAMERA_UPDATE", "additive") != "se3_left":
+            raise ValueError("ceres_se3 requires the se3_left camera update")
+    if arguments.local_solver == "ceres_prox_se3":
+        if os.environ.get("BUNDLE_PALM_CAMERA_UPDATE", "additive") != "se3_left":
+            raise ValueError("ceres_prox_se3 requires the se3_left camera update")
+        if arguments.proximal_metric != "block":
+            raise ValueError("ceres_prox_se3 requires the block proximal metric")
+    if arguments.adaptive_local_depth:
+        if arguments.proximal_metric != "block":
+            raise ValueError("adaptive local depth requires block proximal metric")
+        if not arguments.local_steps < arguments.adaptive_local_depth_maximum <= 20:
+            raise ValueError(
+                "adaptive maximum depth must exceed local steps and be at most 20"
+            )
+        if not 0.0 < arguments.adaptive_local_depth_low < arguments.adaptive_local_depth_high:
+            raise ValueError("adaptive depth thresholds must satisfy 0 < low < high")
+        if arguments.adaptive_local_depth_window <= 0:
+            raise ValueError("adaptive depth window must be positive")
+        if arguments.adaptive_local_depth_dwell < 0:
+            raise ValueError("adaptive depth dwell must be nonnegative")
+        if not 0 <= arguments.adaptive_local_depth_start < arguments.iterations:
+            raise ValueError(
+                "adaptive depth start must be inside the outer iteration range"
+            )
+    if (
+        arguments.initial_shared_schur_correction
+        or arguments.final_shared_schur_correction
+    ):
+        if not arguments.shared_only_camera_proximal:
+            raise ValueError(
+                "shared Schur correction requires shared-only DRS"
+            )
+        if arguments.consensus_execution != "coordinator":
+            raise ValueError(
+                "shared Schur correction requires coordinator consensus"
+            )
+        if os.environ.get("BUNDLE_PALM_CAMERA_UPDATE", "additive") != "se3_left":
+            raise ValueError("shared Schur correction requires se3_left")
+        if os.environ.get(
+            "BUNDLE_PALM_DIRECT_TANGENT_NORMAL_EQUATIONS", "0"
+        ) != "1":
+            raise ValueError(
+                "shared Schur correction requires direct tangent assembly"
+            )
+    if (
+        arguments.initial_shared_schur_basin_guard
+        and not arguments.initial_shared_schur_correction
+    ):
+        raise ValueError(
+            "initial shared Schur basin guard requires the initial correction"
+        )
+    if (
+        arguments.initial_shared_schur_rebase_trust_state
+        and not arguments.initial_shared_schur_correction
+    ):
+        raise ValueError(
+            "initial shared Schur trust rebase requires the initial correction"
+        )
+        if arguments.shared_schur_landmark_damping < 0.0:
+            raise ValueError("shared Schur landmark damping must be nonnegative")
+        if arguments.shared_schur_camera_damping <= 0.0:
+            raise ValueError("shared Schur camera damping must be positive")
+        if not 0.0 < arguments.shared_schur_step_scale <= 1.0:
+            raise ValueError("shared Schur step scale must be in (0, 1]")
+        if not 0 <= arguments.shared_schur_landmark_refinement_steps <= 20:
+            raise ValueError(
+                "shared Schur landmark refinement steps must be in [0, 20]"
+            )
+        if not 0.0 < arguments.shared_schur_relative_tolerance < 1.0:
+            raise ValueError(
+                "shared Schur relative tolerance must be in (0, 1)"
+            )
+        if arguments.shared_schur_maximum_iterations <= 0:
+            raise ValueError(
+                "shared Schur maximum iterations must be positive"
+            )
+        if arguments.initial_shared_schur_maximum_iterations < 0:
+            raise ValueError(
+                "initial shared Schur maximum iterations must be nonnegative"
+            )
+        if arguments.shared_schur_maximum_corrections <= 0:
+            raise ValueError(
+                "shared Schur maximum corrections must be positive"
+            )
+        if arguments.shared_schur_python_confirmation_corrections < 0:
+            raise ValueError(
+                "shared Schur Python confirmation corrections must be "
+                "nonnegative"
+            )
+        if (
+            arguments.shared_schur_confirmation_camera_damping == 0.0
+            or arguments.shared_schur_confirmation_landmark_damping == 0.0
+        ):
+            raise ValueError(
+                "shared Schur confirmation damping must be positive or "
+                "negative to inherit"
+            )
+        if arguments.shared_schur_maximum_attempts <= 0:
+            raise ValueError("shared Schur maximum attempts must be positive")
+        fallback_damping_enabled = (
+            arguments.shared_schur_fallback_camera_damping > 0.0
+            or arguments.shared_schur_fallback_landmark_damping > 0.0
+        )
+        if fallback_damping_enabled and not (
+            arguments.shared_schur_fallback_camera_damping > 0.0
+            and arguments.shared_schur_fallback_landmark_damping > 0.0
+        ):
+            raise ValueError(
+                "shared Schur fallback camera and landmark damping must both "
+                "be positive or both be disabled"
+            )
+        if arguments.shared_schur_damping_increase <= 1.0:
+            raise ValueError("shared Schur damping increase must exceed one")
+        if not 0.0 < arguments.shared_schur_damping_decrease < 1.0:
+            raise ValueError("shared Schur damping decrease must be in (0, 1)")
+        if not 0.0 <= arguments.shared_schur_minimum_gain_ratio < 1.0:
+            raise ValueError(
+                "shared Schur minimum gain ratio must be in [0, 1)"
+            )
+        if not 0.0 <= arguments.shared_schur_minimum_relative_decrease < 1.0:
+            raise ValueError(
+                "shared Schur minimum relative decrease must be in [0, 1)"
+            )
     if arguments.nesterov_max_iterations <= 0:
         raise ValueError("Nesterov maximum iterations must be positive")
+    if arguments.enhanced_inner_max_iterations <= 0:
+        raise ValueError("enhanced inner maximum iterations must be positive")
     if not 1 <= arguments.nesterov_min_iterations <= arguments.nesterov_max_iterations:
         raise ValueError(
             "Nesterov minimum iterations must be between 1 and the maximum"
         )
     if not 0.0 < arguments.nesterov_stop_tolerance < 1.0:
         raise ValueError("Nesterov stop tolerance must be in (0, 1)")
+    if not 0 <= arguments.enhanced_inner_until <= arguments.iterations:
+        raise ValueError("enhanced inner cutoff must be in [0, iterations]")
+    if not 0 <= arguments.diagonal_trust_until <= arguments.iterations:
+        raise ValueError("diagonal trust cutoff must be in [0, iterations]")
+    if not 0 <= arguments.relative_residual_until <= arguments.iterations:
+        raise ValueError("relative residual cutoff must be in [0, iterations]")
     if not 0.0 < arguments.relaxation < 2.0:
         raise ValueError("relaxation must be in (0, 2)")
     if arguments.acceleration_restart_after <= 0:
@@ -311,6 +1888,24 @@ def validate_arguments(arguments):
             "single-node consensus currently requires block/full metrics"
         )
     if (
+        not np.isfinite(arguments.consensus_shared_floor_prior_scale)
+        or arguments.consensus_shared_floor_prior_scale < 0.0
+    ):
+        raise ValueError(
+            "consensus shared floor prior scale must be finite and nonnegative"
+        )
+    if arguments.consensus_shared_floor_prior_scale > 0.0 and not (
+        arguments.proximal_metric == "block"
+        and arguments.consensus_metric == "full"
+        and arguments.consensus_execution == "coordinator"
+        and arguments.metric_proposal_disagreement_grid == "1"
+        and arguments.metric_proposal_disagreement_hysteresis == ""
+        and arguments.metric_proposal_subspace_scales == "1,1,1"
+    ):
+        raise ValueError(
+            "shared floor prior requires fixed-scale coordinator block/full consensus"
+        )
+    if (
         arguments.consensus_execution == "single-node"
         and arguments.worker_consensus_shadow
     ):
@@ -347,6 +1942,8 @@ def validate_arguments(arguments):
             )
     if arguments.curvature_decay_after < 0:
         raise ValueError("curvature decay wait must be nonnegative")
+    if arguments.recovery_relaxed_iterations <= 0:
+        raise ValueError("recovery relaxed iterations must be positive")
     if not 0 <= arguments.metric_diagnostic_iterations <= 100:
         raise ValueError("metric diagnostic iterations must be in [0, 100]")
     if not 0 <= arguments.landmark_refinement_steps <= 20:
@@ -395,6 +1992,8 @@ def validate_arguments(arguments):
         raise ValueError("DRE relative increase must be nonnegative")
     if arguments.minimum_primal_ratio < 1.0:
         raise ValueError("minimum primal ratio must be at least one")
+    if arguments.safeguard_annealing_iterations < 0:
+        raise ValueError("safeguard annealing iterations must be nonnegative")
     if (
         not np.isfinite(arguments.safeguard_relative_deadband)
         or arguments.safeguard_relative_deadband < 0.0
@@ -516,14 +2115,104 @@ def print_iteration(row, best_sse, best_iteration, prox_costs):
     )
 
 
+def diagonal_trust_is_active(iteration, cutoff):
+    return (
+        os.environ.get("BUNDLE_PALM_DIAGONAL_TRUST_DAMPING", "0") == "1"
+        or iteration < cutoff
+    )
+
+
 def main():
     arguments = parse_arguments()
     validate_arguments(arguments)
+    camera_diagonal_quantile_iterations = {
+        int(value) - 1
+        for value in arguments.camera_diagonal_quantile_iterations.split(",")
+        if value
+    }
+    if any(value < 0 for value in camera_diagonal_quantile_iterations):
+        raise ValueError(
+            "camera diagonal quantile iterations must be positive"
+        )
+    camera_disagreement_diagnostic_ids = tuple(
+        int(value)
+        for value in arguments.camera_disagreement_diagnostic_ids.split(",")
+        if value
+    )
+    camera_disagreement_diagnostic_iterations = {
+        int(value) - 1
+        for value in arguments.camera_disagreement_diagnostic_iterations.split(",")
+        if value
+    }
+    schur_alignment_diagnostic_iterations = {
+        int(value) - 1
+        for value in arguments.schur_alignment_diagnostic_iterations.split(",")
+        if value
+    }
+    if any(value < 0 for value in camera_disagreement_diagnostic_ids):
+        raise ValueError("camera disagreement diagnostic IDs must be nonnegative")
+    if any(value < 0 for value in camera_disagreement_diagnostic_iterations):
+        raise ValueError(
+            "camera disagreement diagnostic iterations must be positive"
+        )
+    if any(value < 0 for value in schur_alignment_diagnostic_iterations):
+        raise ValueError("Schur alignment diagnostic iterations must be positive")
+    if schur_alignment_diagnostic_iterations and not (
+        arguments.schur_alignment_camera_damping > 0.0
+        and arguments.schur_alignment_landmark_damping >= 0.0
+    ):
+        raise ValueError(
+            "Schur alignment camera damping must be positive and landmark "
+            "damping nonnegative"
+        )
+    if (
+        arguments.schur_model_consensus_clipping
+        and not schur_alignment_diagnostic_iterations
+    ):
+        raise ValueError(
+            "Schur-model consensus clipping requires alignment iterations"
+        )
+    if not 0.0 <= arguments.schur_model_consensus_clipping_minimum_scale <= 1.0:
+        raise ValueError(
+            "Schur-model consensus clipping minimum scale must be in [0, 1]"
+        )
+    if not (
+        arguments.schur_model_consensus_clipping_minimum_scale
+        <= arguments.schur_model_consensus_clipping_maximum_scale
+        <= 1.0
+    ):
+        raise ValueError(
+            "Schur-model consensus clipping maximum scale must be in "
+            "[minimum scale, 1]"
+        )
+    proposal_hysteresis = (
+        tuple(map(
+            float,
+            arguments.metric_proposal_disagreement_hysteresis.split(","),
+        ))
+        if arguments.metric_proposal_disagreement_hysteresis
+        else None
+    )
+    unique_metric_selector = (
+        tuple(map(float, arguments.unique_camera_metric_selector.split(",")))
+        if arguments.unique_camera_metric_selector
+        else None
+    )
     started_at = time.perf_counter()
 
     raw_cameras, raw_points, camera_indices, point_indices, raw_observations = (
         read_bal_problem(arguments.dataset)
     )
+    if arguments.initial_state:
+        expected_camera_shape = raw_cameras.shape
+        expected_point_shape = raw_points.shape
+        with np.load(arguments.initial_state) as initial_state:
+            raw_cameras = np.asarray(initial_state["cameras"], dtype=np.float64)
+            raw_points = np.asarray(initial_state["points"], dtype=np.float64)
+        if raw_cameras.shape != expected_camera_shape:
+            raise ValueError("initial-state camera shape does not match dataset")
+        if raw_points.shape != expected_point_shape:
+            raise ValueError("initial-state point shape does not match dataset")
     cameras, points, observations = canonicalize_bal_problem(
         raw_cameras,
         raw_points,
@@ -542,11 +2231,12 @@ def main():
         )
 
     partition_started = time.perf_counter()
-    partitioner = (
-        cluster_by_landmark_scalable
-        if arguments.clustering == "landmark_scalable"
-        else cluster_by_landmark_scalable_stable
-    )
+    partitioners = {
+        "landmark_scalable": cluster_by_landmark_scalable,
+        "landmark_scalable_stable": cluster_by_landmark_scalable_stable,
+        "daba_louvain": cluster_by_daba_louvain,
+    }
+    partitioner = partitioners[arguments.clustering]
     partition, partition_cache_status, partition_cache_path = partition_with_cache(
         partitioner,
         arguments.clustering,
@@ -583,6 +2273,15 @@ def main():
     camera_masks = np.zeros((cluster_count, camera_count), dtype=bool)
     for cluster_id, indices in enumerate(camera_indices_in_cluster):
         camera_masks[cluster_id, np.unique(indices)] = True
+    camera_copy_count = np.sum(camera_masks, axis=0)
+    current_unique_camera_metric_scale = arguments.unique_camera_metric_scale
+    camera_proximal_multipliers = camera_metric_multipliers(
+        camera_copy_count,
+        arguments.shared_camera_metric_beta,
+        current_unique_camera_metric_scale,
+    )
+    if arguments.shared_only_camera_proximal:
+        camera_proximal_multipliers[camera_copy_count == 1] = 0.0
     if arguments.debug_output:
         observations_per_cluster = np.asarray(
             [len(indices) for indices in camera_indices_in_cluster]
@@ -627,6 +2326,7 @@ def main():
     block_regularization = arguments.block_regularization
     block_curvature_multiplier = arguments.block_curvature_multiplier
     best_sse = initial_metrics["sumSquaredError"]
+    best_metrics = initial_metrics.copy()
     best_iteration = -1
     best_cameras = cameras.copy()
     best_points = points.copy()
@@ -637,14 +2337,45 @@ def main():
     accepted_consensus = consensus.copy()
     accepted_landmarks = landmarks.copy()
     rejected_count = 0
+    best_checkpoint_restarts = 0
+    relaxed_exploration_remaining = 0
     accepted_since_curvature_increase = 0
     revert_landmark_mode = 0
     trust_region_recovery_ratio = 1.0
+    shared_trust_region_radius = arguments.shared_trust_region_initial_radius
     trajectory = []
     termination_reason = "iteration_limit"
     final_polishing_applied = False
     final_polishing_initial_sse = float("nan")
     final_polishing_refined_sse = float("nan")
+    final_shared_schur_attempted = False
+    final_shared_schur_accepted = False
+    final_shared_schur_initial_sse = float("nan")
+    final_shared_schur_corrected_sse = float("nan")
+    final_shared_schur_worker_sse = float("nan")
+    final_shared_schur_seconds = 0.0
+    final_shared_schur_diagnostics = {}
+    final_shared_schur_attempts = []
+    final_shared_schur_accepted_corrections = 0
+    final_shared_schur_screening_corrections = 0
+    final_shared_schur_confirmation_corrections = 0
+    final_shared_schur_termination = "disabled"
+    final_shared_schur_final_camera_damping = float("nan")
+    final_shared_schur_final_landmark_damping = float("nan")
+    initial_shared_schur_attempted = False
+    initial_shared_schur_accepted = False
+    initial_shared_schur_initial_sse = float("nan")
+    initial_shared_schur_candidate_sse = float("nan")
+    initial_shared_schur_worker_sse = float("nan")
+    initial_shared_schur_seconds = 0.0
+    initial_shared_schur_diagnostics = {}
+    initial_shared_schur_trust_rebased = False
+    initial_shared_schur_pre_rebase_trust_radii = []
+    initial_shared_schur_post_rebase_trust_radii = []
+    bootstrap_basin_guard_active = False
+    bootstrap_basin_guard_ceiling = float("nan")
+    bootstrap_basin_guard_rejections = 0
+    bootstrap_basin_guard_release_iteration = -1
     initialization_seconds = float("nan")
     optimization_seconds = float("nan")
     accelerator = create_accelerator(arguments.outer_acceleration)
@@ -664,6 +2395,27 @@ def main():
     materialized_accelerated_landmark_states = 0
     suppressed_routine_landmark_replies = 0
     consensus_projection_seconds = 0.0
+    adaptive_local_steps = np.full(
+        cluster_count, arguments.local_steps, dtype=np.int64
+    )
+    adaptive_defect_history = []
+    adaptive_depth_dwell_remaining = np.zeros(cluster_count, dtype=np.int64)
+    metric_proposal_hysteresis_scale = (
+        proposal_hysteresis[1] if proposal_hysteresis is not None else 1.0
+    )
+    return_proximal_diagnostics = (
+        arguments.metric_diagnostic_iterations > 0
+        or arguments.adaptive_local_depth
+        or arguments.interior_defect_diagnostic
+        or arguments.global_schur_majorizer_observability_threshold >= 0.0
+        or os.environ.get(
+            "BUNDLE_PALM_SCHUR_OBSERVABILITY_DIAGNOSTIC", "0"
+        ) == "1"
+    )
+    global_schur_majorizer_decided = False
+    global_schur_majorizer_selected = False
+    global_schur_observability_statistic = float("nan")
+    global_schur_observability_valid_clusters = 0
 
     worker = DrsWorkerClient()
     try:
@@ -698,6 +2450,9 @@ def main():
             nesterov_max_iterations=arguments.nesterov_max_iterations,
             nesterov_min_iterations=arguments.nesterov_min_iterations,
             nesterov_stop_tolerance=arguments.nesterov_stop_tolerance,
+            diagonal_trust_damping=False,
+            nesterov_relative_residual=False,
+            camera_proximal_multipliers=camera_proximal_multipliers,
         )
         worker.update_preconditioning(
             camera_indices_in_cluster,
@@ -708,6 +2463,146 @@ def main():
                 local_cameras if arguments.worker_owned_cameras else None
             ),
         )
+        if arguments.initial_shared_schur_correction:
+            initial_shared_schur_attempted = True
+            initial_shared_schur_initial_sse = best_sse
+            initial_schur_started = time.perf_counter()
+            schur_systems = worker.build_schur_systems(
+                camera_indices_in_cluster,
+                point_indices_in_cluster,
+                consensus,
+                landmarks,
+                cluster_count,
+                arguments.shared_schur_landmark_damping,
+            )
+            tangent_step, initial_shared_schur_diagnostics = (
+                solve_global_schur_system(
+                    schur_systems,
+                    camera_count,
+                    arguments.shared_schur_camera_damping,
+                    arguments.shared_schur_step_scale,
+                    arguments.shared_schur_linear_solver,
+                    arguments.shared_schur_relative_tolerance,
+                    (
+                        arguments.initial_shared_schur_maximum_iterations
+                        or arguments.shared_schur_maximum_iterations
+                    ),
+                    operator_mode=(
+                        arguments.shared_schur_operator
+                        if arguments.initial_shared_schur_operator == "inherit"
+                        else arguments.initial_shared_schur_operator
+                    ),
+                )
+            )
+            (
+                corrected_costs,
+                corrected_scaled_cameras,
+                corrected_points,
+            ) = worker.apply_camera_step(
+                camera_indices_in_cluster,
+                point_indices_in_cluster,
+                consensus,
+                landmarks,
+                tangent_step,
+                cluster_count,
+                arguments.shared_schur_landmark_refinement_steps,
+            )
+            initial_shared_schur_worker_sse = float(np.sum(corrected_costs))
+            corrected_cameras = to_physical_cameras(
+                corrected_scaled_cameras, camera_scaling
+            )
+            corrected_metrics = evaluate_bal_state(
+                corrected_cameras,
+                corrected_points,
+                camera_indices,
+                point_indices,
+                observations,
+            )
+            initial_shared_schur_candidate_sse = corrected_metrics[
+                "sumSquaredError"
+            ]
+            initial_shared_schur_accepted = (
+                initial_shared_schur_diagnostics["linearTermination"] == 0
+                and np.isfinite(initial_shared_schur_candidate_sse)
+                and initial_shared_schur_candidate_sse < best_sse
+            )
+            if initial_shared_schur_accepted:
+                scaled_cameras = corrected_scaled_cameras.copy()
+                local_cameras = np.repeat(
+                    scaled_cameras[None, :, :], cluster_count, axis=0
+                )
+                centers = local_cameras.copy()
+                consensus = scaled_cameras.copy()
+                landmarks = corrected_points.copy()
+                best_sse = initial_shared_schur_candidate_sse
+                best_metrics = corrected_metrics.copy()
+                best_cameras = corrected_cameras.copy()
+                best_points = corrected_points.copy()
+                accepted_metrics = corrected_metrics.copy()
+                accepted_dre = initial_shared_schur_candidate_sse
+                accepted_model_dre = initial_shared_schur_candidate_sse
+                accepted_fixed_point_squared = 0.0
+                accepted_consensus = consensus.copy()
+                accepted_landmarks = landmarks.copy()
+                bootstrap_basin_guard_active = (
+                    arguments.initial_shared_schur_basin_guard
+                )
+                bootstrap_basin_guard_ceiling = (
+                    initial_shared_schur_candidate_sse
+                )
+                if arguments.initial_shared_schur_rebase_trust_state:
+                    initial_shared_schur_pre_rebase_trust_radii = (
+                        worker.last_trust_region_radii.tolist()
+                    )
+                    (
+                        rebase_costs,
+                        rebased_scaled_cameras,
+                        rebased_points,
+                    ) = worker.apply_camera_step(
+                        camera_indices_in_cluster,
+                        point_indices_in_cluster,
+                        consensus,
+                        landmarks,
+                        np.zeros_like(tangent_step),
+                        cluster_count,
+                        0,
+                        rebase_trust_state=True,
+                    )
+                    if not (
+                        np.allclose(
+                            rebased_scaled_cameras,
+                            consensus,
+                            rtol=1e-12,
+                            atol=1e-14,
+                        )
+                        and np.allclose(
+                            rebased_points,
+                            landmarks,
+                            rtol=1e-12,
+                            atol=1e-14,
+                        )
+                        and np.isfinite(np.sum(rebase_costs))
+                    ):
+                        raise RuntimeError(
+                            "trust-state rebase changed accepted bootstrap geometry"
+                        )
+                    initial_shared_schur_post_rebase_trust_radii = (
+                        worker.last_trust_region_radii.tolist()
+                    )
+                    initial_shared_schur_trust_rebased = True
+            else:
+                worker.apply_camera_step(
+                    camera_indices_in_cluster,
+                    point_indices_in_cluster,
+                    consensus,
+                    landmarks,
+                    np.zeros_like(tangent_step),
+                    cluster_count,
+                    0,
+                )
+            initial_shared_schur_seconds = (
+                time.perf_counter() - initial_schur_started
+            )
         accepted_landmarks = landmarks.copy()
         if arguments.worker_owned_landmarks:
             worker.control_nominal_landmark_state(
@@ -723,13 +2618,87 @@ def main():
             worker.transport_phase_seconds.copy()
         )
         optimization_started_at = time.perf_counter()
+        safeguard_annealing_iterations = (
+            arguments.safeguard_annealing_iterations or arguments.iterations
+        )
         for iteration in range(arguments.iterations):
+            schur_alignment_tangent = None
+            schur_alignment_base_cameras = None
+            schur_alignment_diagnostics = None
+            if iteration in schur_alignment_diagnostic_iterations:
+                diagnostic_landmarks = accepted_landmarks.copy()
+                if arguments.worker_owned_landmarks:
+                    diagnostic_landmarks = worker.materialize_current_landmarks(
+                        point_indices_in_cluster,
+                        diagnostic_landmarks,
+                        cluster_count,
+                        arguments.iterations + iteration + 2,
+                        source="accepted",
+                    )
+                schur_alignment_base_cameras = to_physical_cameras(
+                    accepted_consensus, camera_scaling
+                )
+                schur_alignment_systems = worker.build_schur_systems(
+                    camera_indices_in_cluster,
+                    point_indices_in_cluster,
+                    accepted_consensus,
+                    diagnostic_landmarks,
+                    cluster_count,
+                    arguments.schur_alignment_landmark_damping,
+                )
+                (
+                    schur_alignment_tangent,
+                    schur_alignment_solve_diagnostics,
+                ) = solve_global_schur_system(
+                    schur_alignment_systems,
+                    camera_count,
+                    arguments.schur_alignment_camera_damping,
+                    1.0,
+                    arguments.shared_schur_linear_solver,
+                    arguments.shared_schur_relative_tolerance,
+                    arguments.shared_schur_maximum_iterations,
+                    operator_mode=arguments.shared_schur_operator,
+                )
+            shared_trust_region_active = (
+                iteration < arguments.shared_trust_region_until
+            )
+            iteration_shared_trust_region_radius = (
+                shared_trust_region_radius
+                if shared_trust_region_active else None
+            )
+            shared_trust_region_log_spread = float("nan")
+            diagonal_trust_until = (
+                arguments.diagonal_trust_until
+                or arguments.enhanced_inner_until
+            )
+            relative_residual_until = (
+                arguments.relative_residual_until
+                or arguments.enhanced_inner_until
+            )
+            diagonal_trust_active = diagonal_trust_is_active(
+                iteration, diagonal_trust_until
+            )
+            relative_residual_active = iteration < relative_residual_until
+            enhanced_inner_active = (
+                diagonal_trust_active or relative_residual_active
+            )
+            iteration_nesterov_maximum = (
+                arguments.enhanced_inner_max_iterations
+                if relative_residual_active
+                else arguments.nesterov_max_iterations
+            )
+            iteration_local_steps = (
+                adaptive_local_steps.copy()
+                if arguments.adaptive_local_depth
+                else arguments.local_steps
+            )
             reference_sse = accepted_metrics["sumSquaredError"]
             reference_dre = accepted_dre
             proximal_penalty = penalty
             proximal_block_regularization = block_regularization
             proximal_block_curvature_multiplier = block_curvature_multiplier
             recovery_exhausted = False
+            relaxed_acceptance_applied = False
             curvature_decay_applied = False
             oracle_initial_local_cameras = local_cameras.copy()
             oracle_initial_landmarks = landmarks.copy()
@@ -738,6 +2707,41 @@ def main():
             oracle_calls_this_iteration = 1
             accelerated_trials = 0
             accepted_acceleration_weight = 0.0
+            camera_copy_diagnostics = []
+            applied_unique_camera_metric_scale = (
+                current_unique_camera_metric_scale
+            )
+            next_unique_camera_metric_scale = (
+                current_unique_camera_metric_scale
+            )
+            shared_camera_compatibility = float("nan")
+            local_linear_iterations = np.full(cluster_count, np.nan)
+            local_linear_relative_residuals = np.full(cluster_count, np.nan)
+            unique_metric_selector_attempted = False
+            unique_metric_selector_selected = False
+            unique_metric_selector_sse = float("nan")
+            unique_metric_selector_dre = float("nan")
+            unique_metric_selector_rejected = False
+            iteration_schur_observability_diagnostic = (
+                arguments.global_schur_majorizer_observability_threshold >= 0.0
+                and not global_schur_majorizer_decided
+            )
+            iteration_schur_majorizer_active = (
+                global_schur_majorizer_decided
+                and global_schur_majorizer_selected
+                and (
+                    arguments.global_schur_majorizer_until == 0
+                    or iteration < arguments.global_schur_majorizer_until
+                )
+            )
+
+            camera_proximal_multipliers = camera_metric_multipliers(
+                camera_copy_count,
+                arguments.shared_camera_metric_beta,
+                applied_unique_camera_metric_scale,
+            )
+            if arguments.shared_only_camera_proximal:
+                camera_proximal_multipliers[camera_copy_count == 1] = 0.0
 
             prox_result = worker.solve_batch(
                 camera_indices_in_cluster,
@@ -753,7 +2757,7 @@ def main():
                 False,
                 initialize=False,
                 cluster_count=cluster_count,
-                local_steps=arguments.local_steps,
+                local_steps=iteration_local_steps,
                 local_solver=arguments.local_solver,
                 trust_region_policy=arguments.trust_region_policy,
                 camera_scaling=camera_scaling,
@@ -768,14 +2772,16 @@ def main():
                 metric_diagnostic_iterations=(
                     arguments.metric_diagnostic_iterations
                 ),
+                proximal_defect_diagnostic=(
+                    arguments.adaptive_local_depth
+                    or arguments.interior_defect_diagnostic
+                ),
                 landmark_refinement_steps=(
                     arguments.landmark_refinement_steps
                 ),
                 override_landmarks=override_landmarks,
                 return_metric_blocks=(arguments.proximal_metric == "block"),
-                return_metric_diagnostics=(
-                    arguments.metric_diagnostic_iterations > 0
-                ),
+                return_metric_diagnostics=return_proximal_diagnostics,
                 return_landmarks=not arguments.worker_owned_landmarks,
                 worker_owned_cameras=arguments.worker_owned_cameras,
                 return_consensus_rhs=arguments.worker_consensus_shadow,
@@ -784,10 +2790,47 @@ def main():
                     arguments.consensus_execution == "single-node"
                 ),
                 consensus_relaxation=arguments.relaxation,
-                nesterov_max_iterations=arguments.nesterov_max_iterations,
+                nesterov_max_iterations=iteration_nesterov_maximum,
                 nesterov_min_iterations=arguments.nesterov_min_iterations,
                 nesterov_stop_tolerance=arguments.nesterov_stop_tolerance,
+                diagonal_trust_damping=diagonal_trust_active,
+                nesterov_relative_residual=relative_residual_active,
+                camera_proximal_multipliers=camera_proximal_multipliers,
+                forced_trust_region_radius=(
+                    iteration_shared_trust_region_radius
+                ),
+                outer_iteration=iteration,
+                oracle_kind=1,
+                collect_camera_diagonal_metrics=(
+                    iteration in camera_diagonal_quantile_iterations
+                ),
+                schur_observability_diagnostic=(
+                    iteration_schur_observability_diagnostic
+                ),
+                schur_offdiagonal_majorizer=(
+                    iteration_schur_majorizer_active
+                ),
             )
+            local_linear_iterations = worker.last_linear_iterations.astype(
+                np.float64, copy=True
+            )
+            local_linear_relative_residuals = (
+                worker.last_linear_relative_residuals.copy()
+            )
+            if shared_trust_region_active:
+                returned_radii = worker.last_trust_region_radii
+                valid_radii = returned_radii[
+                    np.isfinite(returned_radii) & (returned_radii > 0.0)
+                ]
+                if valid_radii.size != cluster_count:
+                    raise RuntimeError(
+                        "worker omitted a synchronized trust-region radius"
+                    )
+                logarithms = np.log(valid_radii)
+                shared_trust_region_radius = float(np.exp(np.mean(logarithms)))
+                shared_trust_region_log_spread = float(
+                    np.max(logarithms) - np.min(logarithms)
+                )
             if arguments.worker_owned_landmarks:
                 suppressed_routine_landmark_replies += cluster_count
             proximal_oracle_calls += 1
@@ -796,7 +2839,7 @@ def main():
             single_node_summary = None
             if (
                 arguments.proximal_metric == "block"
-                and arguments.metric_diagnostic_iterations > 0
+                and return_proximal_diagnostics
             ):
                 if arguments.consensus_execution == "single-node":
                     prox_costs, single_node_summary, metric_diagnostics = (
@@ -825,8 +2868,268 @@ def main():
                 prox_costs = prox_result
                 raw_metric_blocks = None
                 metric_diagnostics = None
+            if iteration_schur_observability_diagnostic:
+                (
+                    global_schur_majorizer_selected,
+                    global_schur_observability_statistic,
+                    global_schur_observability_valid_clusters,
+                ) = select_global_schur_majorizer(
+                    metric_diagnostics["schurObservabilityFractions"],
+                    arguments.
+                    global_schur_majorizer_observability_threshold,
+                )
+                global_schur_majorizer_decided = True
+            projection_metric_blocks = (
+                worker.last_consensus_metric_blocks
+                if worker.last_consensus_metric_blocks is not None
+                else raw_metric_blocks
+            )
+            compatibility_diagnostic_requested = (
+                bool(camera_disagreement_diagnostic_ids)
+                and iteration in camera_disagreement_diagnostic_iterations
+            )
+            if (
+                unique_metric_selector is not None
+                or compatibility_diagnostic_requested
+            ):
+                shared_camera_compatibility, _ = (
+                    shared_camera_compatibility_ratio(
+                        local_cameras,
+                        centers,
+                        camera_masks,
+                        consensus,
+                        projection_metric_blocks,
+                        arguments.consensus_metric,
+                    )
+                )
+            consensus_prior_blocks = shared_floor_prior_blocks(
+                raw_metric_blocks,
+                projection_metric_blocks,
+                camera_masks,
+                arguments.consensus_shared_floor_prior_scale,
+            ) if arguments.consensus_shared_floor_prior_scale > 0.0 else None
             revert_landmark_mode = 0
             trust_region_recovery_ratio = 1.0
+
+            selected_local_camera_step_scale = arguments.local_camera_step_scale
+            selected_local_landmark_step_scale = arguments.local_camera_step_scale
+            corrected_local_data_objective = None
+            metric_proposal_disagreement_ratio = float("nan")
+            applied_metric_proposal_disagreement_scale = 1.0
+            metric_proposal_subspace_energy_fractions = np.full(3, np.nan)
+            if arguments.local_camera_step_scale != 1.0:
+                local_cameras[:] = centers + arguments.local_camera_step_scale * (
+                    local_cameras - centers
+                )
+                landmarks[:] = oracle_initial_landmarks + (
+                    arguments.local_camera_step_scale
+                    * (landmarks - oracle_initial_landmarks)
+                )
+            elif arguments.local_camera_step_grid != "1":
+                oracle_local_cameras = local_cameras.copy()
+                oracle_landmarks = landmarks.copy()
+                best_scale_sse = float("inf")
+                scales = tuple(map(float, arguments.local_camera_step_grid.split(",")))
+                for camera_scale in scales:
+                  for landmark_scale in scales:
+                    scaled_local_cameras = centers + camera_scale * (
+                        oracle_local_cameras - centers
+                    )
+                    scaled_landmarks = oracle_initial_landmarks + landmark_scale * (
+                        oracle_landmarks - oracle_initial_landmarks
+                    )
+                    scaled_consensus, _, _, _, _ = drs_step(
+                        scaled_local_cameras,
+                        centers,
+                        camera_masks,
+                        consensus,
+                        relaxation=arguments.relaxation,
+                        metric_blocks=projection_metric_blocks,
+                        metric_mode=arguments.consensus_metric,
+                    )
+                    scaled_metrics = evaluate_bal_state(
+                        to_physical_cameras(scaled_consensus, camera_scaling),
+                        scaled_landmarks,
+                        camera_indices,
+                        point_indices,
+                        observations,
+                    )
+                    if scaled_metrics["sumSquaredError"] < best_scale_sse:
+                        best_scale_sse = scaled_metrics["sumSquaredError"]
+                        selected_local_camera_step_scale = camera_scale
+                        selected_local_landmark_step_scale = landmark_scale
+                local_cameras[:] = centers + selected_local_camera_step_scale * (
+                    oracle_local_cameras - centers
+                )
+                landmarks[:] = oracle_initial_landmarks + (
+                    selected_local_landmark_step_scale
+                    * (oracle_landmarks - oracle_initial_landmarks)
+                )
+            elif arguments.shared_camera_step_grid != "1":
+                oracle_local_cameras = local_cameras.copy()
+                shared_cameras = np.sum(camera_masks, axis=0) > 1
+                best_scale_sse = float("inf")
+                for scale in map(float, arguments.shared_camera_step_grid.split(",")):
+                    scaled_local_cameras = oracle_local_cameras.copy()
+                    scaled_local_cameras[:, shared_cameras] = (
+                        centers[:, shared_cameras]
+                        + scale * (
+                            oracle_local_cameras[:, shared_cameras]
+                            - centers[:, shared_cameras]
+                        )
+                    )
+                    scaled_consensus, _, _, _, _ = drs_step(
+                        scaled_local_cameras,
+                        centers,
+                        camera_masks,
+                        consensus,
+                        relaxation=arguments.relaxation,
+                        metric_blocks=projection_metric_blocks,
+                        metric_mode=arguments.consensus_metric,
+                    )
+                    scaled_metrics = evaluate_bal_state(
+                        to_physical_cameras(scaled_consensus, camera_scaling),
+                        landmarks,
+                        camera_indices,
+                        point_indices,
+                        observations,
+                    )
+                    if scaled_metrics["sumSquaredError"] < best_scale_sse:
+                        best_scale_sse = scaled_metrics["sumSquaredError"]
+                        selected_local_camera_step_scale = scale
+                local_cameras[:, shared_cameras] = (
+                    centers[:, shared_cameras]
+                    + selected_local_camera_step_scale * (
+                        oracle_local_cameras[:, shared_cameras]
+                        - centers[:, shared_cameras]
+                    )
+                )
+            elif arguments.shared_camera_step_scale != 1.0:
+                shared_cameras = np.sum(camera_masks, axis=0) > 1
+                selected_local_camera_step_scale = arguments.shared_camera_step_scale
+                local_cameras[:, shared_cameras] = (
+                    centers[:, shared_cameras]
+                    + selected_local_camera_step_scale * (
+                        local_cameras[:, shared_cameras]
+                        - centers[:, shared_cameras]
+                    )
+                )
+            elif arguments.shared_camera_disagreement_scale != 1.0:
+                damp_shared_camera_disagreement(
+                    local_cameras,
+                    centers,
+                    camera_masks,
+                    arguments.shared_camera_disagreement_scale,
+                )
+            elif arguments.metric_proposal_subspace_scales != "1,1,1":
+                metric_proposal_subspace_energy_fractions = (
+                    damp_metric_projected_camera_subspaces(
+                        local_cameras,
+                        camera_masks,
+                        consensus,
+                        projection_metric_blocks,
+                        arguments.consensus_metric,
+                        tuple(map(
+                            float,
+                            arguments.metric_proposal_subspace_scales.split(","),
+                        )),
+                    )
+                )
+                corrected_local_data_objective = worker.evaluate_consensus_sse(
+                    camera_indices_in_cluster,
+                    local_cameras,
+                    cluster_count,
+                    preserve_cameras=True,
+                    packed_request_buffers=arguments.packed_request_buffers,
+                )
+            elif proposal_hysteresis is not None:
+                (
+                    metric_proposal_disagreement_ratio,
+                    applied_metric_proposal_disagreement_scale,
+                ) = damp_metric_projected_camera_proposals_hysteresis(
+                    local_cameras,
+                    centers,
+                    camera_masks,
+                    consensus,
+                    projection_metric_blocks,
+                    arguments.consensus_metric,
+                    metric_proposal_hysteresis_scale,
+                    *proposal_hysteresis,
+                )
+                corrected_local_data_objective = worker.evaluate_consensus_sse(
+                    camera_indices_in_cluster,
+                    local_cameras,
+                    cluster_count,
+                    preserve_cameras=True,
+                    packed_request_buffers=arguments.packed_request_buffers,
+                )
+            elif arguments.metric_proposal_disagreement_grid != "1":
+                (
+                    local_cameras,
+                    applied_metric_proposal_disagreement_scale,
+                    metric_proposal_disagreement_ratio,
+                    corrected_local_data_objective,
+                ) = select_metric_proposal_scale(
+                    local_cameras,
+                    centers,
+                    camera_masks,
+                    consensus,
+                    projection_metric_blocks,
+                    arguments.consensus_metric,
+                    tuple(map(
+                        float,
+                        arguments.metric_proposal_disagreement_grid.split(","),
+                    )),
+                    float(np.sum(prox_costs)),
+                    lambda candidate: worker.evaluate_consensus_sse(
+                        camera_indices_in_cluster,
+                        candidate,
+                        cluster_count,
+                        preserve_cameras=True,
+                        packed_request_buffers=arguments.packed_request_buffers,
+                    ),
+                )
+            elif arguments.metric_proposal_disagreement_scale != 1.0:
+                if (
+                    camera_disagreement_diagnostic_ids
+                    and iteration in camera_disagreement_diagnostic_iterations
+                ):
+                    camera_copy_diagnostics = camera_copy_disagreement_diagnostics(
+                        local_cameras,
+                        camera_masks,
+                        consensus,
+                        projection_metric_blocks,
+                        arguments.consensus_metric,
+                        camera_scaling,
+                        camera_disagreement_diagnostic_ids,
+                    )
+                (
+                    metric_proposal_disagreement_ratio,
+                    applied_metric_proposal_disagreement_scale,
+                ) = (
+                    damp_metric_projected_camera_proposals(
+                    local_cameras,
+                    centers,
+                    camera_masks,
+                    consensus,
+                    projection_metric_blocks,
+                    arguments.consensus_metric,
+                    arguments.metric_proposal_disagreement_scale,
+                    (
+                        arguments.metric_proposal_disagreement_threshold
+                        if arguments.metric_proposal_disagreement_threshold >= 0.0
+                        else None
+                    ),
+                    prior_blocks=consensus_prior_blocks,
+                    )
+                )
+                corrected_local_data_objective = worker.evaluate_consensus_sse(
+                    camera_indices_in_cluster,
+                    local_cameras,
+                    cluster_count,
+                    preserve_cameras=True,
+                    packed_request_buffers=arguments.packed_request_buffers,
+                )
 
             consensus_started_at = time.perf_counter()
             if single_node_summary is not None:
@@ -844,21 +3147,39 @@ def main():
                 )
                 selected_metric_blocks = None
             else:
-                (
-                    candidate_consensus,
-                    candidate_centers,
-                    _,
-                    residuals,
-                    selected_metric_blocks,
-                ) = drs_step(
-                    local_cameras,
-                    centers,
-                    camera_masks,
-                    consensus,
-                    relaxation=arguments.relaxation,
-                    metric_blocks=raw_metric_blocks,
-                    metric_mode=arguments.consensus_metric,
-                )
+                if (
+                    arguments.single_cluster_proximal
+                    and not arguments.shared_only_camera_proximal
+                ):
+                    (
+                        candidate_consensus,
+                        candidate_centers,
+                        residuals,
+                        selected_metric_blocks,
+                    ) = proximal_point_step(
+                        local_cameras,
+                        centers,
+                        camera_masks,
+                        metric_blocks=projection_metric_blocks,
+                    )
+                else:
+                    (
+                        candidate_consensus,
+                        candidate_centers,
+                        _,
+                        residuals,
+                        selected_metric_blocks,
+                    ) = drs_step(
+                        local_cameras,
+                        centers,
+                        camera_masks,
+                        consensus,
+                        relaxation=arguments.relaxation,
+                        metric_blocks=projection_metric_blocks,
+                        metric_mode=arguments.consensus_metric,
+                        prior_blocks=consensus_prior_blocks,
+                        shared_only=arguments.shared_only_camera_proximal,
+                    )
             consensus_projection_seconds += (
                 time.perf_counter() - consensus_started_at
             )
@@ -866,7 +3187,7 @@ def main():
                 rhs_error, consensus_error = validate_worker_consensus_rhs(
                     local_cameras,
                     centers,
-                    raw_metric_blocks,
+                    projection_metric_blocks,
                     worker_consensus_rhs,
                     candidate_consensus,
                 )
@@ -879,6 +3200,148 @@ def main():
             physical_candidate = to_physical_cameras(
                 candidate_consensus, camera_scaling
             )
+            if schur_alignment_tangent is not None:
+                consensus_tangent = left_se3_camera_minus(
+                    physical_candidate, schur_alignment_base_cameras
+                )
+                schur_alignment_gradient = np.zeros(
+                    (camera_count, 9), dtype=np.float64
+                )
+                schur_alignment_diagonal = np.zeros(
+                    (camera_count, 9), dtype=np.float64
+                )
+                for system in schur_alignment_systems:
+                    np.add.at(
+                        schur_alignment_gradient,
+                        system.camera_ids,
+                        system.reduced_gradient,
+                    )
+                    np.add.at(
+                        schur_alignment_diagonal,
+                        system.camera_ids,
+                        np.diagonal(
+                            system.camera_diagonal, axis1=1, axis2=2
+                        ),
+                    )
+                shared_cameras = camera_copy_count > 1
+                schur_alignment_diagnostics = {
+                    "cameraDamping": arguments.schur_alignment_camera_damping,
+                    "landmarkDamping": (
+                        arguments.schur_alignment_landmark_damping
+                    ),
+                    "allCameras": tangent_alignment(
+                        schur_alignment_tangent, consensus_tangent
+                    ),
+                    "allCamerasDiagonalWeighted": (
+                        diagonal_weighted_tangent_alignment(
+                            schur_alignment_tangent,
+                            consensus_tangent,
+                            schur_alignment_diagonal,
+                        )
+                    ),
+                    "sharedCameras": tangent_alignment(
+                        schur_alignment_tangent[shared_cameras],
+                        consensus_tangent[shared_cameras],
+                    ),
+                    "sharedCamerasDiagonalWeighted": (
+                        diagonal_weighted_tangent_alignment(
+                            schur_alignment_tangent[shared_cameras],
+                            consensus_tangent[shared_cameras],
+                            schur_alignment_diagonal[shared_cameras],
+                        )
+                    ),
+                    "schurGradientAction": float(np.sum(
+                        schur_alignment_gradient * schur_alignment_tangent
+                    )),
+                    "consensusGradientAction": float(np.sum(
+                        schur_alignment_gradient * consensus_tangent
+                    )),
+                    "consensusModel": evaluate_global_schur_direction(
+                        schur_alignment_systems,
+                        camera_count,
+                        arguments.schur_alignment_camera_damping,
+                        consensus_tangent,
+                    ),
+                    "schur": schur_alignment_solve_diagnostics,
+                }
+                if arguments.schur_model_consensus_clipping:
+                    consensus_model = schur_alignment_diagnostics[
+                        "consensusModel"
+                    ]
+                    model_optimal_scale = float(np.clip(
+                        -consensus_model["gradientAction"]
+                        / max(
+                            consensus_model["undampedQuadratic"],
+                            np.finfo(np.float64).tiny,
+                        ),
+                        0.0,
+                        1.0,
+                    ))
+                    model_scale = min(
+                        model_optimal_scale,
+                        arguments.schur_model_consensus_clipping_maximum_scale,
+                    )
+                    ordinary_worker_sse = worker.evaluate_consensus_sse(
+                        camera_indices_in_cluster,
+                        candidate_consensus,
+                        cluster_count,
+                        preserve_cameras=True,
+                        packed_request_buffers=arguments.packed_request_buffers,
+                    )
+                    clipping_eligible = model_optimal_scale >= (
+                        arguments.
+                        schur_model_consensus_clipping_minimum_scale
+                    )
+                    clipped_worker_sse = float("nan")
+                    clipping_selected = False
+                    if clipping_eligible:
+                        clipped_physical_candidate = left_se3_camera_plus(
+                            schur_alignment_base_cameras,
+                            model_scale * consensus_tangent,
+                        )
+                        clipped_consensus = to_scaled_cameras(
+                            clipped_physical_candidate, camera_scaling
+                        )
+                        clipped_worker_sse = worker.evaluate_consensus_sse(
+                            camera_indices_in_cluster,
+                            clipped_consensus,
+                            cluster_count,
+                            preserve_cameras=True,
+                            packed_request_buffers=(
+                                arguments.packed_request_buffers
+                            ),
+                        )
+                        clipping_selected = (
+                            clipped_worker_sse < ordinary_worker_sse
+                        )
+                    schur_alignment_diagnostics["modelOptimalScale"] = (
+                        model_optimal_scale
+                    )
+                    schur_alignment_diagnostics["modelScale"] = model_scale
+                    schur_alignment_diagnostics["clippingEligible"] = (
+                        clipping_eligible
+                    )
+                    schur_alignment_diagnostics["ordinaryWorkerSSE"] = (
+                        ordinary_worker_sse
+                    )
+                    schur_alignment_diagnostics["clippedWorkerSSE"] = (
+                        clipped_worker_sse
+                    )
+                    schur_alignment_diagnostics["clippingSelected"] = (
+                        clipping_selected
+                    )
+                    if clipping_selected:
+                        candidate_consensus = clipped_consensus
+                        physical_candidate = clipped_physical_candidate
+                        candidate_centers, residuals = drs_state_for_consensus(
+                            local_cameras,
+                            centers,
+                            camera_masks,
+                            candidate_consensus,
+                            arguments.relaxation,
+                            selected_metric_blocks,
+                            shared_only=arguments.shared_only_camera_proximal,
+                        )
             worker_sse = None
             if arguments.worker_owned_landmarks:
                 worker_sse = worker.evaluate_consensus_sse(
@@ -983,7 +3446,11 @@ def main():
                         camera_masks,
                     )
                 )
-                local_data_objective = float(np.sum(prox_costs))
+                local_data_objective = (
+                    corrected_local_data_objective
+                    if corrected_local_data_objective is not None
+                    else float(np.sum(prox_costs))
+                )
             splitting_term = (
                 single_node_summary.splitting_term
                 if single_node_summary is not None
@@ -994,6 +3461,7 @@ def main():
                     camera_masks,
                     splitting_scale,
                     metric_blocks=selected_metric_blocks,
+                    shared_only=arguments.shared_only_camera_proximal,
                 )
             )
             dre_model_envelope, douglas_rachford_envelope = (
@@ -1035,8 +3503,8 @@ def main():
                 themelis_model_threshold = float("nan")
                 themelis_decrease_passed = False
             dre_ratio, primal_ratio = relative_safeguard_ratios(
-                iteration,
-                arguments.iterations,
+                min(iteration, safeguard_annealing_iterations - 1),
+                safeguard_annealing_iterations,
                 dre_increase_at_reference=arguments.dre_relative_increase,
                 minimum_primal_ratio=arguments.minimum_primal_ratio,
             )
@@ -1079,14 +3547,28 @@ def main():
                     not np.isfinite(douglas_rachford_envelope)
                     or not np.isfinite(candidate_sse)
                 )
+            if (
+                rejected
+                and relaxed_exploration_remaining > 0
+                and np.isfinite(douglas_rachford_envelope)
+                and np.isfinite(candidate_sse)
+            ):
+                rejected = False
+                relaxed_exploration_remaining -= 1
+                relaxed_acceptance_applied = True
 
             nominal_trial = {
+                "trial_kind": "nominal",
                 "local_cameras": local_cameras.copy(),
                 "landmarks": landmarks.copy(),
                 "prox_costs": prox_costs.copy(),
                 "raw_metric_blocks": (
                     raw_metric_blocks.copy()
                     if raw_metric_blocks is not None else None
+                ),
+                "projection_metric_blocks": (
+                    projection_metric_blocks.copy()
+                    if projection_metric_blocks is not None else None
                 ),
                 "metric_diagnostics": metric_diagnostics,
                 "candidate_consensus": candidate_consensus.copy(),
@@ -1105,6 +3587,15 @@ def main():
                 "dre_model_envelope": dre_model_envelope,
                 "douglas_rachford_envelope": douglas_rachford_envelope,
                 "rejected": rejected,
+                "metric_proposal_disagreement_ratio": (
+                    metric_proposal_disagreement_ratio
+                ),
+                "applied_metric_proposal_disagreement_scale": (
+                    applied_metric_proposal_disagreement_scale
+                ),
+                "metric_proposal_subspace_energy_fractions": (
+                    metric_proposal_subspace_energy_fractions.copy()
+                ),
             }
             acceleration_proposal, proposal_is_accelerated = accelerator.propose(
                 oracle_input_centers,
@@ -1113,9 +3604,15 @@ def main():
             )
             selected_trial = nominal_trial
             evaluated_accelerated_trial = False
+            selector_triggered = (
+                unique_metric_selector is not None
+                and np.isfinite(shared_camera_compatibility)
+                and shared_camera_compatibility <= unique_metric_selector[1]
+            )
             if (
                 proposal_is_accelerated
                 or accelerator.requires_first_trial_observation
+                or selector_triggered
             ):
                 nominal_landmark_state_id = iteration + 1
                 if (
@@ -1128,18 +3625,49 @@ def main():
                         nominal_landmark_state_id,
                         "save",
                     )
-                for acceleration_weight in line_search_weights:
-                    if acceleration_weight == 0.0:
-                        continue
-                    evaluated_accelerated_trial = True
-                    accelerated_trials += 1
+                trial_specs = []
+                if selector_triggered:
+                    trial_specs.append((
+                        "unique_metric",
+                        0.0,
+                        oracle_input_centers.copy(),
+                        camera_metric_multipliers(
+                            camera_copy_count,
+                            arguments.shared_camera_metric_beta,
+                            unique_metric_selector[0],
+                        ),
+                    ))
+                if (
+                    proposal_is_accelerated
+                    or accelerator.requires_first_trial_observation
+                ):
+                    for acceleration_weight in line_search_weights:
+                        if acceleration_weight != 0.0:
+                            trial_specs.append((
+                                "acceleration",
+                                acceleration_weight,
+                                interpolate_line_search_center(
+                                    candidate_centers,
+                                    acceleration_proposal,
+                                    acceleration_weight,
+                                ),
+                                camera_proximal_multipliers,
+                            ))
+                for (
+                    trial_kind,
+                    acceleration_weight,
+                    trial_centers,
+                    trial_camera_multipliers,
+                ) in trial_specs:
+                    evaluated_accelerated_trial |= (
+                        trial_kind == "acceleration"
+                    )
+                    unique_metric_selector_attempted |= (
+                        trial_kind == "unique_metric"
+                    )
+                    accelerated_trials += trial_kind == "acceleration"
                     oracle_calls_this_iteration += 1
                     proximal_oracle_calls += 1
-                    trial_centers = interpolate_line_search_center(
-                        candidate_centers,
-                        acceleration_proposal,
-                        acceleration_weight,
-                    )
                     trial_local_cameras = oracle_initial_local_cameras.copy()
                     trial_landmarks = oracle_initial_landmarks.copy()
                     trial_result = worker.solve_batch(
@@ -1156,20 +3684,26 @@ def main():
                         False,
                         initialize=False,
                         cluster_count=cluster_count,
-                        local_steps=arguments.local_steps,
+                        local_steps=iteration_local_steps,
                         local_solver=arguments.local_solver,
                         trust_region_policy=arguments.trust_region_policy,
                         camera_scaling=camera_scaling,
-                        revert_landmarks=1,
+                        revert_landmarks=(
+                            2 if trial_kind == "unique_metric" else 1
+                        ),
                         persistent_trust_region=arguments.persistent_trust_region,
                         trust_region_recovery_ratio=1.0,
                         scalar_proximal_prior=(arguments.proximal_metric == "scalar"),
                         block_regularization=proximal_block_regularization,
                         block_curvature_multiplier=proximal_block_curvature_multiplier,
                         metric_diagnostic_iterations=arguments.metric_diagnostic_iterations,
+                        proximal_defect_diagnostic=(
+                            arguments.adaptive_local_depth
+                            or arguments.interior_defect_diagnostic
+                        ),
                         landmark_refinement_steps=arguments.landmark_refinement_steps,
                         return_metric_blocks=(arguments.proximal_metric == "block"),
-                        return_metric_diagnostics=(arguments.metric_diagnostic_iterations > 0),
+                        return_metric_diagnostics=return_proximal_diagnostics,
                         return_landmarks=(
                             not arguments.suppress_accelerated_landmark_replies
                             and not arguments.worker_owned_landmarks
@@ -1181,7 +3715,7 @@ def main():
                         ),
                         consensus_relaxation=arguments.relaxation,
                         nesterov_max_iterations=(
-                            arguments.nesterov_max_iterations
+                            iteration_nesterov_maximum
                         ),
                         nesterov_min_iterations=(
                             arguments.nesterov_min_iterations
@@ -1189,6 +3723,26 @@ def main():
                         nesterov_stop_tolerance=(
                             arguments.nesterov_stop_tolerance
                         ),
+                        diagonal_trust_damping=diagonal_trust_active,
+                        nesterov_relative_residual=relative_residual_active,
+                        camera_proximal_multipliers=trial_camera_multipliers,
+                        forced_trust_region_radius=(
+                            iteration_shared_trust_region_radius
+                        ),
+                        outer_iteration=iteration,
+                        oracle_kind=2,
+                        collect_camera_diagonal_metrics=False,
+                        schur_observability_diagnostic=(
+                            iteration_schur_observability_diagnostic
+                        ),
+                        schur_offdiagonal_majorizer=(
+                            iteration_schur_majorizer_active
+                        ),
+                    )
+                    trial_projection_blocks = (
+                        worker.last_consensus_metric_blocks
+                        if worker.last_consensus_metric_blocks is not None
+                        else None
                     )
                     if (
                         arguments.suppress_accelerated_landmark_replies
@@ -1197,7 +3751,7 @@ def main():
                         suppressed_accelerated_landmark_replies += cluster_count
                     if (
                         arguments.proximal_metric == "block"
-                        and arguments.metric_diagnostic_iterations > 0
+                        and return_proximal_diagnostics
                     ):
                         if arguments.consensus_execution == "single-node":
                             (
@@ -1226,6 +3780,146 @@ def main():
                         trial_raw_blocks = None
                         trial_diagnostics = None
                         trial_single_node_summary = None
+                    if trial_projection_blocks is None:
+                        trial_projection_blocks = trial_raw_blocks
+                    trial_prior_blocks = shared_floor_prior_blocks(
+                        trial_raw_blocks,
+                        trial_projection_blocks,
+                        camera_masks,
+                        arguments.consensus_shared_floor_prior_scale,
+                    ) if arguments.consensus_shared_floor_prior_scale > 0.0 else None
+                    trial_corrected_local_data_objective = None
+                    trial_metric_proposal_disagreement_ratio = float("nan")
+                    trial_applied_metric_proposal_disagreement_scale = 1.0
+                    trial_metric_proposal_subspace_energy_fractions = np.full(
+                        3, np.nan
+                    )
+                    if arguments.shared_camera_step_scale != 1.0:
+                        shared_cameras = np.sum(camera_masks, axis=0) > 1
+                        trial_local_cameras[:, shared_cameras] = (
+                            trial_centers[:, shared_cameras]
+                            + arguments.shared_camera_step_scale * (
+                                trial_local_cameras[:, shared_cameras]
+                                - trial_centers[:, shared_cameras]
+                            )
+                        )
+                    elif arguments.shared_camera_disagreement_scale != 1.0:
+                        damp_shared_camera_disagreement(
+                            trial_local_cameras,
+                            trial_centers,
+                            camera_masks,
+                            arguments.shared_camera_disagreement_scale,
+                        )
+                    elif arguments.metric_proposal_subspace_scales != "1,1,1":
+                        trial_metric_proposal_subspace_energy_fractions = (
+                            damp_metric_projected_camera_subspaces(
+                                trial_local_cameras,
+                                camera_masks,
+                                consensus,
+                                trial_raw_blocks,
+                                arguments.consensus_metric,
+                                tuple(map(
+                                    float,
+                                    arguments.metric_proposal_subspace_scales.split(","),
+                                )),
+                            )
+                        )
+                        trial_corrected_local_data_objective = (
+                            worker.evaluate_consensus_sse(
+                                camera_indices_in_cluster,
+                                trial_local_cameras,
+                                cluster_count,
+                                preserve_cameras=True,
+                                packed_request_buffers=(
+                                    arguments.packed_request_buffers
+                                ),
+                            )
+                        )
+                    elif proposal_hysteresis is not None:
+                        (
+                            trial_metric_proposal_disagreement_ratio,
+                            trial_applied_metric_proposal_disagreement_scale,
+                        ) = damp_metric_projected_camera_proposals_hysteresis(
+                            trial_local_cameras,
+                            trial_centers,
+                            camera_masks,
+                            consensus,
+                            trial_projection_blocks,
+                            arguments.consensus_metric,
+                            metric_proposal_hysteresis_scale,
+                            *proposal_hysteresis,
+                        )
+                        trial_corrected_local_data_objective = (
+                            worker.evaluate_consensus_sse(
+                                camera_indices_in_cluster,
+                                trial_local_cameras,
+                                cluster_count,
+                                preserve_cameras=True,
+                                packed_request_buffers=(
+                                    arguments.packed_request_buffers
+                                ),
+                            )
+                        )
+                    elif arguments.metric_proposal_disagreement_grid != "1":
+                        (
+                            trial_local_cameras,
+                            trial_applied_metric_proposal_disagreement_scale,
+                            trial_metric_proposal_disagreement_ratio,
+                            trial_corrected_local_data_objective,
+                        ) = select_metric_proposal_scale(
+                            trial_local_cameras,
+                            trial_centers,
+                            camera_masks,
+                            consensus,
+                            trial_projection_blocks,
+                            arguments.consensus_metric,
+                            tuple(map(
+                                float,
+                                arguments.metric_proposal_disagreement_grid.split(","),
+                            )),
+                            float(np.sum(trial_prox_costs)),
+                            lambda candidate: worker.evaluate_consensus_sse(
+                                camera_indices_in_cluster,
+                                candidate,
+                                cluster_count,
+                                preserve_cameras=True,
+                                packed_request_buffers=(
+                                    arguments.packed_request_buffers
+                                ),
+                            ),
+                        )
+                    elif arguments.metric_proposal_disagreement_scale != 1.0:
+                        (
+                            trial_metric_proposal_disagreement_ratio,
+                            trial_applied_metric_proposal_disagreement_scale,
+                        ) = (
+                            damp_metric_projected_camera_proposals(
+                            trial_local_cameras,
+                            trial_centers,
+                            camera_masks,
+                            consensus,
+                            trial_projection_blocks,
+                            arguments.consensus_metric,
+                            arguments.metric_proposal_disagreement_scale,
+                            (
+                                arguments.metric_proposal_disagreement_threshold
+                                if arguments.metric_proposal_disagreement_threshold >= 0.0
+                                else None
+                            ),
+                            prior_blocks=trial_prior_blocks,
+                            )
+                        )
+                        trial_corrected_local_data_objective = (
+                            worker.evaluate_consensus_sse(
+                                camera_indices_in_cluster,
+                                trial_local_cameras,
+                                cluster_count,
+                                preserve_cameras=True,
+                                packed_request_buffers=(
+                                    arguments.packed_request_buffers
+                                ),
+                            )
+                        )
                     consensus_started_at = time.perf_counter()
                     if arguments.consensus_execution == "single-node":
                         (
@@ -1254,13 +3948,15 @@ def main():
                             camera_masks,
                             oracle_input_consensus,
                             relaxation=arguments.relaxation,
-                            metric_blocks=trial_raw_blocks,
+                            metric_blocks=trial_projection_blocks,
                             metric_mode=arguments.consensus_metric,
+                            prior_blocks=trial_prior_blocks,
+                            shared_only=arguments.shared_only_camera_proximal,
                         )
                     consensus_projection_seconds += (
                         time.perf_counter() - consensus_started_at
                     )
-                    if acceleration_weight == 1.0:
+                    if trial_kind == "acceleration" and acceleration_weight == 1.0:
                         accelerator.observe_first_trial(
                             trial_centers - trial_next_centers
                         )
@@ -1337,7 +4033,11 @@ def main():
                                 camera_masks,
                             )
                         )
-                        trial_local_objective = float(np.sum(trial_prox_costs))
+                        trial_local_objective = (
+                            trial_corrected_local_data_objective
+                            if trial_corrected_local_data_objective is not None
+                            else float(np.sum(trial_prox_costs))
+                        )
                     trial_splitting_term = (
                         trial_single_node_summary.splitting_term
                         if arguments.consensus_execution == "single-node"
@@ -1348,6 +4048,7 @@ def main():
                             camera_masks,
                             trial_splitting_scale,
                             metric_blocks=trial_selected_blocks,
+                            shared_only=arguments.shared_only_camera_proximal,
                         )
                     )
                     trial_model_dre, trial_dre = complete_douglas_rachford_envelope(
@@ -1475,12 +4176,28 @@ def main():
                             "sumSquaredError": trial_sse,
                             "meanReprojectionError": float("nan"),
                         }
-                    if not trial_rejected:
+                    if trial_kind == "unique_metric":
+                        unique_metric_selector_sse = trial_sse
+                        unique_metric_selector_dre = trial_dre
+                        unique_metric_selector_rejected = trial_rejected
+                    trial_is_better = prefer_metric_selector_trial(
+                        nominal_trial["rejected"],
+                        nominal_trial["douglas_rachford_envelope"],
+                        nominal_trial["candidate_sse"],
+                        trial_rejected,
+                        trial_dre,
+                        trial_sse,
+                    )
+                    if not trial_rejected and (
+                        trial_kind == "acceleration" or trial_is_better
+                    ):
                         selected_trial = {
+                            "trial_kind": trial_kind,
                             "local_cameras": trial_local_cameras,
                             "landmarks": trial_landmarks,
                             "prox_costs": trial_prox_costs,
                             "raw_metric_blocks": trial_raw_blocks,
+                            "projection_metric_blocks": trial_projection_blocks,
                             "metric_diagnostics": trial_diagnostics,
                             "candidate_consensus": trial_consensus,
                             "candidate_centers": trial_next_centers,
@@ -1495,8 +4212,20 @@ def main():
                             "dre_model_envelope": trial_model_dre,
                             "douglas_rachford_envelope": trial_dre,
                             "rejected": False,
+                            "metric_proposal_disagreement_ratio": (
+                                trial_metric_proposal_disagreement_ratio
+                            ),
+                            "applied_metric_proposal_disagreement_scale": (
+                                trial_applied_metric_proposal_disagreement_scale
+                            ),
+                            "metric_proposal_subspace_energy_fractions": (
+                                trial_metric_proposal_subspace_energy_fractions
+                            ),
                         }
-                        accepted_acceleration_weight = acceleration_weight
+                        if trial_kind == "unique_metric":
+                            unique_metric_selector_selected = True
+                        else:
+                            accepted_acceleration_weight = acceleration_weight
                         break
 
             if selected_trial is not nominal_trial:
@@ -1504,6 +4233,9 @@ def main():
                 landmarks = selected_trial["landmarks"]
                 prox_costs = selected_trial["prox_costs"]
                 raw_metric_blocks = selected_trial["raw_metric_blocks"]
+                projection_metric_blocks = selected_trial[
+                    "projection_metric_blocks"
+                ]
                 metric_diagnostics = selected_trial["metric_diagnostics"]
                 candidate_consensus = selected_trial["candidate_consensus"]
                 candidate_centers = selected_trial["candidate_centers"]
@@ -1519,24 +4251,52 @@ def main():
                 splitting_term = selected_trial["splitting_term"]
                 dre_model_envelope = selected_trial["dre_model_envelope"]
                 douglas_rachford_envelope = selected_trial["douglas_rachford_envelope"]
+                metric_proposal_disagreement_ratio = selected_trial[
+                    "metric_proposal_disagreement_ratio"
+                ]
+                applied_metric_proposal_disagreement_scale = selected_trial[
+                    "applied_metric_proposal_disagreement_scale"
+                ]
+                metric_proposal_subspace_energy_fractions = selected_trial[
+                    "metric_proposal_subspace_energy_fractions"
+                ]
                 rejected = False
-                accelerated_acceptances += 1
-                acceleration_failures = 0
-                accelerator.accepted(True)
+                if selected_trial["trial_kind"] == "acceleration":
+                    accelerated_acceptances += 1
+                    acceleration_failures = 0
+                    accelerator.accepted(True)
             else:
                 local_cameras = nominal_trial["local_cameras"]
                 landmarks = nominal_trial["landmarks"]
-                if evaluated_accelerated_trial and not rejected:
-                    nominal_fallbacks += 1
-                    acceleration_failures += 1
+                if (
+                    evaluated_accelerated_trial
+                    or unique_metric_selector_attempted
+                ) and not rejected:
                     override_landmarks = not arguments.worker_owned_landmarks
-                    accelerator.accepted(False)
-                    if acceleration_failures >= arguments.acceleration_restart_after:
-                        accelerator.reset()
-                        acceleration_failures = 0
+                    if evaluated_accelerated_trial:
+                        nominal_fallbacks += 1
+                        acceleration_failures += 1
+                        accelerator.accepted(False)
+                        if acceleration_failures >= arguments.acceleration_restart_after:
+                            accelerator.reset()
+                            acceleration_failures = 0
                 elif rejected:
                     accelerator.reset()
                     acceleration_failures = 0
+
+            proximal_point_sse = float("nan")
+            if (
+                (cluster_count == 1 or arguments.single_cluster_proximal)
+                and not arguments.worker_owned_cameras
+                and not arguments.worker_owned_landmarks
+            ):
+                proximal_point_sse = evaluate_bal_state(
+                    to_physical_cameras(local_cameras[0], camera_scaling),
+                    landmarks,
+                    camera_indices,
+                    point_indices,
+                    observations,
+                )["sumSquaredError"]
 
             if (
                 evaluated_accelerated_trial
@@ -1621,6 +4381,24 @@ def main():
                 not np.isfinite(candidate_sse)
                 or candidate_sse > primal_ratio * reference_sse
             )
+            bootstrap_basin_guard_triggered = False
+            bootstrap_basin_guard_released = False
+            if bootstrap_basin_guard_active:
+                guard_rejected, guard_released = (
+                    bootstrap_basin_guard_decision(
+                        candidate_sse,
+                        bootstrap_basin_guard_ceiling,
+                        True,
+                    )
+                )
+                if guard_rejected:
+                    rejected = True
+                    bootstrap_basin_guard_triggered = True
+                    bootstrap_basin_guard_rejections += 1
+                elif guard_released and not rejected:
+                    bootstrap_basin_guard_active = False
+                    bootstrap_basin_guard_released = True
+                    bootstrap_basin_guard_release_iteration = iteration
             if rejected:
                 rejected_count += 1
                 if arguments.worker_owned_landmarks:
@@ -1689,6 +4467,48 @@ def main():
                         arguments.trust_region_recovery_ratio
                     )
                 recovery_action = "accepted_consensus_reset"
+                if (
+                    recovery_exhausted
+                    and arguments.recovery_exhaustion_policy
+                    == "restart_best_relaxed"
+                ):
+                    best_scaled_cameras = to_scaled_cameras(
+                        best_cameras, camera_scaling
+                    )
+                    local_cameras, centers, consensus = reset_to_consensus(
+                        best_scaled_cameras, cluster_count
+                    )
+                    landmarks = best_points.copy()
+                    accepted_consensus = consensus.copy()
+                    accepted_landmarks = landmarks.copy()
+                    accepted_metrics = best_metrics.copy()
+                    metrics = accepted_metrics
+                    accepted_dre = (
+                        douglas_rachford_envelope
+                        if np.isfinite(douglas_rachford_envelope)
+                        else best_sse
+                    )
+                    accepted_model_dre = accepted_dre
+                    accepted_fixed_point_squared = 0.0
+                    if arguments.worker_owned_landmarks:
+                        worker.control_nominal_landmark_state(
+                            cluster_count, iteration + 1, "restore_best"
+                        )
+                        worker.control_nominal_landmark_state(
+                            cluster_count, iteration + 1, "save_accepted"
+                        )
+                    revert_landmark_mode = (
+                        3 if arguments.worker_owned_landmarks else 2
+                    )
+                    accelerator.reset()
+                    acceleration_failures = 0
+                    accepted_since_curvature_increase = 0
+                    relaxed_exploration_remaining = (
+                        arguments.recovery_relaxed_iterations
+                    )
+                    best_checkpoint_restarts += 1
+                    recovery_exhausted = False
+                    recovery_action = "best_checkpoint_restart"
             else:
                 centers = candidate_centers
                 consensus = candidate_consensus
@@ -1706,6 +4526,10 @@ def main():
                     )
                 metrics = candidate_metrics
                 recovery_action = "none"
+                if proposal_hysteresis is not None:
+                    metric_proposal_hysteresis_scale = (
+                        applied_metric_proposal_disagreement_scale
+                    )
                 accepted_since_curvature_increase += 1
                 if (
                     arguments.curvature_decay_after > 0
@@ -1750,15 +4574,113 @@ def main():
                 proximal_defect_squared = float("nan")
                 proximal_defect_maximum_squared = float("nan")
                 proximal_defect_to_fixed_point_ratio = float("nan")
+            if metric_diagnostics is not None and np.any(np.isfinite(
+                metric_diagnostics["interiorDefectSquared"]
+            )):
+                unique_camera_interior_defect_squared = float(np.nansum(
+                    metric_diagnostics["uniqueCameraInteriorDefectSquared"]
+                ))
+                landmark_interior_defect_squared = float(np.nansum(
+                    metric_diagnostics["landmarkInteriorDefectSquared"]
+                ))
+                interior_defect_squared = float(np.nansum(
+                    metric_diagnostics["interiorDefectSquared"]
+                ))
+                interior_defect_maximum_squared = float(np.nanmax(
+                    metric_diagnostics["interiorDefectSquared"]
+                ))
+            else:
+                unique_camera_interior_defect_squared = float("nan")
+                landmark_interior_defect_squared = float("nan")
+                interior_defect_squared = float("nan")
+                interior_defect_maximum_squared = float("nan")
+            if metric_diagnostics is not None:
+                interior_defect_objective_ratio_by_cluster = np.divide(
+                    metric_diagnostics["interiorDefectSquared"],
+                    np.maximum(prox_costs, np.finfo(np.float64).tiny),
+                )
+            else:
+                interior_defect_objective_ratio_by_cluster = np.full(
+                    cluster_count, np.nan
+                )
+
+            adaptive_rolling_defect_ratio = float("nan")
+            adaptive_rolling_defect_ratio_by_cluster = np.full(
+                cluster_count, np.nan
+            )
+            next_local_steps = (
+                iteration_local_steps.copy()
+                if arguments.adaptive_local_depth
+                else iteration_local_steps
+            )
+            adaptive_depth_changed = False
+            if (
+                arguments.adaptive_local_depth
+                and iteration >= arguments.adaptive_local_depth_start
+                and not rejected
+                and np.any(np.isfinite(
+                    interior_defect_objective_ratio_by_cluster
+                ))
+            ):
+                adaptive_defect_history.append(
+                    interior_defect_objective_ratio_by_cluster.copy()
+                )
+                adaptive_defect_history = adaptive_defect_history[
+                    -arguments.adaptive_local_depth_window:
+                ]
+                adaptive_depth_dwell_remaining = np.maximum(
+                    adaptive_depth_dwell_remaining - 1, 0
+                )
+                if len(adaptive_defect_history) == (
+                    arguments.adaptive_local_depth_window
+                ):
+                    adaptive_rolling_defect_ratio_by_cluster = np.nanmedian(
+                        np.stack(adaptive_defect_history), axis=0
+                    )
+                    finite_rolling = np.isfinite(
+                        adaptive_rolling_defect_ratio_by_cluster
+                    )
+                    increase_depth = (
+                        (iteration_local_steps == arguments.local_steps)
+                        & finite_rolling
+                        & (adaptive_rolling_defect_ratio_by_cluster
+                           > arguments.adaptive_local_depth_high)
+                    )
+                    decrease_depth = (
+                        (iteration_local_steps
+                         == arguments.adaptive_local_depth_maximum)
+                        & (adaptive_depth_dwell_remaining == 0)
+                        & finite_rolling
+                        & (adaptive_rolling_defect_ratio_by_cluster
+                           < arguments.adaptive_local_depth_low)
+                    )
+                    next_local_steps[increase_depth] = (
+                        arguments.adaptive_local_depth_maximum
+                    )
+                    next_local_steps[decrease_depth] = arguments.local_steps
+                    changed_clusters = increase_depth | decrease_depth
+                    adaptive_depth_changed = bool(np.any(changed_clusters))
+                    adaptive_depth_dwell_remaining[changed_clusters] = (
+                        arguments.adaptive_local_depth_dwell
+                    )
+                    adaptive_rolling_defect_ratio = float(np.nanmax(
+                        adaptive_rolling_defect_ratio_by_cluster
+                    ))
+            if arguments.adaptive_local_depth:
+                adaptive_local_steps = next_local_steps.copy()
+
 
             row = {
                 "iteration": iteration,
+                "localCameraStepScale": selected_local_camera_step_scale,
+                "localLandmarkStepScale": selected_local_landmark_step_scale,
                 "overallSeconds": time.perf_counter() - started_at,
                 "optimizationSeconds": (
                     time.perf_counter() - optimization_started_at
                 ),
                 "sumSquaredError": metrics["sumSquaredError"],
                 "candidateSumSquaredError": candidate_sse,
+                "proximalPointSumSquaredError": proximal_point_sse,
                 "refinedCandidateSumSquaredError": (
                     reporting_candidate_metrics["sumSquaredError"]
                 ),
@@ -1769,6 +4691,21 @@ def main():
                 "fixedPointResidualSquared": residuals.fixed_point_squared,
                 "proximalDisplacementSquared": (
                     residuals.proximal_displacement_squared
+                ),
+                "metricProposalDisagreementRatio": (
+                    metric_proposal_disagreement_ratio
+                ),
+                "appliedMetricProposalDisagreementScale": (
+                    applied_metric_proposal_disagreement_scale
+                ),
+                "metricProposalRotationEnergyFraction": (
+                    metric_proposal_subspace_energy_fractions[0]
+                ),
+                "metricProposalTranslationEnergyFraction": (
+                    metric_proposal_subspace_energy_fractions[1]
+                ),
+                "metricProposalIntrinsicsEnergyFraction": (
+                    metric_proposal_subspace_energy_fractions[2]
                 ),
                 "reflectionProjectionSquared": (
                     residuals.reflection_projection_squared
@@ -1788,8 +4725,75 @@ def main():
                 "primalThreshold": primal_ratio * reference_sse,
                 "dreThresholdExceeded": bool(dre_threshold_exceeded),
                 "primalThresholdExceeded": bool(primal_threshold_exceeded),
+                "bootstrapBasinGuardActive": bootstrap_basin_guard_active,
+                "bootstrapBasinGuardTriggered": (
+                    bootstrap_basin_guard_triggered
+                ),
+                "bootstrapBasinGuardReleased": (
+                    bootstrap_basin_guard_released
+                ),
+                "bootstrapBasinGuardCeiling": bootstrap_basin_guard_ceiling,
                 "recoveryAction": recovery_action,
+                "relaxedAcceptanceApplied": relaxed_acceptance_applied,
+                "relaxedExplorationRemaining": relaxed_exploration_remaining,
+                "bestCheckpointRestarts": best_checkpoint_restarts,
+                "cameraCopyDiagnostics": camera_copy_diagnostics,
+                "sharedCameraCompatibilityRatio": (
+                    shared_camera_compatibility
+                ),
+                "schurAlignmentDiagnostics": schur_alignment_diagnostics,
+                "uniqueCameraMetricScale": (
+                    applied_unique_camera_metric_scale
+                ),
+                "nextUniqueCameraMetricScale": (
+                    next_unique_camera_metric_scale
+                ),
+                "uniqueMetricSelectorAttempted": (
+                    unique_metric_selector_attempted
+                ),
+                "uniqueMetricSelectorSelected": (
+                    unique_metric_selector_selected
+                ),
+                "uniqueMetricSelectorSSE": unique_metric_selector_sse,
+                "uniqueMetricSelectorDRE": unique_metric_selector_dre,
+                "uniqueMetricSelectorRejected": (
+                    unique_metric_selector_rejected
+                ),
                 "outerAcceleration": arguments.outer_acceleration,
+                "enhancedInnerActive": enhanced_inner_active,
+                "diagonalTrustActive": diagonal_trust_active,
+                "relativeResidualActive": relative_residual_active,
+                "sharedTrustRegionActive": shared_trust_region_active,
+                "sharedTrustRegionRadius": (
+                    iteration_shared_trust_region_radius
+                    if shared_trust_region_active else float("nan")
+                ),
+                "nextSharedTrustRegionRadius": (
+                    shared_trust_region_radius
+                    if shared_trust_region_active else float("nan")
+                ),
+                "sharedTrustRegionLogSpread": (
+                    shared_trust_region_log_spread
+                ),
+                "nesterovMaximumUsed": iteration_nesterov_maximum,
+                "localLinearIterationsMinimum": float(np.nanmin(
+                    local_linear_iterations
+                )),
+                "localLinearIterationsMedian": float(np.nanmedian(
+                    local_linear_iterations
+                )),
+                "localLinearIterationsMaximum": float(np.nanmax(
+                    local_linear_iterations
+                )),
+                "localLinearRelativeResidualMinimum": float(np.nanmin(
+                    local_linear_relative_residuals
+                )),
+                "localLinearRelativeResidualMedian": float(np.nanmedian(
+                    local_linear_relative_residuals
+                )),
+                "localLinearRelativeResidualMaximum": float(np.nanmax(
+                    local_linear_relative_residuals
+                )),
                 "lineSearchGrid": arguments.line_search_grid,
                 "acceptedAccelerationWeight": accepted_acceleration_weight,
                 "acceleratedTrials": accelerated_trials,
@@ -1827,6 +4831,28 @@ def main():
                     if metric_diagnostics is not None
                     else []
                 ),
+                "schurObservabilityFractions": (
+                    metric_diagnostics[
+                        "schurObservabilityFractions"
+                    ].tolist()
+                    if metric_diagnostics is not None
+                    else []
+                ),
+                "globalSchurMajorizerDecisionMade": (
+                    iteration_schur_observability_diagnostic
+                ),
+                "globalSchurMajorizerSelected": (
+                    global_schur_majorizer_selected
+                ),
+                "globalSchurMajorizerActive": (
+                    iteration_schur_majorizer_active
+                ),
+                "globalSchurObservabilityStatistic": (
+                    global_schur_observability_statistic
+                ),
+                "globalSchurObservabilityValidClusters": (
+                    global_schur_observability_valid_clusters
+                ),
                 "transformedLipschitzMaximum": (
                     transformed_lipschitz_maximum
                 ),
@@ -1859,6 +4885,47 @@ def main():
                 "proximalDefectToFixedPointRatio": (
                     proximal_defect_to_fixed_point_ratio
                 ),
+                "uniqueCameraInteriorDefectSquared": (
+                    unique_camera_interior_defect_squared
+                ),
+                "landmarkInteriorDefectSquared": (
+                    landmark_interior_defect_squared
+                ),
+                "interiorDefectSquared": interior_defect_squared,
+                "interiorDefectMaximumSquared": (
+                    interior_defect_maximum_squared
+                ),
+                "interiorDefectSquaredByCluster": (
+                    metric_diagnostics["interiorDefectSquared"].tolist()
+                    if metric_diagnostics is not None else []
+                ),
+                "localProximalObjectiveByCluster": prox_costs.tolist(),
+                "interiorDefectObjectiveRatioByCluster": (
+                    interior_defect_objective_ratio_by_cluster.tolist()
+                ),
+                "localStepsUsed": (
+                    iteration_local_steps.tolist()
+                    if arguments.adaptive_local_depth
+                    else iteration_local_steps
+                ),
+                "nextLocalSteps": (
+                    next_local_steps.tolist()
+                    if arguments.adaptive_local_depth
+                    else next_local_steps
+                ),
+                "adaptiveDefectRollingMedian": (
+                    adaptive_rolling_defect_ratio
+                ),
+                "adaptiveDefectRollingMedianByCluster": (
+                    adaptive_rolling_defect_ratio_by_cluster.tolist()
+                ),
+                "adaptiveDepthChanged": adaptive_depth_changed,
+                "adaptiveDepthDwellRemaining": (
+                    int(np.max(adaptive_depth_dwell_remaining))
+                ),
+                "adaptiveDepthDwellRemainingByCluster": (
+                    adaptive_depth_dwell_remaining.tolist()
+                ),
                 "nextBlockRegularization": block_regularization,
                 "transportBytesSent": worker.sent_bytes,
                 "transportBytesReceived": worker.received_bytes,
@@ -1869,6 +4936,7 @@ def main():
                 and reporting_candidate_metrics["sumSquaredError"] < best_sse
             ):
                 best_sse = reporting_candidate_metrics["sumSquaredError"]
+                best_metrics = reporting_candidate_metrics.copy()
                 best_iteration = iteration
                 best_cameras = to_physical_cameras(consensus, camera_scaling).copy()
                 if arguments.worker_owned_landmarks:
@@ -1905,6 +4973,262 @@ def main():
                 max(1, best_iteration + 1),
                 source="best",
             )
+        if arguments.final_shared_schur_correction:
+            final_shared_schur_attempted = True
+            final_shared_schur_initial_sse = best_sse
+            schur_started = time.perf_counter()
+            camera_damping = arguments.shared_schur_camera_damping
+            landmark_damping = arguments.shared_schur_landmark_damping
+            rejection_damping_factor = 2.0
+            final_shared_schur_worker_sse = best_sse
+            final_shared_schur_termination = "maximum_corrections"
+            stop_schur_corrections = False
+            previous_tangent_step = None
+            screening_correction = 0
+            confirmation_correction = 0
+            correction = 0
+            confirmation_active = False
+            while True:
+                if (
+                    not confirmation_active
+                    and screening_correction
+                    >= arguments.shared_schur_maximum_corrections
+                ):
+                    confirmation_active = True
+                    previous_tangent_step = None
+                    if (
+                        arguments.shared_schur_confirmation_camera_damping
+                        > 0.0
+                    ):
+                        camera_damping = (
+                            arguments.
+                            shared_schur_confirmation_camera_damping
+                        )
+                    if (
+                        arguments.shared_schur_confirmation_landmark_damping
+                        > 0.0
+                    ):
+                        landmark_damping = (
+                            arguments.
+                            shared_schur_confirmation_landmark_damping
+                        )
+                    rejection_damping_factor = 2.0
+                if confirmation_active:
+                    if confirmation_correction >= (
+                        arguments.shared_schur_python_confirmation_corrections
+                    ):
+                        break
+                    correction_operator = "python"
+                else:
+                    correction_operator = arguments.shared_schur_operator
+                correction_accepted = False
+                for attempt in range(arguments.shared_schur_maximum_attempts):
+                    attempt_started = time.perf_counter()
+                    attempt_initial_sse = best_sse
+                    scaled_best_cameras = to_scaled_cameras(
+                        best_cameras, camera_scaling
+                    )
+                    schur_systems = worker.build_schur_systems(
+                        camera_indices_in_cluster,
+                        point_indices_in_cluster,
+                        scaled_best_cameras,
+                        best_points,
+                        cluster_count,
+                        landmark_damping,
+                    )
+                    tangent_step, schur_diagnostics = (
+                        solve_global_schur_system(
+                            schur_systems,
+                            camera_count,
+                            camera_damping,
+                            arguments.shared_schur_step_scale,
+                            arguments.shared_schur_linear_solver,
+                            arguments.shared_schur_relative_tolerance,
+                            arguments.shared_schur_maximum_iterations,
+                            (
+                                previous_tangent_step
+                                if arguments.shared_schur_warm_start
+                                else None
+                            ),
+                            correction_operator,
+                        )
+                    )
+                    previous_tangent_step = tangent_step
+                    (
+                        corrected_costs,
+                        corrected_scaled_cameras,
+                        corrected_points,
+                    ) = worker.apply_camera_step(
+                        camera_indices_in_cluster,
+                        point_indices_in_cluster,
+                        scaled_best_cameras,
+                        best_points,
+                        tangent_step,
+                        cluster_count,
+                        arguments.shared_schur_landmark_refinement_steps,
+                    )
+                    candidate_worker_sse = float(np.sum(corrected_costs))
+                    corrected_cameras = to_physical_cameras(
+                        corrected_scaled_cameras, camera_scaling
+                    )
+                    corrected_metrics = evaluate_bal_state(
+                        corrected_cameras,
+                        corrected_points,
+                        camera_indices,
+                        point_indices,
+                        observations,
+                    )
+                    candidate_sse = corrected_metrics["sumSquaredError"]
+                    relative_decrease = (
+                        (attempt_initial_sse - candidate_sse)
+                        / max(
+                            attempt_initial_sse,
+                            np.finfo(np.float64).tiny,
+                        )
+                        if np.isfinite(candidate_sse)
+                        else float("-inf")
+                    )
+                    actual_reduction = 0.5 * (
+                        attempt_initial_sse - candidate_sse
+                    )
+                    damped_predicted_reduction = schur_diagnostics[
+                        "dampedPredictedReduction"
+                    ]
+                    undamped_predicted_reduction = schur_diagnostics[
+                        "undampedPredictedReduction"
+                    ]
+                    damped_gain_ratio = (
+                        actual_reduction / damped_predicted_reduction
+                        if damped_predicted_reduction > 0.0
+                        else float("-inf")
+                    )
+                    undamped_gain_ratio = (
+                        actual_reduction / undamped_predicted_reduction
+                        if undamped_predicted_reduction > 0.0
+                        else float("-inf")
+                    )
+                    accepted = (
+                        np.isfinite(candidate_sse)
+                        and candidate_sse < attempt_initial_sse
+                        and schur_diagnostics["linearTermination"] == 0
+                        and (
+                            arguments.shared_schur_damping_policy
+                            != "model_ratio"
+                            or damped_gain_ratio
+                            > arguments.shared_schur_minimum_gain_ratio
+                        )
+                    )
+                    final_shared_schur_diagnostics = schur_diagnostics
+                    final_shared_schur_attempts.append({
+                        "correction": correction,
+                        "phase": (
+                            "confirmation"
+                            if confirmation_active else "screening"
+                        ),
+                        "operator": correction_operator,
+                        "attempt": attempt,
+                        "cameraDamping": camera_damping,
+                        "landmarkDamping": landmark_damping,
+                        "initialSSE": attempt_initial_sse,
+                        "candidateSSE": candidate_sse,
+                        "workerSSE": candidate_worker_sse,
+                        "relativeDecrease": relative_decrease,
+                        "actualReduction": actual_reduction,
+                        "dampedGainRatio": damped_gain_ratio,
+                        "undampedGainRatio": undamped_gain_ratio,
+                        "accepted": accepted,
+                        "seconds": time.perf_counter() - attempt_started,
+                        "diagnostics": schur_diagnostics,
+                    })
+                    if accepted:
+                        correction_accepted = True
+                        final_shared_schur_accepted = True
+                        final_shared_schur_accepted_corrections += 1
+                        if confirmation_active:
+                            final_shared_schur_confirmation_corrections += 1
+                            confirmation_correction += 1
+                        else:
+                            final_shared_schur_screening_corrections += 1
+                            screening_correction += 1
+                        final_shared_schur_worker_sse = candidate_worker_sse
+                        best_sse = candidate_sse
+                        best_metrics = corrected_metrics.copy()
+                        best_cameras = corrected_cameras
+                        best_points = corrected_points
+                        if (
+                            arguments.shared_schur_damping_policy
+                            == "model_ratio"
+                        ):
+                            damping_factor = model_ratio_damping_factor(
+                                damped_gain_ratio
+                            )
+                            rejection_damping_factor = 2.0
+                        else:
+                            damping_factor = (
+                                arguments.shared_schur_damping_decrease
+                            )
+                        camera_damping *= damping_factor
+                        landmark_damping *= damping_factor
+                        if relative_decrease < (
+                            arguments.shared_schur_minimum_relative_decrease
+                        ):
+                            if (
+                                not confirmation_active
+                                and arguments.
+                                shared_schur_python_confirmation_corrections > 0
+                            ):
+                                if not (
+                                    arguments.
+                                    shared_schur_confirmation_after_screening_budget
+                                ):
+                                    final_shared_schur_termination = (
+                                        "screening_minimum_relative_decrease"
+                                    )
+                                    confirmation_active = True
+                                    previous_tangent_step = None
+                            else:
+                                final_shared_schur_termination = (
+                                    "minimum_relative_decrease"
+                                )
+                                stop_schur_corrections = True
+                        break
+                    if (
+                        arguments.shared_schur_damping_policy
+                        == "model_ratio"
+                    ):
+                        damping_factor = rejection_damping_factor
+                        rejection_damping_factor *= 2.0
+                    else:
+                        damping_factor = arguments.shared_schur_damping_increase
+                    camera_damping, landmark_damping = rejected_schur_damping(
+                        camera_damping,
+                        landmark_damping,
+                        attempt,
+                        damping_factor,
+                        arguments.shared_schur_fallback_camera_damping,
+                        arguments.shared_schur_fallback_landmark_damping,
+                    )
+                if stop_schur_corrections:
+                    break
+                if not correction_accepted:
+                    if (
+                        not confirmation_active
+                        and arguments.
+                        shared_schur_python_confirmation_corrections > 0
+                    ):
+                        final_shared_schur_termination = (
+                            "screening_attempts_exhausted"
+                        )
+                        confirmation_active = True
+                        previous_tangent_step = None
+                    else:
+                        final_shared_schur_termination = "attempts_exhausted"
+                        break
+                correction += 1
+            final_shared_schur_corrected_sse = best_sse
+            final_shared_schur_final_camera_damping = camera_damping
+            final_shared_schur_final_landmark_damping = landmark_damping
+            final_shared_schur_seconds = time.perf_counter() - schur_started
         if (
             arguments.consensus_landmark_refinement_steps > 0
             and arguments.consensus_landmark_refinement_policy == "final"
@@ -1955,15 +5279,210 @@ def main():
         "partitionCacheStatus": partition_cache_status,
         "partitionCachePath": str(partition_cache_path),
         "localSteps": arguments.local_steps,
+        "localCameraStepScale": arguments.local_camera_step_scale,
+        "localCameraStepGrid": arguments.local_camera_step_grid,
+        "sharedCameraStepGrid": arguments.shared_camera_step_grid,
+        "sharedCameraStepScale": arguments.shared_camera_step_scale,
+        "sharedCameraDisagreementScale": (
+            arguments.shared_camera_disagreement_scale
+        ),
+        "metricProposalDisagreementScale": (
+            arguments.metric_proposal_disagreement_scale
+        ),
+        "metricProposalDisagreementGrid": (
+            arguments.metric_proposal_disagreement_grid
+        ),
+        "metricProposalSubspaceScales": (
+            arguments.metric_proposal_subspace_scales
+        ),
+        "metricProposalDisagreementThreshold": (
+            arguments.metric_proposal_disagreement_threshold
+        ),
+        "metricProposalDisagreementHysteresis": (
+            arguments.metric_proposal_disagreement_hysteresis
+        ),
+        "schurAlignmentDiagnosticIterations": sorted(
+            iteration + 1
+            for iteration in schur_alignment_diagnostic_iterations
+        ),
+        "schurAlignmentCameraDamping": (
+            arguments.schur_alignment_camera_damping
+        ),
+        "schurAlignmentLandmarkDamping": (
+            arguments.schur_alignment_landmark_damping
+        ),
+        "schurModelConsensusClipping": (
+            arguments.schur_model_consensus_clipping
+        ),
+        "schurModelConsensusClippingMinimumScale": (
+            arguments.schur_model_consensus_clipping_minimum_scale
+        ),
+        "schurModelConsensusClippingMaximumScale": (
+            arguments.schur_model_consensus_clipping_maximum_scale
+        ),
+        "sharedCameraMetricBeta": arguments.shared_camera_metric_beta,
+        "uniqueCameraMetricScale": arguments.unique_camera_metric_scale,
+        "uniqueCameraMetricSelector": arguments.unique_camera_metric_selector,
+        "sharedOnlyCameraProximal": arguments.shared_only_camera_proximal,
+        "adaptiveLocalDepth": arguments.adaptive_local_depth,
+        "adaptiveLocalDepthStart": arguments.adaptive_local_depth_start,
+        "interiorDefectDiagnostic": arguments.interior_defect_diagnostic,
+        "adaptiveLocalDepthMaximum": (
+            arguments.adaptive_local_depth_maximum
+        ),
+        "adaptiveLocalDepthHigh": arguments.adaptive_local_depth_high,
+        "adaptiveLocalDepthLow": arguments.adaptive_local_depth_low,
+        "adaptiveLocalDepthWindow": arguments.adaptive_local_depth_window,
+        "adaptiveLocalDepthDwell": arguments.adaptive_local_depth_dwell,
+        "finalLocalSteps": (
+            adaptive_local_steps.tolist()
+            if arguments.adaptive_local_depth
+            else arguments.local_steps
+        ),
         "nesterovMaxIterations": arguments.nesterov_max_iterations,
+        "enhancedInnerMaxIterations": arguments.enhanced_inner_max_iterations,
         "nesterovMinIterations": arguments.nesterov_min_iterations,
         "nesterovStopTolerance": arguments.nesterov_stop_tolerance,
+        "enhancedInnerUntil": arguments.enhanced_inner_until,
+        "diagonalTrustUntil": arguments.diagonal_trust_until,
+        "relativeResidualUntil": arguments.relative_residual_until,
         "threadsPerCluster": arguments.threads_per_cluster,
         "localSolver": arguments.local_solver,
+        "cameraUpdate": os.environ.get(
+            "BUNDLE_PALM_CAMERA_UPDATE", "additive"
+        ),
         "trustRegionPolicy": arguments.trust_region_policy,
         "persistentTrustRegion": arguments.persistent_trust_region,
         "trustRegionRecoveryRatio": arguments.trust_region_recovery_ratio,
+        "sharedTrustRegionUntil": arguments.shared_trust_region_until,
+        "sharedTrustRegionInitialRadius": (
+            arguments.shared_trust_region_initial_radius
+        ),
+        "diagonalTrustDamping": (
+            os.environ.get("BUNDLE_PALM_DIAGONAL_TRUST_DAMPING", "0") == "1"
+        ),
+        "baeTrustSchedule": (
+            os.environ.get("BUNDLE_PALM_BAE_TRUST_SCHEDULE", "0") == "1"
+        ),
+        "cumulativeDiagonalDamping": (
+            os.environ.get(
+                "BUNDLE_PALM_CUMULATIVE_DIAGONAL_DAMPING", "0"
+            ) == "1"
+        ),
+        "directTangentNormalEquations": (
+            os.environ.get(
+                "BUNDLE_PALM_DIRECT_TANGENT_NORMAL_EQUATIONS", "0"
+            ) == "1"
+        ),
+        "schurProximalMetric": (
+            os.environ.get("BUNDLE_PALM_SCHUR_PROXIMAL_METRIC", "0") == "1"
+        ),
+        "schurProximalMetricBlend": float(
+            os.environ.get("BUNDLE_PALM_SCHUR_PROXIMAL_METRIC_BLEND", "1")
+        ),
+        "schurProximalMetricSubspaceBlends": [
+            float(os.environ.get(
+                name,
+                os.environ.get("BUNDLE_PALM_SCHUR_PROXIMAL_METRIC_BLEND", "1"),
+            ))
+            for name in (
+                "BUNDLE_PALM_SCHUR_PROXIMAL_METRIC_TRANSLATION_BLEND",
+                "BUNDLE_PALM_SCHUR_PROXIMAL_METRIC_ROTATION_BLEND",
+                "BUNDLE_PALM_SCHUR_PROXIMAL_METRIC_INTRINSICS_BLEND",
+            )
+        ],
+        "schurProximalMetricPreserveRawDiagonal": (
+            os.environ.get(
+                "BUNDLE_PALM_SCHUR_PROXIMAL_METRIC_PRESERVE_RAW_DIAGONAL",
+                "0",
+            ) == "1"
+        ),
+        "schurProximalMetricOffDiagonalMajorizer": (
+            os.environ.get(
+                "BUNDLE_PALM_SCHUR_PROXIMAL_METRIC_OFFDIAGONAL_MAJORIZE",
+                "0",
+            ) == "1"
+        ),
+        "schurProximalMetricOffDiagonalMajorizerScale": float(
+            os.environ.get(
+                "BUNDLE_PALM_SCHUR_PROXIMAL_METRIC_OFFDIAGONAL_MAJORIZE_SCALE",
+                "1",
+            )
+        ),
+        "globalSchurMajorizerObservabilityThreshold": (
+            arguments.global_schur_majorizer_observability_threshold
+        ),
+        "globalSchurMajorizerUntil": (
+            arguments.global_schur_majorizer_until
+        ),
+        "schurObservabilityDiagnostic": (
+            os.environ.get(
+                "BUNDLE_PALM_SCHUR_OBSERVABILITY_DIAGNOSTIC", "0"
+            ) == "1"
+        ),
+        "disableLocalProximalTerm": (
+            os.environ.get("BUNDLE_PALM_DISABLE_LOCAL_PROXIMAL_TERM", "0") == "1"
+        ),
+        "disableLandmarkPreconditioning": (
+            os.environ.get(
+                "BUNDLE_PALM_DISABLE_LANDMARK_PRECONDITIONING", "0"
+            ) == "1"
+        ),
+        "pobaBlockRelativeFloor": float(
+            os.environ.get("BUNDLE_PALM_POBA_BLOCK_RELATIVE_FLOOR", "0")
+        ),
+        "pobaDiagnosticIterations": int(
+            os.environ.get("BUNDLE_PALM_POBA_DIAGNOSTIC_ITERATIONS", "0")
+        ),
+        "centralizedCeresJacobiScaling": (
+            os.environ.get(
+                "BUNDLE_PALM_CENTRALIZED_CERES_JACOBI_SCALING", "1"
+            ) == "1"
+        ),
+        "centralizedCeresSparseSchur": (
+            os.environ.get("BUNDLE_PALM_CENTRALIZED_CERES_SPARSE_SCHUR", "0")
+            == "1"
+        ),
+        "centralizedCeresIterations": int(
+            os.environ.get("BUNDLE_PALM_CENTRALIZED_CERES_ITERATIONS", "90")
+        ),
+        "initialTrustRegionRadius": float(
+            os.environ.get("BUNDLE_PALM_INITIAL_TRUST_REGION_RADIUS", "10")
+        ),
+        "maximumTrustRegionRadius": float(
+            os.environ.get("BUNDLE_PALM_MAXIMUM_TRUST_REGION_RADIUS", "1000000")
+        ),
+        "dabaInitialTrustRegionCap": float(
+            os.environ.get("BUNDLE_PALM_DABA_INITIAL_TRUST_REGION_CAP", "100")
+        ),
+        "nesterovSchurLipschitz": float(
+            os.environ.get("BUNDLE_PALM_NESTEROV_SCHUR_LIPSCHITZ", "0.9")
+        ),
+        "nesterovStopCheckInterval": int(
+            os.environ.get("BUNDLE_PALM_NESTEROV_STOP_CHECK_INTERVAL", "1")
+        ),
+        "nesterovRelativeResidual": (
+            os.environ.get("BUNDLE_PALM_NESTEROV_RELATIVE_RESIDUAL", "0") == "1"
+        ),
+        "schurPcgRelativeTolerance": float(
+            os.environ.get("BUNDLE_PALM_SCHUR_PCG_RELATIVE_TOLERANCE", "0.01")
+        ),
+        "schurPcgQTolerance": float(
+            os.environ.get("BUNDLE_PALM_SCHUR_PCG_Q_TOLERANCE", "0")
+        ),
+        "schurPcgJacobiPreconditioner": (
+            os.environ.get(
+                "BUNDLE_PALM_SCHUR_PCG_JACOBI_PRECONDITIONER", "0"
+            ) == "1"
+        ),
+        "schurPcgMaximumIterations": int(
+            os.environ.get("BUNDLE_PALM_SCHUR_PCG_MAX_ITERATIONS", "400")
+        ),
         "sceneNormalization": arguments.scene_normalization,
+        "initialState": (
+            str(Path(arguments.initial_state).resolve())
+            if arguments.initial_state else None
+        ),
         "cameraScaling": arguments.camera_scaling,
         "cameraScalingMaximumRatio": arguments.camera_scaling_maximum_ratio,
         "cameraScalingClippingPercentile": (
@@ -1978,6 +5497,18 @@ def main():
             np.exp(np.mean(np.log(camera_scaling)))
         ),
         "cameraDiagonalRelativeFloor": arguments.camera_diagonal_relative_floor,
+        "cameraDiagonalTranslationFloor": float(os.environ.get(
+            "BUNDLE_PALM_CAMERA_DIAGONAL_TRANSLATION_FLOOR",
+            arguments.camera_diagonal_relative_floor,
+        )),
+        "cameraDiagonalRotationFloor": float(os.environ.get(
+            "BUNDLE_PALM_CAMERA_DIAGONAL_ROTATION_FLOOR",
+            arguments.camera_diagonal_relative_floor,
+        )),
+        "cameraDiagonalIntrinsicsFloor": float(os.environ.get(
+            "BUNDLE_PALM_CAMERA_DIAGONAL_INTRINSICS_FLOOR",
+            arguments.camera_diagonal_relative_floor,
+        )),
         "cameraTrustDiagonalScale": arguments.camera_trust_diagonal_scale,
         "cameraDiagonalMetricScale": arguments.camera_diagonal_metric_scale,
         "scalingSeconds": scaling_seconds,
@@ -1985,6 +5516,7 @@ def main():
         "optimizationSeconds": optimization_seconds,
         "relaxation": arguments.relaxation,
         "outerAcceleration": arguments.outer_acceleration,
+        "singleClusterProximal": arguments.single_cluster_proximal,
         "lineSearchGrid": arguments.line_search_grid,
         "accelerationRestartAfter": arguments.acceleration_restart_after,
         "acceleratedAcceptances": accelerated_acceptances,
@@ -1992,6 +5524,14 @@ def main():
         "proximalOracleCalls": proximal_oracle_calls,
         "proximalMetric": arguments.proximal_metric,
         "consensusMetric": arguments.consensus_metric,
+        "consensusUnflooredCameraDiagonal": (
+            os.environ.get(
+                "BUNDLE_PALM_CONSENSUS_UNFLOORED_CAMERA_DIAGONAL", "0"
+            ) == "1"
+        ),
+        "consensusSharedFloorPriorScale": (
+            arguments.consensus_shared_floor_prior_scale
+        ),
         "consensusExecution": arguments.consensus_execution,
         "consensusProjectionSeconds": consensus_projection_seconds,
         "workerOperationSeconds": worker_operation_seconds,
@@ -2015,6 +5555,9 @@ def main():
         "maximumBlockCurvatureMultiplier": (
             arguments.maximum_block_curvature_multiplier
         ),
+        "recoveryExhaustionPolicy": arguments.recovery_exhaustion_policy,
+        "recoveryRelaxedIterations": arguments.recovery_relaxed_iterations,
+        "bestCheckpointRestarts": best_checkpoint_restarts,
         "blockRecoveryMode": arguments.block_recovery_mode,
         "curvatureDecayAfter": arguments.curvature_decay_after,
         "curvatureDecayRatio": arguments.curvature_decay_ratio,
@@ -2057,17 +5600,141 @@ def main():
         "finalLandmarkPolishingApplied": final_polishing_applied,
         "finalLandmarkPolishingInitialSSE": final_polishing_initial_sse,
         "finalLandmarkPolishingRefinedSSE": final_polishing_refined_sse,
+        "finalSharedSchurAttempted": final_shared_schur_attempted,
+        "finalSharedSchurAccepted": final_shared_schur_accepted,
+        "finalSharedSchurInitialSSE": final_shared_schur_initial_sse,
+        "finalSharedSchurCorrectedSSE": final_shared_schur_corrected_sse,
+        "finalSharedSchurWorkerSSE": final_shared_schur_worker_sse,
+        "finalSharedSchurSeconds": final_shared_schur_seconds,
+        "finalSharedSchurDiagnostics": final_shared_schur_diagnostics,
+        "finalSharedSchurAttempts": final_shared_schur_attempts,
+        "finalSharedSchurAcceptedCorrections": (
+            final_shared_schur_accepted_corrections
+        ),
+        "finalSharedSchurScreeningCorrections": (
+            final_shared_schur_screening_corrections
+        ),
+        "finalSharedSchurConfirmationCorrections": (
+            final_shared_schur_confirmation_corrections
+        ),
+        "finalSharedSchurTermination": final_shared_schur_termination,
+        "finalSharedSchurFinalCameraDamping": (
+            final_shared_schur_final_camera_damping
+        ),
+        "finalSharedSchurFinalLandmarkDamping": (
+            final_shared_schur_final_landmark_damping
+        ),
+        "initialSharedSchurCorrection": (
+            arguments.initial_shared_schur_correction
+        ),
+        "initialSharedSchurOperator": (
+            arguments.shared_schur_operator
+            if arguments.initial_shared_schur_operator == "inherit"
+            else arguments.initial_shared_schur_operator
+        ),
+        "initialSharedSchurMaximumIterations": (
+            arguments.initial_shared_schur_maximum_iterations
+            or arguments.shared_schur_maximum_iterations
+        ),
+        "initialSharedSchurAttempted": initial_shared_schur_attempted,
+        "initialSharedSchurAccepted": initial_shared_schur_accepted,
+        "initialSharedSchurInitialSSE": initial_shared_schur_initial_sse,
+        "initialSharedSchurCandidateSSE": initial_shared_schur_candidate_sse,
+        "initialSharedSchurWorkerSSE": initial_shared_schur_worker_sse,
+        "initialSharedSchurSeconds": initial_shared_schur_seconds,
+        "initialSharedSchurDiagnostics": initial_shared_schur_diagnostics,
+        "initialSharedSchurTrustRebase": (
+            arguments.initial_shared_schur_rebase_trust_state
+        ),
+        "initialSharedSchurTrustRebased": initial_shared_schur_trust_rebased,
+        "initialSharedSchurPreRebaseTrustRadii": (
+            initial_shared_schur_pre_rebase_trust_radii
+        ),
+        "initialSharedSchurPostRebaseTrustRadii": (
+            initial_shared_schur_post_rebase_trust_radii
+        ),
+        "initialSharedSchurBasinGuard": (
+            arguments.initial_shared_schur_basin_guard
+        ),
+        "bootstrapBasinGuardRejections": bootstrap_basin_guard_rejections,
+        "bootstrapBasinGuardReleaseIteration": (
+            bootstrap_basin_guard_release_iteration + 1
+            if bootstrap_basin_guard_release_iteration >= 0
+            else -1
+        ),
+        "sharedSchurLandmarkDamping": (
+            arguments.shared_schur_landmark_damping
+        ),
+        "sharedSchurCameraDamping": arguments.shared_schur_camera_damping,
+        "sharedSchurStepScale": arguments.shared_schur_step_scale,
+        "sharedSchurLinearSolver": arguments.shared_schur_linear_solver,
+        "sharedSchurRelativeTolerance": (
+            arguments.shared_schur_relative_tolerance
+        ),
+        "sharedSchurMaximumIterations": (
+            arguments.shared_schur_maximum_iterations
+        ),
+        "sharedSchurMaximumCorrections": (
+            arguments.shared_schur_maximum_corrections
+        ),
+        "sharedSchurPythonConfirmationCorrections": (
+            arguments.shared_schur_python_confirmation_corrections
+        ),
+        "sharedSchurConfirmationCameraDamping": (
+            arguments.shared_schur_confirmation_camera_damping
+        ),
+        "sharedSchurConfirmationLandmarkDamping": (
+            arguments.shared_schur_confirmation_landmark_damping
+        ),
+        "sharedSchurConfirmationAfterScreeningBudget": (
+            arguments.shared_schur_confirmation_after_screening_budget
+        ),
+        "sharedSchurMaximumAttempts": arguments.shared_schur_maximum_attempts,
+        "sharedSchurDampingIncrease": arguments.shared_schur_damping_increase,
+        "sharedSchurDampingDecrease": arguments.shared_schur_damping_decrease,
+        "sharedSchurFallbackCameraDamping": (
+            arguments.shared_schur_fallback_camera_damping
+        ),
+        "sharedSchurFallbackLandmarkDamping": (
+            arguments.shared_schur_fallback_landmark_damping
+        ),
+        "sharedSchurDampingPolicy": arguments.shared_schur_damping_policy,
+        "sharedSchurMinimumGainRatio": (
+            arguments.shared_schur_minimum_gain_ratio
+        ),
+        "sharedSchurMinimumRelativeDecrease": (
+            arguments.shared_schur_minimum_relative_decrease
+        ),
+        "sharedSchurWarmStart": arguments.shared_schur_warm_start,
+        "sharedSchurOperator": arguments.shared_schur_operator,
+        "sharedSchurLandmarkRefinementSteps": (
+            arguments.shared_schur_landmark_refinement_steps
+        ),
         "targetTransformedLipschitz": (
             arguments.target_transformed_lipschitz
         ),
         "initialPenalty": (
             arguments.penalty_multiplier * 2.5 * len(observations) / camera_count
         ),
+        "initialBlockRegularization": arguments.block_regularization,
+        "initialBlockDiagonalCoefficient": (
+            arguments.camera_diagonal_metric_scale
+            * arguments.block_regularization
+            if arguments.proximal_metric == "block"
+            else None
+        ),
         "finalPenalty": penalty,
+        "finalBlockRegularization": block_regularization,
+        "finalBlockDiagonalCoefficient": (
+            arguments.camera_diagonal_metric_scale * block_regularization
+            if arguments.proximal_metric == "block"
+            else None
+        ),
         "gamma": 1.0 / penalty if arguments.proximal_metric == "scalar" else 1.0,
         "safeguardMode": arguments.safeguard_mode,
         "dreRelativeIncrease": arguments.dre_relative_increase,
         "minimumPrimalRatio": arguments.minimum_primal_ratio,
+        "safeguardAnnealingIterations": safeguard_annealing_iterations,
         "safeguardRelativeDeadband": arguments.safeguard_relative_deadband,
         "catastrophicRatio": arguments.catastrophic_ratio,
         "recoveryPenaltyRatio": arguments.recovery_penalty_ratio,

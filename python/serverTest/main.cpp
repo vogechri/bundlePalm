@@ -22,6 +22,7 @@
 #include <condition_variable>
 #include <limits>
 #include <memory>
+#include <unordered_set>
 #include <omp.h>
 #include <chrono>
 #include "test.pb.h"
@@ -112,11 +113,106 @@ int EnvironmentInteger(const char* name, int default_value,
   return static_cast<int>(value);
 }
 
+enum class CameraUpdateMode {
+  kAdditive,
+  kAngleAxisLeft,
+  kSe3Left,
+  kSe3Right,
+};
+
+CameraUpdateMode GetCameraUpdateMode() {
+  static const CameraUpdateMode mode = [] {
+    const char* value = std::getenv("BUNDLE_PALM_CAMERA_UPDATE");
+    if (value == nullptr || *value == '\0' || std::strcmp(value, "additive") == 0) {
+      return CameraUpdateMode::kAdditive;
+    }
+    if (std::strcmp(value, "angle_axis_left") == 0) {
+      return CameraUpdateMode::kAngleAxisLeft;
+    }
+    if (std::strcmp(value, "se3_left") == 0) {
+      return CameraUpdateMode::kSe3Left;
+    }
+    if (std::strcmp(value, "se3_right") == 0) {
+      return CameraUpdateMode::kSe3Right;
+    }
+    throw std::runtime_error(
+        "BUNDLE_PALM_CAMERA_UPDATE must be additive, angle_axis_left, "
+        "se3_left, or se3_right");
+  }();
+  return mode;
+}
+bool FreezeBlockMetricEnabled() {
+  static const bool enabled = EnvironmentInteger(
+      "BUNDLE_PALM_FREEZE_BLOCK_METRIC", 0, 0, 1) == 1;
+  return enabled;
+}
+
+bool ConsensusUnflooredCameraDiagonalEnabled() {
+  static const bool enabled = EnvironmentInteger(
+      "BUNDLE_PALM_CONSENSUS_UNFLOORED_CAMERA_DIAGONAL", 0, 0, 1) == 1;
+  return enabled;
+}
+
+bool ManifoldCameraUpdatesEnabled() {
+  return GetCameraUpdateMode() != CameraUpdateMode::kAdditive;
+}
+
 // Highly active: changing this floor alters convergence paths and final costs.
 double CameraDiagonalRelativeFloor() {
   static const double value = EnvironmentDouble(
       "BUNDLE_PALM_CAMERA_DIAGONAL_FLOOR", 1e-48, 0.0, 1.0);
   return value;
+}
+
+double CameraDiagonalTranslationFloor() {
+  static const double value = EnvironmentDouble(
+      "BUNDLE_PALM_CAMERA_DIAGONAL_TRANSLATION_FLOOR",
+      CameraDiagonalRelativeFloor(), 0.0, 1.0);
+  return value;
+}
+
+double CameraDiagonalRotationFloor() {
+  static const double value = EnvironmentDouble(
+      "BUNDLE_PALM_CAMERA_DIAGONAL_ROTATION_FLOOR",
+      CameraDiagonalRelativeFloor(), 0.0, 1.0);
+  return value;
+}
+
+double CameraDiagonalIntrinsicsFloor() {
+  static const double value = EnvironmentDouble(
+      "BUNDLE_PALM_CAMERA_DIAGONAL_INTRINSICS_FLOOR",
+      CameraDiagonalRelativeFloor(), 0.0, 1.0);
+  return value;
+}
+
+const std::unordered_set<std::uint32_t>& CameraDiagonalExcludedCameraIds() {
+  static const std::unordered_set<std::uint32_t> ids = [] {
+    std::unordered_set<std::uint32_t> result;
+    const char* text = std::getenv(
+        "BUNDLE_PALM_CAMERA_DIAGONAL_EXCLUDED_CAMERA_IDS");
+    if (text == nullptr || *text == '\0') {
+      return result;
+    }
+    std::istringstream stream(text);
+    std::string token;
+    while (std::getline(stream, token, ',')) {
+      if (token.empty()) {
+        throw std::runtime_error(
+            "BUNDLE_PALM_CAMERA_DIAGONAL_EXCLUDED_CAMERA_IDS contains an empty ID");
+      }
+      char* end = nullptr;
+      errno = 0;
+      const unsigned long value = std::strtoul(token.c_str(), &end, 10);
+      if (errno != 0 || end == token.c_str() || *end != '\0' ||
+          value > std::numeric_limits<std::uint32_t>::max()) {
+        throw std::runtime_error(
+            "BUNDLE_PALM_CAMERA_DIAGONAL_EXCLUDED_CAMERA_IDS must be comma-separated camera IDs");
+      }
+      result.insert(static_cast<std::uint32_t>(value));
+    }
+    return result;
+  }();
+  return ids;
 }
 
 // Inactive in the standard build; only used by the __ceresVersion__ path.
@@ -131,6 +227,12 @@ double LandmarkPreconditionerFloor() {
   static const double value = EnvironmentDouble(
       "BUNDLE_PALM_LANDMARK_PRECONDITIONER_FLOOR", 1e-24, 0.0, 1.0);
   return value;
+}
+
+bool DisableLandmarkPreconditioningEnabled() {
+  static const bool enabled = EnvironmentInteger(
+      "BUNDLE_PALM_DISABLE_LANDMARK_PRECONDITIONING", 0, 0, 1) == 1;
+  return enabled;
 }
 
 // Highly active: changes early progress, final costs, and runtime.
@@ -192,8 +294,181 @@ double CameraPreconditionerDiagonalFloor() {
 // Highly active: strongly changes convergence quality, rejection count, and cost.
 double CameraDiagonalMetricScale() {
   static const double value = EnvironmentDouble(
-      "BUNDLE_PALM_CAMERA_DIAGONAL_METRIC_SCALE", 1e1, 0.0, 1e12);
+      "BUNDLE_PALM_CAMERA_DIAGONAL_METRIC_SCALE", 25.0, 0.0, 1e12);
   return value;
+}
+
+double InitialTrustRegionRadius() {
+  static const double value = EnvironmentDouble(
+      "BUNDLE_PALM_INITIAL_TRUST_REGION_RADIUS", 1e1, 1e-12, 1e12);
+  return value;
+}
+
+double MaximumTrustRegionRadius() {
+  static const double value = EnvironmentDouble(
+      "BUNDLE_PALM_MAXIMUM_TRUST_REGION_RADIUS", 1e6, 1e-12, 1e16);
+  return value;
+}
+
+double DabaInitialTrustRegionCap() {
+  static const double value = EnvironmentDouble(
+      "BUNDLE_PALM_DABA_INITIAL_TRUST_REGION_CAP", 100., 1e-12, 1e16);
+  return value;
+}
+
+double NesterovSchurLipschitz() {
+  static const double value = EnvironmentDouble(
+      "BUNDLE_PALM_NESTEROV_SCHUR_LIPSCHITZ", 0.9, 1e-6, 1e6);
+  return value;
+}
+
+int NesterovStopCheckInterval() {
+  static const int value = EnvironmentInteger(
+      "BUNDLE_PALM_NESTEROV_STOP_CHECK_INTERVAL", 1, 1, 10000);
+  return value;
+}
+
+int SchurPcgMaximumIterations() {
+  static const int value = EnvironmentInteger(
+      "BUNDLE_PALM_SCHUR_PCG_MAX_ITERATIONS", 400, 1, 10000);
+  return value;
+}
+
+double SchurPcgRelativeTolerance() {
+  static const double value = EnvironmentDouble(
+      "BUNDLE_PALM_SCHUR_PCG_RELATIVE_TOLERANCE", 1e-2, 1e-12, 1.0);
+  return value;
+}
+
+double SchurPcgQTolerance() {
+  static const double value = EnvironmentDouble(
+      "BUNDLE_PALM_SCHUR_PCG_Q_TOLERANCE", 0., 0., 1.0);
+  return value;
+}
+
+bool SchurPcgJacobiPreconditionerEnabled() {
+  static const bool enabled = EnvironmentInteger(
+      "BUNDLE_PALM_SCHUR_PCG_JACOBI_PRECONDITIONER", 0, 0, 1) == 1;
+  return enabled;
+}
+
+int CentralizedCeresIterations() {
+  static const int value = EnvironmentInteger(
+      "BUNDLE_PALM_CENTRALIZED_CERES_ITERATIONS", 90, 1, 1000);
+  return value;
+}
+
+double CentralizedCeresInitialRadius() {
+  static const double value = EnvironmentDouble(
+      "BUNDLE_PALM_CENTRALIZED_CERES_INITIAL_RADIUS", 1e4, 1e-12, 1e12);
+  return value;
+}
+
+int CentralizedCeresMaximumLinearIterations() {
+  static const int value = EnvironmentInteger(
+      "BUNDLE_PALM_CENTRALIZED_CERES_MAX_LINEAR_ITERATIONS", 500, 1, 10000);
+  return value;
+}
+
+bool CentralizedCeresJacobiScalingEnabled() {
+  static const bool enabled = EnvironmentInteger(
+      "BUNDLE_PALM_CENTRALIZED_CERES_JACOBI_SCALING", 1, 0, 1) == 1;
+  return enabled;
+}
+
+bool CentralizedCeresTangentDiagnosticEnabled() {
+  static const bool enabled = EnvironmentInteger(
+      "BUNDLE_PALM_CENTRALIZED_CERES_TANGENT_DIAGNOSTIC", 0, 0, 1) == 1;
+  return enabled;
+}
+
+bool CentralizedCeresSparseSchurEnabled() {
+  static const bool enabled = EnvironmentInteger(
+      "BUNDLE_PALM_CENTRALIZED_CERES_SPARSE_SCHUR", 0, 0, 1) == 1;
+  return enabled;
+}
+
+bool DiagonalTrustDampingEnabled() {
+  static const bool enabled = EnvironmentInteger(
+      "BUNDLE_PALM_DIAGONAL_TRUST_DAMPING", 0, 0, 1) == 1;
+  return enabled;
+}
+
+bool BaeTrustScheduleEnabled() {
+  static const bool enabled = EnvironmentInteger(
+      "BUNDLE_PALM_BAE_TRUST_SCHEDULE", 0, 0, 1) == 1;
+  return enabled;
+}
+
+bool CumulativeDiagonalDampingEnabled() {
+  static const bool enabled = EnvironmentInteger(
+      "BUNDLE_PALM_CUMULATIVE_DIAGONAL_DAMPING", 0, 0, 1) == 1;
+  return enabled || BaeTrustScheduleEnabled();
+}
+bool NesterovRelativeResidualEnabled() {
+  static const bool enabled = EnvironmentInteger(
+      "BUNDLE_PALM_NESTEROV_RELATIVE_RESIDUAL", 0, 0, 1) == 1;
+  return enabled;
+}
+
+bool DirectTangentNormalEquationsEnabled() {
+  static const bool enabled = EnvironmentInteger(
+      "BUNDLE_PALM_DIRECT_TANGENT_NORMAL_EQUATIONS", 0, 0, 1) == 1;
+  return enabled;
+}
+
+bool DisableLocalProximalTermEnabled() {
+  static const bool enabled = EnvironmentInteger(
+      "BUNDLE_PALM_DISABLE_LOCAL_PROXIMAL_TERM", 0, 0, 1) == 1;
+  return enabled;
+}
+
+int PobaDiagnosticIterations() {
+  static const int value = EnvironmentInteger(
+      "BUNDLE_PALM_POBA_DIAGNOSTIC_ITERATIONS", 0, 0, 100);
+  return value;
+}
+
+double PobaBlockRelativeFloor() {
+  static const double value = EnvironmentDouble(
+      "BUNDLE_PALM_POBA_BLOCK_RELATIVE_FLOOR", 0., 0., 1.);
+  return value;
+}
+
+template <int BlockSize>
+void FloorSymmetricBlocks(SparseMatrix<double, RowMajor>& matrix,
+                          double relative_floor) {
+  if (!(relative_floor > 0.)) {
+    return;
+  }
+  const int block_count = matrix.rows() / BlockSize;
+  for (int block_index = 0; block_index < block_count; ++block_index) {
+    Eigen::Matrix<double, BlockSize, BlockSize> block;
+    for (int row = 0; row < BlockSize; ++row) {
+      for (int column = 0; column < BlockSize; ++column) {
+        block(row, column) = matrix.coeff(
+            BlockSize * block_index + row,
+            BlockSize * block_index + column);
+      }
+    }
+    block = 0.5 * (block + block.transpose()).eval();
+    Eigen::SelfAdjointEigenSolver<
+        Eigen::Matrix<double, BlockSize, BlockSize>> solver(block);
+    Eigen::Matrix<double, BlockSize, 1> eigenvalues = solver.eigenvalues();
+    double floor = relative_floor * eigenvalues.maxCoeff();
+    if (!(floor > 0.) || !std::isfinite(floor)) {
+      floor = relative_floor;
+    }
+    eigenvalues = eigenvalues.array().max(floor);
+    block = solver.eigenvectors() * eigenvalues.asDiagonal()
+        * solver.eigenvectors().transpose();
+    for (int row = 0; row < BlockSize; ++row) {
+      for (int column = 0; column < BlockSize; ++column) {
+        matrix.coeffRef(BlockSize * block_index + row,
+                        BlockSize * block_index + column) = block(row, column);
+      }
+    }
+  }
 }
 
 double LocalAcceptanceRatio() {
@@ -229,6 +504,14 @@ using TimingClock = std::chrono::steady_clock;
 
 double ElapsedSeconds(const TimingClock::time_point& start) {
   return std::chrono::duration<double>(TimingClock::now() - start).count();
+}
+
+double Quantile(std::vector<double> values, double probability) {
+  THROW_IF(values.empty() || probability < 0.0 || probability > 1.0);
+  const size_t index = static_cast<size_t>(
+      std::floor(probability * static_cast<double>(values.size() - 1)));
+  std::nth_element(values.begin(), values.begin() + index, values.end());
+  return values[index];
 }
 
 template <typename Proto>
@@ -534,7 +817,30 @@ void BlockInverse(SparseMatrix<double, RowMajor>& mat) {
 #pragma omp parallel for num_threads(options.num_threads)
     for (int i = 0; i < numrows / N; i++) {
         auto matNxN = Map< Matrix<double,N,N> > (&(values[i * N*N]));//,  Eigen::Stride<0, 0>);
-    matNxN = matNxN.inverse().eval();
+    const Matrix<double, N, N> original = matNxN;
+        Matrix<double, N, N> inverse = original.inverse().eval();
+    if (!inverse.allFinite()) {
+          const double scale = original.cwiseAbs().maxCoeff();
+          if (scale > 0. && std::isfinite(scale)) {
+            const Matrix<double, N, N> scaled = original / scale;
+            inverse = scaled.ldlt().solve(
+                Matrix<double, N, N>::Identity()) / scale;
+          }
+        }
+        if (!inverse.allFinite()) {
+      const Eigen::Matrix<double, N, 1> eigenvalues =
+        Eigen::SelfAdjointEigenSolver<Matrix<double, N, N>>(
+          0.5 * (original + original.transpose())).eigenvalues();
+#pragma omp critical
+      std::cerr << "Non-finite block inverse: block_size=" << N
+          << " block=" << i
+          << " input_finite=" << original.allFinite()
+          << " input_max=" << original.cwiseAbs().maxCoeff()
+          << " determinant=" << original.determinant()
+          << " eigenvalues=" << eigenvalues.transpose()
+          << std::endl;
+    }
+    matNxN = inverse;
     }
 }
 
@@ -567,7 +873,10 @@ void WriteJacobian(ceres::Problem& problem, int numCameras, int numLandmarks) {
 // Not sure if this copies or not.
 template<int N>
 Eigen::DiagonalMatrix<double, Eigen::Dynamic>
-Diagonal(SparseMatrix<double, RowMajor>& mat, int cluster_id = -1) {
+Diagonal(SparseMatrix<double, RowMajor>& mat, int cluster_id = -1,
+         bool collect_camera_metrics = false, int outer_iteration = -1,
+         int oracle_kind = 0, const char* metric_source = "unspecified",
+         const std::vector<std::uint32_t>* global_camera_ids = nullptr) {
   Eigen::DiagonalMatrix<double, Eigen::Dynamic> diag = mat.diagonal().asDiagonal(); // ?
 #ifdef _const_diag_
   if (N == 9) {
@@ -614,7 +923,11 @@ Diagonal(SparseMatrix<double, RowMajor>& mat, int cluster_id = -1) {
 #else
   if (N == 9) {
     auto& blockDiagonal = diag.diagonal();
-    const bool collectMetrics = LocalSolveMetricsEnabled();
+    const bool collectMetrics = collect_camera_metrics;
+    std::vector<double> relativeDiagonals(
+      collectMetrics ? blockDiagonal.size() : 0);
+    std::vector<double> blockMaxima(
+      collectMetrics ? mat.rows() / N : 0);
     int flooredEntries = 0;
     int zeroEntries = 0;
     int guardedBlocks = 0;
@@ -629,35 +942,142 @@ Diagonal(SparseMatrix<double, RowMajor>& mat, int cluster_id = -1) {
       minimumBlockMaximum = std::min(minimumBlockMaximum, rawMaxDiagonal);
       const double maxDiagonal =
           std::max(CameraDiagonalMaximumGuard(), rawMaxDiagonal);
-      const double floor = CameraDiagonalRelativeFloor() * maxDiagonal;
+        const bool excluded = global_camera_ids != nullptr &&
+          CameraDiagonalExcludedCameraIds().count(
+            (*global_camera_ids)[block]) != 0;
+        const std::array<double, 3> relativeFloors = excluded
+          ? std::array<double, 3>{0., 0., 0.}
+          : std::array<double, 3>{
+            CameraDiagonalTranslationFloor(), CameraDiagonalRotationFloor(),
+            CameraDiagonalIntrinsicsFloor()};
       if (collectMetrics) {
+        blockMaxima[block] = rawMaxDiagonal;
         guardedBlocks += rawMaxDiagonal < CameraDiagonalMaximumGuard();
         for (int coordinate = 0; coordinate < N; ++coordinate) {
+          relativeDiagonals[N * block + coordinate] =
+              cameraDiagonal[coordinate] / maxDiagonal;
           zeroEntries += cameraDiagonal[coordinate] == 0.0;
-          flooredEntries += cameraDiagonal[coordinate] < floor;
+            flooredEntries += cameraDiagonal[coordinate]
+              < relativeFloors[coordinate / 3] * maxDiagonal;
           minimumRelativeDiagonal = std::min(
               minimumRelativeDiagonal,
               cameraDiagonal[coordinate] / maxDiagonal);
         }
       }
-      blockDiagonal.template segment<N>(N * block) = 
-        cameraDiagonal.cwiseMax(floor);
+      for (int coordinate = 0; coordinate < N; ++coordinate) {
+        blockDiagonal[N * block + coordinate] = std::max(
+            cameraDiagonal[coordinate],
+            relativeFloors[coordinate / 3] * maxDiagonal);
+      }
       // if (cameraDiagonal.minCoeff() < 1e-24 * maxDiagonal) {
       //   blockDiagonal.template segment<N>(N * block) =
       //       cameraDiagonal.cwiseMax(1e-24 * maxDiagonal);
       // }
     }
     if (collectMetrics) {
+      THROW_IF(global_camera_ids != nullptr &&
+          global_camera_ids->size() != static_cast<size_t>(mat.rows() / N));
+      std::array<std::vector<double>, 3> groupRelativeDiagonals;
+      std::vector<int> cameraHitCounts(mat.rows() / N, 0);
+      std::array<int, 3> groupHits = {0, 0, 0};
+      std::ostringstream hitCoordinates;
+      bool firstHitCoordinate = true;
+      for (int block = 0; block < mat.rows() / N; ++block) {
+        for (int coordinate = 0; coordinate < N; ++coordinate) {
+          const double relative = relativeDiagonals[N * block + coordinate];
+          const int group = coordinate / 3;
+          groupRelativeDiagonals[group].push_back(relative);
+            const bool excluded = global_camera_ids != nullptr &&
+              CameraDiagonalExcludedCameraIds().count(
+                (*global_camera_ids)[block]) != 0;
+            const std::array<double, 3> relativeFloors = excluded
+              ? std::array<double, 3>{0., 0., 0.}
+              : std::array<double, 3>{
+                CameraDiagonalTranslationFloor(), CameraDiagonalRotationFloor(),
+                CameraDiagonalIntrinsicsFloor()};
+          if (relative < relativeFloors[group]) {
+            ++cameraHitCounts[block];
+            ++groupHits[group];
+            if (!firstHitCoordinate) {
+              hitCoordinates << ",";
+            }
+            hitCoordinates
+              << (global_camera_ids == nullptr
+                    ? static_cast<std::uint32_t>(block)
+                    : (*global_camera_ids)[block])
+              << ":" << coordinate << ":" << relative;
+            firstHitCoordinate = false;
+          }
+        }
+      }
+      std::vector<double> sortedRelativeDiagonals = relativeDiagonals;
+      std::sort(sortedRelativeDiagonals.begin(), sortedRelativeDiagonals.end());
+      const int bottomCount = std::min<int>(8, sortedRelativeDiagonals.size());
+      const double bottomMean = bottomCount > 0
+          ? std::accumulate(sortedRelativeDiagonals.begin(),
+              sortedRelativeDiagonals.begin() + bottomCount, 0.) / bottomCount
+          : std::numeric_limits<double>::quiet_NaN();
+      std::vector<int> sortedCameraHitCounts = cameraHitCounts;
+      std::sort(sortedCameraHitCounts.begin(), sortedCameraHitCounts.end(),
+          std::greater<int>());
+      const int hitCameras = std::count_if(
+          cameraHitCounts.begin(), cameraHitCounts.end(),
+          [](int count) { return count > 0; });
+      const int topCameraCount = std::max<int>(
+          1, (sortedCameraHitCounts.size() + 9) / 10);
+      const int topCameraHits = std::accumulate(
+          sortedCameraHitCounts.begin(),
+          sortedCameraHitCounts.begin() + topCameraCount, 0);
+      double hitHhi = 0.;
+      if (flooredEntries > 0) {
+        for (const int count : cameraHitCounts) {
+          const double share = static_cast<double>(count) / flooredEntries;
+          hitHhi += share * share;
+        }
+      }
       std::ostringstream metric;
       metric << "CAMERA_DIAGONAL cluster=" << cluster_id
+        << " outer_iteration=" << outer_iteration
+        << " oracle_kind=" << oracle_kind
+        << " source=" << metric_source
          << " blocks=" << mat.rows() / N
          << " entries=" << blockDiagonal.size()
          << " floored=" << flooredEntries
          << " zeros=" << zeroEntries
          << " guarded_blocks=" << guardedBlocks
          << " min_relative=" << minimumRelativeDiagonal
+            << " q001_relative=" << Quantile(relativeDiagonals, 0.001)
+         << " q01_relative=" << Quantile(relativeDiagonals, 0.01)
+            << " bottom8_mean=" << bottomMean
+            << " translation_min=" << *std::min_element(
+              groupRelativeDiagonals[0].begin(), groupRelativeDiagonals[0].end())
+            << " translation_q001=" << Quantile(groupRelativeDiagonals[0], 0.001)
+            << " translation_q01=" << Quantile(groupRelativeDiagonals[0], 0.01)
+            << " translation_hits=" << groupHits[0]
+            << " rotation_min=" << *std::min_element(
+              groupRelativeDiagonals[1].begin(), groupRelativeDiagonals[1].end())
+            << " rotation_q001=" << Quantile(groupRelativeDiagonals[1], 0.001)
+            << " rotation_q01=" << Quantile(groupRelativeDiagonals[1], 0.01)
+            << " rotation_hits=" << groupHits[1]
+            << " intrinsics_min=" << *std::min_element(
+              groupRelativeDiagonals[2].begin(), groupRelativeDiagonals[2].end())
+            << " intrinsics_q001=" << Quantile(groupRelativeDiagonals[2], 0.001)
+            << " intrinsics_q01=" << Quantile(groupRelativeDiagonals[2], 0.01)
+            << " intrinsics_hits=" << groupHits[2]
+            << " hit_cameras=" << hitCameras
+            << " max_hits_per_camera=" << (sortedCameraHitCounts.empty()
+              ? 0 : sortedCameraHitCounts.front())
+            << " top10_camera_hit_share=" << (flooredEntries > 0
+              ? static_cast<double>(topCameraHits) / flooredEntries : 0.)
+            << " hit_hhi=" << hitHhi
+            << " hit_coordinates=" << (firstHitCoordinate
+              ? "none" : hitCoordinates.str())
          << " min_block_maximum=" << minimumBlockMaximum
+         << " q01_block_maximum=" << Quantile(blockMaxima, 0.01)
          << " floor=" << CameraDiagonalRelativeFloor()
+         << " translation_floor=" << CameraDiagonalTranslationFloor()
+         << " rotation_floor=" << CameraDiagonalRotationFloor()
+         << " intrinsics_floor=" << CameraDiagonalIntrinsicsFloor()
          << " maximum_guard=" << CameraDiagonalMaximumGuard() << "\n";
       EmitLocalSolveMetric(metric.str());
     }
@@ -802,6 +1222,26 @@ class BlockEdgeMatrix {
   int cols() const { return 3 * num_landmarks_; }
   size_t EdgeCount() const { return edges_.size(); }
 
+  double SquaredNorm() const {
+    double result = 0.;
+    for (const CameraLandmarkEdge& edge : edges_) {
+      for (double value : edge.values) {
+        result += value * value;
+      }
+    }
+    return result;
+  }
+
+  void LeftMultiplyByCameraBlockTransposes(
+      const std::vector<Eigen::Matrix<double, 9, 9>>& blocks) {
+    THROW_IF(blocks.size() != num_cameras_);
+    for (CameraLandmarkEdge& edge : edges_) {
+      Eigen::Map<Eigen::Matrix<double, 9, 3, Eigen::RowMajor>> values(
+          edge.values.data());
+      values = blocks[edge.camera].transpose() * values;
+    }
+  }
+
   void Multiply(const Eigen::VectorXd& landmark_vector,
                 Eigen::VectorXd& camera_result) const {
     THROW_IF(landmark_vector.size() != cols());
@@ -839,6 +1279,31 @@ class BlockEdgeMatrix {
     }
   }
 
+  void SubtractSchurDiagonal(
+      const SparseMatrix<double, RowMajor>& landmark_inverse,
+      SparseMatrix<double, RowMajor>& camera_blocks) const {
+    for (const CameraLandmarkEdge& edge : edges_) {
+      Eigen::Matrix3d inverse_block;
+      for (int row = 0; row < 3; ++row) {
+        for (int column = 0; column < 3; ++column) {
+          inverse_block(row, column) = landmark_inverse.coeff(
+              3 * edge.landmark + row, 3 * edge.landmark + column);
+        }
+      }
+      const Eigen::Map<
+          const Eigen::Matrix<double, 9, 3, Eigen::RowMajor>> cross(
+              edge.values.data());
+      const Eigen::Matrix<double, 9, 9> contribution =
+          cross * inverse_block * cross.transpose();
+      for (int row = 0; row < 9; ++row) {
+        for (int column = 0; column < 9; ++column) {
+          camera_blocks.coeffRef(9 * edge.camera + row,
+              9 * edge.camera + column) -= contribution(row, column);
+        }
+      }
+    }
+  }
+
  private:
   int num_cameras_ = 0;
   int num_landmarks_ = 0;
@@ -862,8 +1327,46 @@ struct MetricDiagnostic {
   double landmark_proximal_defect_squared =
       std::numeric_limits<double>::quiet_NaN();
   double proximal_defect_squared = std::numeric_limits<double>::quiet_NaN();
+    double unique_camera_interior_defect_squared =
+      std::numeric_limits<double>::quiet_NaN();
+    double landmark_interior_defect_squared =
+      std::numeric_limits<double>::quiet_NaN();
+    double interior_defect_squared =
+      std::numeric_limits<double>::quiet_NaN();
   int iterations = 0;
 };
+
+  void EstimateInteriorDefect(
+    const NormalEquations& normal_equations,
+    const std::vector<double>& camera_proximal_multipliers,
+    MetricDiagnostic& diagnostic) {
+    SparseMatrix<double, RowMajor> camera_inverse =
+      normal_equations.camera_hessian;
+    FloorSymmetricBlocks<9>(camera_inverse, 1e-16);
+    BlockInverse<9>(camera_inverse);
+    diagnostic.unique_camera_interior_defect_squared = 0.;
+    for (int camera = 0; camera < camera_proximal_multipliers.size(); ++camera) {
+    if (camera_proximal_multipliers[camera] != 0.) {
+      continue;
+    }
+    const Eigen::VectorXd gradient =
+      normal_equations.camera_gradient.segment<9>(9 * camera);
+    diagnostic.unique_camera_interior_defect_squared += gradient.dot(
+      camera_inverse.block(9 * camera, 9 * camera, 9, 9) * gradient);
+    }
+    SparseMatrix<double, RowMajor> landmark_inverse =
+      normal_equations.landmark_hessian;
+    FloorSymmetricBlocks<3>(landmark_inverse, 1e-16);
+    BlockInverse<3>(landmark_inverse);
+    diagnostic.landmark_interior_defect_squared = std::max(
+      0., normal_equations.landmark_gradient.dot(
+        landmark_inverse * normal_equations.landmark_gradient));
+    diagnostic.unique_camera_interior_defect_squared = std::max(
+      0., diagnostic.unique_camera_interior_defect_squared);
+    diagnostic.interior_defect_squared =
+      diagnostic.unique_camera_interior_defect_squared
+      + diagnostic.landmark_interior_defect_squared;
+  }
 
 void EstimateProximalDefect(
     const NormalEquations& normal_equations,
@@ -1019,7 +1522,8 @@ public:
       THROW_IF(global_camera_ids.size() != static_cast<size_t>(numCameras));
       THROW_IF(cameras.size() != static_cast<size_t>(9 * numCameras));
       THROW_IF(cameras_s.size() != cameras.size());
-      THROW_IF(full_stepSize.size() != static_cast<size_t>(81 * numCameras));
+      const std::vector<double>& consensusMetric = ConsensusMetricBlocks();
+      THROW_IF(consensusMetric.size() != static_cast<size_t>(81 * numCameras));
       SingleNodeConsensusContribution contribution;
       contribution.global_camera_ids = global_camera_ids;
       contribution.metrics.resize(numCameras);
@@ -1031,8 +1535,7 @@ public:
           contribution.centers[camera][row] = cameras_s[9 * camera + row];
           for (int column = 0; column < 9; ++column) {
             contribution.metrics[camera][9 * row + column] =
-              static_cast<float>(
-                full_stepSize[81 * camera + 9 * row + column]);
+              consensusMetric[81 * camera + 9 * row + column];
           }
         }
       }
@@ -1041,6 +1544,9 @@ public:
 
     void ResetProgram(const program_proto &pro) {
       Init(pro.num_clusters());
+      last_linear_iterations = 0;
+      last_linear_relative_residual =
+          std::numeric_limits<double>::quiet_NaN();
       numCameras = pro.cameras_size() / 9;
       numLandmarks = pro.landmarks_size() / 3;
       numResiduals =  pro.observations_size() / 2;
@@ -1048,10 +1554,28 @@ public:
         pro.global_camera_id().begin(), pro.global_camera_id().end());
       THROW_IF(!global_camera_ids.empty()
           && global_camera_ids.size() != static_cast<size_t>(numCameras));
+      camera_proximal_multipliers.assign(
+          pro.camera_proximal_multiplier().begin(),
+          pro.camera_proximal_multiplier().end());
+      if (camera_proximal_multipliers.empty()) {
+        camera_proximal_multipliers.assign(numCameras, 1.);
+      }
+      THROW_IF(camera_proximal_multipliers.size()
+          != static_cast<size_t>(numCameras));
       local_iterations = std::max(1, std::min(20, pro.iterations()));
+      frozen_block_metric_initialized = false;
       scalar_proximal_prior = pro.scalar_proximal_prior();
       block_curvature_multiplier = pro.block_curvature_multiplier();
       metric_diagnostic_iterations = pro.metric_diagnostic_iterations();
+      outer_iteration = pro.outer_iteration();
+      oracle_kind = pro.oracle_kind();
+      collect_camera_diagonal_metrics =
+        pro.collect_camera_diagonal_metrics();
+      proximal_defect_diagnostic = pro.proximal_defect_diagnostic();
+        diagonal_trust_damping = pro.diagonal_trust_damping()
+          || DiagonalTrustDampingEnabled();
+        nesterov_relative_residual = pro.nesterov_relative_residual()
+          || NesterovRelativeResidualEnabled();
       landmark_refinement_steps = pro.landmark_refinement_steps();
         nesterov_max_iterations = pro.nesterov_max_iterations();
         nesterov_min_iterations = pro.nesterov_min_iterations();
@@ -1075,7 +1599,13 @@ public:
       persistent_trust_region = pro.persistent_trust_region();
       persistent_trust_region_active = persistent_trust_region;
       if (trust_region_policy == 1 && persistent_trust_region) {
-        tr_radius = std::min(100., max_trust_region_radius);
+        tr_radius = std::min(
+            DabaInitialTrustRegionCap(), max_trust_region_radius);
+      }
+      if (pro.forced_trust_region_radius() > 0.) {
+        tr_radius = std::max(
+        MinimumTrustRegionRadius(),
+        std::min(max_trust_region_radius, pro.forced_trust_region_radius()));
       }
       ceres_local_solver = pro.ceres_local_solver();
       objective_model = pro.objective_model();
@@ -1363,6 +1893,722 @@ public:
     }
 
 #ifndef __unweighted_system__
+  static Eigen::Matrix3d Skew(const Eigen::Vector3d& vector) {
+    Eigen::Matrix3d result;
+    result << 0., -vector.z(), vector.y(),
+              vector.z(), 0., -vector.x(),
+              -vector.y(), vector.x(), 0.;
+    return result;
+  }
+
+  static Eigen::Matrix3d So3LeftJacobian(const Eigen::Vector3d& rotation) {
+    const double squared_angle = rotation.squaredNorm();
+    const Eigen::Matrix3d rotation_cross = Skew(rotation);
+    if (squared_angle < 1e-12) {
+      return Eigen::Matrix3d::Identity() + 0.5 * rotation_cross
+          + (1. / 6.) * rotation_cross * rotation_cross;
+    }
+    const double angle = std::sqrt(squared_angle);
+    return Eigen::Matrix3d::Identity()
+        + ((1. - std::cos(angle)) / squared_angle) * rotation_cross
+        + ((angle - std::sin(angle)) / (squared_angle * angle))
+            * rotation_cross * rotation_cross;
+  }
+
+  static Eigen::Matrix3d RotationMatrix(const Eigen::Vector3d& angle_axis) {
+    const double angle = angle_axis.norm();
+    if (angle < 1e-14) {
+      return Eigen::Matrix3d::Identity();
+    }
+    return Eigen::AngleAxisd(angle, angle_axis / angle).toRotationMatrix();
+  }
+
+  static Eigen::Vector3d ContinuousAngleAxis(
+      const Eigen::Matrix3d& rotation_matrix,
+      const Eigen::Vector3d& reference) {
+    const double two_pi = 2. * std::acos(-1.);
+    const Eigen::AngleAxisd canonical(rotation_matrix);
+    if (canonical.angle() < 1e-14) {
+      const double reference_norm = reference.norm();
+      if (reference_norm < 1e-14) {
+        return Eigen::Vector3d::Zero();
+      }
+      const double winding = std::round(reference_norm / two_pi);
+      return winding * two_pi * reference / reference_norm;
+    }
+    const Eigen::Vector3d base = canonical.angle() * canonical.axis();
+    const double winding = std::round(
+        (canonical.axis().dot(reference) - canonical.angle()) / two_pi);
+    return base + winding * two_pi * canonical.axis();
+  }
+
+  std::vector<Eigen::Matrix<double, 9, 9>>
+  TangentToScaledJacobians() const {
+    const CameraUpdateMode update_mode = GetCameraUpdateMode();
+    THROW_IF(update_mode == CameraUpdateMode::kAdditive);
+    std::vector<Eigen::Matrix<double, 9, 9>> result(numCameras);
+    for (int camera = 0; camera < numCameras; ++camera) {
+      const int camera_offset = 9 * camera;
+      const int transform_offset = 81 * camera;
+      Eigen::Matrix<double, 9, 9> physical_transform;
+      for (int row = 0; row < 9; ++row) {
+        for (int column = 0; column < 9; ++column) {
+          physical_transform(row, column) =
+              cameraTransform[transform_offset + 9 * row + column]
+              * unorm[camera_offset + column];
+        }
+      }
+      const Eigen::Map<const Eigen::Matrix<double, 9, 1>> scaled_camera(
+          &cameras[camera_offset]);
+      const Eigen::Matrix<double, 9, 1> physical_camera =
+          physical_transform * scaled_camera;
+      Eigen::Matrix<double, 9, 9> physical_jacobian =
+          Eigen::Matrix<double, 9, 9>::Identity();
+      if (update_mode == CameraUpdateMode::kAngleAxisLeft) {
+        physical_jacobian.topLeftCorner<3, 3>() =
+            So3LeftJacobian(physical_camera.head<3>()).inverse();
+        } else if (update_mode == CameraUpdateMode::kSe3Right) {
+        physical_jacobian.setZero();
+        physical_jacobian.block<3, 3>(0, 3) =
+          So3LeftJacobian(-physical_camera.head<3>()).inverse();
+        physical_jacobian.block<3, 3>(3, 0) =
+          RotationMatrix(physical_camera.head<3>());
+        physical_jacobian.bottomRightCorner<3, 3>().setIdentity();
+      } else {
+        physical_jacobian.setZero();
+        physical_jacobian.block<3, 3>(0, 3) =
+            So3LeftJacobian(physical_camera.head<3>()).inverse();
+        physical_jacobian.block<3, 3>(3, 0).setIdentity();
+        physical_jacobian.block<3, 3>(3, 3) =
+            -Skew(physical_camera.segment<3>(3));
+        physical_jacobian.bottomRightCorner<3, 3>().setIdentity();
+      }
+      result[camera] =
+          physical_transform.partialPivLu().solve(physical_jacobian);
+      THROW_IF(!result[camera].allFinite());
+    }
+    return result;
+  }
+
+  static SparseMatrix<double, RowMajor> TransformCameraBlockMatrix(
+      const SparseMatrix<double, RowMajor>& input,
+      const std::vector<Eigen::Matrix<double, 9, 9>>& blocks) {
+    SparseMatrix<double, RowMajor> result(input.rows(), input.cols());
+    result.reserve(VectorXi::Constant(input.rows(), 9));
+    for (int camera = 0; camera < blocks.size(); ++camera) {
+      Eigen::Matrix<double, 9, 9> input_block;
+      for (int row = 0; row < 9; ++row) {
+        for (int column = 0; column < 9; ++column) {
+          input_block(row, column) =
+              input.coeff(9 * camera + row, 9 * camera + column);
+        }
+      }
+      const Eigen::Matrix<double, 9, 9> output_block =
+          blocks[camera].transpose() * input_block * blocks[camera];
+      for (int row = 0; row < 9; ++row) {
+        for (int column = 0; column < 9; ++column) {
+          result.insert(9 * camera + row, 9 * camera + column) =
+              output_block(row, column);
+        }
+      }
+    }
+    result.makeCompressed();
+    return result;
+  }
+  static SparseMatrix<double, RowMajor> CameraBlocksToSparse(
+      const std::vector<double>& blocks) {
+    THROW_IF(blocks.size() % 81 != 0);
+    const int block_count = blocks.size() / 81;
+    SparseMatrix<double, RowMajor> result(
+        9 * block_count, 9 * block_count);
+    result.reserve(VectorXi::Constant(9 * block_count, 9));
+    for (int block = 0; block < block_count; ++block) {
+      for (int row = 0; row < 9; ++row) {
+        for (int column = 0; column < 9; ++column) {
+          result.insert(9 * block + row, 9 * block + column) =
+              blocks[81 * block + 9 * row + column];
+        }
+      }
+    }
+    result.makeCompressed();
+    return result;
+  }
+  static Eigen::VectorXd TransformCameraVector(
+      const Eigen::VectorXd& input,
+      const std::vector<Eigen::Matrix<double, 9, 9>>& blocks) {
+    Eigen::VectorXd result(input.size());
+    for (int camera = 0; camera < blocks.size(); ++camera) {
+      result.segment<9>(9 * camera) =
+          blocks[camera].transpose() * input.segment<9>(9 * camera);
+    }
+    return result;
+  }
+
+  void ApplyCameraStep(const Eigen::VectorXd& step) {
+    THROW_IF(step.size() != cameras.size());
+    const CameraUpdateMode update_mode = GetCameraUpdateMode();
+    if (update_mode == CameraUpdateMode::kAdditive) {
+      for (int index = 0; index < step.size(); ++index) {
+        cameras[index] += step[index];
+      }
+      return;
+    }
+
+    for (int camera = 0; camera < numCameras; ++camera) {
+      const int camera_offset = 9 * camera;
+      const int transform_offset = 81 * camera;
+      Eigen::Matrix<double, 9, 9> physical_transform;
+      for (int row = 0; row < 9; ++row) {
+        for (int column = 0; column < 9; ++column) {
+          physical_transform(row, column) =
+              cameraTransform[transform_offset + 9 * row + column]
+              * unorm[camera_offset + column];
+        }
+      }
+
+      const Eigen::Map<const Eigen::Matrix<double, 9, 1>> scaled_camera(
+          &cameras[camera_offset]);
+      const Eigen::Matrix<double, 9, 1> physical_camera =
+          physical_transform * scaled_camera;
+      const Eigen::Vector3d rotation = physical_camera.head<3>();
+      const Eigen::Vector3d translation = physical_camera.segment<3>(3);
+      const bool se3_left = update_mode == CameraUpdateMode::kSe3Left;
+      const bool se3_right = update_mode == CameraUpdateMode::kSe3Right;
+      const Eigen::Vector3d left_rotation = se3_left
+          ? step.segment<3>(camera_offset + 3)
+          : (se3_right ? step.segment<3>(camera_offset + 3)
+                       : step.segment<3>(camera_offset));
+      const Eigen::Matrix3d rotation_increment = RotationMatrix(left_rotation);
+
+      Eigen::Matrix<double, 9, 1> updated_physical = physical_camera;
+        updated_physical.head<3>() = ContinuousAngleAxis(
+          se3_right
+              ? RotationMatrix(rotation) * rotation_increment
+              : rotation_increment * RotationMatrix(rotation),
+          rotation);
+        if (se3_left) {
+        const Eigen::Vector3d left_translation =
+          step.segment<3>(camera_offset);
+        updated_physical.segment<3>(3) = rotation_increment * translation
+          + So3LeftJacobian(left_rotation) * left_translation;
+        } else if (se3_right) {
+        const Eigen::Vector3d right_translation =
+          step.segment<3>(camera_offset);
+        updated_physical.segment<3>(3) = translation
+          + RotationMatrix(rotation) * So3LeftJacobian(left_rotation)
+              * right_translation;
+        } else {
+        updated_physical.segment<3>(3) +=
+          step.segment<3>(camera_offset + 3);
+        }
+        updated_physical.tail<3>() += step.segment<3>(camera_offset + 6);
+
+      const Eigen::Matrix<double, 9, 1> updated_scaled =
+          physical_transform.partialPivLu().solve(updated_physical);
+        if (!updated_scaled.allFinite()) {
+        const Eigen::Matrix<double, 9, 1> camera_step =
+          step.segment<9>(camera_offset);
+        const Eigen::Matrix<double, 9, 1> singular_values =
+          physical_transform.jacobiSvd().singularValues();
+        std::cerr << "Non-finite camera back-transform: camera=" << camera
+              << " radius=" << tr_radius
+              << " step_norm=" << camera_step.norm()
+              << " step_max=" << camera_step.cwiseAbs().maxCoeff()
+              << " physical_norm=" << physical_camera.norm()
+              << " updated_physical_norm=" << updated_physical.norm()
+              << " transform_sigma_min=" << singular_values.minCoeff()
+              << " transform_sigma_max=" << singular_values.maxCoeff()
+              << " scaled_max=" << updated_scaled.cwiseAbs().maxCoeff()
+              << std::endl;
+        }
+      THROW_IF(!updated_scaled.allFinite());
+      Eigen::Map<Eigen::Matrix<double, 9, 1>> scaled_camera_output(
+          &cameras[camera_offset]);
+      scaled_camera_output = updated_scaled;
+    }
+  }
+
+  class ScaledLeftSe3Manifold final : public ceres::Manifold {
+   public:
+    explicit ScaledLeftSe3Manifold(
+        const Eigen::Matrix<double, 9, 9>& physical_transform)
+        : physical_transform_(physical_transform),
+          scaled_transform_(physical_transform.inverse()) {}
+
+    int AmbientSize() const override { return 9; }
+    int TangentSize() const override { return 9; }
+
+    bool Plus(const double* x, const double* delta,
+              double* x_plus_delta) const override {
+      const Eigen::Map<const Eigen::Matrix<double, 9, 1>> scaled(x);
+      const Eigen::Matrix<double, 9, 1> physical = physical_transform_ * scaled;
+      const Eigen::Map<const Eigen::Vector3d> translation_delta(delta);
+      const Eigen::Map<const Eigen::Vector3d> rotation_delta(delta + 3);
+      const Eigen::Matrix3d rotation_increment = RotationMatrix(rotation_delta);
+      Eigen::Matrix<double, 9, 1> updated = physical;
+      updated.head<3>() = ContinuousAngleAxis(
+          rotation_increment * RotationMatrix(physical.head<3>()),
+          physical.head<3>());
+      updated.segment<3>(3) =
+          rotation_increment * physical.segment<3>(3)
+          + So3LeftJacobian(rotation_delta) * translation_delta;
+      updated.tail<3>() += Eigen::Map<const Eigen::Vector3d>(delta + 6);
+        Eigen::Map<Eigen::Matrix<double, 9, 1>> output(x_plus_delta);
+        output = scaled_transform_ * updated;
+      return true;
+    }
+
+    bool PlusJacobian(const double* x, double* jacobian) const override {
+      const Eigen::Map<const Eigen::Matrix<double, 9, 1>> scaled(x);
+      const Eigen::Matrix<double, 9, 1> physical = physical_transform_ * scaled;
+      Eigen::Matrix<double, 9, 9> physical_jacobian =
+          Eigen::Matrix<double, 9, 9>::Zero();
+      physical_jacobian.block<3, 3>(0, 3) =
+          So3LeftJacobian(physical.head<3>()).inverse();
+      physical_jacobian.block<3, 3>(3, 0).setIdentity();
+      physical_jacobian.block<3, 3>(3, 3) =
+          -Skew(physical.segment<3>(3));
+      physical_jacobian.bottomRightCorner<3, 3>().setIdentity();
+      Eigen::Map<Eigen::Matrix<double, 9, 9, Eigen::RowMajor>> result(jacobian);
+      result = scaled_transform_ * physical_jacobian;
+      return result.allFinite();
+    }
+
+    bool Minus(const double* y, const double* x,
+               double* y_minus_x) const override {
+      const Eigen::Map<const Eigen::Matrix<double, 9, 1>> scaled_y(y);
+      const Eigen::Map<const Eigen::Matrix<double, 9, 1>> scaled_x(x);
+      const Eigen::Matrix<double, 9, 1> physical_y = physical_transform_ * scaled_y;
+      const Eigen::Matrix<double, 9, 1> physical_x = physical_transform_ * scaled_x;
+      const Eigen::Matrix3d relative_rotation =
+          RotationMatrix(physical_y.head<3>())
+          * RotationMatrix(physical_x.head<3>()).transpose();
+      const Eigen::Vector3d rotation = ContinuousAngleAxis(
+          relative_rotation, Eigen::Vector3d::Zero());
+      const Eigen::Vector3d relative_translation =
+          physical_y.segment<3>(3)
+          - relative_rotation * physical_x.segment<3>(3);
+        Eigen::Map<Eigen::Vector3d> translation_output(y_minus_x);
+        Eigen::Map<Eigen::Vector3d> rotation_output(y_minus_x + 3);
+        Eigen::Map<Eigen::Vector3d> intrinsics_output(y_minus_x + 6);
+        translation_output =
+          So3LeftJacobian(rotation).inverse() * relative_translation;
+        rotation_output = rotation;
+        intrinsics_output = physical_y.tail<3>() - physical_x.tail<3>();
+      return true;
+    }
+
+    bool MinusJacobian(const double* x, double* jacobian) const override {
+      double plus_jacobian[81];
+      PlusJacobian(x, plus_jacobian);
+      const Eigen::Map<const Eigen::Matrix<double, 9, 9, Eigen::RowMajor>> plus(
+          plus_jacobian);
+      Eigen::Map<Eigen::Matrix<double, 9, 9, Eigen::RowMajor>> result(jacobian);
+      result = plus.inverse();
+      return result.allFinite();
+    }
+
+   private:
+    Eigen::Matrix<double, 9, 9> physical_transform_;
+    Eigen::Matrix<double, 9, 9> scaled_transform_;
+  };
+
+  class CameraBlockProximalCost final
+      : public ceres::SizedCostFunction<9, 9> {
+   public:
+    CameraBlockProximalCost(
+        const Eigen::Matrix<double, 9, 9>& metric,
+        const double* center) {
+      const Eigen::SelfAdjointEigenSolver<Eigen::Matrix<double, 9, 9>> solver(
+          0.5 * (metric + metric.transpose()));
+      THROW_IF(solver.info() != Eigen::Success);
+      square_root_ = solver.eigenvectors()
+          * solver.eigenvalues().cwiseMax(0.).cwiseSqrt().asDiagonal()
+          * solver.eigenvectors().transpose();
+      center_ = Eigen::Map<const Eigen::Matrix<double, 9, 1>>(center);
+    }
+
+    bool Evaluate(double const* const* parameters, double* residuals,
+                  double** jacobians) const override {
+      const Eigen::Map<const Eigen::Matrix<double, 9, 1>> camera(parameters[0]);
+        Eigen::Map<Eigen::Matrix<double, 9, 1>> residual_map(residuals);
+        residual_map = square_root_ * (camera - center_);
+      if (jacobians != nullptr && jacobians[0] != nullptr) {
+        Eigen::Map<Eigen::Matrix<double, 9, 9, Eigen::RowMajor>> jacobian(
+            jacobians[0]);
+        jacobian = square_root_;
+      }
+      return true;
+    }
+
+   private:
+    Eigen::Matrix<double, 9, 9> square_root_;
+    Eigen::Matrix<double, 9, 1> center_;
+  };
+
+  void ScaleCameraProximalMetric(
+      SparseMatrix<double, RowMajor>& metric) const {
+    THROW_IF(camera_proximal_multipliers.size()
+        != static_cast<size_t>(numCameras));
+    for (int row = 0; row < metric.outerSize(); ++row) {
+      const double multiplier = camera_proximal_multipliers[row / 9];
+      THROW_IF(multiplier < 0. || !std::isfinite(multiplier));
+      for (SparseMatrix<double, RowMajor>::InnerIterator entry(metric, row);
+           entry; ++entry) {
+        entry.valueRef() *= multiplier;
+      }
+    }
+  }
+
+  bool PrepareCentralizedProximalMetric() {
+    NormalEquations normal_equations = GetNormalEquations();
+    SparseMatrix<double, RowMajor> camera_hessian =
+        normal_equations.camera_hessian;
+    if (firstIteration) {
+      if (!DisableLandmarkPreconditioningEnabled()) {
+        const Eigen::VectorXd diagonal =
+            normal_equations.landmark_hessian.diagonal().array()
+                .cwiseMax(LandmarkPreconditionerFloor())
+                .cwiseSqrt().cwiseInverse();
+        for (int index = 0; index < diagonal.size(); ++index) {
+          landmarks[index] /= diagonal[index];
+          vnorm[index] = diagonal[index];
+        }
+      }
+      UpdatePreconditioningCameras(camera_hessian);
+      best_landmarks = landmarks;
+      cost = 2. * GetCost();
+      firstIteration = false;
+      return false;
+    }
+
+    const Eigen::DiagonalMatrix<double, Eigen::Dynamic> consensus_diagonal =
+        CameraDiagonalMetricScale() * Diagonal<9>(
+          camera_hessian, cluster_id, collect_camera_diagonal_metrics,
+          outer_iteration, oracle_kind, "centralized_consensus",
+          &global_camera_ids);
+    const double legacy_scale =
+        std::min(1.005, 1e-1 * std::sqrt(current_be / start_be));
+    const double scale = block_curvature_multiplier > 0.
+        ? block_curvature_multiplier : legacy_scale;
+    SparseMatrix<double, RowMajor> metric = scale * camera_hessian;
+    metric += consensus_diagonal * current_be;
+    ScaleCameraProximalMetric(metric);
+    const double* values = metric.valuePtr();
+    full_stepSize.assign(values, values + 81 * numCameras);
+    return true;
+  }
+
+  double SolveCentralizedLeftSe3(bool include_proximal = false) {
+    THROW_IF((!include_proximal && num_clusters != 1) ||
+             GetCameraUpdateMode() != CameraUpdateMode::kSe3Left);
+    if (include_proximal && !PrepareCentralizedProximalMetric()) {
+      return cost;
+    }
+    ceres::Problem centralized_problem;
+    const std::vector<double> diagnostic_initial_cameras = cameras;
+    const std::vector<double> diagnostic_initial_landmarks = landmarks;
+    for (int observation = 0; observation < numResiduals; ++observation) {
+      const int camera_id = cam_obs[observation];
+      const int landmark_id = lm_obs[observation];
+      centralized_problem.AddResidualBlock(
+          SnavelyReprojectionErrorWeighted::Create(
+              observed_x[observation], observed_y[observation],
+              &unorm[9 * camera_id], &vnorm[3 * landmark_id],
+              &cameraTransform[81 * camera_id]),
+          nullptr, &cameras[9 * camera_id], &landmarks[3 * landmark_id]);
+    }
+    for (int camera = 0; camera < numCameras; ++camera) {
+      Eigen::Matrix<double, 9, 9> physical_transform;
+      for (int row = 0; row < 9; ++row) {
+        for (int column = 0; column < 9; ++column) {
+          physical_transform(row, column) =
+              cameraTransform[81 * camera + 9 * row + column]
+              * unorm[9 * camera + column];
+        }
+      }
+      centralized_problem.SetManifold(
+          &cameras[9 * camera], new ScaledLeftSe3Manifold(physical_transform));
+      if (include_proximal) {
+        Eigen::Matrix<double, 9, 9> metric;
+        for (int row = 0; row < 9; ++row) {
+          for (int column = 0; column < 9; ++column) {
+            metric(row, column) =
+                full_stepSize[81 * camera + 9 * row + column];
+          }
+        }
+        centralized_problem.AddResidualBlock(
+            new CameraBlockProximalCost(metric, &cameras_s[9 * camera]),
+            nullptr, &cameras[9 * camera]);
+      }
+    }
+    ceres::Solver::Options centralized_options;
+    centralized_options.max_num_iterations = CentralizedCeresIterations();
+    centralized_options.num_threads = options.num_threads;
+    centralized_options.linear_solver_type = CentralizedCeresSparseSchurEnabled()
+        ? ceres::SPARSE_SCHUR : ceres::ITERATIVE_SCHUR;
+    if (!CentralizedCeresSparseSchurEnabled()) {
+      centralized_options.preconditioner_type = ceres::SCHUR_JACOBI;
+    }
+    centralized_options.initial_trust_region_radius =
+      CentralizedCeresInitialRadius();
+    centralized_options.max_linear_solver_iterations =
+      CentralizedCeresMaximumLinearIterations();
+    centralized_options.function_tolerance = 1e-12;
+    centralized_options.gradient_tolerance = 1e-12;
+    centralized_options.parameter_tolerance = 1e-12;
+    centralized_options.eta = 0.1;
+    centralized_options.jacobi_scaling =
+      CentralizedCeresJacobiScalingEnabled();
+    centralized_options.minimizer_progress_to_stdout = false;
+    if (const char* dump_directory = std::getenv(
+        "BUNDLE_PALM_CENTRALIZED_CERES_DUMP_DIRECTORY")) {
+      centralized_options.trust_region_minimizer_iterations_to_dump = {0, 1};
+      centralized_options.trust_region_problem_dump_directory = dump_directory;
+      centralized_options.trust_region_problem_dump_format_type =
+        ceres::TEXTFILE;
+    }
+    if (CentralizedCeresTangentDiagnosticEnabled()) {
+      ceres::Problem::EvaluateOptions evaluate_options;
+      for (int camera = 0; camera < numCameras; ++camera) {
+        evaluate_options.parameter_blocks.push_back(&cameras[9 * camera]);
+      }
+      for (int landmark = 0; landmark < numLandmarks; ++landmark) {
+        evaluate_options.parameter_blocks.push_back(&landmarks[3 * landmark]);
+      }
+      double diagnostic_cost = 0.;
+      std::vector<double> gradient;
+      ceres::CRSMatrix jacobian;
+      centralized_problem.Evaluate(
+          evaluate_options, &diagnostic_cost, nullptr, &gradient, &jacobian);
+      std::array<double, 4> gradient_squared = {0., 0., 0., 0.};
+      std::vector<double> column_squared(jacobian.num_cols, 0.);
+      for (int row = 0; row < jacobian.num_rows; ++row) {
+        for (int index = jacobian.rows[row];
+             index < jacobian.rows[row + 1]; ++index) {
+          column_squared[jacobian.cols[index]] +=
+              jacobian.values[index] * jacobian.values[index];
+        }
+      }
+      std::array<double, 4> normalized_gradient_squared = {0., 0., 0., 0.};
+      std::array<double, 4> minimum_column_squared = {
+          std::numeric_limits<double>::infinity(),
+          std::numeric_limits<double>::infinity(),
+          std::numeric_limits<double>::infinity(),
+          std::numeric_limits<double>::infinity()};
+      for (int camera = 0; camera < numCameras; ++camera) {
+        for (int parameter = 0; parameter < 9; ++parameter) {
+          const double value = gradient[9 * camera + parameter];
+            const int group = parameter / 3;
+            gradient_squared[group] += value * value;
+            minimum_column_squared[group] = std::min(
+              minimum_column_squared[group],
+              column_squared[9 * camera + parameter]);
+            normalized_gradient_squared[group] += value * value /
+              std::max(column_squared[9 * camera + parameter],
+                std::numeric_limits<double>::min());
+        }
+      }
+      const int landmark_offset = 9 * numCameras;
+      for (int parameter = landmark_offset;
+           parameter < gradient.size(); ++parameter) {
+        gradient_squared[3] += gradient[parameter] * gradient[parameter];
+        minimum_column_squared[3] = std::min(
+          minimum_column_squared[3], column_squared[parameter]);
+        normalized_gradient_squared[3] += gradient[parameter] * gradient[parameter] /
+          std::max(column_squared[parameter],
+            std::numeric_limits<double>::min());
+      }
+      double camera_quadratic = 0.;
+      double landmark_quadratic = 0.;
+      double cross_quadratic = 0.;
+      double gradient_probe = 0.;
+      for (int column = 0; column < gradient.size(); ++column) {
+        gradient_probe += gradient[column]
+        * std::sin(0.6180339887498949 * (column + 1));
+      }
+      for (int row = 0; row < jacobian.num_rows; ++row) {
+        double camera_action = 0.;
+        double landmark_action = 0.;
+        for (int index = jacobian.rows[row];
+             index < jacobian.rows[row + 1]; ++index) {
+          const int column = jacobian.cols[index];
+          const double probe = std::sin(0.6180339887498949 * (column + 1));
+          if (column < landmark_offset) {
+            camera_action += jacobian.values[index] * probe;
+          } else {
+            landmark_action += jacobian.values[index] * probe;
+          }
+        }
+        camera_quadratic += camera_action * camera_action;
+        landmark_quadratic += landmark_action * landmark_action;
+        cross_quadratic += 2. * camera_action * landmark_action;
+      }
+      std::ostringstream metric;
+      metric << "CERES_TANGENT_GRADIENT cluster=" << cluster_id
+             << " cost=" << 2. * diagnostic_cost
+             << " translation=" << std::sqrt(gradient_squared[0])
+             << " rotation=" << std::sqrt(gradient_squared[1])
+             << " intrinsics=" << std::sqrt(gradient_squared[2])
+             << " landmarks=" << std::sqrt(gradient_squared[3])
+             << " normalized_translation="
+             << std::sqrt(normalized_gradient_squared[0])
+             << " normalized_rotation="
+             << std::sqrt(normalized_gradient_squared[1])
+             << " normalized_intrinsics="
+             << std::sqrt(normalized_gradient_squared[2])
+             << " normalized_landmarks="
+             << std::sqrt(normalized_gradient_squared[3])
+             << " minimum_translation_diagonal=" << minimum_column_squared[0]
+             << " minimum_rotation_diagonal=" << minimum_column_squared[1]
+             << " minimum_intrinsics_diagonal=" << minimum_column_squared[2]
+             << " minimum_landmark_diagonal=" << minimum_column_squared[3]
+             << " camera_quadratic=" << camera_quadratic
+             << " landmark_quadratic=" << landmark_quadratic
+             << " cross_quadratic=" << cross_quadratic
+             << " gradient_probe=" << gradient_probe
+             << " columns=" << jacobian.num_cols << "\n";
+      EmitLocalSolveMetric(metric.str());
+    }
+    NormalEquations diagnostic_normal_equations;
+    BlockEdgeMatrix diagnostic_cross_hessian;
+    if (CentralizedCeresTangentDiagnosticEnabled()) {
+      diagnostic_normal_equations = GetBatchedNormalEquations(true);
+      diagnostic_cross_hessian = camera_landmark_hessian;
+    }
+    ceres::Solver::Summary summary;
+    ceres::Solve(centralized_options, &centralized_problem, &summary);
+    if (include_proximal && LocalSolveMetricsEnabled()) {
+      Eigen::Map<const Eigen::VectorXd> initial_camera_vector(
+        diagnostic_initial_cameras.data(), diagnostic_initial_cameras.size());
+      Eigen::Map<const Eigen::VectorXd> final_camera_vector(
+        cameras.data(), cameras.size());
+      Eigen::Map<const Eigen::VectorXd> initial_landmark_vector(
+        diagnostic_initial_landmarks.data(), diagnostic_initial_landmarks.size());
+      Eigen::Map<const Eigen::VectorXd> final_landmark_vector(
+        landmarks.data(), landmarks.size());
+      Eigen::VectorXd proximal_offset(cameras.size());
+      for (int index = 0; index < proximal_offset.size(); ++index) {
+      proximal_offset[index] = cameras[index] - cameras_s[index];
+      }
+      const double proximal_cost = proximal_offset.dot(
+        blockMult<9>(full_stepSize, proximal_offset));
+      std::ostringstream metric;
+      metric << "CENTRALIZED_CERES_PROXIMAL_ENDPOINT cluster=" << cluster_id
+         << " camera_displacement="
+         << (final_camera_vector - initial_camera_vector).norm()
+         << " landmark_displacement="
+         << (final_landmark_vector - initial_landmark_vector).norm()
+         << " reprojection=" << 2. * GetCost()
+         << " proximal=" << proximal_cost
+         << " total=" << 2. * GetCost() + proximal_cost << "\n";
+      EmitLocalSolveMetric(metric.str());
+    }
+    if (CentralizedCeresTangentDiagnosticEnabled()) {
+      const NormalEquations& normal_equations = diagnostic_normal_equations;
+      const BlockEdgeMatrix& cross_hessian = diagnostic_cross_hessian;
+      Eigen::VectorXd camera_step(9 * numCameras);
+      for (int camera = 0; camera < numCameras; ++camera) {
+        Eigen::Matrix<double, 9, 9> physical_transform;
+        for (int row = 0; row < 9; ++row) {
+          for (int column = 0; column < 9; ++column) {
+            physical_transform(row, column) =
+                cameraTransform[81 * camera + 9 * row + column]
+                * unorm[9 * camera + column];
+          }
+        }
+        ScaledLeftSe3Manifold manifold(physical_transform);
+        manifold.Minus(&cameras[9 * camera],
+                       &diagnostic_initial_cameras[9 * camera],
+                       &camera_step[9 * camera]);
+      }
+      const Eigen::Map<const Eigen::VectorXd> initial_landmarks(
+          diagnostic_initial_landmarks.data(), diagnostic_initial_landmarks.size());
+      const Eigen::Map<const Eigen::VectorXd> final_landmarks(
+          landmarks.data(), landmarks.size());
+      const Eigen::VectorXd landmark_step = final_landmarks - initial_landmarks;
+      double solve_radius = centralized_options.initial_trust_region_radius;
+      for (int iteration = 1; iteration < summary.iterations.size(); ++iteration) {
+        if (summary.iterations[iteration].step_is_successful) {
+          solve_radius = summary.iterations[iteration - 1].trust_region_radius;
+          break;
+        }
+      }
+      Eigen::VectorXd camera_cross(camera_step.size());
+      Eigen::VectorXd landmark_cross(landmark_step.size());
+      cross_hessian.Multiply(landmark_step, camera_cross);
+      cross_hessian.TransposeMultiply(camera_step, landmark_cross);
+      Eigen::VectorXd camera_residual =
+          normal_equations.camera_hessian * camera_step + camera_cross
+          + normal_equations.camera_gradient;
+      Eigen::VectorXd landmark_residual =
+          normal_equations.landmark_hessian * landmark_step + landmark_cross
+          + normal_equations.landmark_gradient;
+      camera_residual += (1. / solve_radius)
+          * normal_equations.camera_hessian.diagonal().cwiseMax(1e-6)
+              .cwiseMin(1e32).cwiseProduct(camera_step);
+      landmark_residual += (1. / solve_radius)
+          * normal_equations.landmark_hessian.diagonal().cwiseMax(1e-6)
+              .cwiseMin(1e32).cwiseProduct(landmark_step);
+      const double gradient_norm = std::hypot(
+          normal_equations.camera_gradient.norm(),
+          normal_equations.landmark_gradient.norm());
+      std::ostringstream metric;
+        double translation_step_squared = 0.;
+        double rotation_step_squared = 0.;
+        double intrinsics_step_squared = 0.;
+        for (int camera = 0; camera < numCameras; ++camera) {
+        translation_step_squared +=
+          camera_step.segment<3>(9 * camera).squaredNorm();
+        rotation_step_squared +=
+          camera_step.segment<3>(9 * camera + 3).squaredNorm();
+        intrinsics_step_squared +=
+          camera_step.segment<3>(9 * camera + 6).squaredNorm();
+        }
+      metric << "CERES_STEP_NORMAL_RESIDUAL cluster=" << cluster_id
+             << " radius=" << solve_radius
+             << " camera_step=" << camera_step.norm()
+           << " translation_step=" << std::sqrt(translation_step_squared)
+           << " rotation_step=" << std::sqrt(rotation_step_squared)
+           << " intrinsics_step=" << std::sqrt(intrinsics_step_squared)
+             << " landmark_step=" << landmark_step.norm()
+             << " camera_residual=" << camera_residual.norm()
+             << " landmark_residual=" << landmark_residual.norm()
+             << " relative=" << std::hypot(
+                  camera_residual.norm(), landmark_residual.norm())
+                  / gradient_norm << "\n";
+      EmitLocalSolveMetric(metric.str());
+    }
+    if (LocalSolveMetricsEnabled()) {
+      EmitLocalSolveMetric(
+          "CENTRALIZED_CERES_SCHUR_STRUCTURE cluster="
+          + std::to_string(cluster_id)
+          + " used=" + summary.schur_structure_used + "\n");
+      for (const ceres::IterationSummary& iteration : summary.iterations) {
+        std::ostringstream metric;
+        metric << "CENTRALIZED_CERES_ITERATION cluster=" << cluster_id
+               << " iteration=" << iteration.iteration
+               << " cost=" << 2. * iteration.cost
+               << " cost_change=" << 2. * iteration.cost_change
+               << " relative_decrease=" << iteration.relative_decrease
+               << " radius=" << iteration.trust_region_radius
+               << " step_norm=" << iteration.step_norm
+               << " step_successful=" << iteration.step_is_successful
+               << " step_valid=" << iteration.step_is_valid
+               << " linear_iterations=" << iteration.linear_solver_iterations
+               << "\n";
+        EmitLocalSolveMetric(metric.str());
+      }
+    }
+    cost = 2. * GetCost();
+    if (!summary.iterations.empty()) {
+      tr_radius = std::min(
+          max_trust_region_radius,
+          summary.iterations.back().trust_region_radius);
+    }
+    return cost;
+  }
+
   void UpdateWeightedParameters() {
       for (int camera = 0; camera < numCameras; ++camera) {
         const int cameraOffset = 9 * camera;
@@ -1426,26 +2672,41 @@ public:
         physical_landmarks.size() * sizeof(double));
       }
       if (include_metric_blocks) {
-        std::vector<float> metric_upper_blocks;
+        std::vector<double> metric_upper_blocks;
         metric_upper_blocks.reserve(45 * numCameras);
         for (int camera = 0; camera < numCameras; ++camera) {
           const int offset = 81 * camera;
           for (int row = 0; row < 9; ++row) {
             for (int column = row; column < 9; ++column) {
-              const float upper = static_cast<float>(
-                  full_stepSize[offset + 9 * row + column]);
-              const float lower = static_cast<float>(
-                  full_stepSize[offset + 9 * column + row]);
+              const double upper = full_stepSize[offset + 9 * row + column];
+              const double lower = full_stepSize[offset + 9 * column + row];
               THROW_IF(upper != lower);
               metric_upper_blocks.push_back(upper);
             }
           }
         }
-        return_proto.set_step_size_upper_f32(
+        return_proto.set_step_size_upper_f64(
             reinterpret_cast<const char*>(metric_upper_blocks.data()),
-            metric_upper_blocks.size() * sizeof(float));
+            metric_upper_blocks.size() * sizeof(double));
+        if (ConsensusUnflooredCameraDiagonalEnabled()) {
+          const std::vector<double>& consensusMetric = ConsensusMetricBlocks();
+          metric_upper_blocks.clear();
+          for (int camera = 0; camera < numCameras; ++camera) {
+            const int offset = 81 * camera;
+            for (int row = 0; row < 9; ++row) {
+              for (int column = row; column < 9; ++column) {
+                metric_upper_blocks.push_back(
+                    consensusMetric[offset + 9 * row + column]);
+              }
+            }
+          }
+          return_proto.set_consensus_step_size_upper_f64(
+              reinterpret_cast<const char*>(metric_upper_blocks.data()),
+              metric_upper_blocks.size() * sizeof(double));
+        }
       }
       if (include_consensus_rhs) {
+        const std::vector<double>& consensusMetric = ConsensusMetricBlocks();
         std::vector<double> consensus_rhs(9 * numCameras, 0.);
         for (int camera = 0; camera < numCameras; ++camera) {
           const int camera_offset = 9 * camera;
@@ -1453,8 +2714,8 @@ public:
           for (int row = 0; row < 9; ++row) {
             double value = 0.;
             for (int column = 0; column < 9; ++column) {
-              const double metric_value = static_cast<float>(
-                  full_stepSize[metric_offset + 9 * row + column]);
+                const double metric_value =
+                  consensusMetric[metric_offset + 9 * row + column];
               value += metric_value * (
                   2. * cameras[camera_offset + column]
                   - cameras_s[camera_offset + column]);
@@ -1468,6 +2729,10 @@ public:
       }
       return_proto.set_cluster_id(cluster_id);
       return_proto.set_cost(cost);
+      return_proto.set_trust_region_radius(tr_radius);
+        return_proto.set_linear_iterations(last_linear_iterations);
+        return_proto.set_linear_relative_residual(
+          last_linear_relative_residual);
       return_proto.set_objective_model(objective_model);
         return_proto.set_transformed_lipschitz_estimate(
           metric_diagnostic.transformed_lipschitz);
@@ -1481,6 +2746,12 @@ public:
             metric_diagnostic.landmark_proximal_defect_squared);
           return_proto.set_proximal_defect_squared(
             metric_diagnostic.proximal_defect_squared);
+          return_proto.set_unique_camera_interior_defect_squared(
+            metric_diagnostic.unique_camera_interior_defect_squared);
+          return_proto.set_landmark_interior_defect_squared(
+            metric_diagnostic.landmark_interior_defect_squared);
+          return_proto.set_interior_defect_squared(
+            metric_diagnostic.interior_defect_squared);
       return return_proto;
     }
 
@@ -1594,6 +2865,11 @@ public:
       landmarks = accepted_landmarks;
     }
 
+    void RestoreBestOutputLandmarkState() {
+      THROW_IF(best_output_landmarks.size() != landmarks.size());
+      landmarks = best_output_landmarks;
+    }
+
     void SaveBestOutputLandmarkState() {
       best_output_landmarks = landmarks;
     }
@@ -1643,8 +2919,31 @@ public:
       }
       current_be = update.be();
       scalar_proximal_prior = update.scalar_proximal_prior();
+      if (update.camera_proximal_multiplier_size() > 0) {
+        THROW_IF(update.camera_proximal_multiplier_size() != numCameras);
+        camera_proximal_multipliers.assign(
+        update.camera_proximal_multiplier().begin(),
+        update.camera_proximal_multiplier().end());
+      }
       block_curvature_multiplier = update.block_curvature_multiplier();
       metric_diagnostic_iterations = update.metric_diagnostic_iterations();
+      outer_iteration = update.outer_iteration();
+      oracle_kind = update.oracle_kind();
+      collect_camera_diagonal_metrics =
+        update.collect_camera_diagonal_metrics();
+      if (collect_camera_diagonal_metrics) {
+        std::ostringstream metric;
+        metric << "CAMERA_DIAGONAL_REQUEST cluster=" << cluster_id
+               << " outer_iteration=" << outer_iteration
+               << " oracle_kind=" << oracle_kind << "\n";
+        EmitLocalSolveMetric(metric.str());
+      }
+        proximal_defect_diagnostic = update.proximal_defect_diagnostic();
+        diagonal_trust_damping = update.diagonal_trust_damping();
+        nesterov_relative_residual = update.nesterov_relative_residual();
+        THROW_IF(update.local_iterations() <= 0 ||
+          update.local_iterations() > 20);
+        local_iterations = update.local_iterations();
       landmark_refinement_steps = update.landmark_refinement_steps();
         nesterov_max_iterations = update.nesterov_max_iterations();
         nesterov_min_iterations = update.nesterov_min_iterations();
@@ -1754,6 +3053,15 @@ public:
         last_landmarks = landmarks;
         last_tr_radius = tr_radius;
       }
+      if (update.forced_trust_region_radius() > 0.) {
+        tr_radius = std::max(
+            MinimumTrustRegionRadius(),
+            std::min(
+                max_trust_region_radius,
+                update.forced_trust_region_radius()));
+        last_tr_radius = tr_radius;
+        persistent_trust_region_active = true;
+      }
       options.initial_trust_region_radius = tr_radius;
     }
 
@@ -1793,6 +3101,18 @@ public:
     }
 
     bool UsesCeresLocalSolver() const { return ceres_local_solver; }
+
+    const std::vector<double>& ConsensusMetricBlocks() const {
+      return ConsensusUnflooredCameraDiagonalEnabled()
+          && consensus_stepSize.size() == full_stepSize.size()
+          ? consensus_stepSize : full_stepSize;
+    }
+    bool UsesCentralizedLeftSe3Solver() const {
+      return local_linear_solver == 2 || local_linear_solver == 3;
+    }
+    bool UsesCentralizedProximalLeftSe3Solver() const {
+      return local_linear_solver == 3;
+    }
     int LocalIterations() const { return local_iterations; }
 
     void UpdatePreconditioning(const preconditioning_proto& preconditioningProto) {
@@ -1848,10 +3168,17 @@ void UpdatePreconditioningCameras(SparseMatrix<double, RowMajor> JpJ) {
   std::copy(values, values + full_stepSize.size(), full_stepSize.data());
   int flooredEntries = 0;
   double minimumDiagonal = std::numeric_limits<double>::infinity();
+  std::vector<double> cameraDiagonals;
+  if (LocalSolveMetricsEnabled()) {
+    cameraDiagonals.reserve(9 * numCameras);
+  }
   // ToDo: Is this ok or an issue to be resolved differently?
   for (int b = 0; b < numCameras; ++b) {
     for(int id = 0; id < 81; id += 10) { // diagonal entries !?
       const double diagonal = full_stepSize[81*b + id];
+      if (LocalSolveMetricsEnabled()) {
+        cameraDiagonals.push_back(diagonal);
+      }
       minimumDiagonal = std::min(minimumDiagonal, diagonal);
       flooredEntries += diagonal < CameraPreconditionerDiagonalFloor();
       full_stepSize[81*b + id] =
@@ -1864,6 +3191,7 @@ void UpdatePreconditioningCameras(SparseMatrix<double, RowMajor> JpJ) {
            << " entries=" << 9 * numCameras
            << " floored=" << flooredEntries
            << " minimum=" << minimumDiagonal
+           << " q01=" << Quantile(cameraDiagonals, 0.01)
            << " floor=" << CameraPreconditionerDiagonalFloor() << "\n";
     EmitLocalSolveMetric(metric.str());
   }
@@ -1897,10 +3225,13 @@ SolveByGDNesterov(SparseMatrix<double, RowMajor> Uli, SparseMatrix<double, RowMa
                 const Matrix<double, Eigen::Dynamic, 1>& bl,
                 const Matrix<double, Eigen::Dynamic, 1>& proximalGradient,
                 int power_iterations, int minimum_iterations,
-                double stop_tolerance,
-                int* completed_iterations, NesterovInnerTiming* timing) {
+                double stop_tolerance, bool relative_residual,
+                int* completed_iterations, double* completed_relative_residual,
+                NesterovInnerTiming* timing) {
 
   *completed_iterations = 0;
+  *completed_relative_residual = std::numeric_limits<double>::quiet_NaN();
+  const SparseMatrix<double, RowMajor> camera_system = Uli;
   const bool collect_timing = timing != nullptr;
   const auto inner_start = collect_timing
       ? TimingClock::now() : TimingClock::time_point{};
@@ -1911,6 +3242,12 @@ SolveByGDNesterov(SparseMatrix<double, RowMajor> Uli, SparseMatrix<double, RowMa
   // compute bS, Vli, W
   auto operation_start = collect_timing
       ? TimingClock::now() : TimingClock::time_point{};
+    const Eigen::Map<const Eigen::VectorXd> landmark_block_values_before(
+      Vli.valuePtr(), Vli.nonZeros());
+    const bool landmark_blocks_finite_before =
+      landmark_block_values_before.allFinite();
+    const double landmark_blocks_max_before =
+      landmark_block_values_before.cwiseAbs().maxCoeff();
   BlockInverse<3>(Vli);
   if (collect_timing) {
     timing->inverse_landmark_blocks += ElapsedSeconds(operation_start);
@@ -1931,11 +3268,17 @@ SolveByGDNesterov(SparseMatrix<double, RowMajor> Uli, SparseMatrix<double, RowMa
 
   operation_start = collect_timing
       ? TimingClock::now() : TimingClock::time_point{};
+    const Eigen::Map<const Eigen::VectorXd> camera_block_values_before(
+      Uli.valuePtr(), Uli.nonZeros());
+    const bool camera_blocks_finite_before =
+      camera_block_values_before.allFinite();
+    const double camera_blocks_max_before =
+      camera_block_values_before.cwiseAbs().maxCoeff();
   BlockInverse<9>(Uli);
   if (collect_timing) {
     timing->inverse_camera_blocks += ElapsedSeconds(operation_start);
   }
-  const double Lip = 0.9;
+  const double Lip = NesterovSchurLipschitz();
   double lambda0 = (1. + std::sqrt(5.)) / 2.;
   operation_start = collect_timing
       ? TimingClock::now() : TimingClock::time_point{};
@@ -1976,9 +3319,40 @@ SolveByGDNesterov(SparseMatrix<double, RowMajor> Uli, SparseMatrix<double, RowMa
   operation_start = collect_timing
       ? TimingClock::now() : TimingClock::time_point{};
   Matrix<double, Eigen::Dynamic, 1> ubs = -Uli * bS;
+  const double initial_gradient_squared_norm = std::max(
+      ubs.squaredNorm(), std::numeric_limits<double>::min());
   // Todo : * 1. / Lip ? or not
   Matrix<double, Eigen::Dynamic, 1> xk = - 1. / Lip * ubs; // xk =0, g = ubs, yk = -1. / Lip * g = - 1. / Lip * ubs; xk = (1-gamma) yk + gamma y0, gamma = 0
   Matrix<double, Eigen::Dynamic, 1> y0 = - 1. / Lip * ubs; // xk =0, g = ubs, yk = -1. / Lip * g = - 1. / Lip * ubs; y0 = yk.
+  if (!ubs.allFinite()) {
+    const Eigen::Map<const Eigen::VectorXd> camera_inverse_values(
+        Uli.valuePtr(), Uli.nonZeros());
+    const Eigen::Map<const Eigen::VectorXd> landmark_inverse_values(
+        Vli.valuePtr(), Vli.nonZeros());
+    std::cerr << "Non-finite Nesterov initialization:"
+              << " camera_blocks_finite_before="
+              << camera_blocks_finite_before
+              << " camera_blocks_max_before="
+              << camera_blocks_max_before
+              << " camera_inverse_finite="
+              << camera_inverse_values.allFinite()
+              << " landmark_blocks_finite_before="
+              << landmark_blocks_finite_before
+              << " landmark_blocks_max_before="
+              << landmark_blocks_max_before
+              << " landmark_inverse_finite="
+              << landmark_inverse_values.allFinite()
+              << " bp_finite=" << bp.allFinite()
+              << " bl_finite=" << bl.allFinite()
+              << " proximal_gradient_finite="
+              << proximalGradient.allFinite()
+              << " landmark_workspace_finite="
+              << landmarkWorkspace.allFinite()
+              << " camera_workspace_finite="
+              << cameraWorkspace.allFinite()
+              << " schur_rhs_finite=" << bS.allFinite()
+              << std::endl;
+  }
   Matrix<double, Eigen::Dynamic, 1> wtX(W.cols());
   Matrix<double, Eigen::Dynamic, 1> vinvWtX(W.cols());
   Matrix<double, Eigen::Dynamic, 1> wVinvWtX(W.rows());
@@ -2049,17 +3423,36 @@ SolveByGDNesterov(SparseMatrix<double, RowMajor> Uli, SparseMatrix<double, RowMa
       if (collect_timing) {
         timing->iter_vector += ElapsedSeconds(operation_start);
       }
+      if (!xk.allFinite()) {
+        std::cerr << "Non-finite Nesterov iterate: iteration=" << i + 1
+                  << " lipschitz=" << Lip
+                  << " ubs_finite=" << ubs.allFinite()
+                  << " wt_finite=" << wtX.allFinite()
+                  << " vinv_wt_finite=" << vinvWtX.allFinite()
+                  << " w_vinv_wt_finite=" << wVinvWtX.allFinite()
+                  << " uinv_w_vinv_wt_finite="
+                  << uinvWVinvWtX.allFinite()
+                  << " gradient_finite=" << g.allFinite()
+                  << " extrapolated_finite=" << yk.allFinite()
+                  << std::endl;
+        break;
+      }
 
       //std::cout << i << ". xk :" << xk.squaredNorm() << "\n";
 
       operation_start = collect_timing
           ? TimingClock::now() : TimingClock::time_point{};
-      const bool should_stop = stop_criterion(
-          xk.squaredNorm(), g.squaredNorm(), Lip, i, stop_tolerance);
+        const bool should_stop = relative_residual
+          ? g.squaredNorm() < stop_tolerance * stop_tolerance
+            * initial_gradient_squared_norm
+          : stop_criterion(
+            xk.squaredNorm(), g.squaredNorm(), Lip, i, stop_tolerance);
       if (collect_timing) {
         timing->iter_stop += ElapsedSeconds(operation_start);
       }
-      if (i + 1 >= minimum_iterations && should_stop) {
+        if (i + 1 >= minimum_iterations
+          && (i + 1) % NesterovStopCheckInterval() == 0
+          && should_stop) {
           break;
       }
   }
@@ -2073,6 +3466,14 @@ SolveByGDNesterov(SparseMatrix<double, RowMajor> Uli, SparseMatrix<double, RowMa
   operation_start = collect_timing
       ? TimingClock::now() : TimingClock::time_point{};
   Matrix<double, Eigen::Dynamic, 1> delta_l = Vli * (wtX - bl);
+    const Eigen::VectorXd solution = -xk;
+    W.TransposeMultiply(solution, wtX);
+    vinvWtX.noalias() = Vli * wtX;
+    W.Multiply(vinvWtX, wVinvWtX);
+    const Eigen::VectorXd reduced_residual =
+      -bS - (camera_system * solution - wVinvWtX);
+    *completed_relative_residual = reduced_residual.norm() /
+      std::max(bS.norm(), std::numeric_limits<double>::min());
   if (collect_timing) {
     timing->final_landmark_multiply += ElapsedSeconds(operation_start);
     timing->inner_total += ElapsedSeconds(inner_start);
@@ -2088,10 +3489,54 @@ SolveBySchurPCG(
     const Matrix<double, Eigen::Dynamic, 1>& bp,
     const Matrix<double, Eigen::Dynamic, 1>& bl,
     const Matrix<double, Eigen::Dynamic, 1>& proximalGradient,
-    int* iterations_out) {
+    int* iterations_out, int* termination_out,
+    double* relative_residual_out) {
   SparseMatrix<double, RowMajor> Vinv = Vli;
   SparseMatrix<double, RowMajor> Uinv = Uli;
   BlockInverse<3>(Vinv);
+  if (SchurPcgJacobiPreconditionerEnabled()) {
+    const double landmark_trace = Vli.diagonal().sum();
+    const double landmark_inverse_trace = Vinv.diagonal().sum();
+    W.SubtractSchurDiagonal(Vinv, Uinv);
+    FloorSymmetricBlocks<9>(Uinv, PobaBlockRelativeFloor());
+    if (LocalSolveMetricsEnabled()) {
+      Eigen::VectorXd probe(Uinv.rows());
+      for (int parameter = 0; parameter < probe.size(); ++parameter) {
+        probe[parameter] =
+            std::sin(0.6180339887498949 * (parameter + 1));
+      }
+      double trace = 0.;
+      double squared_norm = 0.;
+      double minimum_eigenvalue = std::numeric_limits<double>::infinity();
+      for (int camera = 0; camera < Uinv.rows() / 9; ++camera) {
+        Eigen::Matrix<double, 9, 9> block;
+        for (int row = 0; row < 9; ++row) {
+          for (int column = 0; column < 9; ++column) {
+            block(row, column) = Uinv.coeff(
+                9 * camera + row, 9 * camera + column);
+          }
+        }
+        trace += block.trace();
+        squared_norm += block.squaredNorm();
+        minimum_eigenvalue = std::min(minimum_eigenvalue,
+            Eigen::SelfAdjointEigenSolver<Eigen::Matrix<double, 9, 9>>(block)
+                .eigenvalues().minCoeff());
+      }
+      std::ostringstream metric;
+      metric << "SCHUR_JACOBI_MATRIX cluster=" << cluster_id
+              << " camera_trace=" << Uli.diagonal().sum()
+               << " cross_frobenius=" << std::sqrt(W.SquaredNorm())
+               << " landmark_trace=" << landmark_trace
+               << " landmark_inverse_trace=" << landmark_inverse_trace
+              << " elimination_trace="
+              << Uli.diagonal().sum() - Uinv.diagonal().sum()
+             << " trace=" << trace
+             << " frobenius=" << std::sqrt(squared_norm)
+             << " probe=" << probe.dot(Uinv * probe)
+             << " minimum_eigenvalue=" << minimum_eigenvalue << "\n";
+      EmitLocalSolveMetric(metric.str());
+    }
+  }
   BlockInverse<9>(Uinv);
 
   Eigen::VectorXd vinvBl = Vinv * bl;
@@ -2103,16 +3548,39 @@ SolveBySchurPCG(
   Eigen::VectorXd residual = right_hand_side;
   Eigen::VectorXd preconditioned = Uinv * residual;
   Eigen::VectorXd direction = preconditioned;
+  if (LocalSolveMetricsEnabled()) {
+    double translation_squared = 0.;
+    double rotation_squared = 0.;
+    double intrinsics_squared = 0.;
+    for (int camera = 0; camera < preconditioned.size() / 9; ++camera) {
+      translation_squared +=
+          preconditioned.segment<3>(9 * camera).squaredNorm();
+      rotation_squared +=
+          preconditioned.segment<3>(9 * camera + 3).squaredNorm();
+      intrinsics_squared +=
+          preconditioned.segment<3>(9 * camera + 6).squaredNorm();
+    }
+    std::ostringstream metric;
+    metric << "SCHUR_PCG_INITIAL cluster=" << cluster_id
+           << " rhs=" << right_hand_side.norm()
+           << " preconditioned=" << preconditioned.norm()
+           << " translation=" << std::sqrt(translation_squared)
+           << " rotation=" << std::sqrt(rotation_squared)
+           << " intrinsics=" << std::sqrt(intrinsics_squared) << "\n";
+    EmitLocalSolveMetric(metric.str());
+  }
   Eigen::VectorXd wtDirection(W.cols());
   Eigen::VectorXd vinvWtDirection(W.cols());
   Eigen::VectorXd wVinvWtDirection(W.rows());
   Eigen::VectorXd schurDirection(W.rows());
   double residual_preconditioned = residual.dot(preconditioned);
+  double quadratic_model = 0.;
   const double initial_residual_norm = std::max(
       residual.norm(), std::numeric_limits<double>::min());
   int iterations = 0;
+  *termination_out = 0;
 
-  for (; iterations < 400; ++iterations) {
+  for (; iterations < SchurPcgMaximumIterations(); ++iterations) {
     W.TransposeMultiply(direction, wtDirection);
     vinvWtDirection.noalias() = Vinv * wtDirection;
     W.Multiply(vinvWtDirection, wVinvWtDirection);
@@ -2120,19 +3588,42 @@ SolveBySchurPCG(
     schurDirection -= wVinvWtDirection;
     const double denominator = direction.dot(schurDirection);
     if (!(denominator > 0.) || !std::isfinite(denominator)) {
+      *termination_out = 2;
       break;
     }
     const double alpha = residual_preconditioned / denominator;
+    if (iterations == 0 && LocalSolveMetricsEnabled()) {
+      std::ostringstream metric;
+      metric << "SCHUR_PCG_FIRST_ALPHA cluster=" << cluster_id
+             << " alpha=" << alpha
+             << " numerator=" << residual_preconditioned
+             << " denominator=" << denominator << "\n";
+      EmitLocalSolveMetric(metric.str());
+    }
     solution += alpha * direction;
     residual -= alpha * schurDirection;
-    if (residual.norm() <= 1e-2 * initial_residual_norm) {
+    const double next_quadratic_model =
+        -solution.dot(right_hand_side + residual);
+    const double zeta = (iterations + 1)
+        * (next_quadratic_model - quadratic_model) / next_quadratic_model;
+    if (SchurPcgQTolerance() > 0. &&
+        zeta < SchurPcgQTolerance()) {
       ++iterations;
+      *termination_out = 4;
+      break;
+    }
+    quadratic_model = next_quadratic_model;
+    if (SchurPcgQTolerance() == 0. && residual.norm() <=
+      SchurPcgRelativeTolerance() * initial_residual_norm) {
+      ++iterations;
+      *termination_out = 1;
       break;
     }
     preconditioned.noalias() = Uinv * residual;
     const double next_residual_preconditioned = residual.dot(preconditioned);
     if (!(next_residual_preconditioned >= 0.) ||
         !std::isfinite(next_residual_preconditioned)) {
+      *termination_out = 3;
       break;
     }
     const double beta = next_residual_preconditioned /
@@ -2141,10 +3632,58 @@ SolveBySchurPCG(
     residual_preconditioned = next_residual_preconditioned;
   }
   *iterations_out = iterations;
+  *relative_residual_out = residual.norm() / initial_residual_norm;
 
   Eigen::VectorXd wtSolution(W.cols());
   W.TransposeMultiply(solution, wtSolution);
-  Eigen::VectorXd delta_l = Vinv * (wtSolution - bl);
+  Eigen::VectorXd delta_l = Vinv * (-wtSolution - bl);
+  return {solution, delta_l};
+}
+
+std::pair<Matrix<double, Eigen::Dynamic, 1>, Matrix<double, Eigen::Dynamic, 1>>
+SolveByPobaPowerSeries(
+    SparseMatrix<double, RowMajor> camera_hessian,
+    SparseMatrix<double, RowMajor> landmark_hessian,
+    const BlockEdgeMatrix& W,
+    const Matrix<double, Eigen::Dynamic, 1>& bp,
+    const Matrix<double, Eigen::Dynamic, 1>& bl,
+    const Matrix<double, Eigen::Dynamic, 1>& proximal_gradient,
+    int maximum_order, double tolerance, int* iterations_out,
+    double* relative_residual_out) {
+  BlockInverse<9>(camera_hessian);
+  BlockInverse<3>(landmark_hessian);
+
+  Eigen::VectorXd landmark_workspace = landmark_hessian * bl;
+  Eigen::VectorXd camera_workspace(W.rows());
+  W.Multiply(landmark_workspace, camera_workspace);
+  Eigen::VectorXd reduced_gradient = bp + proximal_gradient - camera_workspace;
+
+  Eigen::VectorXd term = -camera_hessian * reduced_gradient;
+  Eigen::VectorXd solution = term;
+  Eigen::VectorXd wt_term(W.cols());
+  Eigen::VectorXd vinv_wt_term(W.cols());
+  Eigen::VectorXd w_vinv_wt_term(W.rows());
+  int completed_orders = 0;
+  for (int order = 1; order <= maximum_order; ++order) {
+    W.TransposeMultiply(term, wt_term);
+    vinv_wt_term.noalias() = landmark_hessian * wt_term;
+    W.Multiply(vinv_wt_term, w_vinv_wt_term);
+    term.noalias() = camera_hessian * w_vinv_wt_term;
+    solution += term;
+    completed_orders = order;
+    if ((order + 1.) * term.norm()
+        < tolerance * std::max(solution.norm(),
+            std::numeric_limits<double>::min())) {
+      break;
+    }
+  }
+  *iterations_out = completed_orders;
+  *relative_residual_out = (completed_orders + 1.) * term.norm() /
+      std::max(solution.norm(), std::numeric_limits<double>::min());
+
+  Eigen::VectorXd wt_solution(W.cols());
+  W.TransposeMultiply(solution, wt_solution);
+  Eigen::VectorXd delta_l = landmark_hessian * (-bl - wt_solution);
   return {solution, delta_l};
 }
 
@@ -2195,17 +3734,21 @@ void UpdateStepSizeAndSolve() {//bool keep_cameras_fixed = false) { // Recompute
   const auto assemblyStart = collectTiming ? TimingClock::now() : TimingClock::time_point{};
   const Eigen::VectorXd& residual = normalEquations.residual;
   SparseMatrix<double, RowMajor> Vl = normalEquations.landmark_hessian;
-  if (firstIteration) { // preconditioning
+  if (firstIteration && !DisableLandmarkPreconditioningEnabled()) {
       // diag is a reference .. why? i do stuff on it.
       const Eigen::VectorXd landmarkDiagonal = Vl.diagonal();
       const double landmarkFloor = LandmarkPreconditionerFloor();
       if (LocalSolveMetricsEnabled()) {
+        std::vector<double> landmarkDiagonals(
+            landmarkDiagonal.data(),
+            landmarkDiagonal.data() + landmarkDiagonal.size());
         std::ostringstream metric;
         metric << "LANDMARK_PRECONDITIONER_FLOOR cluster=" << cluster_id
                << " entries=" << landmarkDiagonal.size()
                << " floored="
                << (landmarkDiagonal.array() < landmarkFloor).count()
                << " minimum=" << landmarkDiagonal.minCoeff()
+               << " q01=" << Quantile(landmarkDiagonals, 0.01)
                << " floor=" << landmarkFloor << "\n";
         EmitLocalSolveMetric(metric.str());
       }
@@ -2237,6 +3780,7 @@ void UpdateStepSizeAndSolve() {//bool keep_cameras_fixed = false) { // Recompute
       costEvaluationSeconds += ElapsedSeconds(costEvaluationStart);
     }
     cost = costEnd;
+    firstIteration = false;
     WORKER_LOG(cluster_id << ". Sending no update but pcg. costStart == costend: " << residual.squaredNorm() << " == "  << costEnd << "\n");
     if (collectTiming) {
       std::ostringstream metric;
@@ -2253,9 +3797,12 @@ void UpdateStepSizeAndSolve() {//bool keep_cameras_fixed = false) { // Recompute
     }
     return; // 1st step only preconditioning as it can go very wrong?
   }
-  const Eigen::DiagonalMatrix<double, Eigen::Dynamic> diagVL = Diagonal<3>(Vl); // Vl = VL + L * diagVL
-  const Eigen::DiagonalMatrix<double, Eigen::Dynamic> diagUP = CameraDiagonalMetricScale() * Diagonal<9>(Ul, cluster_id); // Vp = Vp + L * diagVp
-  const SparseMatrix<double, RowMajor>& cameraHessian = normalEquations.camera_hessian;
+  Eigen::DiagonalMatrix<double, Eigen::Dynamic> diagVL = Diagonal<3>(Vl); // Vl = VL + L * diagVL
+  const Eigen::DiagonalMatrix<double, Eigen::Dynamic> consensusDiagUP =
+    CameraDiagonalMetricScale() * Diagonal<9>(
+      Ul, cluster_id, collect_camera_diagonal_metrics,
+      outer_iteration, oracle_kind, "consensus",
+      &global_camera_ids); // Vp = Vp + L * diagVp
   const SparseMatrix<double, RowMajor>& landmarkHessian = normalEquations.landmark_hessian;
 
   //const double scale = 1e-1; // 1e0: @29: 501k, no jump. 1e1 many jumps. 473k
@@ -2276,8 +3823,13 @@ void UpdateStepSizeAndSolve() {//bool keep_cameras_fixed = false) { // Recompute
       }
       stepSize.makeCompressed();
     } else {
-      stepSize = scale * Ul;
-      stepSize += diagUP * current_be;
+      if (FreezeBlockMetricEnabled() && frozen_block_metric_initialized) {
+        stepSize = CameraBlocksToSparse(full_stepSize);
+      } else {
+        stepSize = scale * Ul;
+        stepSize += consensusDiagUP * current_be;
+        ScaleCameraProximalMetric(stepSize);
+      }
     }
     const double* values = stepSize.valuePtr();
     if (scalar_proximal_prior) {
@@ -2290,6 +3842,18 @@ void UpdateStepSizeAndSolve() {//bool keep_cameras_fixed = false) { // Recompute
       }
     } else {
       std::copy(values, values + full_stepSize.size(), full_stepSize.data());
+      frozen_block_metric_initialized = true;
+    }
+    consensus_stepSize = full_stepSize;
+    if (!scalar_proximal_prior &&
+        ConsensusUnflooredCameraDiagonalEnabled()) {
+      SparseMatrix<double, RowMajor> voteMetric = scale * Ul;
+      voteMetric += current_be * CameraDiagonalMetricScale()
+          * Ul.diagonal().asDiagonal();
+      ScaleCameraProximalMetric(voteMetric);
+      const double* voteValues = voteMetric.valuePtr();
+      std::copy(voteValues, voteValues + consensus_stepSize.size(),
+          consensus_stepSize.data());
     }
     Ul += stepSize;
   } else {
@@ -2305,7 +3869,7 @@ void UpdateStepSizeAndSolve() {//bool keep_cameras_fixed = false) { // Recompute
       }
     } else {
       Ul += scale * Ul;
-      Ul += diagUP * current_be;
+      Ul += consensusDiagUP * current_be;
     }
     // let full_Stepsize define setpsize always. else confusing to debug: cost optimized differs from cost evaluated.
     // const SparseMatrix<double, RowMajor> stepSize = Ul;
@@ -2328,19 +3892,175 @@ void UpdateStepSizeAndSolve() {//bool keep_cameras_fixed = false) { // Recompute
       EmitLocalSolveMetric(metric.str());
     }
   }
+  SparseMatrix<double, RowMajor> cameraHessian =
+      normalEquations.camera_hessian;
+  Eigen::VectorXd bp = normalEquations.camera_gradient;
+  BlockEdgeMatrix W = camera_landmark_hessian;
+  std::vector<Eigen::Matrix<double, 9, 9>> tangentToScaled;
+  if (ManifoldCameraUpdatesEnabled()) {
+    tangentToScaled = TangentToScaledJacobians();
+    if (DirectTangentNormalEquationsEnabled()) {
+      const NormalEquations tangent_normal_equations =
+          GetBatchedNormalEquations(true);
+      cameraHessian = tangent_normal_equations.camera_hessian;
+      bp = tangent_normal_equations.camera_gradient;
+        Vl = tangent_normal_equations.landmark_hessian;
+        diagVL = Diagonal<3>(Vl);
+        normalEquations.landmark_hessian =
+          tangent_normal_equations.landmark_hessian;
+        normalEquations.landmark_gradient =
+          tangent_normal_equations.landmark_gradient;
+      W = camera_landmark_hessian;
+      Ul = cameraHessian;
+      if (DisableLocalProximalTermEnabled()) {
+        // K1 BA reference: LM damping supplies SPD regularization.
+      } else if (FreezeBlockMetricEnabled() && frozen_block_metric_initialized) {
+        Ul += TransformCameraBlockMatrix(
+            CameraBlocksToSparse(full_stepSize), tangentToScaled);
+      } else {
+        Ul += scale * cameraHessian;
+        SparseMatrix<double, RowMajor> consensus_diagonal(
+          9 * numCameras, 9 * numCameras);
+        consensus_diagonal.reserve(
+          Eigen::VectorXi::Constant(9 * numCameras, 1));
+        for (int parameter = 0; parameter < 9 * numCameras; ++parameter) {
+          consensus_diagonal.insert(parameter, parameter) =
+            consensusDiagUP.diagonal()[parameter];
+        }
+        consensus_diagonal.makeCompressed();
+        Ul += current_be * TransformCameraBlockMatrix(
+            consensus_diagonal, tangentToScaled);
+      }
+    } else {
+      cameraHessian = TransformCameraBlockMatrix(
+          cameraHessian, tangentToScaled);
+      Ul = TransformCameraBlockMatrix(Ul, tangentToScaled);
+      bp = TransformCameraVector(bp, tangentToScaled);
+      W.LeftMultiplyByCameraBlockTransposes(tangentToScaled);
+    }
+  }
+  if (collectTiming) {
+    double translation_gradient_squared = 0.;
+    double rotation_gradient_squared = 0.;
+    double intrinsics_gradient_squared = 0.;
+    double normalized_translation_squared = 0.;
+    double normalized_rotation_squared = 0.;
+    double normalized_intrinsics_squared = 0.;
+    std::array<double, 3> minimum_diagonal = {
+      std::numeric_limits<double>::infinity(),
+      std::numeric_limits<double>::infinity(),
+      std::numeric_limits<double>::infinity()};
+    std::array<int, 3> nonpositive_diagonal = {0, 0, 0};
+    for (int camera = 0; camera < numCameras; ++camera) {
+      const int offset = 9 * camera;
+      translation_gradient_squared += bp.segment<3>(offset).squaredNorm();
+      rotation_gradient_squared += bp.segment<3>(offset + 3).squaredNorm();
+      intrinsics_gradient_squared += bp.segment<3>(offset + 6).squaredNorm();
+      for (int parameter = 0; parameter < 9; ++parameter) {
+        const double diagonal = std::max(
+            cameraHessian.coeff(offset + parameter, offset + parameter),
+            std::numeric_limits<double>::min());
+        const double raw_diagonal =
+          cameraHessian.coeff(offset + parameter, offset + parameter);
+        const int group = parameter / 3;
+        minimum_diagonal[group] = std::min(
+          minimum_diagonal[group], raw_diagonal);
+        nonpositive_diagonal[group] += raw_diagonal <= 0.;
+        const double normalized = bp[offset + parameter] / std::sqrt(diagonal);
+        if (parameter < 3) {
+          normalized_translation_squared += normalized * normalized;
+        } else if (parameter < 6) {
+          normalized_rotation_squared += normalized * normalized;
+        } else {
+          normalized_intrinsics_squared += normalized * normalized;
+        }
+      }
+    }
+    double normalized_landmarks_squared = 0.;
+    for (int parameter = 0;
+         parameter < normalEquations.landmark_gradient.size(); ++parameter) {
+      const double diagonal = std::max(
+          normalEquations.landmark_hessian.coeff(parameter, parameter),
+          std::numeric_limits<double>::min());
+      const double normalized =
+          normalEquations.landmark_gradient[parameter] / std::sqrt(diagonal);
+      normalized_landmarks_squared += normalized * normalized;
+    }
+    std::ostringstream metric;
+    metric << "GRADIENT_GROUPS cluster=" << cluster_id
+           << " translation=" << std::sqrt(translation_gradient_squared)
+           << " rotation=" << std::sqrt(rotation_gradient_squared)
+           << " intrinsics=" << std::sqrt(intrinsics_gradient_squared)
+           << " landmarks=" << normalEquations.landmark_gradient.norm()
+           << " normalized_translation="
+           << std::sqrt(normalized_translation_squared)
+           << " normalized_rotation=" << std::sqrt(normalized_rotation_squared)
+           << " normalized_intrinsics="
+           << std::sqrt(normalized_intrinsics_squared)
+           << " normalized_landmarks="
+           << std::sqrt(normalized_landmarks_squared)
+           << " minimum_translation_diagonal=" << minimum_diagonal[0]
+           << " minimum_rotation_diagonal=" << minimum_diagonal[1]
+           << " minimum_intrinsics_diagonal=" << minimum_diagonal[2]
+           << " nonpositive_translation_diagonal="
+           << nonpositive_diagonal[0]
+           << " nonpositive_rotation_diagonal=" << nonpositive_diagonal[1]
+           << " nonpositive_intrinsics_diagonal=" << nonpositive_diagonal[2]
+           << "\n";
+    EmitLocalSolveMetric(metric.str());
+
+    Eigen::VectorXd camera_probe(cameraHessian.rows());
+    Eigen::VectorXd landmark_probe(normalEquations.landmark_hessian.rows());
+    for (int parameter = 0; parameter < camera_probe.size(); ++parameter) {
+      camera_probe[parameter] =
+          std::sin(0.6180339887498949 * (parameter + 1));
+    }
+    for (int parameter = 0; parameter < landmark_probe.size(); ++parameter) {
+      landmark_probe[parameter] = std::sin(
+          0.6180339887498949 * (camera_probe.size() + parameter + 1));
+    }
+    Eigen::VectorXd cross_action(camera_probe.size());
+    W.Multiply(landmark_probe, cross_action);
+    std::ostringstream quadratic_metric;
+    quadratic_metric << "TANGENT_QUADRATIC cluster=" << cluster_id
+        << " camera=" << camera_probe.dot(cameraHessian * camera_probe)
+        << " landmark=" << landmark_probe.dot(
+             normalEquations.landmark_hessian * landmark_probe)
+         << " cross=" << 2. * camera_probe.dot(cross_action)
+         << " gradient_probe="
+         << camera_probe.dot(bp)
+           + landmark_probe.dot(normalEquations.landmark_gradient)
+         << "\n";
+    EmitLocalSolveMetric(quadratic_metric.str());
+  }
+  const Eigen::DiagonalMatrix<double, Eigen::Dynamic> trustDiagUP =
+      CameraDiagonalMetricScale() * Diagonal<9>(
+        cameraHessian, cluster_id, collect_camera_diagonal_metrics,
+        outer_iteration, oracle_kind, "trust", &global_camera_ids);
+      Eigen::DiagonalMatrix<double, Eigen::Dynamic> cameraTrustDiagonal =
+        Diagonal<9>(cameraHessian, cluster_id);
+      Eigen::DiagonalMatrix<double, Eigen::Dynamic> landmarkTrustDiagonal = diagVL;
+  if (collectTiming) {
+    std::ostringstream metric;
+    metric << "LANDMARK_TRUST_INPUT cluster=" << cluster_id
+           << " base_trace=" << Vl.diagonal().sum()
+           << " damping_trace=" << landmarkTrustDiagonal.diagonal().sum()
+           << " minimum=" << Vl.diagonal().minCoeff()
+           << " maximum=" << Vl.diagonal().maxCoeff() << "\n";
+    EmitLocalSolveMetric(metric.str());
+  }
   // Loop until ok or adjust tr_region
   if (trust_region_policy == 1 && !persistent_trust_region_active) {
-    tr_radius = std::min(100., max_trust_region_radius);
+    tr_radius = std::min(DabaInitialTrustRegionCap(), max_trust_region_radius);
   } else {
     tr_radius = std::min(max_trust_region_radius, tr_radius);
   }
-  double trust_region_decreasing_ratio = 0.5;
+  double trust_region_decreasing_ratio =
+      BaeTrustScheduleEnabled() ? 1. / 16. : 0.5;
   double inv_tr_radius = 0;
 
   const int power_iterations = nesterov_max_iterations;
   const double costStart = residual.squaredNorm();
-  const BlockEdgeMatrix& W = camera_landmark_hessian;
-  const Eigen::VectorXd& bp = normalEquations.camera_gradient;
   const Eigen::VectorXd& bl = normalEquations.landmark_gradient;
   Matrix<double, Eigen::Dynamic, 1> proximalOffset(9 * numCameras);
   for (int id = 0; id < proximalOffset.size(); ++id) {
@@ -2348,13 +4068,23 @@ void UpdateStepSizeAndSolve() {//bool keep_cameras_fixed = false) { // Recompute
   }
   Matrix<double, Eigen::Dynamic, 1> proximalGradient(9 * numCameras);
   blockMult<9>(full_stepSize, proximalOffset, proximalGradient);
-  const double penaltyStart = proximalOffset.dot(proximalGradient);
+  double penaltyStart = proximalOffset.dot(proximalGradient);
+  if (DisableLocalProximalTermEnabled()) {
+    proximalGradient.setZero();
+    penaltyStart = 0.;
+  }
+  if (ManifoldCameraUpdatesEnabled()) {
+    proximalGradient = TransformCameraVector(
+        proximalGradient, tangentToScaled);
+  }
   Matrix<double, Eigen::Dynamic, 1> proximalStep(9 * numCameras);
   Matrix<double, Eigen::Dynamic, 1> crossProduct(9 * numCameras);
   const double assemblySeconds = collectTiming ? ElapsedSeconds(assemblyStart) : 0.;
   int trust_region_attempts = 0;
   int trust_region_rejections = 0;
   int linear_iterations = 0;
+  int linear_termination = 0;
+  double linear_relative_residual = std::numeric_limits<double>::quiet_NaN();
   NesterovInnerTiming nesterov_inner_timing;
   // options.max_num_iterations 
   while ( true ) { // if costStart + penaltyStart < costEnd + penaltyP
@@ -2364,15 +4094,107 @@ void UpdateStepSizeAndSolve() {//bool keep_cameras_fixed = false) { // Recompute
     //   std::cout << " diagVL " << Vl.diagonal()[0] << " " << Vl.diagonal()[1] << " " << Vl.diagonal()[2] << "\n";// TOTALLY OFF after tr_check fails.
 
     // if not complicated this will lead to total chaos, likely the 
-    Ul += (1. / tr_radius - inv_tr_radius) * (CameraTrustDiagonalScale() * diagUP);// + Jp.transpose() * Jp);
-    Ul += cameraHessian * (1. / tr_radius - inv_tr_radius);
+    const bool cumulative_damping = CumulativeDiagonalDampingEnabled()
+      || BaeTrustScheduleEnabled();
+    const double damping_change = cumulative_damping
+      ? 1. / tr_radius : 1. / tr_radius - inv_tr_radius;
+    if (diagonal_trust_damping) {
+      Ul += damping_change * (cumulative_damping
+          ? Diagonal<9>(Ul, cluster_id) : cameraTrustDiagonal);
+    } else {
+      Ul += damping_change * (CameraTrustDiagonalScale() * trustDiagUP);
+      Ul += cameraHessian * damping_change;
+    }
 
-    if (inv_tr_radius != 0) {
+    if (inv_tr_radius != 0 && !BaeTrustScheduleEnabled()) {
       Vl = landmarkHessian;
     }
-    Vl *= 1. + 1. / tr_radius;
-    Vl += (1. / tr_radius) * diagVL;
+    if (diagonal_trust_damping) {
+        Vl += (1. / tr_radius) * (cumulative_damping
+          ? Diagonal<3>(Vl) : landmarkTrustDiagonal);
+    } else {
+      Vl *= 1. + 1. / tr_radius;
+      Vl += (1. / tr_radius) * diagVL;
+    }
     inv_tr_radius = 1. / tr_radius;
+    FloorSymmetricBlocks<9>(Ul, PobaBlockRelativeFloor());
+    FloorSymmetricBlocks<3>(Vl, PobaBlockRelativeFloor());
+    if (collectTiming) {
+      std::ostringstream metric;
+      metric << "LANDMARK_TRUST_UPDATED cluster=" << cluster_id
+             << " radius=" << tr_radius
+             << " trace=" << Vl.diagonal().sum() << "\n";
+      EmitLocalSolveMetric(metric.str());
+    }
+
+    if (PobaDiagnosticIterations() > 0) {
+      double minimum_u_eigenvalue = std::numeric_limits<double>::infinity();
+      double minimum_v_eigenvalue = std::numeric_limits<double>::infinity();
+      int nonpositive_u_blocks = 0;
+      int nonpositive_v_blocks = 0;
+      for (int camera = 0; camera < numCameras; ++camera) {
+        Eigen::Matrix<double, 9, 9> block;
+        for (int row = 0; row < 9; ++row) {
+          for (int column = 0; column < 9; ++column) {
+            block(row, column) = Ul.coeff(
+                9 * camera + row, 9 * camera + column);
+          }
+        }
+        const double eigenvalue = Eigen::SelfAdjointEigenSolver<
+            Eigen::Matrix<double, 9, 9>>(block).eigenvalues().minCoeff();
+        minimum_u_eigenvalue = std::min(minimum_u_eigenvalue, eigenvalue);
+        nonpositive_u_blocks += !(eigenvalue > 0.);
+      }
+      for (int landmark = 0; landmark < numLandmarks; ++landmark) {
+        Eigen::Matrix3d block;
+        for (int row = 0; row < 3; ++row) {
+          for (int column = 0; column < 3; ++column) {
+            block(row, column) = Vl.coeff(
+                3 * landmark + row, 3 * landmark + column);
+          }
+        }
+        const double eigenvalue = Eigen::SelfAdjointEigenSolver<
+            Eigen::Matrix3d>(block).eigenvalues().minCoeff();
+        minimum_v_eigenvalue = std::min(minimum_v_eigenvalue, eigenvalue);
+        nonpositive_v_blocks += !(eigenvalue > 0.);
+      }
+
+      double spectral_radius = std::numeric_limits<double>::quiet_NaN();
+      if (nonpositive_u_blocks == 0 && nonpositive_v_blocks == 0) {
+        SparseMatrix<double, RowMajor> u_inverse = Ul;
+        SparseMatrix<double, RowMajor> v_inverse = Vl;
+        BlockInverse<9>(u_inverse);
+        BlockInverse<3>(v_inverse);
+        Eigen::VectorXd vector = Eigen::VectorXd::Ones(W.rows());
+        vector /= std::sqrt(vector.dot(Ul * vector));
+        Eigen::VectorXd landmark_workspace(W.cols());
+        Eigen::VectorXd camera_workspace(W.rows());
+        Eigen::VectorXd next(W.rows());
+        for (int iteration = 0;
+             iteration < PobaDiagnosticIterations(); ++iteration) {
+          W.TransposeMultiply(vector, landmark_workspace);
+          landmark_workspace = v_inverse * landmark_workspace;
+          W.Multiply(landmark_workspace, camera_workspace);
+            spectral_radius = vector.dot(camera_workspace) /
+              vector.dot(Ul * vector);
+          next = u_inverse * camera_workspace;
+          const double norm = std::sqrt(std::max(0., next.dot(Ul * next)));
+          if (!(norm > 0.) || !std::isfinite(norm)) {
+            break;
+          }
+          vector = next / norm;
+        }
+      }
+      std::ostringstream metric;
+      metric << "POBA_INVARIANT cluster=" << cluster_id
+             << " attempt=" << trust_region_attempts
+             << " minimum_u_eigenvalue=" << minimum_u_eigenvalue
+             << " minimum_v_eigenvalue=" << minimum_v_eigenvalue
+             << " nonpositive_u_blocks=" << nonpositive_u_blocks
+             << " nonpositive_v_blocks=" << nonpositive_v_blocks
+             << " spectral_radius=" << spectral_radius << "\n";
+      EmitLocalSolveMetric(metric.str());
+    }
     //   std::cout << " diagUp " << Ul.diagonal()[0] << " " << Ul.diagonal()[1] << " " << Ul.diagonal()[2] << "\n";
     //   std::cout << " diagVL " << Vl.diagonal()[0] << " " << Vl.diagonal()[1] << " " << Vl.diagonal()[2] << "\n";
 
@@ -2382,17 +4204,57 @@ void UpdateStepSizeAndSolve() {//bool keep_cameras_fixed = false) { // Recompute
     std::pair<Eigen::VectorXd, Eigen::VectorXd> step;
     if (local_linear_solver == 1) {
       step = SolveBySchurPCG(
-          Ul, Vl, W, bp, bl, proximalGradient, &linear_iterations);
+          Ul, Vl, W, bp, bl, proximalGradient, &linear_iterations,
+          &linear_termination, &linear_relative_residual);
+    } else if (local_linear_solver == 5) {
+      step = SolveByPobaPowerSeries(
+          Ul, Vl, W, bp, bl, proximalGradient, power_iterations,
+          nesterov_stop_tolerance, &linear_iterations,
+          &linear_relative_residual);
+      linear_termination = 1;
     } else {
       step = SolveByGDNesterov(
           Ul, Vl, W, bp, bl, proximalGradient, power_iterations,
-          nesterov_min_iterations, nesterov_stop_tolerance, &linear_iterations,
+          nesterov_min_iterations, nesterov_stop_tolerance,
+          nesterov_relative_residual, &linear_iterations,
+          &linear_relative_residual,
           collectTiming ? &nesterov_inner_timing : nullptr);
     }
-    const Eigen::VectorXd& delta_p = step.first;
-    const Eigen::VectorXd& delta_l = step.second;
+    Eigen::VectorXd delta_p = step.first;
+    Eigen::VectorXd delta_l = step.second;
     if (collectTiming) {
       nesterovSeconds += ElapsedSeconds(nesterovStart);
+      const double camera_diagonal_norm = std::sqrt(std::max(
+          0., delta_p.dot(Diagonal<9>(cameraHessian, cluster_id) * delta_p)));
+      const double landmark_diagonal_norm = std::sqrt(std::max(
+          0., delta_l.dot(diagVL * delta_l)));
+        double translation_step_squared = 0.;
+        double rotation_step_squared = 0.;
+        double intrinsics_step_squared = 0.;
+        for (int camera = 0; camera < numCameras; ++camera) {
+        translation_step_squared +=
+          delta_p.segment<3>(9 * camera).squaredNorm();
+        rotation_step_squared +=
+          delta_p.segment<3>(9 * camera + 3).squaredNorm();
+        intrinsics_step_squared +=
+          delta_p.segment<3>(9 * camera + 6).squaredNorm();
+        }
+      std::ostringstream metric;
+      metric << "FULL_STEP_NORM cluster=" << cluster_id
+             << " attempt=" << trust_region_attempts
+             << " camera_euclidean=" << delta_p.norm()
+             << " landmark_euclidean=" << delta_l.norm()
+             << " full_euclidean="
+             << std::sqrt(delta_p.squaredNorm() + delta_l.squaredNorm())
+             << " translation=" << std::sqrt(translation_step_squared)
+             << " rotation=" << std::sqrt(rotation_step_squared)
+             << " intrinsics=" << std::sqrt(intrinsics_step_squared)
+             << " camera_diagonal=" << camera_diagonal_norm
+             << " landmark_diagonal=" << landmark_diagonal_norm
+             << " full_diagonal=" << std::hypot(
+                    camera_diagonal_norm, landmark_diagonal_norm)
+             << " radius=" << tr_radius << "\n";
+      EmitLocalSolveMetric(metric.str());
     }
     // compute cost / tr_check
     //fx0_new = fx0 + (J_pose * delta_p + J_land * delta_l)
@@ -2413,8 +4275,21 @@ void UpdateStepSizeAndSolve() {//bool keep_cameras_fixed = false) { // Recompute
     // std::cout << "res/dl/dp :" << residual.squaredNorm() << " " << delta_p.squaredNorm() << " " << delta_l.squaredNorm() << "\n";
     // Map<Matrix<double, Eigen::Dynamic, 1> >(blockMult<9>(full_stepSize, cameras).data());
 
-    blockMult<9>(full_stepSize, delta_p, proximalStep);
-    const double penaltyEnd = penaltyStart
+    if (ManifoldCameraUpdatesEnabled()) {
+      for (int camera = 0; camera < numCameras; ++camera) {
+        const Eigen::Map<const Eigen::Matrix<double, 9, 9, Eigen::RowMajor>>
+            scaledProximal(&full_stepSize[81 * camera]);
+        proximalStep.segment<9>(9 * camera) =
+            tangentToScaled[camera].transpose() * scaledProximal
+            * tangentToScaled[camera] * delta_p.segment<9>(9 * camera);
+      }
+    } else {
+      blockMult<9>(full_stepSize, delta_p, proximalStep);
+    }
+    if (DisableLocalProximalTermEnabled()) {
+      proximalStep.setZero();
+    }
+    const double penaltyModelEnd = penaltyStart
         + 2. * delta_p.dot(proximalGradient)
         + delta_p.dot(proximalStep);
     //const double penaltyEnd2 = (Jp * prox_rhs).squaredNorm();
@@ -2426,12 +4301,20 @@ void UpdateStepSizeAndSolve() {//bool keep_cameras_fixed = false) { // Recompute
     //std::cout << "==Penalties end/end2: " << penaltyEnd << " ?= " << penaltyEnd2 << " == " << penaltyEnd6 << "\n"; // since full_step differs from Jp cna differ  
     
     // Needs to be done due to GetCost.
-    for (int id = 0; id < delta_p.size(); ++id) {
-        cameras[id] += delta_p[id];
-    }
+    const std::vector<double> cameras_before_step = cameras;
+    ApplyCameraStep(delta_p);
     for (int id = 0; id < delta_l.size(); ++id) {
         landmarks[id] += delta_l[id];
     }
+    Matrix<double, Eigen::Dynamic, 1> actualProximalOffset(9 * numCameras);
+    for (int id = 0; id < actualProximalOffset.size(); ++id) {
+      actualProximalOffset[id] = cameras[id] - cameras_s[id];
+    }
+    Matrix<double, Eigen::Dynamic, 1> actualProximalGradient(9 * numCameras);
+    blockMult<9>(full_stepSize, actualProximalOffset,
+           actualProximalGradient);
+    const double penaltyEnd = DisableLocalProximalTermEnabled()
+      ? 0. : actualProximalOffset.dot(actualProximalGradient);
     const auto costEvaluationStart = collectTiming ? TimingClock::now() : TimingClock::time_point{};
     const double costEnd = 2 * GetCost(); // demands cameras , landmarks already updated.
     if (collectTiming) {
@@ -2443,13 +4326,35 @@ void UpdateStepSizeAndSolve() {//bool keep_cameras_fixed = false) { // Recompute
     const double actual_decrease =
         costStart - costEnd + penaltyStart - penaltyEnd;
     const double predicted_decrease =
-        costStart - costQuad + penaltyStart - penaltyEnd;
+      costStart - costQuad + penaltyStart - penaltyModelEnd;
     const double tr_check = actual_decrease /
         std::max(0.1, predicted_decrease);
+    if (LocalSolveMetricsEnabled()) {
+      std::ostringstream metric;
+      metric << "LOCAL_TRUST_ATTEMPT cluster=" << cluster_id
+             << " attempt=" << trust_region_attempts
+             << " radius=" << tr_radius
+             << " start=" << costStart + penaltyStart
+             << " end=" << costEnd + penaltyEnd
+             << " actual_decrease=" << actual_decrease
+             << " predicted_decrease=" << predicted_decrease
+             << " rho=" << tr_check
+             << " linear_iterations=" << linear_iterations
+             << " linear_relative_residual=" << linear_relative_residual
+             << "\n";
+      EmitLocalSolveMetric(metric.str());
+    }
     bool accept_step = false;
     if (trust_region_policy == 1) {
       accept_step = actual_decrease > 0.;
-      if (accept_step) {
+      if (BaeTrustScheduleEnabled() && accept_step) {
+        if (tr_check > 0.5) {
+          tr_radius = std::min(max_trust_region_radius, 2. * tr_radius);
+        } else if (!(tr_check > 1e-3)) {
+          tr_radius *= trust_region_decreasing_ratio;
+        }
+        trust_region_decreasing_ratio = 1. / 16.;
+      } else if (accept_step) {
         const double radius_divisor = std::max(
             1. / 3., 1. - std::pow(2. * tr_check - 1., 3));
         tr_radius = std::min(
@@ -2472,15 +4377,13 @@ void UpdateStepSizeAndSolve() {//bool keep_cameras_fixed = false) { // Recompute
           (costEnd + penaltyEnd) * LocalAcceptanceRatio();
     }
 
-    if (costStart + penaltyStart > costQuad + penaltyEnd)
-      WORKER_LOG("==Start Cost < estimated cost: " << costStart + penaltyStart << " < " << costQuad + penaltyEnd << "\n");
+    if (costStart + penaltyStart > costQuad + penaltyModelEnd)
+      WORKER_LOG("==Start Cost < estimated cost: " << costStart + penaltyStart << " < " << costQuad + penaltyModelEnd << "\n");
 
     if (!accept_step) {
       ++trust_region_rejections;
       WORKER_LOG("Reject Start Cost < end cost: "<< costStart + penaltyStart << " < " << costEnd + penaltyEnd << "\n");
-      for (int id = 0; id < delta_p.size(); ++id) {
-          cameras[id] -= delta_p[id];
-      }
+        cameras = cameras_before_step;
       for (int id = 0; id < delta_l.size(); ++id) {
         landmarks[id] -= delta_l[id];
       }
@@ -2501,15 +4404,19 @@ void UpdateStepSizeAndSolve() {//bool keep_cameras_fixed = false) { // Recompute
          << " rejections=" << trust_region_rejections
          << " start=" << costStart + penaltyStart
          << " end=" << costEnd + penaltyEnd
-         << " predicted=" << costStart - costQuad + penaltyStart - penaltyEnd
+         << " predicted=" << costStart - costQuad + penaltyStart - penaltyModelEnd
          << " rho=" << tr_check
          << " radius=" << tr_radius
          << " linear_solver=" << local_linear_solver
          << " linear_iterations=" << linear_iterations
+         << " linear_termination=" << linear_termination
+         << " linear_relative_residual=" << linear_relative_residual
          << " trust_policy=" << trust_region_policy
          << " diagonal_floor=" << CameraDiagonalRelativeFloor()
          << " block_sqrt_floor=" << BlockSqrtEigenvalueFloor()
          << " landmark_preconditioner_floor=" << LandmarkPreconditionerFloor()
+         << " landmark_preconditioning_disabled="
+         << DisableLandmarkPreconditioningEnabled()
          << " camera_trust_diagonal_scale=" << CameraTrustDiagonalScale()
          << " camera_diagonal_maximum_guard=" << CameraDiagonalMaximumGuard()
          << " minimum_trust_region_radius=" << MinimumTrustRegionRadius()
@@ -2569,10 +4476,13 @@ void UpdateStepSizeAndSolve() {//bool keep_cameras_fixed = false) { // Recompute
   
     break;
   }
+  last_linear_iterations = linear_iterations;
+  last_linear_relative_residual = linear_relative_residual;
   if (landmark_refinement_steps > 0) {
     RefineLandmarksWithFixedCameras(landmark_refinement_steps);
   }
-  if (!scalar_proximal_prior && metric_diagnostic_iterations > 0) {
+  if (!scalar_proximal_prior &&
+      (metric_diagnostic_iterations > 0 || proximal_defect_diagnostic)) {
     const NormalEquations final_normal_equations = GetNormalEquations();
     EstimateProximalDefect(
         final_normal_equations,
@@ -2580,6 +4490,10 @@ void UpdateStepSizeAndSolve() {//bool keep_cameras_fixed = false) { // Recompute
         cameras,
         cameras_s,
         metric_diagnostic);
+    EstimateInteriorDefect(
+      final_normal_equations,
+      camera_proximal_multipliers,
+      metric_diagnostic);
     if (collectTiming) {
       std::ostringstream metric;
       metric << "PROXIMAL_DEFECT cluster=" << cluster_id
@@ -2725,7 +4639,7 @@ private:
   }
 
 #ifndef __unweighted_system__
-  NormalEquations GetBatchedNormalEquations() {
+  NormalEquations GetBatchedNormalEquations(bool tangent_coordinates = false) {
     using ObservationJet = ceres::Jet<double, 12>;
     const bool collectTiming = LocalSolveMetricsEnabled();
     const auto evaluateStart = collectTiming ? TimingClock::now() : TimingClock::time_point{};
@@ -2741,6 +4655,7 @@ private:
     result.camera_gradient = Eigen::VectorXd::Zero(9 * numCameras);
     result.landmark_gradient = Eigen::VectorXd::Zero(3 * numLandmarks);
     double squaredResidualNorm = 0.;
+    std::vector<Eigen::Matrix<double, 9, 9>> tangent_to_scaled;
 
     for (int observation = 0; observation < numResiduals; ++observation) {
       const int cameraId = cam_obs[observation];
@@ -2750,13 +4665,29 @@ private:
       const int transformOffset = 81 * cameraId;
       ObservationJet camera[9];
       ObservationJet landmark[3];
+      Eigen::Matrix<double, 9, 9> physical_jacobian =
+          Eigen::Matrix<double, 9, 9>::Zero();
+      if (tangent_coordinates) {
+        const Eigen::Map<const Eigen::Matrix<double, 9, 1>> physical_camera(
+            &weighted_cameras[cameraOffset]);
+        physical_jacobian.block<3, 3>(0, 3) =
+            So3LeftJacobian(physical_camera.head<3>()).inverse();
+        physical_jacobian.block<3, 3>(3, 0).setIdentity();
+        physical_jacobian.block<3, 3>(3, 3) =
+            -Skew(physical_camera.segment<3>(3));
+        physical_jacobian.bottomRightCorner<3, 3>().setIdentity();
+      }
       for (int row = 0; row < 9; ++row) {
         camera[row].a = weighted_cameras[cameraOffset + row];
         camera[row].v.setZero();
         for (int col = 0; col < 9; ++col) {
-          camera[row].v[col] =
-              cameraTransform[transformOffset + 9 * row + col]
-              * unorm[cameraOffset + col];
+          if (tangent_coordinates) {
+            camera[row].v[col] = physical_jacobian(row, col);
+          } else {
+            camera[row].v[col] =
+                cameraTransform[transformOffset + 9 * row + col]
+                * unorm[cameraOffset + col];
+          }
         }
       }
       for (int row = 0; row < 3; ++row) {
@@ -2836,7 +4767,7 @@ private:
   NormalEquations GetNormalEquations() {
 #ifndef __unweighted_system__
     if (objective_model == 0 && BatchedEvaluationEnabled()) {
-      return GetBatchedNormalEquations();
+      return GetBatchedNormalEquations(false);
     }
 #endif
     // 1st get Jacobian(s):
@@ -3025,6 +4956,7 @@ private:
   int num_clusters = 1;
   int numCameras = 0;
   std::vector<std::uint32_t> global_camera_ids;
+  std::vector<double> camera_proximal_multipliers;
   int local_solve_sequence = 0;
   int numLandmarks = 0;
   int numResiduals = 0;
@@ -3032,6 +4964,13 @@ private:
   double current_be = init_be;
   double block_curvature_multiplier = 0.;
   int metric_diagnostic_iterations = 0;
+  int outer_iteration = -1;
+  int oracle_kind = 0;
+  bool collect_camera_diagonal_metrics = false;
+  bool frozen_block_metric_initialized = false;
+  bool proximal_defect_diagnostic = false;
+  bool diagonal_trust_damping = false;
+  bool nesterov_relative_residual = false;
   int landmark_refinement_steps = 0;
   int nesterov_max_iterations = 100;
   int nesterov_min_iterations = 1;
@@ -3050,15 +4989,18 @@ private:
   bool ceres_local_solver = false;
   int local_iterations = 1;
   double start_be = init_be;
-  const double init_trust_region_radius = 1e1; // Todo: set to 1?
+  const double init_trust_region_radius = InitialTrustRegionRadius();
   double tr_radius = init_trust_region_radius; // 1e4 is ceres standard. -> Init()
   double last_tr_radius = init_trust_region_radius;
-  const double max_trust_region_radius = 1e6;
+  const double max_trust_region_radius = MaximumTrustRegionRadius();
   double startCost;
   double cost;
   double best_cost;
   double last_jacobian_evaluate_seconds = 0.;
   double last_jacobian_conversion_seconds = 0.;
+  int last_linear_iterations = 0;
+  double last_linear_relative_residual =
+      std::numeric_limits<double>::quiet_NaN();
   bool firstIteration = true; // full step is wo. diag part to acc.
   //bool new_best_cost = false;
   std::vector<ceres::ResidualBlockId> function_residual_blocks;
@@ -3076,6 +5018,7 @@ private:
   std::vector<double> best_landmarks;
   std::vector<double> stepSize; // internally modelling prox term. 'sqrt' of full_stepSize 
   std::vector<double> full_stepSize; // returned to compute s update in DRS.
+  std::vector<double> consensus_stepSize; // optional unfloored projection metric.
   std::vector<double> unorm;
   std::vector<double> vnorm;
   std::vector<double> cameraTransform;
@@ -3320,7 +5263,10 @@ int main() {
           ? ElapsedSeconds(launch_start) : 0.;
         CeresProgram &program = cluster_to_program[cluster_id];
         // std::cout << cluster_id << " Update "<< "\n";
-  if (program.UsesCeresLocalSolver()) {
+  if (program.UsesCentralizedLeftSe3Solver()) {
+    program.SolveCentralizedLeftSe3(
+        program.UsesCentralizedProximalLeftSe3Solver());
+  } else if (program.UsesCeresLocalSolver()) {
     program.PrepareScalarCeresPrior();
     program.Solve();
   } else {
@@ -3606,6 +5552,9 @@ int main() {
           break;
         case landmark_state_proto::RESTORE_NOMINAL_ROUNDTRIP:
           program.RestoreNominalLandmarkStateWithRoundTrip(state.state_id());
+          break;
+        case landmark_state_proto::RESTORE_BEST:
+          program.RestoreBestOutputLandmarkState();
           break;
         default:
           THROW_IF(true);

@@ -80,6 +80,13 @@ work; this is a diagnostic oracle, not a practical inner solver. Its checkpoint
 implementation did not survive into the maintained post-crash source and must
 not be reconstructed or extended unless explicitly requested.
 
+The 2026-08-11 C4 telemetry smoke also established a narrower recovery
+boundary: the maintained source runs the recorded shared-only direct-tangent
+K2 configuration, but does not reproduce the historical Roman trajectory.
+Keep that historical JSONL immutable as evidence. Before the matched C4
+comparison, freeze a separately named executable post-crash baseline; do not
+attribute its trajectory to the historical source state.
+
 ### Frozen Next Gate
 
 Use the maintained C4 surface in `main.cpp` and `client_drs.py`:
@@ -92,9 +99,80 @@ Use the maintained C4 surface in `main.cpp` and `client_drs.py`:
 4. keep outer acceleration off for this transfer gate;
 5. only after the inner-only result, test isolated C1/C5 interactions.
 
+K2 gate result (2026-08-11): on the separately named post-crash Roman and
+Trafalgar `K2/I30` control, Schur-PCG reaches `0.9165x` and `0.7992x` the
+matched finite-Nesterov SSE while taking `0.8391x` and `0.8324x` its
+optimization time. This passes the two-scene safety/usefulness gate without
+tolerance tuning.
+
+K24 transfer result (2026-08-11): with the same frozen configuration,
+Schur-PCG reaches `0.9789x` and `0.9042x` the Nesterov SSE while taking
+`0.8732x` and `0.8672x` its optimization time. Rejection counts are identical
+and PCG uses materially fewer inner iterations. C4 therefore passes the K24
+transfer gate. The active next check is unchanged six-scene K24 breadth before
+isolated C1/C5 composition; do not tune the inner tolerance from these scenes.
+
+Six-scene breadth result (2026-08-11): PCG wins SSE on `3/6`, runtime on
+`6/6`, summed SSE at `0.9745x`, geometric-mean per-scene SSE at `0.9948x`, and
+geometric-mean optimization time at `0.8979x` Nesterov. Piccadilly regresses to
+`1.0913x` SSE, so this is not a uniform quality promotion. The active decision
+gate is one unchanged all-15 K24 comparison. Do not tune from the six scenes
+and do not introduce a scene-dependent solver switch.
+
+All-15 C4 decision (2026-08-11): PCG reaches `0.9851x` summed SSE but
+`1.0055x` geometric-mean per-scene SSE, with `8/15` quality wins and a
+`1.1953x` NYC Library regression. It reaches `0.9317x` geometric-mean
+optimization time and wins runtime on `12/15`. Therefore PCG is retained as an
+independently switchable speed-oriented C4 level, not promoted as the universal
+inner solver. Nesterov remains the named unchanged default trajectory. The
+inner-only gate is closed. The retained Stage-C C1/C5 publication factorial is
+a separate PCG/regularization family; do not reinterpret its ratios as a
+Nesterov composition. No tolerance tuning or scene-dependent solver selection
+is permitted from this matrix.
+
+Fresh Stage-C cross-family confirmation (2026-08-11): current-source K24/I30
+plain and C1+C5 rows complete on all 15 1DSfM and all 29 BAL scenes, with no
+recovery exhaustion. Relative to fresh plain DRS, C1+C5 reaches `0.870061x`
+geometric SSE on 1DSfM (13/15 wins) and `0.983638x` on BAL (28/29 wins), at
+`1.801873x` and `2.030313x` optimization time. Relative to left-SE3 Ceres it
+reaches `2.197218x` and `1.010071x`.
+
+The complete global 2x2 factorial establishes the cumulative order. C1 is the
+accepted first rung (`0.865147x` plain SSE on 1DSfM and `0.983780x` on BAL).
+Current C5 alone is `1.015807x` and `1.000057x`; adding it to C1 gives
+`1.005680x` C1 on 1DSfM and `0.999855x` on BAL. Both C1 and C5 remain in the
+final architecture and C1+C5 is the intended combined stack. The active
+research task is global C5 threshold/work-policy tuning to make its incremental
+gain over C1 robust across both families. Never use per-scene settings. The
+frozen one-factor tuning order and acceptance gates are in
+`benchmark_results/stage_c_global_c5_tuning_plan.md`.
+
+Global C5 tuning result (2026-08-11): scalar threshold, window, dwell, and
+maximum-depth sweeps did not pass both development families. Delaying C5 until
+I5 did. Freeze one common policy everywhere: start I5, high/low `0.35/0.20`,
+window/dwell `3/3`, maximum depth 2. It was selected on six development 1DSfM
+plus five BAL sentinels, then run unchanged on nine held-out 1DSfM and all-29
+BAL. Tuned C1+C5/C1 is `0.980053x` all-15 1DSfM and `0.999486x` all-29 BAL;
+C1+C5/plain is `0.847890x` and `0.983275x`, W/T/L `14/0/1` and `28/0/1`.
+Promote tuned C1+C5 as the final Stage-C stack, with C1 and C5 retained as
+independent switches. No scene-specific settings are used.
+
+Loss-factorial clarification (2026-08-11): fallback safety does not imply
+endpoint dominance over a separately run plain trajectory. Roman's C1 and C5
+main effects both lose but interact beneficially; Yorkminster's main effects
+both lose and interact adversely; BAL135 is a C1-only loss because C5 is
+inactive. Under a prefix-identical I30 safeguard schedule continued to I60,
+Yorkminster C1 becomes `0.908028x` plain while C5 and C1+C5 remain `1.015475x`
+and `1.029215x`. Retain the innovations, keep the I30 tail warning, and do not
+introduce scene-dependent switching. These are global tuning diagnostics, not
+innovation vetoes. Full evidence is in
+`benchmark_results/stage_c_loss_factorials_k24_i30_report.md`.
+
 The goal is consensus-aware finite local work, not convergence of each local
 objective and not another multi-branch basin portfolio. Ceres/BAE remain
-diagnostic references. The current baseline remains runnable and unchanged.
+diagnostic references. The historical baseline artifact remains unchanged;
+the separately named post-crash executable baseline is the control for new C4
+runs.
 
 ## 2. Non-Negotiable Method Constraints
 
@@ -437,7 +515,12 @@ candidate/control ratio is `0.741372x`, and after one accepted correction it is
 Vienna, and Union cross from better to worse near accepted corrections 12, 11,
 and 25.
 
-## 8. Frozen Next Task
+## 8. Archived Historical Task (Superseded)
+
+This section records the earlier transient-majorizer/polishing investigation.
+It is not the active restart point. The controlling direction is
+**Section 1A, Active K1-to-Core Decision**. Do not resume work from this section
+or from its final "stop here" language.
 
 Do not launch another selector, startup-duration, or correction-count sweep.
 
@@ -761,9 +844,10 @@ Do not restart these without a new mechanism and explicit justification:
 
 After a crash or context loss:
 
-1. Read this file.
-2. Read the latest `Current Decision` and `Next Work` sections in
-   `benchmark_results/1dsfm_k1_algorithmic_bridge_report.md`.
+1. Read this file, especially **Section 1A, Active K1-to-Core Decision**.
+2. Treat the lower archived sections and
+   `benchmark_results/1dsfm_k1_algorithmic_bridge_report.md` as evidence, not
+   as authority for the next experiment.
 3. Check `git status --short`; never revert unknown user changes.
 4. Confirm the weekend artifact exists.
 5. Confirm no benchmark process is still running before reusing ports.
@@ -776,9 +860,11 @@ PYTHONPATH="$PWD/build_admm/generated/proto:$PWD" \
   .venv/bin/python -m pytest -q test_*.py
 ```
 
-Expected current source suite: 122 passed.
+Expected current maintained source suite: 128 passed.
 
 7. State the active budget class and exact next experiment before launching it.
+   Current active gate: C4 single-trajectory inner-only PCG/Nesterov carry-over,
+   first K2 and then K24 if safe, with outer acceleration off.
 8. Update this file whenever a result changes the north star, quality reference,
    current research preset, frozen next experiment, or promotion decision.
 

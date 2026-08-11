@@ -8,6 +8,7 @@ from pathlib import Path
 import tempfile
 
 import numpy as np
+from scipy.spatial.transform import Rotation
 
 
 def angle_axis_rotate_points(angle_axis, points):
@@ -301,6 +302,53 @@ def encoded_daba_ray_state_to_matrix(initial_cameras, cameras, points):
     return daba_cameras, -points
 
 
+def daba_matrix_state_to_bal(
+    initial_cameras,
+    daba_cameras,
+    daba_points,
+    camera_indices,
+    point_indices,
+    observations,
+):
+    """Transfer DABA geometry and fit BAL's forward radial intrinsics."""
+    initial_cameras = np.asarray(initial_cameras, dtype=np.float64)
+    daba_cameras = np.asarray(daba_cameras, dtype=np.float64)
+    daba_points = np.asarray(daba_points, dtype=np.float64)
+    if daba_cameras.shape != (len(initial_cameras), 3, 5):
+        raise ValueError("DABA camera state has an invalid shape")
+    rotations = np.swapaxes(daba_cameras[:, :, :3], 1, 2)
+    cameras = np.empty((len(initial_cameras), 9), dtype=np.float64)
+    cameras[:, :3] = Rotation.from_matrix(rotations).as_rotvec()
+    cameras[:, 3:6] = np.einsum(
+        "nij,nj->ni", rotations, daba_cameras[:, :, 3]
+    )
+    points = -daba_points
+
+    camera_indices = np.asarray(camera_indices, dtype=np.int64)
+    point_indices = np.asarray(point_indices, dtype=np.int64)
+    observations = np.asarray(observations, dtype=np.float64)
+    camera_points = angle_axis_rotate_points(
+        cameras[camera_indices, :3], points[point_indices]
+    ) + cameras[camera_indices, 3:6]
+    normalized = -camera_points[:, :2] / camera_points[:, 2, None]
+    radius_squared = np.sum(normalized**2, axis=1)
+    radial_basis = np.column_stack((
+        np.ones_like(radius_squared),
+        radius_squared,
+        radius_squared**2,
+    ))
+    for camera_index in range(len(cameras)):
+        selected = camera_indices == camera_index
+        design = (normalized[selected, :, None]
+                  * radial_basis[selected, None, :]).reshape(-1, 3)
+        coefficients, *_ = np.linalg.lstsq(
+            design, observations[selected].reshape(-1), rcond=None
+        )
+        cameras[camera_index, 6] = coefficients[0]
+        cameras[camera_index, 7:] = coefficients[1:] / coefficients[0]
+    return cameras, points
+
+
 def save_bal_state(path, cameras, points, metadata=None):
     """Save a solver state and compact provenance in a portable NPZ file."""
     output_path = Path(path)
@@ -440,6 +488,46 @@ def read_daba_ceres_state(path):
     cameras = values[:camera_end].reshape(
         camera_count, 5, 3).transpose(0, 2, 1)
     points = values[camera_end:].reshape(point_count, 3)
+    return cameras, points
+
+
+def read_daba_native_state(path):
+    """Read a one-rank state emitted by DABA's mpi_daba_bal_dataset."""
+    with open(path, "rt") as input_file:
+        camera_count, intrinsic_count, point_count, rank_count = map(
+            int, input_file.readline().split()
+        )
+        rank_cameras, rank_intrinsics, rank_points = map(
+            int, input_file.readline().split()
+        )
+        values = np.fromiter(
+            (float(value) for line in input_file for value in line.split()),
+            dtype=np.float64,
+        )
+    if rank_count != 1:
+        raise ValueError("only one-rank native DABA states are supported")
+    if (rank_cameras, rank_intrinsics, rank_points) != (
+        camera_count,
+        intrinsic_count,
+        point_count,
+    ):
+        raise ValueError("native DABA rank sizes do not match global sizes")
+    expected_values = 12 * camera_count + 3 * intrinsic_count + 3 * point_count
+    if values.size != expected_values:
+        raise ValueError(
+            f"native DABA state contains {values.size} values; "
+            f"expected {expected_values}"
+        )
+    extrinsic_end = 12 * camera_count
+    intrinsic_end = extrinsic_end + 3 * intrinsic_count
+    extrinsics = values[:extrinsic_end].reshape(camera_count, 3, 4)
+    intrinsics = values[extrinsic_end:intrinsic_end].reshape(intrinsic_count, 3)
+    if intrinsic_count != camera_count:
+        raise ValueError("native DABA state must have one intrinsic per camera")
+    cameras = np.empty((camera_count, 3, 5), dtype=np.float64)
+    cameras[:, :, :4] = extrinsics
+    cameras[:, :, 4] = intrinsics
+    points = values[intrinsic_end:].reshape(point_count, 3)
     return cameras, points
 
 

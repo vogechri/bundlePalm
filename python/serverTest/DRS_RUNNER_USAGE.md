@@ -1,3 +1,4 @@
+| `CAMERA_UPDATE` | `additive` | Camera update mode: `additive`, `angle_axis_left`, `se3_left`, or `se3_right`. |
 # DRS benchmark runner usage
 
 This guide covers `run_drs_failure_top3_live.sh`, the recommended wrapper for
@@ -12,6 +13,54 @@ cd /home/chvogel/bundlePalm/python/serverTest
 The wrapper starts and stops the worker, runs each requested scene/cluster
 combination, applies a per-case timeout, and stores JSON results, logs, states,
 status, timing, and memory measurements under `OUTPUT_DIR`.
+
+## Six-scene K1 Ceres validation
+
+`run_k1_ceres_validation.sh` runs the consolidated K1 left-SE(3) workflow on
+the six 1DSfM scenes and writes a comparison table alongside the raw results:
+
+```bash
+./run_k1_ceres_validation.sh
+```
+
+The default matrix contains:
+
+- custom Schur-PCG at 80 accepted nonlinear steps, with direct tangent
+  assembly, no proximal term, Schur-Jacobi, Nash--Sofer `Q` tolerance `0.1`,
+  diagonal LM damping, and persistent DABA trust state;
+- Ceres left-SE(3) at 90 trust attempts without internal Jacobi scaling;
+- the fully scaled Ceres left-SE(3) reference at the same budget.
+
+Useful overrides are `ITERATIONS`, `CERES_ITERATIONS`, `PROBLEM_FILTER`,
+`OUTPUT_ROOT`, `OVERWRITE`, `RUN_CUSTOM`, `RUN_CERES_UNSCALED`, and
+`RUN_CERES_SCALED`. For example, the matched first accepted Roman step is:
+
+```bash
+PROBLEM_FILTER=roman_forum \
+ITERATIONS=1 \
+CERES_ITERATIONS=4 \
+OUTPUT_ROOT="$PWD/../benchmark_results/1dsfm_k1_ceres_validation_smoke" \
+OVERWRITE=1 \
+./run_k1_ceres_validation.sh
+```
+
+The dataset manifest is `1dsfm_six_datasets.txt`; paths in it are relative to
+the workspace root.
+
+## K1 BAE Nesterov reproduction
+
+`run_k1_bae_nesterov_validation.sh` reproduces the preserved BAE local
+algorithm in the deterministic C++ worker: left-SE(3), raw coordinates,
+`U_lambda`-preconditioned Nesterov with `L=0.9`, 400 maximum iterations,
+criterion (32) checked every 10 iterations, diagonal damping, and BAE's trust
+radius schedule including cumulative damping across retries.
+
+```bash
+./run_k1_bae_nesterov_validation.sh
+```
+
+Use `PROBLEM_FILTER`, `ITERATIONS`, `OUTPUT_DIR`, `REQUEST_PORT`, and
+`OVERWRITE` to select or resume experiments.
 
 ## Your current 3068 run
 
@@ -64,6 +113,34 @@ Important differences from relying on defaults:
 - `OUTER_ACCELERATION=nesterov` accelerates the **outer DRS iteration**.
   `LOCAL_SOLVER=nesterov` and the `NESTEROV_*` settings control the distinct
   **inner local linear solve**.
+
+## Adaptive local nonlinear depth
+
+The experimental defect-forcing policy starts with `LOCAL_STEPS` and switches
+between that depth and `ADAPTIVE_LOCAL_DEPTH_MAXIMUM`. It uses the rolling
+median of accepted-iteration interior-defect/local-objective ratios; transformed-
+Lipschitz power iteration is not required.
+
+```bash
+LOCAL_STEPS=1 \
+ADAPTIVE_LOCAL_DEPTH=1 \
+ADAPTIVE_LOCAL_DEPTH_START=5 \
+ADAPTIVE_LOCAL_DEPTH_MAXIMUM=2 \
+ADAPTIVE_LOCAL_DEPTH_HIGH=0.35 \
+ADAPTIVE_LOCAL_DEPTH_LOW=0.20 \
+ADAPTIVE_LOCAL_DEPTH_WINDOW=3 \
+ADAPTIVE_LOCAL_DEPTH_DWELL=3 \
+... ./run_drs_failure_top3_live.sh
+```
+
+Depth adaptation begins at `ADAPTIVE_LOCAL_DEPTH_START`. The depth increases
+after a full accepted window has median ratio above the high threshold and
+decreases after the dwell expires and a full accepted window falls below the
+low threshold. Every trajectory row records
+`localStepsUsed`, `nextLocalSteps`, `adaptiveDefectRollingMedian`, and
+`adaptiveDepthChanged`. The promoted Stage-C policy uses the values above with
+one global configuration across all scenes; C1 and C5 remain separately
+switchable for ablations.
 
 ## Partition cache and repartitioning
 
@@ -140,6 +217,7 @@ diagonal floor as `cameraDiagonalRelativeFloor`.
 | `ALL_PROBLEMS` | `0` | `0`: use the built-in 12-scene list. `1`: scan all 29 top-level `problem-*-pre.txt` files. |
 | `PROBLEM_FILTER` | `646 931 1266` | Space-separated scene camera counts to run, e.g. `"89 3068"`. Empty means all scenes in the selected list. |
 | `CLUSTERS_LIST` | `10 20 30` | Space-separated cluster counts, e.g. `"10 30"`. |
+| `SINGLE_CLUSTER_PROXIMAL` | `0` | `1`: run the explicit K=1 proximal-point procedure and bypass projection, reflection, relaxation, acceleration, and DRS safeguards. Forces materialized coordinator state. |
 | `ITERATIONS` | `30` | Number of outer DRS iterations. |
 | `LOCAL_STEPS` | `1` | Local proximal solves per DRS oracle call. |
 | `THREADS_PER_CLUSTER` | `1` | OpenMP threads assigned to each cluster. Total runnable worker threads can approach `clusters × threads`. |
@@ -148,6 +226,10 @@ diagonal floor as `cameraDiagonalRelativeFloor`.
 Examples:
 
 ```bash
+# Simplified K=1 proximal-point analysis.
+SINGLE_CLUSTER_PROXIMAL=1 PROBLEM_FILTER=931 ITERATIONS=180 \
+  ./run_drs_failure_top3_live.sh
+
 # One scene from the built-in list.
 PROBLEM_FILTER=931 CLUSTERS_LIST=30 ./run_drs_failure_top3_live.sh
 
@@ -160,25 +242,70 @@ ALL_PROBLEMS=1 PROBLEM_FILTER='' CLUSTERS_LIST='10 30' \
   ./run_drs_failure_top3_live.sh
 ```
 
+`SINGLE_CLUSTER_PROXIMAL=1` overrides `CLUSTERS_LIST`, `OUTER_ACCELERATION`,
+`RELAXATION`, `SAFEGUARD_MODE`, consensus refinement, and worker-owned state.
+Each iteration performs only
+
+\[
+u_k = \operatorname{prox}^{M_k}_F(s_k), \qquad s_{k+1} = u_k,
+\]
+
+and evaluates the BAL objective at `u_k`.
+
 ## Local solver and trust region
 
 | Variable | Default | Values / meaning |
 |---|---:|---|
-| `LOCAL_SOLVER` | `nesterov` | `nesterov`: custom accelerated inner solve. `schur_pcg`: custom Schur-PCG solve. `ceres_pcg`: Ceres local solve. |
+| `LOCAL_SOLVER` | `nesterov` | `nesterov`: accelerated PoBA-style inner solve. `poba_power`: direct Neumann recurrence from equation (22) of `powerits.pdf`. `schur_pcg`: custom Schur-PCG solve. `ceres_pcg`: additive scaled-coordinate Ceres solve. `ceres_se3`: converged left-SE(3) K1 reference. `ceres_prox_se3`: K>1 diagnostic minimizing each cluster's reprojection plus actual block camera proximal objective. |
+| `LOCAL_CAMERA_STEP_SCALE` | `1.0` | Diagnostic interpolation `u <- s + scale * (u-s)` before DRS reflection. Values below one require coordinator-owned cameras, no outer acceleration, and no safeguard. |
+| `LOCAL_CAMERA_STEP_GRID` | `1` | Diagnostic global-SSE selection over the 3x3 independent camera/landmark displacement scales `0.25,0.5,1`. Requires coordinator-owned cameras and landmarks, coordinator consensus, no acceleration, no safeguard, and no consensus refinement. |
+| `SHARED_CAMERA_STEP_GRID` | `1` | Diagnostic global-SSE selection over `0.25,0.5,1` applied only to cameras owned by multiple clusters; unique-camera and landmark steps remain unchanged. Uses the same restrictions as the local step grid. |
+| `SHARED_CAMERA_STEP_SCALE` | `1.0` | Fixed interpolation applied only to shared-camera displacement before reflection; `0.5` is the evidence-backed K24 diagnostic value. Requires coordinator-owned cameras. |
+| `SHARED_CAMERA_DISAGREEMENT_SCALE` | `1.0` | Preserves each shared camera's mean local displacement and scales only copy-to-copy disagreement. `0` enforces identical active-copy displacement; diagnostic-only and requires coordinator consensus/cameras. |
+| `METRIC_PROPOSAL_DISAGREEMENT_SCALE` | `1.0` | Preserves the full-metric projection of shared-camera local proposals and scales only proposal residuals around it. Diagnostic-only; requires block metrics and coordinator consensus/cameras. |
+| `METRIC_PROPOSAL_DISAGREEMENT_GRID` | `1` | Corrected-DRE selection over projection-preserving proposal scales. `0.6,1` compares damping with the exact undamped local proposal without another proximal solve. |
+| `METRIC_PROPOSAL_SUBSPACE_SCALES` | `1,1,1` | Projection-preserving rotation, translation, and intrinsics proposal scales. Supported diagnostics include one-group `0.6` and extrinsics `0.6,0.6,1`. |
+| `METRIC_PROPOSAL_DISAGREEMENT_THRESHOLD` | `-1` | When nonnegative, applies `METRIC_PROPOSAL_DISAGREEMENT_SCALE` only if normalized metric proposal disagreement meets this threshold. |
+| `SHARED_CAMERA_METRIC_BETA` | `0` | Ownership-weighted block metric `M_j <- (1 + beta * (copies_j - 1)) M_j`. Unique-camera blocks remain unchanged. |
 | `NESTEROV_MAX_ITERATIONS` | `100` | Hard maximum for the inner Nesterov solve; valid range in the worker is 1–1000. |
+| `ENHANCED_INNER_MAX_ITERATIONS` | `300` | Inner ceiling while staged relative-residual forcing is active. |
 | `NESTEROV_MIN_ITERATIONS` | `1` | Minimum completed inner iterations before the stopping criterion may terminate the solve; must not exceed the maximum. |
 | `NESTEROV_STOP_TOLERANCE` | `1e-2` | Inner relative stopping tolerance in `(0,1)`. Larger is cheaper/looser. |
+| `ENHANCED_INNER_UNTIL` | `0` | Shorthand outer-iteration cutoff that enables both diagonal damping and relative-residual forcing before the cutoff. |
+| `DIAGONAL_TRUST_UNTIL` | `0` | Independent outer-iteration cutoff for diagonal trust damping; overrides the shorthand when nonzero. |
+| `RELATIVE_RESIDUAL_UNTIL` | `0` | Independent outer-iteration cutoff for relative-residual forcing; overrides the shorthand when nonzero. |
 | `TRUST_REGION_POLICY` | `daba` | `daba`, `drs`, or `ceres`. |
 | `PERSISTENT_TRUST_REGION` | `0` | `1`: carry the local trust-region radius between oracle calls. |
 | `TRUST_REGION_RECOVERY_RATIO` | `0.5` | Radius recovery factor in `(0,1]`. |
+| `SHARED_TRUST_REGION_UNTIL` | `0` | Before this outer-iteration cutoff, broadcast one common starting radius to every local oracle and set the next shared radius to the geometric mean of returned worker radii. This aligns oracle-call starts, not retries within a call. Diagnostic-only; I90 experiments were not robust. |
+| `SHARED_TRUST_REGION_INITIAL_RADIUS` | `1000000` | Initial common radius used when `SHARED_TRUST_REGION_UNTIL` is positive. |
 | `BUNDLE_PALM_CAMERA_DIAGONAL_FLOOR` | `1e-48` | Relative C++ floor used when regularizing camera diagonal terms. Non-default values are included in the variant name and result metadata. |
 | `BUNDLE_PALM_BLOCK_SQRT_EIGENVALUE_FLOOR` | `1e-16` | Absolute floor applied after taking square roots of camera-block eigenvalues in the optional `__ceresVersion__` path; inactive in the standard Nesterov build. |
 | `BUNDLE_PALM_LANDMARK_PRECONDITIONER_FLOOR` | `1e-24` | Floor on the landmark Hessian diagonal before inverse-square-root preconditioning. |
+| `BUNDLE_PALM_DISABLE_LANDMARK_PRECONDITIONING` | `0` | `1`: leave worker landmark coordinates unscaled. Intended for raw-coordinate BAE K1 comparisons. |
 | `BUNDLE_PALM_CAMERA_TRUST_DIAGONAL_SCALE` | `1e-4` | Relative weight of the camera diagonal in trust-region damping. |
 | `BUNDLE_PALM_CAMERA_DIAGONAL_MAXIMUM_GUARD` | `1e-32` | Absolute guard used when forming relative camera diagonal floors. |
 | `BUNDLE_PALM_MINIMUM_TRUST_REGION_RADIUS` | `1e-4` | Lower trust-region radius used by recovery clamping and failed-attempt termination. |
 | `BUNDLE_PALM_CAMERA_PRECONDITIONER_DIAGONAL_FLOOR` | `1e-36` | Absolute floor on initial camera Hessian diagonal entries. |
-| `BUNDLE_PALM_CAMERA_DIAGONAL_METRIC_SCALE` | `1e1` | Multiplier on the active camera diagonal metric used by proximal and trust-region terms. |
+| `BUNDLE_PALM_CAMERA_DIAGONAL_METRIC_SCALE` | `25` | Multiplier on the active camera diagonal metric used by proximal and trust-region terms. |
+| `BUNDLE_PALM_FREEZE_BLOCK_METRIC` | `0` | `1`: reuse each worker's first optimization block metric on later oracle calls for fixed-versus-refreshed metric ablations. |
+| `BUNDLE_PALM_INITIAL_TRUST_REGION_RADIUS` | `10` | Initial custom-worker trust-region radius. Use `10000` for a Ceres initialization ablation. |
+| `BUNDLE_PALM_MAXIMUM_TRUST_REGION_RADIUS` | `1e6` | Maximum custom-worker trust-region radius. |
+| `BUNDLE_PALM_DABA_INITIAL_TRUST_REGION_CAP` | `100` | First-call trust-radius cap used by the DABA-style cubic policy. Set to `10000` for a Ceres-matched initialization probe. |
+| `BUNDLE_PALM_NESTEROV_SCHUR_LIPSCHITZ` | `0.9` | Step denominator used by the custom Nesterov Schur iteration. |
+| `BUNDLE_PALM_NESTEROV_STOP_CHECK_INTERVAL` | `1` | Evaluate the stopping criterion every N inner iterations. Use `10` to match the preserved BAE Nesterov script. |
+| `BUNDLE_PALM_NESTEROV_RELATIVE_RESIDUAL` | `0` | `1`: interpret `NESTEROV_STOP_TOLERANCE` as a relative preconditioned Schur-residual tolerance instead of the legacy iteration-dependent criterion. |
+| `BUNDLE_PALM_SCHUR_PCG_RELATIVE_TOLERANCE` | `1e-2` | Relative raw-residual stopping tolerance for custom Schur-PCG. |
+| `BUNDLE_PALM_SCHUR_PCG_Q_TOLERANCE` | `0` | Positive values enable Ceres's Nash--Sofer quadratic-model stopping rule and disable raw-residual stopping; use `0.1` to match Ceres's default `eta`. |
+| `BUNDLE_PALM_SCHUR_PCG_JACOBI_PRECONDITIONER` | `0` | `1`: precondition PCG with the camera-block diagonal of the reduced Schur complement, matching Ceres `SCHUR_JACOBI`; default `0` retains the PoBA `U_lambda` block preconditioner. |
+| `BUNDLE_PALM_SCHUR_PCG_MAX_ITERATIONS` | `400` | Maximum custom Schur-PCG iterations per trust-region attempt. |
+| `BUNDLE_PALM_CENTRALIZED_CERES_ITERATIONS` | `90` | Trust-region iterations for `ceres_se3` and `ceres_prox_se3`. Use small values when diagnosing inexact proximal solves. |
+| `BUNDLE_PALM_DIAGONAL_TRUST_DAMPING` | `0` | `1`: damp only camera/landmark Hessian diagonals in the custom solver instead of adding scaled full Hessian blocks. The client forwards this setting in every worker update. |
+| `BUNDLE_PALM_BAE_TRUST_SCHEDULE` | `0` | `1`: with DABA trust, use BAE's retry factors `1/16, 1/32, ...`, quality thresholds `0.5/1e-3`, and accepted-step radius update. Intended for K1 analysis. |
+| `BUNDLE_PALM_CUMULATIVE_DIAGONAL_DAMPING` | `0` | `1`: multiply the current diagonal by `1 + 1/r` on every retry, matching BAE damping without changing the trust-radius schedule. |
+| `BUNDLE_PALM_DIRECT_TANGENT_NORMAL_EQUATIONS` | `0` | `1`: transform each observation Jacobian to the left-SE(3) tangent before accumulating local normal equations. Diagnostic for avoiding ill-conditioned post-Hessian congruence. |
+| `BUNDLE_PALM_POBA_BLOCK_RELATIVE_FLOOR` | `0` | Relative per-block eigenvalue floor applied to `U_lambda` and `V_lambda` before PoBA inversion. `1e-16` is the minimally invasive tested diagnostic value. |
+| `BUNDLE_PALM_POBA_DIAGNOSTIC_ITERATIONS` | `0` | Positive values report minimum block eigenvalues and a `U_lambda`-inner-product power estimate of `rho(U_lambda^-1 W V_lambda^-1 W^T)`. |
 | `BUNDLE_PALM_CAMERA_BLOCK_SCALE` | `1e1` | Scale used when constructing the camera block step metric in the optional `__ceresVersion__` path; inactive in the standard Nesterov build. |
 | `BUNDLE_PALM_LEGACY_LANDMARK_JACOBIAN_SQRT_FLOOR` | `1e-10` | JlJ square-root floor in the optional `__ceresVersion__` path; inactive in the standard Nesterov build. |
 | `BUNDLE_PALM_CONST_DIAGONAL_MAXIMUM_FLOOR` | `1e-32` | Maximum-diagonal floor in the optional `_const_diag_` path; inactive in the standard build. |
@@ -193,6 +320,11 @@ preconditioner floor and camera trust diagonal scale are active.
 Compatibility rules:
 
 - `ceres_pcg` requires `TRUST_REGION_POLICY=ceres` and scalar proximal metrics.
+- `ceres_se3` requires `SINGLE_CLUSTER_PROXIMAL=1`, `CAMERA_UPDATE=se3_left`,
+  `ITERATIONS=1`, and `LOCAL_STEPS=1`. It excludes the proximal residual and
+  solves the complete K=1 BAL problem inside one worker call.
+- `ceres_prox_se3` requires `CAMERA_UPDATE=se3_left` and
+  `PROXIMAL_METRIC=block`. It is an analysis oracle, not a promoted solver.
 - `nesterov` and `schur_pcg` require `TRUST_REGION_POLICY=drs` or `daba`.
 - The measured ten-scene inner-iteration distribution at tolerance `1e-2` was:
   median 18, p90 33, p95 36, p99 43, maximum 85. Thus 40 is an aggressive
@@ -333,6 +465,7 @@ to `64`, and halve recovered curvature after five accepted iterations.
 | `SAFEGUARD_MODE` | `relative` | `relative`, `catastrophic`, or `none`. |
 | `DRE_RELATIVE_INCREASE` | `0.01` | Allowed relative DRE increase; nonnegative. |
 | `MINIMUM_PRIMAL_RATIO` | `1.001` | Minimum safeguard ratio; must be at least 1. |
+| `SAFEGUARD_ANNEALING_ITERATIONS` | `0` | Diagnostic schedule horizon. `0` uses the requested run length; a positive value clamps at that schedule's terminal ratio afterward for prefix-identical continuation tests. |
 | `SAFEGUARD_RELATIVE_DEADBAND` | `0` | Nonnegative relative numerical deadband around DRE and primal rejection thresholds; `0` preserves strict comparisons. |
 | `CATASTROPHIC_RATIO` | `1000000` | Rejection threshold for catastrophic mode; at least 1. |
 | `RECOVERY_PENALTY_RATIO` | `2.0` | Recovery growth factor; must exceed 1. |

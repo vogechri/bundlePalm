@@ -249,6 +249,32 @@ def test_multiview_triangulation_recovers_exact_point() -> None:
     assert result.maximum_reprojection_errors[0] < 1e-10
 
 
+def test_multiview_triangulation_skips_singular_solve(monkeypatch) -> None:
+    camera_ids = np.array([0, 1])
+    rotations = np.repeat(np.eye(3)[np.newaxis], 2, axis=0)
+    centers = np.array([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]])
+    coordinates = {
+        camera: (
+            CameraFeatures(camera, str(camera), 1, 100.0, 80.0, 100.0),
+            np.array([[50.5, 40.5]]),
+        )
+        for camera in camera_ids
+    }
+    monkeypatch.setattr(
+        np.linalg,
+        "solve",
+        lambda *_: (_ for _ in ()).throw(np.linalg.LinAlgError("singular")),
+    )
+    result = triangulate_tracks(
+        camera_ids,
+        rotations,
+        centers,
+        [np.array([[0, 0], [1, 0]])],
+        coordinates,
+    )
+    assert len(result.track_ids) == 0
+
+
 def test_degree_cleanup_cascades_from_cameras_to_points() -> None:
     triangulation = TriangulationResult(
         track_ids=np.arange(3),

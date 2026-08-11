@@ -324,7 +324,12 @@ def triangulate_tracks(
         condition = float(np.linalg.cond(system))
         if not np.isfinite(condition):
             continue
-        point = np.linalg.solve(system, np.einsum("nij,nj->i", projectors, centers_array))
+        try:
+            point = np.linalg.solve(
+                system, np.einsum("nij,nj->i", projectors, centers_array)
+            )
+        except np.linalg.LinAlgError:
+            continue
         depths = np.sum((point - centers_array) * directions_array, axis=1)
         dot_products = np.clip(directions_array @ directions_array.T, -1.0, 1.0)
         maximum_parallax = float(np.degrees(np.arccos(np.min(dot_products))))

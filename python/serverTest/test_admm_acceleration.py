@@ -1,6 +1,9 @@
+import sys
+
 import numpy as np
 import pytest
 
+import client_drs
 from admm_acceleration import (
     augmented_consensus_merit,
     consensus_disagreement_squared,
@@ -75,6 +78,82 @@ def test_legacy_nesterov_has_two_nominal_startup_proposals():
     assert not first_accelerated
     assert not second_accelerated
     assert third_accelerated
+
+
+def test_drs_cli_exposes_themelis_fast_drs(monkeypatch):
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["client_drs.py", "unused.bal", "--outer-acceleration", "themelis_nesterov"],
+    )
+    assert client_drs.parse_arguments().outer_acceleration == "themelis_nesterov"
+
+
+def test_factorized_metric_allows_themelis_acceleration(monkeypatch):
+    monkeypatch.setenv("BUNDLE_PALM_CAMERA_UPDATE", "se3_left")
+    monkeypatch.setenv("BUNDLE_PALM_DIRECT_TANGENT_NORMAL_EQUATIONS", "1")
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "client_drs.py",
+            "unused.bal",
+            "--local-solver",
+            "schur_pcg",
+            "--proximal-metric",
+            "block",
+            "--consensus-metric",
+            "full",
+            "--shared-only-camera-proximal",
+            "--factorized-coupled-schur-proximal-metric",
+            "--global-schur-majorizer-observability-threshold",
+            "0.55",
+            "--outer-acceleration",
+            "themelis_nesterov",
+        ],
+    )
+    client_drs.validate_arguments(client_drs.parse_arguments())
+
+
+def test_factorized_metric_allows_adaptive_local_depth(monkeypatch):
+    monkeypatch.setenv("BUNDLE_PALM_CAMERA_UPDATE", "se3_left")
+    monkeypatch.setenv("BUNDLE_PALM_DIRECT_TANGENT_NORMAL_EQUATIONS", "1")
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "client_drs.py",
+            "unused.bal",
+            "--local-solver",
+            "schur_pcg",
+            "--proximal-metric",
+            "block",
+            "--consensus-metric",
+            "full",
+            "--shared-only-camera-proximal",
+            "--factorized-coupled-schur-proximal-metric",
+            "--global-schur-majorizer-observability-threshold",
+            "0.55",
+            "--adaptive-local-depth",
+        ],
+    )
+    client_drs.validate_arguments(client_drs.parse_arguments())
+
+
+def test_bootstrap_trust_rebase_cli_flag(monkeypatch):
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "client_drs.py",
+            "unused.bal",
+            "--initial-shared-schur-correction",
+            "--initial-shared-schur-rebase-trust-state",
+        ],
+    )
+    arguments = client_drs.parse_arguments()
+    assert arguments.initial_shared_schur_correction
+    assert arguments.initial_shared_schur_rebase_trust_state
 
 
 @pytest.mark.parametrize(

@@ -1,0 +1,139 @@
+{
+  "eligible": [],
+  "leader": null,
+  "parameter": "low",
+  "thresholds": {
+    "0.1": {
+      "1dsfm": {
+        "depth_two_fraction": 0.06967592592592593,
+        "geometric_sse_ratio": 0.9674111860278034,
+        "losses": 1,
+        "optimization_ratio": 1.4513491069175695,
+        "recovery_exhausted": false,
+        "summed_sse_ratio": 0.9786848044092505,
+        "wins": 5,
+        "worst_sse_ratio": 1.034400601017875
+      },
+      "bal": {
+        "depth_two_fraction": 0.010277777777777778,
+        "geometric_sse_ratio": 1.0010865640419426,
+        "losses": 1,
+        "optimization_ratio": 1.370853711143042,
+        "recovery_exhausted": false,
+        "summed_sse_ratio": 1.000584170559147,
+        "wins": 1,
+        "worst_sse_ratio": 1.0054492883081338
+      },
+      "versus_control": {
+        "1dsfm": {
+          "depth_two_fraction": 0.06967592592592593,
+          "geometric_sse_ratio": 1.0,
+          "losses": 0,
+          "optimization_ratio": 1.0,
+          "recovery_exhausted": false,
+          "summed_sse_ratio": 1.0,
+          "wins": 0,
+          "worst_sse_ratio": 1.0
+        },
+        "bal": {
+          "depth_two_fraction": 0.010277777777777778,
+          "geometric_sse_ratio": 1.0,
+          "losses": 0,
+          "optimization_ratio": 1.0,
+          "recovery_exhausted": false,
+          "summed_sse_ratio": 1.0,
+          "wins": 0,
+          "worst_sse_ratio": 1.0
+        }
+      }
+    },
+    "0.15": {
+      "1dsfm": {
+        "depth_two_fraction": 0.06388888888888888,
+        "geometric_sse_ratio": 0.9814886226817326,
+        "losses": 2,
+        "optimization_ratio": 1.4491881758728484,
+        "recovery_exhausted": false,
+        "summed_sse_ratio": 0.9899910213586084,
+        "wins": 4,
+        "worst_sse_ratio": 1.034400601017875
+      },
+      "bal": {
+        "depth_two_fraction": 0.01,
+        "geometric_sse_ratio": 1.0011075767854736,
+        "losses": 1,
+        "optimization_ratio": 1.2718546594374176,
+        "recovery_exhausted": false,
+        "summed_sse_ratio": 1.0005954890723043,
+        "wins": 1,
+        "worst_sse_ratio": 1.005554814322193
+      },
+      "versus_control": {
+        "1dsfm": {
+          "depth_two_fraction": 0.06388888888888888,
+          "geometric_sse_ratio": 1.0145516579271026,
+          "losses": 4,
+          "optimization_ratio": 0.998511088039107,
+          "recovery_exhausted": false,
+          "summed_sse_ratio": 1.0115524598914993,
+          "wins": 0,
+          "worst_sse_ratio": 1.0430725620505992
+        },
+        "bal": {
+          "depth_two_fraction": 0.01,
+          "geometric_sse_ratio": 1.0000209899366206,
+          "losses": 1,
+          "optimization_ratio": 0.9277829203065896,
+          "recovery_exhausted": false,
+          "summed_sse_ratio": 1.0000113119050755,
+          "wins": 0,
+          "worst_sse_ratio": 1.0001049540889693
+        }
+      }
+    },
+    "0.2": {
+      "1dsfm": {
+        "depth_two_fraction": 0.05393518518518518,
+        "geometric_sse_ratio": 0.9260889780615938,
+        "losses": 2,
+        "optimization_ratio": 1.3194695413511026,
+        "recovery_exhausted": false,
+        "summed_sse_ratio": 0.9374480323012878,
+        "wins": 4,
+        "worst_sse_ratio": 1.034400601017875
+      },
+      "bal": {
+        "depth_two_fraction": 0.009722222222222222,
+        "geometric_sse_ratio": 1.0011967802819053,
+        "losses": 1,
+        "optimization_ratio": 1.2366723801021808,
+        "recovery_exhausted": false,
+        "summed_sse_ratio": 1.0006435491119023,
+        "wins": 1,
+        "worst_sse_ratio": 1.0060028930003537
+      },
+      "versus_control": {
+        "1dsfm": {
+          "depth_two_fraction": 0.05393518518518518,
+          "geometric_sse_ratio": 0.9572857864752642,
+          "losses": 2,
+          "optimization_ratio": 0.9091331197036682,
+          "recovery_exhausted": false,
+          "summed_sse_ratio": 0.9578651145678574,
+          "wins": 2,
+          "worst_sse_ratio": 1.0321136104642386
+        },
+        "bal": {
+          "depth_two_fraction": 0.009722222222222222,
+          "geometric_sse_ratio": 1.0001100966129417,
+          "losses": 1,
+          "optimization_ratio": 0.9021184171949476,
+          "recovery_exhausted": false,
+          "summed_sse_ratio": 1.0000593438858043,
+          "wins": 0,
+          "worst_sse_ratio": 1.000550604290696
+        }
+      }
+    }
+  }
+}

@@ -58,6 +58,19 @@ def should_reject_trial(
     )
 
 
+def bootstrap_basin_guard_decision(candidate_sse, ceiling_sse, active):
+    """Return rejection and release decisions for an accepted bootstrap basin."""
+    if not active:
+        return False, False
+    if not np.isfinite(ceiling_sse) or ceiling_sse < 0.0:
+        raise ValueError("bootstrap basin ceiling must be finite and nonnegative")
+    if not np.isfinite(candidate_sse):
+        return True, False
+    if candidate_sse < ceiling_sse:
+        return False, True
+    return True, False
+
+
 def exceeds_with_relative_deadband(value, threshold, relative_deadband):
     """Return whether a finite value exceeds a threshold beyond roundoff slack."""
     if relative_deadband < 0.0 or not np.isfinite(relative_deadband):

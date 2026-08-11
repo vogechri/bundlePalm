@@ -210,6 +210,27 @@ frontier and let the target hardware/network select the operating point.
 
 ## Cumulative Evaluation Ladder
 
+### Current long-horizon evidence
+
+The maintained K24/I30 results supersede the provisional cumulative ordering
+below where interactions are material. The manuscript-ready section is
+`stage_c_long_horizon_results.tex`, with machine-readable provenance in
+`benchmark_results/stage_c_reproducibility_manifest.json`.
+
+Current decisions:
+
+- retain C1 as a long-horizon 1DSfM quality component;
+- retain isolated C5 and C1+C5, with C1+C5 the strongest safe normalized
+   all-15 quality row (`0.786739x`, 15/15 wins);
+- keep C2 and C4 as separate factorial studies because both interact strongly
+   with C1 and scene coordinates;
+- keep C5 disabled in the practical large-BAL preset;
+- treat C3 as artifact-backed until its coordinator execution path is
+   explicitly reconstructed after the 2026-08-11 source rollback.
+
+The table below remains the conceptual dependency ladder, not a claim that
+every component is enabled in one final preset.
+
 Use one plain baseline and add exactly one component at a time. The main table
 should follow this order:
 
@@ -298,6 +319,16 @@ uniform: central quantiles are often comparable or better, but scene 245 has a
 maximum error of `889.7 px` and 1723 has 14 observations with no real inverse
 projection. This supports the paper's decision to target standard pixel error
 and to report DABA ray results with pixel-tail cross-evaluation.
+
+Combining this cohort with the four-scene failure cohort gives nine matched BAL
+scenes. Ray optimization has higher pixel SSE on eight of nine, with a 42.54%
+geometric-mean SSE penalty and a 1.98% geometric-mean mean-error penalty. Scene
+245 dominates summed SSE; excluding it still leaves a 2.60% geometric-mean SSE
+penalty. As external supporting evidence, DABA-Ceres states on all six
+SfM_Init-derived 1DSfM scenes have higher pixel SSE than DRS, by 8.00x geometric
+mean, and contain 514 noninvertible observations. The matched BAL ablation is
+the causal objective comparison; the 1DSfM result changes solver as well and
+must be labeled supporting evidence.
 
 ## Main Claims If Evidence Holds
 

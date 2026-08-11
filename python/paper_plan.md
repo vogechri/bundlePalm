@@ -27,7 +27,23 @@ order and the experiments should add them cumulatively.
 
 ## 3. Contribution hierarchy
 
-### C1. Primary: variable-metric nonlinear consensus BA
+### Terminology
+
+Use the Stage-C labels consistently in the manuscript and artifact names:
+
+- **C1:** safeguarded fast DRS;
+- **C2:** coordinate equilibration;
+- **C3:** variable-metric consensus;
+- **C4:** finite local Schur solver;
+- **C5:** adaptive local nonlinear work;
+- **C6:** optional distributed globalization.
+
+Landmark ownership and full block-metric camera consensus define the base
+method and precede this labeled ablation stack. Earlier drafts used C1--C5 for
+the prose contribution hierarchy below; those labels are superseded by the
+Stage-C convention to avoid assigning the same symbol to two mechanisms.
+
+### Base method: variable-metric nonlinear consensus BA
 
 Formulate BA as landmark-owned nonlinear subproblems with duplicated cameras. Each worker approximately solves
 
@@ -61,7 +77,7 @@ for diagonal and `1,209,725` for scalar projection; arithmetic is unstable on
 1723. Treat this as a passed breadth gate, while retaining a larger BAL/1DSfM
 confirmation requirement for the final paper claim.
 
-### C2. Primary if supported: practical stability package
+### C1. Safeguarded fast DRS
 
 Show that coordinate equilibration, metric regularization, DRE-guided fallback, restart, and best-primal restoration transform a brittle decomposition into a robust solver. The package matters only if ablations show materially better success rate, objective, or time-to-quality across the full suite.
 
@@ -76,7 +92,7 @@ block-regularization ceiling or replace the accepted DRE reference with a
 rejected trial; those are separate heuristics and are not part of the claimed
 line-search contribution.
 
-### C3. Primary only if proved: finite-local-solve convergence
+### Theory target: finite-local-solve convergence
 
 Prove convergence under a checkable inexact-prox condition compatible with a finite number of damped GN/LM steps. DABA is especially relevant here: its theorem assumes local surrogate minimizers, while its implementation uses one successful LM step. A rigorous bridge from finite local solves to convergence would be valuable beyond this implementation.
 
@@ -90,11 +106,11 @@ Acceptable forms include:
 
 Do not claim this contribution unless every assumption is both proved and connected to quantities the implementation computes.
 
-### C4. Supporting: partitioning and resource-aware execution
+### Supporting systems contribution: partitioning and resource-aware execution
 
 The exact complete-track partitioner and optimized worker implementation support scale and reproducibility. They are engineering contributions, not the headline, unless experiments establish a new partition-quality/runtime frontier with downstream solver consequences.
 
-### C5. Optional companion: PALM for evolving or bounded-memory problems
+### Optional companion: PALM for evolving or bounded-memory problems
 
 PALM is a different operating regime: sequential dirty-region optimization with ephemeral derivative workspaces. Include it only if changing-graph experiments demonstrate work proportional to affected edges and a meaningful memory advantage. Do not force PALM into the DRS convergence story.
 

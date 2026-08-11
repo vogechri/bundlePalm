@@ -5,6 +5,7 @@ import pytest
 
 from bal_evaluator import (
     canonicalize_bal_problem,
+    daba_matrix_state_to_bal,
     encoded_daba_ray_state_to_matrix,
     evaluate_encoded_daba_ray_state,
     evaluate_daba_ray_state,
@@ -14,9 +15,68 @@ from bal_evaluator import (
     read_bal_problem,
     read_ceres_text_state,
     read_daba_ceres_state,
+    read_daba_native_state,
     save_bal_state,
     write_bal_problem,
 )
+
+
+def test_read_daba_native_state(tmp_path):
+    state_path = tmp_path / "native.txt"
+    state_path.write_text(
+        "1 1 2 1\n"
+        "1 1 2\n"
+        "1 0 0 4\n0 1 0 5\n0 0 1 6\n"
+        "7 8 9\n"
+        "10 11 12\n13 14 15\n"
+    )
+
+    cameras, points = read_daba_native_state(state_path)
+
+    np.testing.assert_array_equal(
+        cameras,
+        np.array([[[1, 0, 0, 4, 7],
+                   [0, 1, 0, 5, 8],
+                   [0, 0, 1, 6, 9]]]),
+    )
+    np.testing.assert_array_equal(points, [[10, 11, 12], [13, 14, 15]])
+
+
+def test_daba_matrix_state_round_trip_recovers_bal_state():
+    cameras = np.array([
+        [0.02, -0.01, 0.03, 0.1, -0.2, 0.3, 800.0, 1e-3, -2e-5],
+        [-0.03, 0.04, -0.02, -0.4, 0.2, 0.1, 1200.0, -2e-3, 3e-6],
+    ])
+    points = np.array([[0.2, -0.1, -4.0], [-0.3, 0.4, -5.0]])
+    camera_indices = np.array([0, 0, 1, 1])
+    point_indices = np.array([0, 1, 0, 1])
+    observations = project_bal(
+        cameras, points, camera_indices, point_indices
+    )
+    daba_cameras, daba_points = encoded_daba_ray_state_to_matrix(
+        cameras, cameras, points
+    )
+
+    recovered_cameras, recovered_points = daba_matrix_state_to_bal(
+        cameras,
+        daba_cameras,
+        daba_points,
+        camera_indices,
+        point_indices,
+        observations,
+    )
+
+    np.testing.assert_allclose(recovered_cameras[:, :6], cameras[:, :6],
+                               rtol=1e-12, atol=1e-12)
+    np.testing.assert_array_equal(recovered_points, points)
+    np.testing.assert_allclose(
+        project_bal(
+            recovered_cameras, recovered_points, camera_indices, point_indices
+        ),
+        observations,
+        rtol=1e-12,
+        atol=1e-12,
+    )
 
 
 def test_evaluate_bal_state_reports_explicit_metric_conventions():

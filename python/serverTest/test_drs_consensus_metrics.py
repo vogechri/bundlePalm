@@ -46,3 +46,14 @@ def test_packed_upper_camera_metrics_reconstruct_symmetric_blocks():
 
     np.testing.assert_array_equal(blocks[:, rows, columns], packed)
     np.testing.assert_array_equal(blocks, np.swapaxes(blocks, 1, 2))
+
+
+def test_packed_upper_camera_metrics_preserve_float64_subnormals():
+    rows, columns = CAMERA_METRIC_UPPER_INDICES
+    packed = np.zeros((1, 45), dtype=np.float64)
+    packed[0, 0] = 1e-300
+
+    blocks = unpack_symmetric_camera_metric_blocks(packed)
+
+    assert blocks.dtype == np.float64
+    assert blocks[0, rows[0], columns[0]] == 1e-300

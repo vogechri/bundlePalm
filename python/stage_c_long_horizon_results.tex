@@ -1,0 +1,200 @@
+% Breadth values are generated from
+% benchmark_results/stage_c_reproducibility_manifest.json; factorial values
+% come from the matched C1xC2/C1xC2xC4 reports and the post-crash all-15 C4
+% decision artifact.
+% Regenerate the manifest with:
+% serverTest/.venv/bin/python serverTest/build_stage_c_reproducibility_manifest.py
+
+\section{Long-Horizon Component Ablations}
+\label{sec:stage-c-long-horizon}
+
+We evaluate the maintained Stage-C components with a matched long-horizon
+protocol: 24 landmark clusters, 30 outer iterations, one nominal local
+nonlinear step, shared-only full block-metric camera consensus, direct
+left-$\mathrm{SE}(3)$ tangent normal equations, points-$p_{95}$ scene
+normalization, initial Jacobi camera scaling, persistent DABA trust-region
+state, and Schur--PCG with relative tolerance $10^{-2}$.  This retained
+plain/C1/C5 matrix is distinct from the post-crash C4 carry-over gate below,
+which uses curvature recovery and finite Nesterov as its named reference.  All methods minimize
+the standard Snavely pixel sum-squared error (SSE).  Ratios below one favor the
+candidate.  Worker CPU is the sum of user and system time reported by
+\texttt{/usr/bin/time}; optimization time is coordinator-reported elapsed time.
+
+\subsection{Breadth of safeguarded acceleration and adaptive local work}
+
+Table~\ref{tab:stage-c-breadth} reports the two components with complete
+long-horizon breadth.  C1 is safeguarded Themelis-style outer acceleration with
+a nominal DRS fallback and restart.  C5 adapts each cluster between one and two
+local nonlinear steps using the measured proximal defect.  C5 does not add
+proximal oracle calls; it changes the amount of work within a nominal oracle.
+
+\begin{table}[t]
+  \centering
+  \caption{Matched K24/I30 Stage-C breadth.  SSE, optimization, oracle, and CPU
+  columns are geometric-mean ratios to the plain reference.  W/T/L counts
+  per-scene endpoint SSE.}
+  \label{tab:stage-c-breadth}
+  \small
+  \begin{tabular}{lrrrrrr}
+    \hline
+    Method & SSE & W/T/L & Worst & Optimization & Prox. oracles & Worker CPU \\
+    \hline
+    \multicolumn{7}{l}{\emph{SfM\_Init-derived 1DSfM, 15 scenes}} \\
+    C1 & 0.850595 & 13/0/2 & 1.045075 & 1.541091 & 1.673801 & 1.726258 \\
+    C5 & 0.952889 & 13/0/2 & 1.016898 & 1.176137 & 1.000000 & 1.468372 \\
+    C1+C5 & \textbf{0.786739} & \textbf{15/0/0} & \textbf{0.947483}
+      & 1.832873 & 1.667622 & 2.544050 \\
+    \hline
+    \multicolumn{7}{l}{\emph{Large BAL, 3 scenes}} \\
+    C1 & 0.991375 & 2/0/1 & 1.002193 & 1.724159 & 1.700226 & 1.753382 \\
+    C5 & 0.999815 & 1/2/0 & 1.000000 & 1.114341 & 1.000000 & 1.198071 \\
+    C1+C5 & 0.996026 & 2/0/1 & 1.016363 & 1.913371 & 1.633218 & 2.043677 \\
+    \hline
+  \end{tabular}
+\end{table}
+
+C1 retains its short-horizon quality gains on 1DSfM: it improves 13 of 15
+scenes and reduces geometric-mean SSE by $14.9\%$.  Its large-BAL endpoint gain
+is only $0.86\%$, while worker CPU increases by $75.3\%$; C1 is therefore a
+quality mechanism rather than a universal speedup.  Isolated C5 improves 13 of
+15 1DSfM scenes without adding proximal calls.  C5 activates depth two in
+$10.9\%$ of nominal cluster-iterations.  It is inactive on BAL1490 and BAL1778
+and nearly neutral over the large-BAL cohort.
+
+C1 and C5 compose strongly on 1DSfM.  The combination improves every scene,
+reduces geometric mean SSE by $21.3\%$, and repairs both C1 losses.  For
+example, the Trafalgar ratio changes from $1.0451$ with C1 to $0.7131$ with
+C1+C5; NYC Library changes from $1.0299$ to $0.6344$.  This quality costs
+$2.54\times$ worker CPU.  On large BAL, C5 does not provide a useful cumulative
+gain and slightly worsens BAL3068.  We consequently retain C1+C5 as a 1DSfM
+quality configuration, not as the universal practical preset.
+
+These breadth rows are retained pre-recovery artifacts.  We additionally ran a
+fresh executable confirmation of the current source over all 15 1DSfM and all
+29 BAL scenes.  Table~\ref{tab:stage-c-fresh-cross-family} compares the fresh
+global $2\times2$ factorial with a fresh plain DRS control.
+
+\begin{table}[t]
+  \centering
+  \caption{Fresh current-source K24/I30 cross-family factorial.  SSE and
+  optimization ratios use the matched plain DRS row in each family.}
+  \label{tab:stage-c-fresh-cross-family}
+  \small
+  \begin{tabular}{lrrrrrr}
+    \hline
+    Method & 1DSfM SSE & W/T/L & Opt. & BAL SSE & W/T/L & Opt. \\
+    \hline
+    C1 & 0.865147 & 13/0/2 & 1.557830 & 0.983780 & 28/0/1 & 1.820914 \\
+    C5 & 1.015807 & 5/0/10 & 1.207142 & 1.000057 & 4/15/10 & 1.158716 \\
+    C1+C5 & 0.870061 & 13/0/2 & 1.801873 & 0.983638 & 28/0/1 & 2.030313 \\
+    \hline
+  \end{tabular}
+\end{table}
+
+All 176 DRS cases complete.  C1 is the accepted first cumulative rung.  Current
+C5 alone is not an aggregate improvement, and adding it to C1 gives
+$1.005680\times$ C1 SSE on 1DSfM and $0.999855\times$ on BAL.  We retain both
+innovations and the C1+C5 architecture; the next step is to tune C5's common
+threshold and work policy so its incremental gain over C1 is robust.  No
+parameter or mode is selected by scene.  At this I30 budget every DRS row remains
+behind Ceres on 1DSfM and approximately tied on BAL; cross-solver timing is
+contextual because setup boundaries differ.
+
+A matched $2\times2$ diagnosis shows that the losses are not failed fallback
+events.  On Roman, C1 and C5 individually reach $1.0982\times$ and
+$1.0556\times$ plain SSE, but their beneficial interaction limits C1+C5 to
+$1.0473\times$.  On Yorkminster, the same main effects are $1.0310\times$ and
+$1.0637\times$ and interact adversely, producing $1.1843\times$.  BAL135 is a
+pure C1 loss of only $0.27\%$ because C5 never activates.  A prefix-identical
+Yorkminster continuation with the I30 safeguard schedule held fixed reaches
+$0.9080\times$ for C1 and $1.0292\times$ for C1+C5 at I60.  Thus C1's loss is a
+finite-horizon lag, while current C5 parameters and their Yorkminster
+interaction remain a global tuning diagnostic rather than a scene veto.
+The safeguard ensures admissible progress on the current trajectory; it does
+not maintain and dominate a shadow plain-DRS trajectory.
+
+We therefore tuned C5 globally and one factor at a time.  Scalar threshold,
+window, dwell, and maximum-depth changes did not improve the C1 rung on both
+development families.  Delaying C5 until outer iteration five did.  The frozen
+common policy uses high/low thresholds $0.35/0.20$, window and dwell three, and
+maximum depth two.  It was selected on six development 1DSfM scenes plus five
+BAL sentinels, then evaluated unchanged on nine held-out 1DSfM scenes and all
+29 BAL scenes.  Tuned C1+C5/C1 geometric SSE is $0.980053$ on all-15 1DSfM and
+$0.999486$ on all-29 BAL; tuned C1+C5/plain is $0.847890$ and $0.983275$, with
+W/T/L $14/0/1$ and $28/0/1$.  We promote this single global C1+C5 policy while
+retaining C1 and C5 as independent ablation switches.
+
+\subsection{Coordinate and finite-solver interactions}
+
+The remaining components are reported as factorials because their effects are
+not independent.  Table~\ref{tab:stage-c-factorials} summarizes the decisive
+sentinel interactions.  C2 denotes points-$p_{95}$ plus Jacobi equilibration,
+and C4 replaces Schur--PCG with finite Schur--Nesterov while holding trust,
+damping, nonlinear depth, and safeguards fixed.
+
+\begin{table}[t]
+  \centering
+  \caption{Long-horizon sentinel interactions.  Values are endpoint SSE ratios.
+  ``Raw'' disables scene normalization and camera scaling; ``scaled'' uses the
+  maintained points-$p_{95}$/Jacobi coordinates.}
+  \label{tab:stage-c-factorials}
+  \small
+  \begin{tabular}{llrrrr}
+    \hline
+    Scene & Coordinates & C1 only & C2 only & C1+C2 & Nesterov/PCG with C1 \\
+    \hline
+    Roman Forum & Raw & 0.763587 & 1.062746 & 0.718185 & 0.883997 \\
+    Roman Forum & Scaled & -- & -- & -- & 1.069439 \\
+    Trafalgar & Raw & 0.614318 & 0.997396 & 1.042354 & 1.025774 \\
+    Trafalgar & Scaled & -- & -- & -- & 0.804377 \\
+    BAL1490 & Raw & 0.987128 & 0.991674 & 0.986136 & 0.998941 \\
+    BAL1490 & Scaled & -- & -- & -- & 1.000139 \\
+    BAL3068 & Raw & 0.991296 & 1.001286 & 1.003482 & 1.019623 \\
+    BAL3068 & Scaled & -- & -- & -- & 1.015382 \\
+    \hline
+  \end{tabular}
+\end{table}
+
+C2 is not an automatic cumulative improvement after C1.  Roman exhibits
+positive C1--C2 synergy, whereas on Trafalgar scaling changes a strong raw C1
+gain ($0.6143$) into a loss ($1.0424$).  We therefore report C2 as an isolated
+coordinate study.  C4 is similarly context-dependent: Nesterov repairs scaled
+C1 Trafalgar but worsens raw C1 Trafalgar and scaled C1 Roman.  Moreover, equal
+configured tolerance does not imply equal delivered work.  PCG terminates at
+relative residuals near $6\text{--}7\times10^{-3}$, whereas Nesterov reaches
+approximately $8\times10^{-4}\text{--}1.1\times10^{-3}$ and uses
+$1.11\text{--}1.33\times$ worker CPU in these contexts.  We treat C4 as a
+finite-work basin ablation and make no universal solver-efficiency claim.
+
+The recovered core path permits a broader C4 decision without changing the
+distributed consensus method.  Table~\ref{tab:stage-c-c4-all15} reports the
+all-15 K24/I30 inner-only gate with outer acceleration disabled.  Coordinates,
+damping, preconditioning, trust, local nonlinear depth, and the proximal metric
+are fixed; only the finite inner solver changes.
+
+\begin{table}[t]
+  \centering
+  \caption{Post-crash all-15 C4 gate.  Ratios compare Schur--PCG with finite
+  Schur--Nesterov in the matched curvature-recovery family.}
+  \label{tab:stage-c-c4-all15}
+  \small
+  \begin{tabular}{lrrrrr}
+    \hline
+    Candidate/reference & Summed SSE & Geomean SSE & W/L & Geomean opt. & Worst \\
+    \hline
+    Schur--PCG/Nesterov & 0.985199 & 1.005578 & 8/7 & 0.931664 & 1.195314 \\
+    \hline
+  \end{tabular}
+\end{table}
+
+PCG is faster on 12 of 15 scenes and improves summed SSE, but its geometric
+per-scene SSE and worst-scene tail regress; NYC Library reaches $1.1953\times$
+and Piccadilly $1.0913\times$ the Nesterov SSE.  We therefore retain Nesterov
+as the named unchanged trajectory and expose PCG only as an independently
+switchable, speed-oriented C4 factorial level.  We neither tune the tolerance
+from this matrix nor choose the solver by scene.
+
+\subsubsection*{Reproducibility}
+Per-scene configurations, artifact paths, endpoint metrics, proximal oracle
+counts, worker CPU, worker RSS, repository revision, and the source-recovery
+boundary are recorded in the machine-readable supplementary manifest.

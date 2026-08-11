@@ -8,6 +8,20 @@ from drs_consensus_metrics import (
     CONSENSUS_METRIC_MODES,
     reduce_camera_metric_blocks,
 )
+from drs_coupled_metrics import (
+    CoupledCameraMetricBlocks,
+    coupled_metric_bilinear_sum,
+    coupled_metric_quadratic_sum,
+    project_coupled_consensus,
+    validate_coupled_metric,
+)
+from drs_factorized_metrics import (
+    FactorizedCameraMetric,
+    factorized_metric_bilinear_sum,
+    factorized_metric_quadratic_sum,
+    project_factorized_consensus,
+    validate_factorized_metric,
+)
 
 
 @dataclass(frozen=True)
@@ -110,6 +124,16 @@ def reduce_metric_tensor(metric_blocks, camera_masks, mode, parameter_count=9):
         ).copy()
         reduced[~camera_masks] = 0.0
         return reduced
+    if isinstance(metric_blocks, CoupledCameraMetricBlocks):
+        if mode != "full":
+            raise ValueError("coupled camera metrics require full consensus mode")
+        validate_coupled_metric(metric_blocks, camera_masks)
+        return metric_blocks
+    if isinstance(metric_blocks, FactorizedCameraMetric):
+        if mode != "full":
+            raise ValueError("factorized camera metrics require full consensus mode")
+        validate_factorized_metric(metric_blocks, camera_masks)
+        return metric_blocks
     if isinstance(metric_blocks, ActiveCameraMetricBlocks):
         _validate_active_metrics(metric_blocks, camera_masks)
         return ActiveCameraMetricBlocks(
@@ -138,6 +162,14 @@ def metric_quadratic_sum(vectors, metric_blocks, camera_masks):
     camera_masks = np.asarray(camera_masks, dtype=bool)
     if vectors.shape[:2] != camera_masks.shape:
         raise ValueError("vectors must have shape (clusters, cameras, parameters)")
+    if isinstance(metric_blocks, CoupledCameraMetricBlocks):
+        return coupled_metric_quadratic_sum(
+            vectors, camera_masks, metric_blocks
+        )
+    if isinstance(metric_blocks, FactorizedCameraMetric):
+        return factorized_metric_quadratic_sum(
+            vectors, camera_masks, metric_blocks
+        )
     if isinstance(metric_blocks, ActiveCameraMetricBlocks):
         _validate_active_metrics(metric_blocks, camera_masks)
         active_vectors = vectors[
@@ -158,7 +190,8 @@ def metric_quadratic_sum(vectors, metric_blocks, camera_masks):
 
 
 def project_consensus(
-    values, camera_masks, previous_consensus, metric_blocks=None
+    values, camera_masks, previous_consensus, metric_blocks=None,
+    prior_blocks=None, prior_center=None, direct_singletons=None,
 ):
     """Project product-space camera copies onto block-metric consensus."""
     values = np.asarray(values, dtype=np.float64)
@@ -167,6 +200,25 @@ def project_consensus(
     if metric_blocks is None:
         metric_blocks = reduce_metric_tensor(
             None, camera_masks, "arithmetic", values.shape[2]
+        )
+    if isinstance(metric_blocks, CoupledCameraMetricBlocks):
+        if prior_blocks is not None:
+            raise ValueError("coupled consensus does not yet support prior blocks")
+        return project_coupled_consensus(
+            values,
+            camera_masks,
+            metric_blocks,
+            direct_singletons=direct_singletons,
+        )
+    if isinstance(metric_blocks, FactorizedCameraMetric):
+        if prior_blocks is not None:
+            raise ValueError("factorized consensus does not yet support prior blocks")
+        return project_factorized_consensus(
+            values,
+            camera_masks,
+            metric_blocks,
+            direct_singletons=direct_singletons,
+            initial_consensus=previous_consensus,
         )
     denominator = np.sum(camera_masks, axis=0)
     if np.any(denominator == 0):
@@ -194,7 +246,75 @@ def project_consensus(
         metric_blocks = np.asarray(metric_blocks, dtype=np.float64)
         metric_sum = np.sum(metric_blocks, axis=0)
         right_hand_side = np.einsum("kcij,kcj->ci", metric_blocks, values)
-    return np.linalg.solve(metric_sum, right_hand_side[..., None])[..., 0]
+    if prior_blocks is not None:
+        prior_blocks = np.asarray(prior_blocks, dtype=np.float64)
+        if prior_blocks.shape != metric_sum.shape:
+            raise ValueError("consensus prior blocks do not match cameras")
+        prior_center = (
+            previous_consensus
+            if prior_center is None
+            else np.asarray(prior_center, dtype=np.float64)
+        )
+        if prior_center.shape != previous_consensus.shape:
+            raise ValueError("consensus prior center does not match cameras")
+        metric_sum += prior_blocks
+        right_hand_side += np.einsum(
+            "cij,cj->ci", prior_blocks, prior_center
+        )
+    if direct_singletons is None:
+        return np.linalg.solve(metric_sum, right_hand_side[..., None])[..., 0]
+    direct_singletons = np.asarray(direct_singletons, dtype=np.float64)
+    if direct_singletons.shape != values.shape:
+        raise ValueError("direct singletons must match product-space values")
+    copy_count = np.sum(camera_masks, axis=0)
+    shared = copy_count > 1
+    consensus = previous_consensus.copy()
+    if np.any(shared):
+        consensus[shared] = np.linalg.solve(
+            metric_sum[shared], right_hand_side[shared, :, None]
+        )[..., 0]
+    for camera in np.flatnonzero(copy_count == 1):
+        cluster = np.flatnonzero(camera_masks[:, camera])[0]
+        consensus[camera] = direct_singletons[cluster, camera]
+    return consensus
+
+
+def shared_floor_prior_blocks(
+    local_metric_blocks, vote_metric_blocks, camera_masks, scale
+):
+    """Return one copy-count-normalized floor prior per global camera."""
+    if not np.isfinite(scale) or scale < 0.0:
+        raise ValueError("shared floor prior scale must be finite and nonnegative")
+    if scale == 0.0:
+        return None
+    camera_masks = np.asarray(camera_masks, dtype=bool)
+    if not isinstance(local_metric_blocks, ActiveCameraMetricBlocks) or not (
+        isinstance(vote_metric_blocks, ActiveCameraMetricBlocks)
+    ):
+        raise ValueError("shared floor prior requires active camera metrics")
+    _validate_active_metrics(local_metric_blocks, camera_masks)
+    _validate_active_metrics(vote_metric_blocks, camera_masks)
+    if not (
+        np.array_equal(
+            local_metric_blocks.cluster_indices,
+            vote_metric_blocks.cluster_indices,
+        )
+        and np.array_equal(
+            local_metric_blocks.camera_indices,
+            vote_metric_blocks.camera_indices,
+        )
+    ):
+        raise ValueError("local and vote camera metrics are misaligned")
+    difference = (
+        local_metric_blocks.blocks - vote_metric_blocks.blocks
+    )
+    priors = np.zeros(
+        (local_metric_blocks.camera_count, 9, 9), dtype=np.float64
+    )
+    np.add.at(priors, local_metric_blocks.camera_indices, difference)
+    copy_count = np.sum(camera_masks, axis=0)
+    priors *= scale / copy_count[:, None, None]
+    return 0.5 * (priors + np.swapaxes(priors, 1, 2))
 
 
 def drs_step(
@@ -204,7 +324,7 @@ def drs_step(
     previous_consensus,
     relaxation=1.0,
     metric_blocks=None,
-    metric_mode="arithmetic",
+    metric_mode="arithmetic", prior_blocks=None, shared_only=False,
 ):
     """Apply prox-G to the reflection and update the DRS fixed-point center.
 
@@ -221,13 +341,72 @@ def drs_step(
         metric_blocks, camera_masks, metric_mode, local_cameras.shape[2]
     )
     reflected = 2.0 * local_cameras - centers
+    copy_count = np.sum(camera_masks, axis=0)
+    unique = copy_count == 1
+    if shared_only:
+        reflected[:, unique] = local_cameras[:, unique]
     consensus = project_consensus(
-        reflected, camera_masks, previous_consensus, selected_metrics
+        reflected, camera_masks, previous_consensus, selected_metrics,
+        prior_blocks=prior_blocks, prior_center=previous_consensus,
+        direct_singletons=(local_cameras if shared_only else None),
     )
+    next_centers, residuals = drs_state_for_consensus(
+        local_cameras,
+        centers,
+        camera_masks,
+        consensus,
+        relaxation,
+        selected_metrics,
+        shared_only=shared_only,
+        reflected=reflected,
+    )
+    return consensus, next_centers, reflected, residuals, selected_metrics
+
+
+def drs_state_for_consensus(
+    local_cameras,
+    centers,
+    camera_masks,
+    consensus,
+    relaxation,
+    selected_metrics,
+    shared_only=False,
+    reflected=None,
+):
+    """Rebuild DRS center and residuals for a supplied consensus state."""
+    local_cameras = np.asarray(local_cameras, dtype=np.float64)
+    centers = np.asarray(centers, dtype=np.float64)
+    camera_masks = np.asarray(camera_masks, dtype=bool)
+    consensus = np.asarray(consensus, dtype=np.float64)
+    if not np.isfinite(relaxation) or not 0.0 < relaxation < 2.0:
+        raise ValueError("relaxation must be finite and in (0, 2)")
+    if local_cameras.shape != centers.shape:
+        raise ValueError("centers must match local cameras")
+    if camera_masks.shape != local_cameras.shape[:2]:
+        raise ValueError("camera masks must match local cameras")
+    if consensus.shape != local_cameras.shape[1:]:
+        raise ValueError("consensus must match global cameras")
+    active = camera_masks[:, :, None]
+    unique = np.sum(camera_masks, axis=0) == 1
+    if reflected is None:
+        reflected = 2.0 * local_cameras - centers
+        if shared_only:
+            reflected[:, np.sum(camera_masks, axis=0) == 1] = (
+                local_cameras[:, np.sum(camera_masks, axis=0) == 1]
+            )
+    else:
+        reflected = np.asarray(reflected, dtype=np.float64)
     fixed_point = active * (local_cameras - consensus[None, :, :])
     proximal_displacement = active * (local_cameras - centers)
     reflection_projection = active * (reflected - consensus[None, :, :])
     center_step = -relaxation * fixed_point
+    if shared_only:
+        unique_active = camera_masks[:, unique, None]
+        center_step[:, unique] = np.where(
+            unique_active,
+            local_cameras[:, unique] - centers[:, unique],
+            0.0,
+        )
     next_centers = centers + center_step
     residuals = DrsResiduals(
         fixed_point_squared=metric_quadratic_sum(
@@ -243,7 +422,42 @@ def drs_step(
             center_step, selected_metrics, camera_masks
         ),
     )
-    return consensus, next_centers, reflected, residuals, selected_metrics
+    return next_centers, residuals
+
+
+def proximal_point_step(local_cameras, centers, camera_masks, metric_blocks=None):
+    """Advance the single-cluster proximal-point iteration ``s_next = prox_F(s)``."""
+    local_cameras = np.asarray(local_cameras, dtype=np.float64)
+    centers = np.asarray(centers, dtype=np.float64)
+    camera_masks = np.asarray(camera_masks, dtype=bool)
+    if local_cameras.ndim != 3 or local_cameras.shape[0] != 1:
+        raise ValueError("proximal-point mode requires exactly one cluster")
+    if centers.shape != local_cameras.shape:
+        raise ValueError("centers must match local_cameras")
+    if camera_masks.shape != local_cameras.shape[:2] or not np.all(camera_masks):
+        raise ValueError("every camera must be active in the single cluster")
+    selected_metrics = reduce_metric_tensor(
+        metric_blocks,
+        camera_masks,
+        "arithmetic" if metric_blocks is None else "full",
+        local_cameras.shape[2],
+    )
+    center_step = local_cameras - centers
+    residual_squared = metric_quadratic_sum(
+        center_step, selected_metrics, camera_masks
+    )
+    residuals = DrsResiduals(
+        fixed_point_squared=residual_squared,
+        proximal_displacement_squared=residual_squared,
+        reflection_projection_squared=0.0,
+        center_step_squared=residual_squared,
+    )
+    return (
+        local_cameras[0].copy(),
+        local_cameras.copy(),
+        residuals,
+        selected_metrics,
+    )
 
 
 def dre_splitting_term(
@@ -252,12 +466,14 @@ def dre_splitting_term(
     centers,
     camera_masks,
     penalty=1.0,
-    metric_blocks=None,
+    metric_blocks=None, shared_only=False,
 ):
     """Return only the quadratic DRE splitting term, excluding F(u)."""
     if not np.isfinite(penalty) or penalty <= 0.0:
         raise ValueError("penalty must be finite and positive")
     active = np.asarray(camera_masks, dtype=bool)[:, :, None]
+    if shared_only:
+        active = active * (np.sum(camera_masks, axis=0) > 1)[None, :, None]
     local_cameras = np.asarray(local_cameras, dtype=np.float64)
     centers = np.asarray(centers, dtype=np.float64)
     consensus = np.asarray(consensus, dtype=np.float64)
@@ -283,6 +499,28 @@ def dre_splitting_term(
             metric_blocks.blocks,
             u_minus_v + 2.0 * u_minus_s,
         ))
+    if isinstance(metric_blocks, CoupledCameraMetricBlocks):
+        u_minus_v = active * (
+            local_cameras - consensus[None, :, :]
+        )
+        u_minus_s = active * (local_cameras - centers)
+        return 0.5 * penalty * coupled_metric_bilinear_sum(
+            u_minus_v,
+            u_minus_v + 2.0 * u_minus_s,
+            camera_masks,
+            metric_blocks,
+        )
+    if isinstance(metric_blocks, FactorizedCameraMetric):
+        u_minus_v = active * (
+            local_cameras - consensus[None, :, :]
+        )
+        u_minus_s = active * (local_cameras - centers)
+        return 0.5 * penalty * factorized_metric_bilinear_sum(
+            u_minus_v,
+            u_minus_v + 2.0 * u_minus_s,
+            camera_masks,
+            metric_blocks,
+        )
     metric_blocks = np.asarray(metric_blocks, dtype=np.float64)
     u_minus_v = active * (local_cameras - consensus[None, :, :])
     u_minus_s = active * (local_cameras - centers)

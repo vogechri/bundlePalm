@@ -705,6 +705,98 @@ matched cap-`1e4` endpoint by `+19.53%` and creates the repeated safeguard
 rejections. The camera floor is the dominant regression source; the curvature
 cap only determines whether that poor trajectory stops early or reaches I90.
 
+#### Joint 5+5 Camera-Floor Sweep
+
+Camera-floor evaluation was repeated with the repaired LDLT worker on five
+1DSfM scenes and five floor-sensitive BAL scenes (`88`, `142`, `245`, `951`,
+and catastrophic sentinel `3068`). Fixed settings were metric `75`, regularizer
+`1e-4`, proposal `0.6`, maximum radius `1e4`, POBA floor `0`, and K24. The grid
+covered `1e-48`, `1e-14`, `1e-12`, `3e-12`, `1e-11`, `2e-11`, `3e-11`,
+`6e-11`, `1e-10`, `2e-10`, and `3e-10`. Promotion remains deferred.
+
+| Camera floor | 1DSfM geomean ratio | 1DSfM complete | BAL geomean ratio | BAL complete |
+|---:|---:|---:|---:|---:|
+| `1e-48` | 1.000000 | 5/5 | **1.000000** | 5/5 |
+| `1e-14` | 0.982448 | 5/5 | 1.014048 | 5/5 |
+| `1e-12` | 0.989141 | 5/5 | 1.018339 | 5/5 |
+| `3e-12` | 0.992215 | 5/5 | incomplete | 4/5 |
+| `1e-11` | incomplete | 4/5 | incomplete | 4/5 |
+| `2e-11` | 1.010564 | 5/5 | incomplete | 4/5 |
+| `3e-11` | 1.007568 | 5/5 | incomplete | 4/5 |
+| `6e-11` | 0.993744 | 5/5 | incomplete | 4/5 |
+| `1e-10` | 1.007710 | 5/5 | incomplete | 4/5 |
+| `2e-10` | 1.002742 | 5/5 | 1.067533 | 5/5 |
+| `3e-10` | **0.979373** | 5/5 | incomplete | 4/5 |
+
+The previously incomplete 1DSfM `1e-10` arm now completes all five scenes with
+the fixed worker. The omitted `1e-9` arm is no longer relevant because
+`3e-10` is the largest floor retained for consideration. NYC Library at
+`1e-11` is a genuine failure (`DRE inputs must be finite`), not an operational
+miss.
+
+No raised fixed floor passes both family gates. Floor `3e-10` is the best
+1DSfM aggregate (`-2.06%`) but again stops BAL 3068. Floor `1e-14` is the most
+balanced raised 1DSfM value (`-1.76%`, 4/5 wins, worst `+0.17%`) but regresses
+the sensitive BAL cohort by `1.40%`. BAL scenes `88`, `142`, `245`, and `951`
+all select `1e-48`; only 3068 benefits from a raised floor, selecting `1e-12`
+at `0.977799x`.
+
+Per-scene best complete 1DSfM floors are heterogeneous:
+
+| Scene | Best floor | Ratio vs `1e-48` |
+|---|---:|---:|
+| Alamo | `3e-12` | 0.981475 |
+| Gendarmenmarkt | `2e-10` | 0.971075 |
+| Notre Dame | `1e-14` | 0.971965 |
+| NYC Library | `2e-11` | 0.894633 |
+| Tower of London | `1e-12` | 0.933325 |
+
+Selective nominal-oracle instrumentation measured the raw camera trust-diagonal
+q01 at I1 and I10. Family medians are stable over those iterations: about
+`1.13e-9` for 1DSfM and `2.4e-10` for BAL. However, the retrospective ratio of
+best floor to baseline q01 is not scene-invariant. For 1DSfM it ranges from
+`1.37e-5` (Notre Dame) through roughly `1e-3` (Alamo, NYC, Tower) to `0.299`
+(Gendarmenmarkt). Four BAL scenes prefer the effectively zero baseline, while
+3068 prefers about `0.0046 * q01`.
+
+Therefore a universal rule such as `floor = alpha * q01` is not supported by
+this cohort. I1 and I10 give nearly the same calibration signal, so waiting to
+I10 adds little. The complete detailed endpoints, checkpoints, q01 distributions,
+floor-hit fractions, and retrospective ratios are in
+`benchmark_results/camera_floor_joint_sweep/report.md`. No value is promoted at
+this stage.
+
+Additional I1/I10 diagnostics measured q0.1%, bottom-eight means, parameter-group
+hits, affected cameras, and hit concentration at a probe floor `1e-12`. The
+dominant weak coordinates are usually intrinsics. Helpful probe-floor cases are
+NYC (`0.943876x`), Tower (`0.933325x`), and BAL 3068 (`0.977799x`); their hit
+shares are respectively 92.9%, 100%, and 86.2% intrinsics, with at most 2.41
+hits per affected camera. Harmful BAL cases have denser hits (3.08-6.11 per
+affected camera) and 21-44% translation hits.
+
+This is a meaningful correlation but not a complete rule: Notre Dame also has
+87.9% intrinsics hits and sparse activity, yet floor `1e-12` regresses it by
+6.34%. Per-cluster q0.1% varies strongly, but BAL 245 demonstrates that an
+extreme lower tail alone does not justify flooring. The next focused experiment
+should therefore compare intrinsics-only flooring and a conservative gate based
+on intrinsics share, pose-hit share, and hits per affected camera. Detailed
+per-scene/per-cluster tables are in
+`benchmark_results/camera_floor_structure_diagnostics/report.md`.
+
+Independent subspace-floor validation confirms that the raised floor should
+primarily target intrinsics. Intrinsics-only `3e-10` is the best 1DSfM arm at
+`0.972248x` (4/5 wins, worst `1.006014x`), outperforming the all-coordinate
+floor. Rotation-only and translation-only `1e-12` both regress 1DSfM.
+
+BAL remains different: four sensitive scenes prefer the baseline. Rotation-only
+`1e-12` is effectively neutral (`0.998177x`), while every intrinsics-only arm
+exhausts recovery on 3068. A tiny translation support floor resolves that
+specific instability: intrinsics `1e-12` plus translation `1e-14` completes all
+five BAL scenes, although its BAL aggregate remains worse at `1.018467x`.
+Rotation should therefore stay at `1e-48`; translation should generally stay at
+`1e-48` except as a possible stability support; intrinsics is the group worth
+raising. Full results are in `benchmark_results/camera_subspace_floor_grid/report.md`.
+
 Focused controls separate the two interactions:
 
 | Camera floor | Proposal scale | Maximum curvature | Completed iterations | Termination | Best SSE | Rejections/fallbacks |

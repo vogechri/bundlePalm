@@ -9,11 +9,13 @@ CAMERA_METRIC_UPPER_INDICES = np.triu_indices(9)
 
 def unpack_symmetric_camera_metric_blocks(packed):
     """Expand packed upper triangles to symmetric 9x9 camera blocks."""
-    packed = np.asarray(packed, dtype=np.float32)
+    packed = np.asarray(packed)
+    if packed.dtype not in (np.dtype(np.float32), np.dtype(np.float64)):
+        packed = packed.astype(np.float64)
     if packed.size % 45 != 0:
         raise ValueError("packed camera metrics must contain 45 values per block")
     packed = packed.reshape((-1, 45))
-    blocks = np.empty((packed.shape[0], 9, 9), dtype=np.float32)
+    blocks = np.empty((packed.shape[0], 9, 9), dtype=packed.dtype)
     rows, columns = CAMERA_METRIC_UPPER_INDICES
     blocks[:, rows, columns] = packed
     blocks[:, columns, rows] = packed

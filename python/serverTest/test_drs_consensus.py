@@ -7,9 +7,31 @@ from drs_consensus import (
     complete_douglas_rachford_envelope,
     dre_splitting_term,
     drs_step,
+    proximal_point_step,
     recover_local_data_objective,
     reset_to_consensus,
+    shared_floor_prior_blocks,
 )
+
+
+def test_shared_floor_prior_is_added_once_per_camera():
+    camera_masks = np.array([[True], [True]])
+    cluster_indices = np.array([0, 1])
+    camera_indices = np.array([0, 0])
+    vote = ActiveCameraMetricBlocks(
+        cluster_indices, camera_indices,
+        np.tile(np.eye(9), (2, 1, 1)), 2, 1,
+    )
+    local = ActiveCameraMetricBlocks(
+        cluster_indices, camera_indices,
+        np.tile(3.0 * np.eye(9), (2, 1, 1)), 2, 1,
+    )
+
+    prior = shared_floor_prior_blocks(
+        local, vote, camera_masks, scale=0.25
+    )
+
+    np.testing.assert_allclose(prior[0], 0.5 * np.eye(9))
 
 
 def test_drs_step_matches_writeup_equations():
@@ -43,6 +65,23 @@ def test_relaxed_drs_scales_only_center_update():
     np.testing.assert_allclose(consensus, [[3.0]])
     np.testing.assert_allclose(next_centers[:, 0, 0], [2.5, 3.5])
     assert residuals.center_step_squared == pytest.approx(4.5)
+
+
+def test_single_cluster_proximal_point_advances_directly_to_local_solution():
+    centers = np.array([[[1.0], [5.0]]])
+    local = np.array([[[2.0], [3.0]]])
+    masks = np.ones((1, 2), dtype=bool)
+
+    consensus, next_centers, residuals, _ = proximal_point_step(
+        local, centers, masks
+    )
+
+    np.testing.assert_allclose(consensus, local[0])
+    np.testing.assert_allclose(next_centers, local)
+    assert residuals.fixed_point_squared == pytest.approx(5.0)
+    assert residuals.proximal_displacement_squared == pytest.approx(5.0)
+    assert residuals.reflection_projection_squared == pytest.approx(0.0)
+    assert residuals.center_step_squared == pytest.approx(5.0)
 
 
 def test_drs_projection_ignores_absent_camera_copies():

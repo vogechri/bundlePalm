@@ -1,0 +1,114 @@
+{
+  "1dsfm": {
+    "c1_c5_vs_c1": {
+      "geometric": 0.9800534522685995,
+      "losses": 7,
+      "optimization": 1.374239780805257,
+      "summed": 0.9839784960996056,
+      "ties": 2,
+      "wins": 6,
+      "worst": 1.097713297159528
+    },
+    "c1_c5_vs_c5": {
+      "geometric": 0.8460902379686451,
+      "losses": 0,
+      "optimization": 1.4701324534995557,
+      "summed": 0.8475623620109236,
+      "ties": 0,
+      "wins": 15,
+      "worst": 0.9912021845675202
+    },
+    "c1_c5_vs_ceres": {
+      "geometric": 2.1412289686152866,
+      "losses": 15,
+      "optimization": null,
+      "summed": 1.9414927544083143,
+      "ties": 0,
+      "wins": 0,
+      "worst": 3.4291818646639443
+    },
+    "c1_c5_vs_plain": {
+      "geometric": 0.8478903083327786,
+      "losses": 1,
+      "optimization": 2.140831878975875,
+      "summed": 0.8508316118317577,
+      "ties": 0,
+      "wins": 14,
+      "worst": 1.0004585207413772
+    },
+    "c1_vs_plain": {
+      "geometric": 0.8651470043497183,
+      "losses": 2,
+      "optimization": 1.5578299426912394,
+      "summed": 0.8646851686336345,
+      "ties": 0,
+      "wins": 13,
+      "worst": 1.0982171053790555
+    },
+    "c5_vs_plain": {
+      "geometric": 1.0021275158172906,
+      "losses": 6,
+      "optimization": 1.4562170053995902,
+      "summed": 1.0038572380834343,
+      "ties": 1,
+      "wins": 8,
+      "worst": 1.2094414016822457
+    }
+  },
+  "bal": {
+    "c1_c5_vs_c1": {
+      "geometric": 0.9994863514717895,
+      "losses": 0,
+      "optimization": 1.2600568582362595,
+      "summed": 0.9985680904681016,
+      "ties": 27,
+      "wins": 2,
+      "worst": 1.0
+    },
+    "c1_c5_vs_c5": {
+      "geometric": 0.9832483358113442,
+      "losses": 1,
+      "optimization": 1.734684443806943,
+      "summed": 0.9844081999975389,
+      "ties": 0,
+      "wins": 28,
+      "worst": 1.0027339656184378
+    },
+    "c1_c5_vs_ceres": {
+      "geometric": 1.0096984445016308,
+      "losses": 22,
+      "optimization": null,
+      "summed": 1.0134318769257151,
+      "ties": 0,
+      "wins": 7,
+      "worst": 1.1440075151456437
+    },
+    "c1_c5_vs_plain": {
+      "geometric": 0.9832748849015235,
+      "losses": 1,
+      "optimization": 2.294454960806586,
+      "summed": 0.984419238522176,
+      "ties": 0,
+      "wins": 28,
+      "worst": 1.0027339656184378
+    },
+    "c1_vs_plain": {
+      "geometric": 0.9837802021544427,
+      "losses": 1,
+      "optimization": 1.820913830839511,
+      "summed": 0.9858308591261985,
+      "ties": 0,
+      "wins": 28,
+      "worst": 1.0027339656184378
+    },
+    "c5_vs_plain": {
+      "geometric": 1.0000270014087105,
+      "losses": 1,
+      "optimization": 1.322692994105123,
+      "summed": 1.000011213361121,
+      "ties": 28,
+      "wins": 0,
+      "worst": 1.0007833369294372
+    }
+  }
+}

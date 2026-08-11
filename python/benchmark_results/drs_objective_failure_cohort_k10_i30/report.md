@@ -25,10 +25,10 @@ baseline.
 
 | Scene | Pixel mean px | Ray mean px | Pixel RMSE | Ray RMSE | Pixel / ray max px | Ray noninvertible |
 |---:|---:|---:|---:|---:|---:|---:|
-| 646 | **0.7435** | 0.7532 | **1.0523** | 1.0814 | 28.26 / 33.70 | 0 |
-| 931 | **0.7514** | 0.7604 | **1.0508** | 1.0677 | 24.06 / 24.90 | 0 |
-| 1064 | **0.7567** | 0.7668 | **1.0542** | 1.0739 | 14.46 / 22.67 | 0 |
-| 1266 | **0.7577** | 0.7698 | **1.0627** | 1.0844 | 21.04 / 22.93 | 0 |
+| 646 | **0.7435** | 0.7532 | **1.0523** | 1.0814 | 28.26 / 33.70 | 8 |
+| 931 | **0.7514** | 0.7604 | **1.0508** | 1.0677 | 24.06 / 24.90 | 10 |
+| 1064 | **0.7567** | 0.7668 | **1.0542** | 1.0739 | 14.46 / 22.67 | 11 |
+| 1266 | **0.7577** | 0.7698 | **1.0627** | 1.0844 | 21.04 / 22.93 | 11 |
 
 | Aggregate | Pixel objective | DABA-ray objective | Ray gap |
 |---|---:|---:|---:|
@@ -47,7 +47,8 @@ The DABA ray objective gives a small stability benefit on this cohort, reducing
 hard restorations from 11 to 9. It does not eliminate the need for the mature
 consensus metric or safeguard, and it is consistently worse under the standard
 pixel objective. Unlike the earlier scene-245 result, these four scenes show no
-catastrophic pixel tail or inverse-projection failure.
+catastrophic pixel tail. Current saved-state reevaluation finds 40 observations
+without a real inverse ray projection across the four scenes.
 
 The defensible conclusion is that DABA's ray geometry improves conditioning,
 but only modestly on these historical failure scenes once full-block consensus

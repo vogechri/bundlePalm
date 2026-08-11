@@ -1,7 +1,86 @@
 from __future__ import print_function
 from termios import CINTR
 import ctypes
+import json
+import os
+from pathlib import Path
+import subprocess
+import tempfile
 import numpy as np
+
+
+def partition_observations_by_point_owner(
+    camera_indices, points_2d, point_indices, point_owner, cluster_count
+):
+    point_owner = np.asarray(point_owner, dtype=np.int64)
+    if point_owner.shape != (int(np.max(point_indices)) + 1,):
+        raise ValueError("DABA point ownership has an invalid shape")
+    if np.any(point_owner < 0) or np.any(point_owner >= cluster_count):
+        raise ValueError("DABA point ownership contains an invalid cluster")
+    camera_clusters = []
+    point_clusters = []
+    observation_clusters = []
+    for cluster in range(cluster_count):
+        mask = point_owner[point_indices] == cluster
+        camera_clusters.append(camera_indices[mask])
+        point_clusters.append(point_indices[mask])
+        observation_clusters.append(points_2d[mask])
+    return camera_clusters, point_clusters, observation_clusters, cluster_count
+
+
+def cluster_by_daba_louvain(
+    camera_indices_, points_2d_, point_indices_, kClusters_, n_cameras_, n_points_,
+    residual_balance_slack=0.05, minimum_camera_landmarks=20,
+    max_refinement_passes=2,
+):
+    del residual_balance_slack, minimum_camera_landmarks, max_refinement_passes
+    workspace = Path(__file__).resolve().parents[1]
+    exporter = Path(os.environ.get(
+        "BUNDLE_PALM_DABA_PARTITION_EXPORTER",
+        workspace / "third_party/DABA/build-clustering/daba_partition_exporter",
+    ))
+    if not exporter.is_file():
+        raise FileNotFoundError(exporter)
+    cuda_directory = Path(os.environ.get(
+        "BUNDLE_PALM_DABA_CUDA_DIRECTORY",
+        Path.home() / "bae/.venv/targets/x86_64-linux/lib",
+    ))
+    environment = os.environ.copy()
+    environment["LD_LIBRARY_PATH"] = str(cuda_directory) + (
+        ":" + environment["LD_LIBRARY_PATH"]
+        if environment.get("LD_LIBRARY_PATH") else ""
+    )
+    with tempfile.TemporaryDirectory(prefix="bundle-palm-daba-partition-") as temp:
+        problem = Path(temp) / "graph.txt"
+        output = Path(temp) / "partition.json"
+        with problem.open("w", encoding="utf-8") as stream:
+            stream.write(
+                f"{n_cameras_} {n_points_} {len(camera_indices_)}\n"
+            )
+            for camera, point, observation in zip(
+                camera_indices_, point_indices_, points_2d_
+            ):
+                stream.write(
+                    f"{int(camera)} {int(point)} "
+                    f"{float(observation[0]):.17g} "
+                    f"{float(observation[1]):.17g}\n"
+                )
+        subprocess.run(
+            [str(exporter), str(problem), str(kClusters_), str(output), "0"],
+            check=True,
+            env=environment,
+        )
+        partition = json.loads(output.read_text(encoding="utf-8"))
+    if partition["clusters"] != kClusters_:
+        raise RuntimeError("DABA returned a different cluster count")
+    if len(partition["camera_owner"]) != n_cameras_:
+        raise RuntimeError("DABA returned invalid camera ownership")
+    if len(partition["point_owner"]) != n_points_:
+        raise RuntimeError("DABA returned invalid point ownership")
+    return partition_observations_by_point_owner(
+        camera_indices_, points_2d_, point_indices_,
+        partition["point_owner"], kClusters_
+    )
 
 def fillPythonVec(out, sizes_out, kClusters):
     ret = []

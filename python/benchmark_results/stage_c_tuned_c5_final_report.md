@@ -1,0 +1,22 @@
+# Final Tuned Global C1+C5 Result
+
+One global C5 policy is used everywhere: start I5, high/low thresholds `0.35/0.20`, rolling window 3, dwell 3, maximum depth 2. The setting was selected on six development 1DSfM plus five BAL sentinels, frozen for nine held-out 1DSfM scenes, then confirmed on all 29 BAL scenes.
+
+| Family | Comparison | Geomean SSE | Summed SSE | W/T/L | Worst | Opt. |
+|---|---|---:|---:|---:|---:|---:|
+| 1DSFM | C1/plain | 0.865147004 | 0.864685169 | 13/0/2 | 1.098217105 | 1.557830 |
+| 1DSFM | C5/plain | 1.002127516 | 1.003857238 | 8/1/6 | 1.209441402 | 1.456217 |
+| 1DSFM | C1+C5/plain | 0.847890308 | 0.850831612 | 14/0/1 | 1.000458521 | 2.140832 |
+| 1DSFM | C1+C5/C1 | 0.980053452 | 0.983978496 | 6/2/7 | 1.097713297 | 1.374240 |
+| 1DSFM | C1+C5/C5 | 0.846090238 | 0.847562362 | 15/0/0 | 0.991202185 | 1.470132 |
+| 1DSFM | C1+C5/Ceres | 2.141228969 | 1.941492754 | 0/0/15 | 3.429181865 | -- |
+| BAL | C1/plain | 0.983780202 | 0.985830859 | 28/0/1 | 1.002733966 | 1.820914 |
+| BAL | C5/plain | 1.000027001 | 1.000011213 | 0/28/1 | 1.000783337 | 1.322693 |
+| BAL | C1+C5/plain | 0.983274885 | 0.984419239 | 28/0/1 | 1.002733966 | 2.294455 |
+| BAL | C1+C5/C1 | 0.999486351 | 0.998568090 | 2/27/0 | 1.000000000 | 1.260057 |
+| BAL | C1+C5/C5 | 0.983248336 | 0.984408200 | 28/0/1 | 1.002733966 | 1.734684 |
+| BAL | C1+C5/Ceres | 1.009698445 | 1.013431877 | 7/0/22 | 1.144007515 | -- |
+
+## Decision
+
+Promote the tuned C1+C5 stack as the final Stage-C configuration. It improves the accepted C1 rung geometrically on both complete families and uses one common policy. Keep C1 and C5 independently switchable for ablations. No scene-specific settings are used.

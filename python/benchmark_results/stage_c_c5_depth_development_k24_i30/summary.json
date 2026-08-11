@@ -1,0 +1,95 @@
+{
+  "eligible": [],
+  "leader": null,
+  "parameter": "maximum_depth",
+  "thresholds": {
+    "2.0": {
+      "1dsfm": {
+        "depth_two_fraction": 0.05393518518518518,
+        "geometric_sse_ratio": 0.9260889780615938,
+        "losses": 2,
+        "optimization_ratio": 1.3485975508802792,
+        "recovery_exhausted": false,
+        "summed_sse_ratio": 0.9374480323012878,
+        "wins": 4,
+        "worst_sse_ratio": 1.034400601017875
+      },
+      "bal": {
+        "depth_two_fraction": 0.009722222222222222,
+        "geometric_sse_ratio": 1.0011967802819053,
+        "losses": 1,
+        "optimization_ratio": 1.2749005768637736,
+        "recovery_exhausted": false,
+        "summed_sse_ratio": 1.0006435491119023,
+        "wins": 1,
+        "worst_sse_ratio": 1.0060028930003537
+      },
+      "versus_control": {
+        "1dsfm": {
+          "depth_two_fraction": 0.05393518518518518,
+          "geometric_sse_ratio": 1.0,
+          "losses": 0,
+          "optimization_ratio": 1.0,
+          "recovery_exhausted": false,
+          "summed_sse_ratio": 1.0,
+          "wins": 0,
+          "worst_sse_ratio": 1.0
+        },
+        "bal": {
+          "depth_two_fraction": 0.009722222222222222,
+          "geometric_sse_ratio": 1.0,
+          "losses": 0,
+          "optimization_ratio": 1.0,
+          "recovery_exhausted": false,
+          "summed_sse_ratio": 1.0,
+          "wins": 0,
+          "worst_sse_ratio": 1.0
+        }
+      }
+    },
+    "3.0": {
+      "1dsfm": {
+        "depth_two_fraction": 0.04513888888888889,
+        "geometric_sse_ratio": 0.9676148730632185,
+        "losses": 3,
+        "optimization_ratio": 1.4210895338107046,
+        "recovery_exhausted": false,
+        "summed_sse_ratio": 0.9858263630184971,
+        "wins": 3,
+        "worst_sse_ratio": 1.1095130460920286
+      },
+      "bal": {
+        "depth_two_fraction": 0.009722222222222222,
+        "geometric_sse_ratio": 1.0011291632722963,
+        "losses": 2,
+        "optimization_ratio": 1.2808411052853108,
+        "recovery_exhausted": false,
+        "summed_sse_ratio": 1.000605196182087,
+        "wins": 0,
+        "worst_sse_ratio": 1.0056160396803495
+      },
+      "versus_control": {
+        "1dsfm": {
+          "depth_two_fraction": 0.04513888888888889,
+          "geometric_sse_ratio": 1.0448400704309675,
+          "losses": 4,
+          "optimization_ratio": 1.0537536071329117,
+          "recovery_exhausted": false,
+          "summed_sse_ratio": 1.0516064134226706,
+          "wins": 2,
+          "worst_sse_ratio": 1.201676850720071
+        },
+        "bal": {
+          "depth_two_fraction": 0.009722222222222222,
+          "geometric_sse_ratio": 0.9999324638163641,
+          "losses": 1,
+          "optimization_ratio": 1.004659601328404,
+          "recovery_exhausted": false,
+          "summed_sse_ratio": 0.9999616717363049,
+          "wins": 1,
+          "worst_sse_ratio": 1.0000469276737887
+        }
+      }
+    }
+  }
+}

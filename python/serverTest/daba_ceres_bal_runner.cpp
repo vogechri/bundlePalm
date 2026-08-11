@@ -121,16 +121,18 @@ void WriteState(const std::string& path, const DabaBalProblem& problem) {
 }
 
 int main(int argc, char** argv) {
-  if (argc < 3 || argc > 5) {
+  if (argc < 3 || argc > 6) {
     std::cerr << "usage: daba_ceres_bal_runner INPUT_BAL STATE_OUTPUT "
-                 "[LOSS=trivial] [THREADS=64]\n";
+                 "[LOSS=trivial] [THREADS=64] [ITERATIONS=40]\n";
     return 2;
   }
   const std::string loss_name = argc >= 4 ? argv[3] : "trivial";
   const int thread_count = argc >= 5 ? std::stoi(argv[4]) : 64;
-  if (thread_count <= 0 || (loss_name != "trivial" && loss_name != "huber")) {
+  const int iteration_count = argc >= 6 ? std::stoi(argv[5]) : 40;
+  if (thread_count <= 0 || iteration_count <= 0 ||
+      (loss_name != "trivial" && loss_name != "huber")) {
     throw std::invalid_argument(
-        "threads must be positive and loss must be trivial or huber");
+        "threads and iterations must be positive; loss must be trivial or huber");
   }
 
   const auto setup_started = std::chrono::steady_clock::now();
@@ -156,7 +158,7 @@ int main(int argc, char** argv) {
   options.linear_solver_type = ceres::ITERATIVE_SCHUR;
   options.preconditioner_type = ceres::SCHUR_JACOBI;
   options.trust_region_strategy_type = ceres::LEVENBERG_MARQUARDT;
-  options.max_num_iterations = 40;
+  options.max_num_iterations = iteration_count;
   options.num_threads = thread_count;
   options.parameter_tolerance = 0;
   options.function_tolerance = 0;
@@ -181,10 +183,14 @@ int main(int argc, char** argv) {
             << "\"stateFile\":\"" << argv[2] << "\","
             << "\"loss\":\"" << loss_name << "\","
             << "\"threads\":" << thread_count << ','
-            << "\"maxIterations\":40,"
+            << "\"maxIterations\":" << iteration_count << ','
             << "\"observationCount\":" << bal.measurements.size() << ','
             << "\"initialCeresCost\":" << summary.initial_cost << ','
             << "\"finalCeresCost\":" << summary.final_cost << ','
+            << "\"initialMeanHalfWeightedRayCost\":"
+            << summary.initial_cost / observation_count << ','
+            << "\"finalMeanHalfWeightedRayCost\":"
+            << summary.final_cost / observation_count << ','
             << "\"initialReportedMetric\":"
             << summary.initial_cost / observation_count << ','
             << "\"finalReportedMetric\":"

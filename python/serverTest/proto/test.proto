@@ -36,6 +36,14 @@ message program_proto {
   int32 nesterov_max_iterations = 31;
   double nesterov_stop_tolerance = 32;
   int32 nesterov_min_iterations = 33;
+  bool proximal_defect_diagnostic = 34;
+  bool diagonal_trust_damping = 35;
+  bool nesterov_relative_residual = 36;
+  repeated double camera_proximal_multiplier = 37;
+  double forced_trust_region_radius = 38;
+  int32 outer_iteration = 39;
+  int32 oracle_kind = 40; // 0=bootstrap/other, 1=nominal, 2=accelerated trial
+  bool collect_camera_diagonal_metrics = 41;
 }
 
 // sent once
@@ -91,6 +99,15 @@ message prox_cluster_proto {
   int32 nesterov_max_iterations = 29;
   double nesterov_stop_tolerance = 30;
   int32 nesterov_min_iterations = 31;
+  int32 local_iterations = 32; // mutable local nonlinear step count
+  bool proximal_defect_diagnostic = 33; // defect without Lipschitz power iteration
+  bool diagonal_trust_damping = 34;
+  bool nesterov_relative_residual = 35;
+  repeated double camera_proximal_multiplier = 36;
+  double forced_trust_region_radius = 37;
+  int32 outer_iteration = 38;
+  int32 oracle_kind = 39; // 0=bootstrap/other, 1=nominal, 2=accelerated trial
+  bool collect_camera_diagonal_metrics = 40;
   // clustering: lms by cam. # lms that can fill up cam in cl.
 }
 
@@ -125,6 +142,14 @@ message return_cluster_proto {
   double consensus_center_step_squared = 24;
   double consensus_splitting_term = 25;
   bool has_single_node_consensus = 26;
+  double trust_region_radius = 27;
+  bytes step_size_upper_f64 = 28; // packed upper triangle: 45 float64 values per camera
+  bytes consensus_step_size_upper_f64 = 29; // optional unfloored vote metric
+  double unique_camera_interior_defect_squared = 30;
+  double landmark_interior_defect_squared = 31;
+  double interior_defect_squared = 32;
+  int32 linear_iterations = 33;
+  double linear_relative_residual = 34;
 }
 
 // send to get cost
@@ -168,6 +193,7 @@ message landmark_state_proto {
     SAVE_BEST = 7;
     MATERIALIZE_BEST = 8;
     RESTORE_NOMINAL_ROUNDTRIP = 9;
+    RESTORE_BEST = 10;
   }
   int32 cluster_id = 1;
   uint64 run_id = 2;
