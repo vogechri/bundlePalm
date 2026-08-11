@@ -10,11 +10,29 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 RESULTS = ROOT / "benchmark_results"
-K1_PATH = (
+K1_PCG_PATH = (
     RESULTS
     / "1dsfm_k1_schur_pcg_t24_all15_i80/custom/"
     "proximal_point_block_se3_left_lip0.00625_curvature_persistent_tr.jsonl"
 )
+K1_BAE_PATH = (
+    RESULTS
+    / "1dsfm_k1_bae_nesterov_exact_i90/"
+    "proximal_point_block_se3_left_scene_raw_lip0.00625_curvature_persistent_tr.jsonl"
+)
+BASE_DRS_PATHS = {
+    "1dsfm": (
+        RESULTS
+        / "1dsfm_drs_ceres_se3_all15/drs/"
+        "nesterov_ls01_block_full_se3_left_diag_metric75_lip0.4_"
+        "metric_proposal0.5_curvature_persistent_tr_trust_drs_enhanced30_decay5.jsonl"
+    ),
+    "bal": (
+        RESULTS
+        / "drs_29_scene_candidate_k24_coordinator_i90/"
+        "nesterov_ls01_block_full_lip0.1_curvature_persistent_tr_decay5.jsonl"
+    ),
+}
 SCALING_ROOT = RESULTS / "stage_c_scaling_confirmation_k4_16_i30"
 CERES_PATHS = {
     "1dsfm": RESULTS / "1dsfm_drs_ceres_se3_all15/ceres/results.jsonl",
@@ -91,17 +109,36 @@ def load_scaling(family):
     return rows, paths[0]
 
 
-def validate_k1(rows):
+def validate_k1(rows, iterations, threads, bae_style=False):
     if len(rows) != 15:
         raise ValueError(f"K1 coverage mismatch: {len(rows)}/15")
     for scene, row in rows.items():
         if not (
             row.get("clusters") == 1
-            and row.get("iterations") == 80
-            and row.get("completedIterations") == 80
-            and row.get("threadsPerCluster") == 24
+            and row.get("iterations") == iterations
+            and row.get("completedIterations") == iterations
+            and row.get("threadsPerCluster") == threads
         ):
             raise ValueError(f"K1 configuration mismatch for {scene}")
+        if bae_style and not (
+            row.get("baeTrustSchedule") is True
+            and row.get("diagonalTrustDamping") is True
+            and row.get("sceneNormalization") == "none"
+            and row.get("cameraScaling") == "none"
+        ):
+            raise ValueError(f"BAE-style K1 configuration mismatch for {scene}")
+
+
+def validate_base_drs(rows, expected, iterations):
+    if len(rows) != expected:
+        raise ValueError(f"base DRS coverage mismatch: {len(rows)}/{expected}")
+    for scene, row in rows.items():
+        if not (
+            row.get("clusters") == 24
+            and row.get("iterations") == iterations
+            and row.get("completedIterations") == iterations
+        ):
+            raise ValueError(f"base DRS configuration mismatch for {scene}")
 
 
 def validate_ceres(rows, expected):
@@ -147,23 +184,40 @@ def sse(row, kind="drs"):
     return row["qualityMetrics"]["sumSquaredError"]
 
 
-def summarize(label, rows, reference, scenes, kind, specification, timing_class):
+def optimization_time(rows, scenes, kind):
+    if kind == "bae":
+        return math.fsum(rows[scene]["optimizationSeconds"] for scene in scenes)
+    if kind == "ceres":
+        return math.fsum(rows[scene]["native"]["solveSeconds"] for scene in scenes)
+    return math.fsum(rows[scene]["optimizationSeconds"] for scene in scenes)
+
+
+def summarize(
+    label,
+    rows,
+    reference,
+    scenes,
+    kind,
+    specification,
+    timing_class,
+    base=None,
+):
     ratios = [sse(rows[scene], kind) / sse(reference[scene]) for scene in scenes]
     wins = sum(value < 1.0 and not math.isclose(value, 1.0, rel_tol=1e-12) for value in ratios)
     ties = sum(math.isclose(value, 1.0, rel_tol=1e-12) for value in ratios)
     if kind == "bae":
-        optimization_seconds = math.fsum(rows[scene]["optimizationSeconds"] for scene in scenes)
+        optimization_seconds = optimization_time(rows, scenes, kind)
         overall_seconds = None
         peak_memory_mib = max(rows[scene]["peakCudaMemoryMiB"] for scene in scenes)
     elif kind == "ceres":
-        optimization_seconds = math.fsum(rows[scene]["native"]["solveSeconds"] for scene in scenes)
+        optimization_seconds = optimization_time(rows, scenes, kind)
         overall_seconds = math.fsum(rows[scene]["native"]["overallSeconds"] for scene in scenes)
         peak_memory_mib = None
     else:
-        optimization_seconds = math.fsum(rows[scene]["optimizationSeconds"] for scene in scenes)
+        optimization_seconds = optimization_time(rows, scenes, kind)
         overall_seconds = math.fsum(rows[scene]["overallSeconds"] for scene in scenes)
         peak_memory_mib = None
-    return {
+    result = {
         "label": label,
         "specification": specification,
         "scenes": len(scenes),
@@ -178,6 +232,15 @@ def summarize(label, rows, reference, scenes, kind, specification, timing_class)
         "timing_class": timing_class,
         "peak_memory_mib": peak_memory_mib,
     }
+    if base is not None:
+        result["sse_vs_base_geometric"] = geometric_mean([
+            sse(rows[scene], kind) / sse(base[scene]) for scene in scenes
+        ])
+        result["optimization_vs_base"] = (
+            optimization_seconds / optimization_time(base, scenes, "drs")
+            if kind == "drs" else None
+        )
+    return result
 
 
 def add_bae_ratios(rows, bae_cg, scenes):
@@ -190,10 +253,13 @@ def add_bae_ratios(rows, bae_cg, scenes):
         ])
 
 
-def write_table(output, title, rows, include_bae=False):
+def write_table(output, title, rows, include_bae=False, include_base=False):
     output.write(f"## {title}\n\n")
     header = "| Method | Fixed specification | Scenes | SSE/Ceres | Summed SSE/Ceres | W/T/L vs Ceres | Optimization s | Timing class"
     separator = "|---|---|---:|---:|---:|---:|---:|---"
+    if include_base:
+        header += " | SSE/base DRS | DRS time/base"
+        separator += "|---:|---:"
     if include_bae:
         header += " | SSE/BAE-CG"
         separator += "|---:"
@@ -209,6 +275,10 @@ def write_table(output, title, rows, include_bae=False):
         )
         if include_bae:
             output.write(f" | {row['sse_vs_bae_cg_geometric']:.6f}")
+        if include_base:
+            output.write(f" | {row['sse_vs_base_geometric']:.6f} | ")
+            value = row["optimization_vs_base"]
+            output.write("--" if value is None else f"{value:.6f}")
         output.write(" |\n")
     output.write("\n")
 
@@ -222,39 +292,58 @@ def main():
     )
     arguments = parser.parse_args()
 
-    k1 = load_jsonl(K1_PATH)
-    validate_k1(k1)
+    k1_pcg = load_jsonl(K1_PCG_PATH)
+    validate_k1(k1_pcg, 80, 24)
+    k1_bae = load_jsonl(K1_BAE_PATH)
+    validate_k1(k1_bae, 90, 1, bae_style=True)
+    base_drs = {
+        family: load_jsonl(path) for family, path in BASE_DRS_PATHS.items()
+    }
+    validate_base_drs(base_drs["1dsfm"], 15, 200)
+    validate_base_drs(base_drs["bal"], 29, 90)
     scaling_1dsfm, scaling_1dsfm_path = load_scaling("1dsfm")
     scaling_bal, scaling_bal_path = load_scaling("bal")
     ceres = {family: load_jsonl(path) for family, path in CERES_PATHS.items()}
     validate_ceres(ceres["1dsfm"], 15)
     validate_ceres(ceres["bal"], 29)
-    if not (k1.keys() == scaling_1dsfm[4].keys() == scaling_1dsfm[16].keys() == ceres["1dsfm"].keys()):
+    if not (
+        k1_pcg.keys() == k1_bae.keys() == base_drs["1dsfm"].keys()
+        == scaling_1dsfm[4].keys() == scaling_1dsfm[16].keys()
+        == ceres["1dsfm"].keys()
+    ):
         raise ValueError("all-15 1DSfM scene mismatch")
-    if not (scaling_bal[4].keys() == scaling_bal[16].keys() == ceres["bal"].keys()):
+    if not (
+        base_drs["bal"].keys() == scaling_bal[4].keys()
+        == scaling_bal[16].keys() == ceres["bal"].keys()
+    ):
         raise ValueError("all-29 BAL scene mismatch")
 
     bae = {label: load_jsonl(path) for label, path in BAE_PATHS.items()}
     for label, rows in bae.items():
         validate_bae(rows, label)
 
-    one_d_sfm_scenes = sorted(k1)
+    one_d_sfm_scenes = sorted(k1_bae)
     bal_scenes = sorted(ceres["bal"])
     all15 = [
-        summarize("Ceres", ceres["1dsfm"], ceres["1dsfm"], one_d_sfm_scenes, "ceres", "left-SE3, I90, T16", "CPU native solve"),
-        summarize("DRS K1", k1, ceres["1dsfm"], one_d_sfm_scenes, "drs", "specialized local diagnostic, I80, T24", "CPU DRS optimization"),
-        summarize("DRS K4", scaling_1dsfm[4], ceres["1dsfm"], one_d_sfm_scenes, "drs", "frozen C1+C5 resource endpoint, I30, T1/cluster", "CPU DRS optimization"),
-        summarize("DRS K16", scaling_1dsfm[16], ceres["1dsfm"], one_d_sfm_scenes, "drs", "frozen C1+C5 latency endpoint, I30, T1/cluster", "CPU DRS optimization"),
+        summarize("Ceres", ceres["1dsfm"], ceres["1dsfm"], one_d_sfm_scenes, "ceres", "left-SE3, I90, T16", "CPU native solve", base_drs["1dsfm"]),
+        summarize("DRS K1 BAE-style", k1_bae, ceres["1dsfm"], one_d_sfm_scenes, "drs", "best local diagnostic, I90, T1", "CPU DRS optimization", base_drs["1dsfm"]),
+        summarize("DRS K1 Schur-PCG", k1_pcg, ceres["1dsfm"], one_d_sfm_scenes, "drs", "secondary local diagnostic, I80, T24", "CPU DRS optimization", base_drs["1dsfm"]),
+        summarize("Base DRS K24", base_drs["1dsfm"], ceres["1dsfm"], one_d_sfm_scenes, "drs", "preserved quality baseline, I200, T1/cluster", "CPU DRS optimization", base_drs["1dsfm"]),
+        summarize("DRS K4", scaling_1dsfm[4], ceres["1dsfm"], one_d_sfm_scenes, "drs", "frozen C1+C5 resource endpoint, I30, T1/cluster", "CPU DRS optimization", base_drs["1dsfm"]),
+        summarize("DRS K16", scaling_1dsfm[16], ceres["1dsfm"], one_d_sfm_scenes, "drs", "frozen C1+C5 latency endpoint, I30, T1/cluster", "CPU DRS optimization", base_drs["1dsfm"]),
     ]
     all29 = [
-        summarize("Ceres", ceres["bal"], ceres["bal"], bal_scenes, "ceres", "left-SE3, I90, T16", "CPU native solve"),
-        summarize("DRS K4", scaling_bal[4], ceres["bal"], bal_scenes, "drs", "frozen C1+C5 resource endpoint, I30, T1/cluster", "CPU DRS optimization"),
-        summarize("DRS K16", scaling_bal[16], ceres["bal"], bal_scenes, "drs", "frozen C1+C5 latency endpoint, I30, T1/cluster", "CPU DRS optimization"),
+        summarize("Ceres", ceres["bal"], ceres["bal"], bal_scenes, "ceres", "left-SE3, I90, T16", "CPU native solve", base_drs["bal"]),
+        summarize("Base DRS K24", base_drs["bal"], ceres["bal"], bal_scenes, "drs", "established quality baseline, I90, T1/cluster", "CPU DRS optimization", base_drs["bal"]),
+        summarize("DRS K4", scaling_bal[4], ceres["bal"], bal_scenes, "drs", "frozen C1+C5 resource endpoint, I30, T1/cluster", "CPU DRS optimization", base_drs["bal"]),
+        summarize("DRS K16", scaling_bal[16], ceres["bal"], bal_scenes, "drs", "frozen C1+C5 latency endpoint, I30, T1/cluster", "CPU DRS optimization", base_drs["bal"]),
     ]
     six_scenes = list(BAE_SCENES)
     six_sources = [
         ("Ceres", ceres["1dsfm"], "ceres", "left-SE3, I90, T16", "CPU native solve"),
-        ("DRS K1", k1, "drs", "specialized local diagnostic, I80, T24", "CPU DRS optimization"),
+        ("DRS K1 BAE-style", k1_bae, "drs", "best local diagnostic, I90, T1", "CPU DRS optimization"),
+        ("DRS K1 Schur-PCG", k1_pcg, "drs", "secondary local diagnostic, I80, T24", "CPU DRS optimization"),
+        ("Base DRS K24", base_drs["1dsfm"], "drs", "preserved quality baseline, I200", "CPU DRS optimization"),
         ("DRS K4", scaling_1dsfm[4], "drs", "frozen C1+C5 resource endpoint, I30, T1/cluster", "CPU DRS optimization"),
         ("DRS K16", scaling_1dsfm[16], "drs", "frozen C1+C5 latency endpoint, I30, T1/cluster", "CPU DRS optimization"),
         ("BAE Schur-PCG CG", bae["BAE Schur-PCG CG"], "bae", "verified exported state, I90", "RTX 5090 GPU optimization"),
@@ -279,7 +368,10 @@ def main():
             "bae_all29_bal": "not available",
         },
         "source_artifacts": {
-            "k1": str(K1_PATH.relative_to(ROOT)),
+            "k1_bae_style": str(K1_BAE_PATH.relative_to(ROOT)),
+            "k1_schur_pcg": str(K1_PCG_PATH.relative_to(ROOT)),
+            "base_drs_1dsfm": str(BASE_DRS_PATHS["1dsfm"].relative_to(ROOT)),
+            "base_drs_bal": str(BASE_DRS_PATHS["bal"].relative_to(ROOT)),
             "k4_k16_1dsfm": str(scaling_1dsfm_path.relative_to(ROOT)),
             "k4_k16_bal": str(scaling_bal_path.relative_to(ROOT)),
             "ceres_1dsfm": str(CERES_PATHS["1dsfm"].relative_to(ROOT)),
@@ -302,8 +394,8 @@ def main():
             "DRS, CPU Ceres, and RTX 5090 BAE times are reported in separate timing "
             "classes; no cross-hardware speedup is claimed.\n\n"
         )
-        write_table(output, "Complete 1DSfM cohort (15/15)", all15)
-        write_table(output, "Complete BAL cohort (29/29)", all29)
+        write_table(output, "Complete 1DSfM cohort (15/15)", all15, include_base=True)
+        write_table(output, "Complete BAL cohort (29/29)", all29, include_base=True)
         output.write(
             "K1 has no authoritative matched all-29 BAL artifact and is therefore "
             "omitted from the BAL panel.\n\n"
@@ -311,12 +403,13 @@ def main():
         write_table(output, "Verified BAE inset (six 1DSfM scenes)", six, include_bae=True)
         output.write("## Interpretation\n\n")
         output.write(
-            "K1 remains a local-solver diagnostic: it reaches near-Ceres aggregate "
-            "quality on all 15 1DSfM scenes but is neither the distributed method nor "
-            "a matched work budget. K4 and K16 are the frozen global distributed "
-            "resource and latency endpoints. They remain close to Ceres on all 29 "
-            "BAL scenes, while difficult 1DSfM initialization retains a substantial "
-            "quality gap. Verified BAE coverage is only six 1DSfM scenes, uses GPU "
+            "The best BAE-style K1 local diagnostic reaches near-Ceres aggregate "
+            "quality on all 15 1DSfM scenes but is neither distributed nor a matched "
+            "work budget. The preserved longer-horizon base DRS is better in endpoint "
+            "quality than current K4/K16 on both families. K4 and K16 are therefore "
+            "speed endpoints, not quality replacements: C1+C5 improves its matched "
+            "I30 plain control, but that gain does not overcome the shorter horizon. "
+            "Verified BAE coverage is only six 1DSfM scenes, uses GPU "
             "hardware, and is basin-sensitive on Trafalgar; it is contextual evidence, "
             "not an all-scene or deterministic reference. No per-scene settings or "
             "solver routing are used.\n"

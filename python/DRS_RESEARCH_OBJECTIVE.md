@@ -194,15 +194,17 @@ maximum optimization-time CV is `1.75%`. Mean K16/K4 optimization ratios are
 K16 frozen as the global resource and latency endpoints. See
 `benchmark_results/stage_c_scaling_repeats_k4_16_i30/report.md`.
 
-Publication comparison gate (2026-08-11): the cohort-explicit final table is
-closed without new tuning. On all-15 1DSfM, specialized K1/T24/I80 is
-`1.022987x` Ceres, while frozen K4/K16 I30 are `2.052536x`/`1.957296x`; K1 is a
-local diagnostic with a different work budget, not the distributed method. On
-all-29 BAL, K4/K16 are `1.007309x`/`1.010098x` Ceres. Verified BAE is reported
-only as a six-scene RTX 5090 inset: CG is `0.944668x` Ceres and is
-basin-sensitive on Trafalgar. There is no authoritative K1 all-29 BAL, BAE
-all-15 1DSfM, or BAE all-29 BAL artifact. CPU/GPU times remain separate timing
-classes; no cross-hardware speedup is claimed. See
+Publication comparison correction (2026-08-12): the cohort-explicit final table
+now explicitly restores the best base DRS rows. On all-15 1DSfM,
+the best BAE-style K1/I90 diagnostic is `0.993529x` Ceres and the secondary
+Schur-PCG K1/I80 diagnostic is `1.022987x`. The preserved K24/I200 base is
+`1.457017x` Ceres; frozen K4/K16 I30 are `2.052536x`/`1.957296x`, or
+`1.408725x`/`1.343358x` base SSE with `0.280585x`/`0.163860x` base optimization
+time. On all-29 BAL, preserved K24/I90 is `0.998404x` Ceres; K4/K16 are
+`1.008920x`/`1.011713x` its SSE at `0.738821x`/`0.376767x` its optimization
+time. Thus C1+C5 is a valid matched-I30 improvement, but K4/K16 are speed
+endpoints, not quality replacements for best base DRS. Verified BAE is only a
+six-scene RTX 5090 inset; no cross-hardware speedup is claimed. See
 `benchmark_results/stage_c_publication_comparison/report.md`.
 
 Loss-factorial clarification (2026-08-11): fallback safety does not imply

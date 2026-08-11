@@ -64,9 +64,10 @@ handoff when they conflict.
 > tolerance tuning, or branch portfolios.
 
 K1 is closed: the internal deterministic BAE-style left-SE3 path matches Ceres
-aggregate quality on all 15 1DSfM scenes (`0.993529x` SSE). The portable package
-retains points-p95 normalization, Jacobi camera scaling, and landmark
-preconditioning.
+aggregate quality on all 15 1DSfM scenes (`0.993529x` SSE). That exact K1
+package uses raw scene coordinates, no camera scaling, and no landmark
+preconditioning; the normalized/Jacobi package is the separate maintained K>1
+core and must not be attributed to this K1 artifact.
 
 The historical K2 candidate was an exact reset-versus-preserve handoff race:
 
@@ -272,8 +273,10 @@ CV `1.75%`. Repeated K16/K4 optimization ratios are `0.5158x` on 1DSfM and
 The final K1/K4/K16 versus Ceres/BAE publication comparison is generated from
 frozen artifacts. It uses separate all-15 1DSfM, all-29 BAL, and six-scene BAE
 panels, explicitly marks unavailable coverage, and never compares CPU/GPU time
-as a speedup. K1 remains a local diagnostic; K4/K16 remain the distributed
-resource/latency endpoints. Report:
+as a speedup. The corrected table includes preserved best base DRS: current
+K4/K16 are faster but worse in endpoint quality on both families. K1 remains a
+local diagnostic; K4/K16 are distributed speed endpoints, not base-quality
+replacements. Report:
 `benchmark_results/stage_c_publication_comparison/report.md`.
 
 The machine-readable reproduction index is

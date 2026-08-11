@@ -21,6 +21,9 @@ One global C5 policy is used everywhere: start I5, high/low thresholds `0.35/0.2
 
 Promote the tuned C1+C5 stack as the final Stage-C configuration. It improves the accepted C1 rung geometrically on both complete families and uses one common policy. Keep C1 and C5 independently switchable for ablations. No scene-specific settings are used.
 
+This promotion is within the matched K24/I30 Stage-C ablation. It does not
+supersede the longer-horizon best base DRS in endpoint quality.
+
 ## Deterministic repeats
 
 After one excluded warm-up, three measured repeats on Roman, Trafalgar, BAL52,
@@ -48,5 +51,8 @@ See `stage_c_scaling_repeats_k4_16_i30/report.md`.
 The cohort-explicit publication table compares K1/K4/K16 with Ceres on all 15
 1DSfM scenes, K4/K16 with Ceres on all 29 BAL scenes, and verified BAE only on
 its matched six-scene 1DSfM cohort. K1 and BAE coverage gaps are explicit, and
-CPU/GPU timings are not turned into cross-hardware speedups. See
+CPU/GPU timings are not turned into cross-hardware speedups. The corrected
+table also includes preserved best base DRS. K4/K16 are faster, but reach
+`1.408725x`/`1.343358x` base SSE on 1DSfM and
+`1.008920x`/`1.011713x` on BAL. See
 `stage_c_publication_comparison/report.md`.

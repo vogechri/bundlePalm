@@ -3,10 +3,12 @@
     {
       "label": "Ceres",
       "optimization_seconds": 219.52092426,
+      "optimization_vs_base": null,
       "overall_seconds": 223.853494569,
       "peak_memory_mib": null,
       "scenes": 15,
       "specification": "left-SE3, I90, T16",
+      "sse_vs_base_geometric": 0.6863336231547996,
       "sse_vs_ceres_geometric": 1.0,
       "sse_vs_ceres_summed": 1.0,
       "timing_class": "CPU native solve",
@@ -17,12 +19,32 @@
       ]
     },
     {
-      "label": "DRS K1",
+      "label": "DRS K1 BAE-style",
+      "optimization_seconds": 2060.9372848389667,
+      "optimization_vs_base": 3.6005242584364967,
+      "overall_seconds": 2079.252319170002,
+      "peak_memory_mib": null,
+      "scenes": 15,
+      "specification": "best local diagnostic, I90, T1",
+      "sse_vs_base_geometric": 0.6818920393071622,
+      "sse_vs_ceres_geometric": 0.993528535251965,
+      "sse_vs_ceres_summed": 0.9475612794095913,
+      "timing_class": "CPU DRS optimization",
+      "wins_ties_losses_vs_ceres": [
+        5,
+        0,
+        10
+      ]
+    },
+    {
+      "label": "DRS K1 Schur-PCG",
       "optimization_seconds": 1048.9502953140036,
+      "optimization_vs_base": 1.8325501760560845,
       "overall_seconds": 1067.792203178993,
       "peak_memory_mib": null,
       "scenes": 15,
-      "specification": "specialized local diagnostic, I80, T24",
+      "specification": "secondary local diagnostic, I80, T24",
+      "sse_vs_base_geometric": 0.7021101003569951,
       "sse_vs_ceres_geometric": 1.022986601078463,
       "sse_vs_ceres_summed": 1.0871270409684215,
       "timing_class": "CPU DRS optimization",
@@ -33,12 +55,32 @@
       ]
     },
     {
+      "label": "Base DRS K24",
+      "optimization_seconds": 572.3992221438093,
+      "optimization_vs_base": 1.0,
+      "overall_seconds": 589.6157873099437,
+      "peak_memory_mib": null,
+      "scenes": 15,
+      "specification": "preserved quality baseline, I200, T1/cluster",
+      "sse_vs_base_geometric": 1.0,
+      "sse_vs_ceres_geometric": 1.4570173546261689,
+      "sse_vs_ceres_summed": 1.434853553217013,
+      "timing_class": "CPU DRS optimization",
+      "wins_ties_losses_vs_ceres": [
+        1,
+        0,
+        14
+      ]
+    },
+    {
       "label": "DRS K4",
       "optimization_seconds": 160.60661371600145,
+      "optimization_vs_base": 0.2805849615142397,
       "overall_seconds": 175.44511014998716,
       "peak_memory_mib": null,
       "scenes": 15,
       "specification": "frozen C1+C5 resource endpoint, I30, T1/cluster",
+      "sse_vs_base_geometric": 1.408724635291451,
       "sse_vs_ceres_geometric": 2.052536241509064,
       "sse_vs_ceres_summed": 1.9241827194254413,
       "timing_class": "CPU DRS optimization",
@@ -51,10 +93,12 @@
     {
       "label": "DRS K16",
       "optimization_seconds": 93.79306116799853,
+      "optimization_vs_base": 0.16385951891533843,
       "overall_seconds": 121.39260207900224,
       "peak_memory_mib": null,
       "scenes": 15,
       "specification": "frozen C1+C5 latency endpoint, I30, T1/cluster",
+      "sse_vs_base_geometric": 1.343358394162348,
       "sse_vs_ceres_geometric": 1.9572964937772823,
       "sse_vs_ceres_summed": 1.848750444487779,
       "timing_class": "CPU DRS optimization",
@@ -69,10 +113,12 @@
     {
       "label": "Ceres",
       "optimization_seconds": 1803.779569737,
+      "optimization_vs_base": null,
       "overall_seconds": 1827.4252217599999,
       "peak_memory_mib": null,
       "scenes": 29,
       "specification": "left-SE3, I90, T16",
+      "sse_vs_base_geometric": 1.0015989822211167,
       "sse_vs_ceres_geometric": 1.0,
       "sse_vs_ceres_summed": 1.0,
       "timing_class": "CPU native solve",
@@ -83,12 +129,32 @@
       ]
     },
     {
+      "label": "Base DRS K24",
+      "optimization_seconds": 1271.5746001080079,
+      "optimization_vs_base": 1.0,
+      "overall_seconds": 1349.4810566299893,
+      "peak_memory_mib": null,
+      "scenes": 29,
+      "specification": "established quality baseline, I90, T1/cluster",
+      "sse_vs_base_geometric": 1.0,
+      "sse_vs_ceres_geometric": 0.998403570441365,
+      "sse_vs_ceres_summed": 0.9954876580897181,
+      "timing_class": "CPU DRS optimization",
+      "wins_ties_losses_vs_ceres": [
+        12,
+        0,
+        17
+      ]
+    },
+    {
       "label": "DRS K4",
       "optimization_seconds": 939.4658011429856,
+      "optimization_vs_base": 0.7388208297517008,
       "overall_seconds": 1124.4428099309807,
       "peak_memory_mib": null,
       "scenes": 29,
       "specification": "frozen C1+C5 resource endpoint, I30, T1/cluster",
+      "sse_vs_base_geometric": 1.0089199833063311,
       "sse_vs_ceres_geometric": 1.0073093136226834,
       "sse_vs_ceres_summed": 1.0107262618128918,
       "timing_class": "CPU DRS optimization",
@@ -101,10 +167,12 @@
     {
       "label": "DRS K16",
       "optimization_seconds": 479.0873021229927,
+      "optimization_vs_base": 0.3767669644252873,
       "overall_seconds": 703.5367292670053,
       "peak_memory_mib": null,
       "scenes": 29,
       "specification": "frozen C1+C5 latency endpoint, I30, T1/cluster",
+      "sse_vs_base_geometric": 1.0117126830606582,
       "sse_vs_ceres_geometric": 1.010097555028574,
       "sse_vs_ceres_summed": 1.0160170641529662,
       "timing_class": "CPU DRS optimization",
@@ -134,12 +202,29 @@
       ]
     },
     {
-      "label": "DRS K1",
+      "label": "DRS K1 BAE-style",
+      "optimization_seconds": 1413.7081937979674,
+      "overall_seconds": 1424.7005418949993,
+      "peak_memory_mib": null,
+      "scenes": 6,
+      "specification": "best local diagnostic, I90, T1",
+      "sse_vs_bae_cg_geometric": 1.009414960062474,
+      "sse_vs_ceres_geometric": 0.9535617676630661,
+      "sse_vs_ceres_summed": 0.9102247668320643,
+      "timing_class": "CPU DRS optimization",
+      "wins_ties_losses_vs_ceres": [
+        4,
+        0,
+        2
+      ]
+    },
+    {
+      "label": "DRS K1 Schur-PCG",
       "optimization_seconds": 543.5945131850094,
       "overall_seconds": 553.5550814499875,
       "peak_memory_mib": null,
       "scenes": 6,
-      "specification": "specialized local diagnostic, I80, T24",
+      "specification": "secondary local diagnostic, I80, T24",
       "sse_vs_bae_cg_geometric": 1.1026405667129016,
       "sse_vs_ceres_geometric": 1.0416289925272006,
       "sse_vs_ceres_summed": 1.1356375150863935,
@@ -148,6 +233,23 @@
         4,
         0,
         2
+      ]
+    },
+    {
+      "label": "Base DRS K24",
+      "optimization_seconds": 315.88898534397595,
+      "overall_seconds": 325.2024543971056,
+      "peak_memory_mib": null,
+      "scenes": 6,
+      "specification": "preserved quality baseline, I200",
+      "sse_vs_bae_cg_geometric": 1.380796523035638,
+      "sse_vs_ceres_geometric": 1.3043939562847253,
+      "sse_vs_ceres_summed": 1.2038756249144145,
+      "timing_class": "CPU DRS optimization",
+      "wins_ties_losses_vs_ceres": [
+        1,
+        0,
+        5
       ]
     },
     {
@@ -228,9 +330,12 @@
   "source_artifacts": {
     "bae_cg": "benchmark_results/sfm_init_1dsfm_bae_exported/results.jsonl",
     "bae_nesterov": "benchmark_results/sfm_init_1dsfm_bae_k1_verified/results.jsonl",
+    "base_drs_1dsfm": "benchmark_results/1dsfm_drs_ceres_se3_all15/drs/nesterov_ls01_block_full_se3_left_diag_metric75_lip0.4_metric_proposal0.5_curvature_persistent_tr_trust_drs_enhanced30_decay5.jsonl",
+    "base_drs_bal": "benchmark_results/drs_29_scene_candidate_k24_coordinator_i90/nesterov_ls01_block_full_lip0.1_curvature_persistent_tr_decay5.jsonl",
     "ceres_1dsfm": "benchmark_results/1dsfm_drs_ceres_se3_all15/ceres/results.jsonl",
     "ceres_bal": "benchmark_results/bal_ceres_se3_all29/results.jsonl",
-    "k1": "benchmark_results/1dsfm_k1_schur_pcg_t24_all15_i80/custom/proximal_point_block_se3_left_lip0.00625_curvature_persistent_tr.jsonl",
+    "k1_bae_style": "benchmark_results/1dsfm_k1_bae_nesterov_exact_i90/proximal_point_block_se3_left_scene_raw_lip0.00625_curvature_persistent_tr.jsonl",
+    "k1_schur_pcg": "benchmark_results/1dsfm_k1_schur_pcg_t24_all15_i80/custom/proximal_point_block_se3_left_lip0.00625_curvature_persistent_tr.jsonl",
     "k4_k16_1dsfm": "benchmark_results/stage_c_scaling_confirmation_k4_16_i30/1dsfm/c1_c5/themelis_nesterov_ls01_block_full_se3_left_persistent_tr_adaptl1-2_h0.35_l0.20_w3_start5_stage_c_final_c1_c5.jsonl",
     "k4_k16_bal": "benchmark_results/stage_c_scaling_confirmation_k4_16_i30/bal/c1_c5/themelis_nesterov_ls01_block_full_se3_left_persistent_tr_adaptl1-2_h0.35_l0.20_w3_start5_stage_c_final_c1_c5.jsonl"
   }

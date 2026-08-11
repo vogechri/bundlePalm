@@ -626,12 +626,24 @@ def build_manifest():
     publication_path = RESULTS / "stage_c_publication_comparison/summary.json"
     publication = json.loads(publication_path.read_text(encoding="utf-8"))
     expected_panels = {
-        "all15_1dsfm": (["Ceres", "DRS K1", "DRS K4", "DRS K16"], 15),
-        "all29_bal": (["Ceres", "DRS K4", "DRS K16"], 29),
+        "all15_1dsfm": (
+            [
+                "Ceres",
+                "DRS K1 BAE-style",
+                "DRS K1 Schur-PCG",
+                "Base DRS K24",
+                "DRS K4",
+                "DRS K16",
+            ],
+            15,
+        ),
+        "all29_bal": (["Ceres", "Base DRS K24", "DRS K4", "DRS K16"], 29),
         "bae_six_scene_inset": (
             [
                 "Ceres",
-                "DRS K1",
+                "DRS K1 BAE-style",
+                "DRS K1 Schur-PCG",
+                "Base DRS K24",
                 "DRS K4",
                 "DRS K16",
                 "BAE Schur-PCG CG",
@@ -663,6 +675,7 @@ def build_manifest():
         "summary": str(publication_path.relative_to(ROOT)),
         "report": "benchmark_results/stage_c_publication_comparison/report.md",
         "cross_hardware_speedup_claimed": False,
+        "current_k4_k16_are_base_quality_replacements": False,
     }
     return manifest
 
