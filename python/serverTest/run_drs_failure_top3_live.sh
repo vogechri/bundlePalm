@@ -350,13 +350,22 @@ fi
 
 cleanup_worker() {
   if [[ -n "$WORKER_PID" ]] && kill -0 "$WORKER_PID" 2>/dev/null; then
-    kill -TERM -- "-$WORKER_PID" 2>/dev/null || true
+    worker_children=$(pgrep -P "$WORKER_PID" || true)
+    if [[ -n "$worker_children" ]]; then
+      kill -TERM $worker_children 2>/dev/null || true
+    else
+      kill -TERM "$WORKER_PID" 2>/dev/null || true
+    fi
     for _ in {1..50}; do
       kill -0 "$WORKER_PID" 2>/dev/null || break
       read -r -t 0.1 _ || true
     done
     if kill -0 "$WORKER_PID" 2>/dev/null; then
-      kill -KILL -- "-$WORKER_PID" 2>/dev/null || true
+      worker_children=$(pgrep -P "$WORKER_PID" || true)
+      if [[ -n "$worker_children" ]]; then
+        kill -KILL $worker_children 2>/dev/null || true
+      fi
+      kill -TERM "$WORKER_PID" 2>/dev/null || true
     fi
     wait "$WORKER_PID" 2>/dev/null || true
   fi

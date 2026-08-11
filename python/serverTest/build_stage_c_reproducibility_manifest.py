@@ -286,6 +286,7 @@ def build_manifest():
         "final_cross_family_confirmation": {},
         "tuned_c5_final": {},
         "huber_sentinel": {},
+        "scaling_confirmation": {},
         "relative_summaries": {},
     }
 
@@ -563,6 +564,39 @@ def build_manifest():
         },
         "decision": "validated capability; current schedules not promoted",
         "report": "benchmark_results/stage_c_huber_sentinel_report.md",
+    }
+
+    scaling_path = RESULTS / "stage_c_scaling_confirmation_k4_16_i30/summary.json"
+    scaling = json.loads(scaling_path.read_text(encoding="utf-8"))
+    expected_scaling = {"1dsfm": 15, "bal": 29}
+    for family, expected_scenes in expected_scaling.items():
+        rows = scaling.get(family, [])
+        if [row.get("clusters") for row in rows] != [4, 16]:
+            raise ValueError(f"scaling K coverage mismatch for {family}")
+        if any(row.get("scenes") != expected_scenes for row in rows):
+            raise ValueError(f"scaling scene coverage mismatch for {family}")
+    manifest["scaling_confirmation"] = {
+        "objective": "standard Snavely pixel sum-squared error",
+        "configuration": "frozen tuned L2 C1+C5",
+        "threads_per_cluster": 1,
+        "iterations": 30,
+        "operating_points": {
+            "resource": 4,
+            "latency": 16,
+        },
+        "no_scene_specific_routing": True,
+        "families": {
+            family: [
+                {key: value for key, value in row.items() if key != "rows"}
+                for row in rows
+            ]
+            for family, rows in scaling.items()
+        },
+        "summary": str(scaling_path.relative_to(ROOT)),
+        "report": (
+            "benchmark_results/"
+            "stage_c_scaling_confirmation_k4_16_i30/report.md"
+        ),
     }
     return manifest
 

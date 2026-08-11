@@ -5242,8 +5242,123 @@
   },
   "repository": {
     "branch": "user/chvogel/notSamePerformanceNew2c",
-    "commit": "8286223dc6b711c5485908d140db8cf4e6725be7",
+    "commit": "9225db21afd851ce55a1e63ae579b70cf8fd3e8e",
     "working_tree_clean": false
+  },
+  "scaling_confirmation": {
+    "configuration": "frozen tuned L2 C1+C5",
+    "families": {
+      "1dsfm": [
+        {
+          "clusters": 4,
+          "coordinator_cpu_seconds": 866.23,
+          "coordinator_max_rss_kb": 1188048,
+          "optimization_seconds": 160.60661371600145,
+          "optimization_vs_baseline": 1.0,
+          "oracles_vs_baseline": 1.0,
+          "overall_seconds": 175.44511014998716,
+          "overall_vs_baseline": 1.0,
+          "proximal_oracle_calls": 755,
+          "scenes": 15,
+          "sse_vs_baseline_geometric": 1.0,
+          "sse_vs_ceres_geometric": 2.052536241509064,
+          "transport_bytes": 1217406174,
+          "transport_vs_baseline": 1.0,
+          "wins_ties_losses_vs_baseline": [
+            0,
+            15,
+            0
+          ],
+          "worker_cpu_seconds": 399.82,
+          "worker_cpu_vs_baseline": 1.0,
+          "worker_max_rss_kb": 1496304
+        },
+        {
+          "clusters": 16,
+          "coordinator_cpu_seconds": 864.5899999999999,
+          "coordinator_max_rss_kb": 1317936,
+          "optimization_seconds": 93.79306116799853,
+          "optimization_vs_baseline": 0.5839925205935265,
+          "oracles_vs_baseline": 0.9920529801324504,
+          "overall_seconds": 121.39260207900224,
+          "overall_vs_baseline": 0.6919121426366589,
+          "proximal_oracle_calls": 749,
+          "scenes": 15,
+          "sse_vs_baseline_geometric": 0.9535989933791572,
+          "sse_vs_ceres_geometric": 1.9572964937772823,
+          "transport_bytes": 2346506522,
+          "transport_vs_baseline": 1.927463957481129,
+          "wins_ties_losses_vs_baseline": [
+            9,
+            0,
+            6
+          ],
+          "worker_cpu_seconds": 581.98,
+          "worker_cpu_vs_baseline": 1.455605022260017,
+          "worker_max_rss_kb": 1593668
+        }
+      ],
+      "bal": [
+        {
+          "clusters": 4,
+          "coordinator_cpu_seconds": 1654.18,
+          "coordinator_max_rss_kb": 2774244,
+          "optimization_seconds": 939.4658011429856,
+          "optimization_vs_baseline": 1.0,
+          "oracles_vs_baseline": 1.0,
+          "overall_seconds": 1124.4428099309807,
+          "overall_vs_baseline": 1.0,
+          "proximal_oracle_calls": 1652,
+          "scenes": 29,
+          "sse_vs_baseline_geometric": 1.0,
+          "sse_vs_ceres_geometric": 1.0073093136226834,
+          "transport_bytes": 3384314906,
+          "transport_vs_baseline": 1.0,
+          "wins_ties_losses_vs_baseline": [
+            0,
+            29,
+            0
+          ],
+          "worker_cpu_seconds": 2958.56,
+          "worker_cpu_vs_baseline": 1.0,
+          "worker_max_rss_kb": 5268960
+        },
+        {
+          "clusters": 16,
+          "coordinator_cpu_seconds": 2053.09,
+          "coordinator_max_rss_kb": 2801008,
+          "optimization_seconds": 479.0873021229927,
+          "optimization_vs_baseline": 0.5099571496270743,
+          "oracles_vs_baseline": 0.9709443099273608,
+          "overall_seconds": 703.5367292670053,
+          "overall_vs_baseline": 0.6256758663521438,
+          "proximal_oracle_calls": 1604,
+          "scenes": 29,
+          "sse_vs_baseline_geometric": 1.0027680091588385,
+          "sse_vs_ceres_geometric": 1.010097555028574,
+          "transport_bytes": 6717973860,
+          "transport_vs_baseline": 1.9850321399139919,
+          "wins_ties_losses_vs_baseline": [
+            9,
+            0,
+            20
+          ],
+          "worker_cpu_seconds": 4639.0199999999995,
+          "worker_cpu_vs_baseline": 1.5679992969552754,
+          "worker_max_rss_kb": 5349364
+        }
+      ]
+    },
+    "iterations": 30,
+    "no_scene_specific_routing": true,
+    "objective": "standard Snavely pixel sum-squared error",
+    "operating_points": {
+      "latency": 16,
+      "resource": 4
+    },
+    "report": "benchmark_results/stage_c_scaling_confirmation_k4_16_i30/report.md",
+    "summary": "benchmark_results/stage_c_scaling_confirmation_k4_16_i30/summary.json",
+    "threads_per_cluster": 1
   },
   "schema_version": 1,
   "tuned_c5_final": {

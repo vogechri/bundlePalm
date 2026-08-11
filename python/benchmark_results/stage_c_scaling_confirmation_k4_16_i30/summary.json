@@ -1,0 +1,726 @@
+{
+  "1dsfm": [
+    {
+      "clusters": 4,
+      "coordinator_cpu_seconds": 866.23,
+      "coordinator_max_rss_kb": 1188048,
+      "optimization_seconds": 160.60661371600145,
+      "optimization_vs_baseline": 1.0,
+      "oracles_vs_baseline": 1.0,
+      "overall_seconds": 175.44511014998716,
+      "overall_vs_baseline": 1.0,
+      "proximal_oracle_calls": 755,
+      "rows": {
+        "alamo": {
+          "optimization_seconds": 10.824362815998029,
+          "overall_seconds": 11.835912906994054,
+          "sse": 1292224.3272803933,
+          "sse_vs_baseline": 1.0,
+          "sse_vs_ceres": 1.565643103828008
+        },
+        "ellis_island": {
+          "optimization_seconds": 2.8870762509977794,
+          "overall_seconds": 3.280255865000072,
+          "sse": 2146238.2237307327,
+          "sse_vs_baseline": 1.0,
+          "sse_vs_ceres": 1.3025008474817263
+        },
+        "gendarmenmarkt": {
+          "optimization_seconds": 3.8884851620023255,
+          "overall_seconds": 4.157210464996751,
+          "sse": 1107789.1955208913,
+          "sse_vs_baseline": 1.0,
+          "sse_vs_ceres": 2.110563486911229
+        },
+        "madrid_metropolis": {
+          "optimization_seconds": 3.113866281993978,
+          "overall_seconds": 3.3151822080035345,
+          "sse": 482460.8072915052,
+          "sse_vs_baseline": 1.0,
+          "sse_vs_ceres": 2.234667643209739
+        },
+        "montreal_notre_dame": {
+          "optimization_seconds": 15.254601804997947,
+          "overall_seconds": 16.88279663299909,
+          "sse": 12430288.63293748,
+          "sse_vs_baseline": 1.0,
+          "sse_vs_ceres": 2.2947615612103873
+        },
+        "notre_dame": {
+          "optimization_seconds": 13.571417582999857,
+          "overall_seconds": 14.975744036994001,
+          "sse": 6747426.6605190635,
+          "sse_vs_baseline": 1.0,
+          "sse_vs_ceres": 2.3598445289867462
+        },
+        "nyc_library": {
+          "optimization_seconds": 4.32595830700302,
+          "overall_seconds": 4.660307941005158,
+          "sse": 1185314.1520216672,
+          "sse_vs_baseline": 1.0,
+          "sse_vs_ceres": 1.5531491197807072
+        },
+        "piazza_del_popolo": {
+          "optimization_seconds": 4.038122717000078,
+          "overall_seconds": 4.3321936529973755,
+          "sse": 1807882.0815561428,
+          "sse_vs_baseline": 1.0,
+          "sse_vs_ceres": 2.4882400883360325
+        },
+        "piccadilly": {
+          "optimization_seconds": 13.49112809500366,
+          "overall_seconds": 14.900999335004599,
+          "sse": 9885053.951974304,
+          "sse_vs_baseline": 1.0,
+          "sse_vs_ceres": 1.4142266436841342
+        },
+        "roman_forum": {
+          "optimization_seconds": 15.598295003997919,
+          "overall_seconds": 17.04080309499841,
+          "sse": 5342492.291907771,
+          "sse_vs_baseline": 1.0,
+          "sse_vs_ceres": 2.6939574941988043
+        },
+        "tower_of_london": {
+          "optimization_seconds": 4.972874724000576,
+          "overall_seconds": 5.380347747995984,
+          "sse": 2620086.0814947197,
+          "sse_vs_baseline": 1.0,
+          "sse_vs_ceres": 3.314972803371942
+        },
+        "trafalgar": {
+          "optimization_seconds": 36.801586330002465,
+          "overall_seconds": 39.725251981995825,
+          "sse": 17936929.7859231,
+          "sse_vs_baseline": 1.0,
+          "sse_vs_ceres": 1.5795739743622355
+        },
+        "union_square": {
+          "optimization_seconds": 8.709684756999195,
+          "overall_seconds": 9.474429916997906,
+          "sse": 4556433.830848569,
+          "sse_vs_baseline": 1.0,
+          "sse_vs_ceres": 1.7479548108793943
+        },
+        "vienna_cathedral": {
+          "optimization_seconds": 14.77261812100187,
+          "overall_seconds": 16.38699662200088,
+          "sse": 6304607.571905086,
+          "sse_vs_baseline": 1.0,
+          "sse_vs_ceres": 2.2762985136420864
+        },
+        "yorkminster": {
+          "optimization_seconds": 8.35653576200275,
+          "overall_seconds": 9.096677742003521,
+          "sse": 5799741.911632924,
+          "sse_vs_baseline": 1.0,
+          "sse_vs_ceres": 3.0259717034059483
+        }
+      },
+      "scenes": 15,
+      "sse_vs_baseline_geometric": 1.0,
+      "sse_vs_ceres_geometric": 2.052536241509064,
+      "transport_bytes": 1217406174,
+      "transport_vs_baseline": 1.0,
+      "wins_ties_losses_vs_baseline": [
+        0,
+        15,
+        0
+      ],
+      "worker_cpu_seconds": 399.82,
+      "worker_cpu_vs_baseline": 1.0,
+      "worker_max_rss_kb": 1496304
+    },
+    {
+      "clusters": 16,
+      "coordinator_cpu_seconds": 864.5899999999999,
+      "coordinator_max_rss_kb": 1317936,
+      "optimization_seconds": 93.79306116799853,
+      "optimization_vs_baseline": 0.5839925205935265,
+      "oracles_vs_baseline": 0.9920529801324504,
+      "overall_seconds": 121.39260207900224,
+      "overall_vs_baseline": 0.6919121426366589,
+      "proximal_oracle_calls": 749,
+      "rows": {
+        "alamo": {
+          "optimization_seconds": 6.881570195000677,
+          "overall_seconds": 9.75566926299507,
+          "sse": 1344770.056361101,
+          "sse_vs_baseline": 1.0406630087140483,
+          "sse_vs_ceres": 1.629306863002056
+        },
+        "ellis_island": {
+          "optimization_seconds": 2.7317760329970042,
+          "overall_seconds": 3.601883542003634,
+          "sse": 1925490.2176529714,
+          "sse_vs_baseline": 0.8971465498857613,
+          "sse_vs_ceres": 1.168534141541511
+        },
+        "gendarmenmarkt": {
+          "optimization_seconds": 2.729235692000657,
+          "overall_seconds": 3.2100779690008494,
+          "sse": 927041.6873250313,
+          "sse_vs_baseline": 0.836839437569283,
+          "sse_vs_ceres": 1.7662027613410578
+        },
+        "madrid_metropolis": {
+          "optimization_seconds": 2.0293127490003826,
+          "overall_seconds": 2.5020244719999027,
+          "sse": 516003.30185689003,
+          "sse_vs_baseline": 1.069523770757027,
+          "sse_vs_ceres": 2.3900301641543993
+        },
+        "montreal_notre_dame": {
+          "optimization_seconds": 7.921559034002712,
+          "overall_seconds": 12.316071773995645,
+          "sse": 12135470.07510133,
+          "sse_vs_baseline": 0.9762822435952979,
+          "sse_vs_ceres": 2.2403349654947253
+        },
+        "notre_dame": {
+          "optimization_seconds": 8.538852392004628,
+          "overall_seconds": 11.96241656600614,
+          "sse": 6688089.272769079,
+          "sse_vs_baseline": 0.9912059232748415,
+          "sse_vs_ceres": 2.339091875139391
+        },
+        "nyc_library": {
+          "optimization_seconds": 2.8557795099986834,
+          "overall_seconds": 3.4521833620019606,
+          "sse": 1277810.9142935097,
+          "sse_vs_baseline": 1.0780356516574785,
+          "sse_vs_ceres": 1.674350123464034
+        },
+        "piazza_del_popolo": {
+          "optimization_seconds": 2.515588251000736,
+          "overall_seconds": 3.539429738004401,
+          "sse": 1726823.698155854,
+          "sse_vs_baseline": 0.9551638991130895,
+          "sse_vs_ceres": 2.376677104704543
+        },
+        "piccadilly": {
+          "optimization_seconds": 8.481602268999268,
+          "overall_seconds": 11.659468571000616,
+          "sse": 7526199.512642867,
+          "sse_vs_baseline": 0.7613716171108694,
+          "sse_vs_ceres": 1.0767520266630666
+        },
+        "roman_forum": {
+          "optimization_seconds": 8.680527502998302,
+          "overall_seconds": 9.969511976996728,
+          "sse": 4418036.062402352,
+          "sse_vs_baseline": 0.8269616166024825,
+          "sse_vs_ceres": 2.227799444461016
+        },
+        "tower_of_london": {
+          "optimization_seconds": 3.1963700920023257,
+          "overall_seconds": 3.8165318019964616,
+          "sse": 2225239.398468434,
+          "sse_vs_baseline": 0.8493001104753658,
+          "sse_vs_ceres": 2.8154067681266235
+        },
+        "trafalgar": {
+          "optimization_seconds": 18.832003851995978,
+          "overall_seconds": 21.506221212999662,
+          "sse": 18910400.663403578,
+          "sse_vs_baseline": 1.0542718786937806,
+          "sse_vs_ceres": 1.6653004214866753
+        },
+        "union_square": {
+          "optimization_seconds": 5.1659595249948325,
+          "overall_seconds": 6.6304169119975995,
+          "sse": 4610545.586530194,
+          "sse_vs_baseline": 1.0118759006912972,
+          "sse_vs_ceres": 1.7687133486262734
+        },
+        "vienna_cathedral": {
+          "optimization_seconds": 8.933635442001105,
+          "overall_seconds": 12.429372537000745,
+          "sse": 6285391.22800152,
+          "sse_vs_baseline": 0.9969520158575454,
+          "sse_vs_ceres": 2.269360391869012
+        },
+        "yorkminster": {
+          "optimization_seconds": 4.299288629001239,
+          "overall_seconds": 5.0413223810028285,
+          "sse": 6005396.532500259,
+          "sse_vs_baseline": 1.0354592711194337,
+          "sse_vs_ceres": 3.133270454436754
+        }
+      },
+      "scenes": 15,
+      "sse_vs_baseline_geometric": 0.9535989933791572,
+      "sse_vs_ceres_geometric": 1.9572964937772823,
+      "transport_bytes": 2346506522,
+      "transport_vs_baseline": 1.927463957481129,
+      "wins_ties_losses_vs_baseline": [
+        9,
+        0,
+        6
+      ],
+      "worker_cpu_seconds": 581.98,
+      "worker_cpu_vs_baseline": 1.455605022260017,
+      "worker_max_rss_kb": 1593668
+    }
+  ],
+  "bal": [
+    {
+      "clusters": 4,
+      "coordinator_cpu_seconds": 1654.18,
+      "coordinator_max_rss_kb": 2774244,
+      "optimization_seconds": 939.4658011429856,
+      "optimization_vs_baseline": 1.0,
+      "oracles_vs_baseline": 1.0,
+      "overall_seconds": 1124.4428099309807,
+      "overall_vs_baseline": 1.0,
+      "proximal_oracle_calls": 1652,
+      "rows": {
+        "bal1064": {
+          "optimization_seconds": 14.382879612996476,
+          "overall_seconds": 16.22223929900065,
+          "sse": 564772.0882345024,
+          "sse_vs_baseline": 1.0,
+          "sse_vs_ceres": 1.002600160089929
+        },
+        "bal126": {
+          "optimization_seconds": 3.141334175998054,
+          "overall_seconds": 3.6480759699988994,
+          "sse": 188431.09159276963,
+          "sse_vs_baseline": 1.0,
+          "sse_vs_ceres": 1.0247442145258965
+        },
+        "bal1266": {
+          "optimization_seconds": 16.355550209002104,
+          "overall_seconds": 18.479265696005314,
+          "sse": 661700.8956383695,
+          "sse_vs_baseline": 1.0,
+          "sse_vs_ceres": 1.003363313398883
+        },
+        "bal135": {
+          "optimization_seconds": 12.154428173998895,
+          "overall_seconds": 14.308095124993997,
+          "sse": 740441.9895955464,
+          "sse_vs_baseline": 1.0,
+          "sse_vs_ceres": 0.99552186767693
+        },
+        "bal142": {
+          "optimization_seconds": 12.109873755995068,
+          "overall_seconds": 14.336871278996114,
+          "sse": 545248.64659731,
+          "sse_vs_baseline": 1.0,
+          "sse_vs_ceres": 1.0025045264324774
+        },
+        "bal1490": {
+          "optimization_seconds": 127.10369927699503,
+          "overall_seconds": 151.59858458000235,
+          "sse": 3090243.1689551263,
+          "sse_vs_baseline": 1.0,
+          "sse_vs_ceres": 0.9997176126887415
+        },
+        "bal1723": {
+          "optimization_seconds": 19.368717314995592,
+          "overall_seconds": 22.180730000996846,
+          "sse": 769636.4062146317,
+          "sse_vs_baseline": 1.0,
+          "sse_vs_ceres": 1.0072591998592673
+        },
+        "bal173": {
+          "optimization_seconds": 15.067406693000521,
+          "overall_seconds": 17.57623755199893,
+          "sse": 519420.01331218216,
+          "sse_vs_baseline": 1.0,
+          "sse_vs_ceres": 0.9993602785852175
+        },
+        "bal1778": {
+          "optimization_seconds": 125.17322322399559,
+          "overall_seconds": 152.5550336429951,
+          "sse": 3359552.1472540866,
+          "sse_vs_baseline": 1.0,
+          "sse_vs_ceres": 1.021835267427337
+        },
+        "bal245": {
+          "optimization_seconds": 23.693152544998156,
+          "overall_seconds": 28.24043582500599,
+          "sse": 1784042.461648909,
+          "sse_vs_baseline": 1.0,
+          "sse_vs_ceres": 0.9723189625152832
+        },
+        "bal253": {
+          "optimization_seconds": 20.655929278000258,
+          "overall_seconds": 24.388498467997124,
+          "sse": 692600.7649079482,
+          "sse_vs_baseline": 1.0,
+          "sse_vs_ceres": 1.0009602590709126
+        },
+        "bal257": {
+          "optimization_seconds": 5.484779400001571,
+          "overall_seconds": 6.683921913005179,
+          "sse": 200265.73116600956,
+          "sse_vs_baseline": 1.0,
+          "sse_vs_ceres": 1.0366516459034616
+        },
+        "bal287": {
+          "optimization_seconds": 24.25464643700252,
+          "overall_seconds": 28.538813674997073,
+          "sse": 715336.25851588,
+          "sse_vs_baseline": 1.0,
+          "sse_vs_ceres": 1.0107441034092959
+        },
+        "bal3068": {
+          "optimization_seconds": 47.0785597819995,
+          "overall_seconds": 51.677660966000985,
+          "sse": 3585080.4699998302,
+          "sse_vs_baseline": 1.0,
+          "sse_vs_ceres": 1.1285064827472304
+        },
+        "bal308": {
+          "optimization_seconds": 25.867619438002293,
+          "overall_seconds": 30.61891716199898,
+          "sse": 789367.0404077467,
+          "sse_vs_baseline": 1.0,
+          "sse_vs_ceres": 1.0124331205556147
+        },
+        "bal356": {
+          "optimization_seconds": 31.05154273300286,
+          "overall_seconds": 36.57336716399732,
+          "sse": 1027210.8358796334,
+          "sse_vs_baseline": 1.0,
+          "sse_vs_ceres": 1.039871487846387
+        },
+        "bal394": {
+          "optimization_seconds": 12.80525325400231,
+          "overall_seconds": 16.174842015003378,
+          "sse": 602473.7612056173,
+          "sse_vs_baseline": 1.0,
+          "sse_vs_ceres": 1.0100678709874693
+        },
+        "bal427": {
+          "optimization_seconds": 40.04357648199948,
+          "overall_seconds": 48.14623438700073,
+          "sse": 2134486.185211877,
+          "sse_vs_baseline": 1.0,
+          "sse_vs_ceres": 0.9960750209122838
+        },
+        "bal49": {
+          "optimization_seconds": 0.663465986996016,
+          "overall_seconds": 0.8455464639991987,
+          "sse": 26715.63600348976,
+          "sse_vs_baseline": 1.0,
+          "sse_vs_ceres": 1.0010174880197091
+        },
+        "bal52": {
+          "optimization_seconds": 7.505570408000494,
+          "overall_seconds": 8.357760387996677,
+          "sse": 477569.4450476266,
+          "sse_vs_baseline": 1.0,
+          "sse_vs_ceres": 0.9703688651769803
+        },
+        "bal646": {
+          "optimization_seconds": 9.530713667001692,
+          "overall_seconds": 10.882563393002783,
+          "sse": 361243.273780413,
+          "sse_vs_baseline": 1.0,
+          "sse_vs_ceres": 1.0033171019892682
+        },
+        "bal744": {
+          "optimization_seconds": 87.5032615070013,
+          "overall_seconds": 104.72158176399535,
+          "sse": 3094544.5209334292,
+          "sse_vs_baseline": 1.0,
+          "sse_vs_ceres": 1.0004226114168098
+        },
+        "bal783": {
+          "optimization_seconds": 11.198020461997658,
+          "overall_seconds": 12.753775406003115,
+          "sse": 396324.6935660153,
+          "sse_vs_baseline": 1.0,
+          "sse_vs_ceres": 1.001371966774458
+        },
+        "bal871": {
+          "optimization_seconds": 73.16283694699814,
+          "overall_seconds": 91.46187690699298,
+          "sse": 3465108.9916296043,
+          "sse_vs_baseline": 1.0,
+          "sse_vs_ceres": 1.0056457725290007
+        },
+        "bal88": {
+          "optimization_seconds": 8.409846472000936,
+          "overall_seconds": 9.65944697100349,
+          "sse": 575555.8618115536,
+          "sse_vs_baseline": 1.0,
+          "sse_vs_ceres": 0.996716938272902
+        },
+        "bal89": {
+          "optimization_seconds": 10.806783202999213,
+          "overall_seconds": 12.741652507000254,
+          "sse": 574119.237105639,
+          "sse_vs_baseline": 1.0,
+          "sse_vs_ceres": 1.011322367649268
+        },
+        "bal931": {
+          "optimization_seconds": 13.44845984600397,
+          "overall_seconds": 15.361289201995532,
+          "sse": 504347.5624198196,
+          "sse_vs_baseline": 1.0,
+          "sse_vs_ceres": 1.0019054671130334
+        },
+        "bal951": {
+          "optimization_seconds": 100.05337380499986,
+          "overall_seconds": 120.55781086900242,
+          "sse": 3218006.3570893314,
+          "sse_vs_baseline": 1.0,
+          "sse_vs_ceres": 0.9647834274512024
+        },
+        "bal961": {
+          "optimization_seconds": 41.39129705300002,
+          "overall_seconds": 55.15168133999396,
+          "sse": 3176642.637147926,
+          "sse_vs_baseline": 1.0,
+          "sse_vs_ceres": 1.0011782684187245
+        }
+      },
+      "scenes": 29,
+      "sse_vs_baseline_geometric": 1.0,
+      "sse_vs_ceres_geometric": 1.0073093136226834,
+      "transport_bytes": 3384314906,
+      "transport_vs_baseline": 1.0,
+      "wins_ties_losses_vs_baseline": [
+        0,
+        29,
+        0
+      ],
+      "worker_cpu_seconds": 2958.56,
+      "worker_cpu_vs_baseline": 1.0,
+      "worker_max_rss_kb": 5268960
+    },
+    {
+      "clusters": 16,
+      "coordinator_cpu_seconds": 2053.09,
+      "coordinator_max_rss_kb": 2801008,
+      "optimization_seconds": 479.0873021229927,
+      "optimization_vs_baseline": 0.5099571496270743,
+      "oracles_vs_baseline": 0.9709443099273608,
+      "overall_seconds": 703.5367292670053,
+      "overall_vs_baseline": 0.6256758663521438,
+      "proximal_oracle_calls": 1604,
+      "rows": {
+        "bal1064": {
+          "optimization_seconds": 7.30898710800102,
+          "overall_seconds": 10.059326476999559,
+          "sse": 565553.9929998452,
+          "sse_vs_baseline": 1.0013844607083666,
+          "sse_vs_ceres": 1.0039882206177755
+        },
+        "bal126": {
+          "optimization_seconds": 2.9131010269993567,
+          "overall_seconds": 3.4593484590004664,
+          "sse": 188697.58588851086,
+          "sse_vs_baseline": 1.0014142798488752,
+          "sse_vs_ceres": 1.026193489618752
+        },
+        "bal1266": {
+          "optimization_seconds": 7.597266954995575,
+          "overall_seconds": 10.416118157998426,
+          "sse": 662457.8141963577,
+          "sse_vs_baseline": 1.0011438983428578,
+          "sse_vs_ceres": 1.0045110590303643
+        },
+        "bal135": {
+          "optimization_seconds": 7.137959072999365,
+          "overall_seconds": 9.467395126994234,
+          "sse": 741933.274895676,
+          "sse_vs_baseline": 1.0020140474488004,
+          "sse_vs_ceres": 0.9975268959547496
+        },
+        "bal142": {
+          "optimization_seconds": 7.309382726998592,
+          "overall_seconds": 9.56629734300077,
+          "sse": 545776.6774509018,
+          "sse_vs_baseline": 1.0009684221261017,
+          "sse_vs_ceres": 1.0034753739973918
+        },
+        "bal1490": {
+          "optimization_seconds": 65.71649583199905,
+          "overall_seconds": 97.85133067700372,
+          "sse": 3085699.537226185,
+          "sse_vs_baseline": 0.9985296847268892,
+          "sse_vs_ceres": 0.9982477126140074
+        },
+        "bal1723": {
+          "optimization_seconds": 9.5026927229992,
+          "overall_seconds": 13.20604447399819,
+          "sse": 777399.3471068616,
+          "sse_vs_baseline": 1.0100865042629819,
+          "sse_vs_ceres": 1.0174189240725755
+        },
+        "bal173": {
+          "optimization_seconds": 8.43452008299937,
+          "overall_seconds": 11.169883403999847,
+          "sse": 519731.3921118078,
+          "sse_vs_baseline": 1.0005994740126398,
+          "sse_vs_ceres": 0.9999593691014937
+        },
+        "bal1778": {
+          "optimization_seconds": 72.2846092539985,
+          "overall_seconds": 107.01395238900295,
+          "sse": 3361253.2119887546,
+          "sse_vs_baseline": 1.000506336755647,
+          "sse_vs_ceres": 1.0223526601814519
+        },
+        "bal245": {
+          "optimization_seconds": 13.559776373003842,
+          "overall_seconds": 18.734273376998317,
+          "sse": 1782280.4732011242,
+          "sse_vs_baseline": 0.9990123618211665,
+          "sse_vs_ceres": 0.9713586631858993
+        },
+        "bal253": {
+          "optimization_seconds": 11.42101360399829,
+          "overall_seconds": 15.744998130001477,
+          "sse": 693676.1539926459,
+          "sse_vs_baseline": 1.001552682496446,
+          "sse_vs_ceres": 1.00251443254481
+        },
+        "bal257": {
+          "optimization_seconds": 3.8923216490002233,
+          "overall_seconds": 4.7833206840005005,
+          "sse": 200083.477348856,
+          "sse_vs_baseline": 0.999089940070663,
+          "sse_vs_ceres": 1.0357082307798435
+        },
+        "bal287": {
+          "optimization_seconds": 12.528468427000917,
+          "overall_seconds": 17.381677199002297,
+          "sse": 714749.9344781323,
+          "sse_vs_baseline": 0.9991803518544353,
+          "sse_vs_ceres": 1.009915648879296
+        },
+        "bal3068": {
+          "optimization_seconds": 19.126636549000978,
+          "overall_seconds": 22.501147367001977,
+          "sse": 3755588.6846255176,
+          "sse_vs_baseline": 1.0475604985864364,
+          "sse_vs_ceres": 1.1821788137247142
+        },
+        "bal308": {
+          "optimization_seconds": 13.407622333004838,
+          "overall_seconds": 18.792814874002943,
+          "sse": 791618.776615554,
+          "sse_vs_baseline": 1.0028525845298077,
+          "sse_vs_ceres": 1.0153211716127766
+        },
+        "bal356": {
+          "optimization_seconds": 15.690493839996634,
+          "overall_seconds": 22.656603704999725,
+          "sse": 1026395.77813612,
+          "sse_vs_baseline": 0.9992065331526458,
+          "sse_vs_ceres": 1.0390463842952722
+        },
+        "bal394": {
+          "optimization_seconds": 7.939964737000992,
+          "overall_seconds": 11.238631260996044,
+          "sse": 604554.8193864059,
+          "sse_vs_baseline": 1.0034541889038024,
+          "sse_vs_ceres": 1.0135568362195215
+        },
+        "bal427": {
+          "optimization_seconds": 19.224977257996215,
+          "overall_seconds": 29.876368903002003,
+          "sse": 2136895.373038958,
+          "sse_vs_baseline": 1.0011286968469377,
+          "sse_vs_ceres": 0.997199287647701
+        },
+        "bal49": {
+          "optimization_seconds": 0.45432231800077716,
+          "overall_seconds": 0.6238684950003517,
+          "sse": 26737.26836938117,
+          "sse_vs_baseline": 1.0008097267790512,
+          "sse_vs_ceres": 1.0018280386860572
+        },
+        "bal52": {
+          "optimization_seconds": 3.3375075860021752,
+          "overall_seconds": 4.050942308000231,
+          "sse": 477510.8947185782,
+          "sse_vs_baseline": 0.9998773993402309,
+          "sse_vs_ceres": 0.9702498973138901
+        },
+        "bal646": {
+          "optimization_seconds": 5.310623220997513,
+          "overall_seconds": 8.808084492004127,
+          "sse": 361751.8542387019,
+          "sse_vs_baseline": 1.0014078613920383,
+          "sse_vs_ceres": 1.0047296334011306
+        },
+        "bal744": {
+          "optimization_seconds": 37.58375166800397,
+          "overall_seconds": 58.70040339099796,
+          "sse": 3093380.3097699974,
+          "sse_vs_baseline": 0.9996237859382677,
+          "sse_vs_ceres": 1.0000462383627198
+        },
+        "bal783": {
+          "optimization_seconds": 5.811821085000702,
+          "overall_seconds": 7.900392805997399,
+          "sse": 397136.8361525695,
+          "sse_vs_baseline": 1.0020491849227127,
+          "sse_vs_ceres": 1.0034239631107995
+        },
+        "bal871": {
+          "optimization_seconds": 34.62893643300049,
+          "overall_seconds": 56.2495902810042,
+          "sse": 3471458.072887657,
+          "sse_vs_baseline": 1.0018322890487399,
+          "sse_vs_ceres": 1.0074884062649172
+        },
+        "bal88": {
+          "optimization_seconds": 4.841401236997626,
+          "overall_seconds": 6.521469904000696,
+          "sse": 576605.3846960019,
+          "sse_vs_baseline": 1.0018234943887896,
+          "sse_vs_ceres": 0.9985344460170541
+        },
+        "bal89": {
+          "optimization_seconds": 6.741299355999217,
+          "overall_seconds": 8.86603237199597,
+          "sse": 573694.6030249526,
+          "sse_vs_baseline": 0.9992603730144506,
+          "sse_vs_ceres": 1.0105743663350648
+        },
+        "bal931": {
+          "optimization_seconds": 6.806408773998555,
+          "overall_seconds": 9.300335619998805,
+          "sse": 506036.68746222736,
+          "sse_vs_baseline": 1.0033491289901422,
+          "sse_vs_ceres": 1.0052609777583237
+        },
+        "bal951": {
+          "optimization_seconds": 46.95845818000089,
+          "overall_seconds": 73.09893005499907,
+          "sse": 3225653.032132594,
+          "sse_vs_baseline": 1.0023762150209607,
+          "sse_vs_ceres": 0.9670759603234858
+        },
+        "bal961": {
+          "optimization_seconds": 21.616482712997822,
+          "overall_seconds": 35.49714753500302,
+          "sse": 3174258.7901576036,
+          "sse_vs_baseline": 0.999249570297129,
+          "sse_vs_ceres": 1.000426954508234
+        }
+      },
+      "scenes": 29,
+      "sse_vs_baseline_geometric": 1.0027680091588385,
+      "sse_vs_ceres_geometric": 1.010097555028574,
+      "transport_bytes": 6717973860,
+      "transport_vs_baseline": 1.9850321399139919,
+      "wins_ties_losses_vs_baseline": [
+        9,
+        0,
+        20
+      ],
+      "worker_cpu_seconds": 4639.0199999999995,
+      "worker_cpu_vs_baseline": 1.5679992969552754,
+      "worker_max_rss_kb": 5349364
+    }
+  ]
+}

@@ -27,3 +27,12 @@ After one excluded warm-up, three measured repeats on Roman, Trafalgar, BAL52,
 and BAL3068 have zero endpoint SSE spread and identical rejection/oracle counts.
 Optimization-time CV is `1.1%--2.4%`; overall-time CV is `0.9%--2.5%`. See
 `stage_c_tuned_repeats_k24_i30/report.md`.
+
+## K>1 scaling confirmation
+
+The frozen policy was swept globally at K2/K4/K8/K16/K24 on four sentinels,
+then K4 and K16 were run unchanged on all 15 1DSfM and all 29 BAL scenes. K4 is
+the resource endpoint; K16 is the latency endpoint. K16/K4 geometric SSE is
+`0.953599x` on 1DSfM and `1.002768x` on BAL, while optimization time is
+`0.584x`/`0.510x`. No scene-specific K routing is used. See
+`stage_c_scaling_confirmation_k4_16_i30/report.md`.

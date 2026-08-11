@@ -141,6 +141,14 @@ $0.99\%$, respectively, and remains $2.5698\times$/$1.1679\times$ Ceres.  We
 therefore retain robust-objective support but do not promote either current
 Huber schedule.
 
+Finally, a frozen cluster-count sweep at $K\in\{2,4,8,16,24\}$ selects two
+nondominated global operating points, which we confirm unchanged on all 15
+1DSfM and all 29 BAL scenes.  Relative to $K=4$, $K=16$ reaches geometric SSE
+$0.953599$ on 1DSfM and $1.002768$ on BAL while reducing optimization time to
+$0.584$ and $0.510$.  Its worker CPU rises to $1.456$/$1.568$ and transport to
+$1.927$/$1.985$.  We therefore retain $K=4$ as the resource endpoint and
+$K=16$ as the latency endpoint, without scene-specific routing.
+
 \subsection{Coordinate and finite-solver interactions}
 
 The remaining components are reported as factorials because their effects are

@@ -175,6 +175,16 @@ outer iterations, and remains `2.5698x`/`1.1679x` Ceres. Retain robust support,
 but do not broaden either current policy. Tuned L2 C1+C5 remains promoted.
 See `benchmark_results/stage_c_huber_sentinel_report.md`.
 
+K>1 scaling gate (2026-08-11): the frozen tuned L2 C1+C5 stack was swept at
+K2/K4/K8/K16/K24 on Roman, Trafalgar, BAL52, and BAL3068, then K4 and K16 were
+confirmed unchanged on all 15 1DSfM and all 29 BAL scenes. K16/K4 geometric SSE
+is `0.953599x` on 1DSfM and `1.002768x` on BAL, while optimization time is
+`0.584x`/`0.510x`. K16 raises worker CPU to `1.456x`/`1.568x` and traffic to
+`1.927x`/`1.985x`. Retain K4 as the global resource endpoint and K16 as the
+global latency endpoint. These are two deployment budgets, not per-scene
+settings. K24 is not promoted. See
+`benchmark_results/stage_c_scaling_confirmation_k4_16_i30/report.md`.
+
 Loss-factorial clarification (2026-08-11): fallback safety does not imply
 endpoint dominance over a separately run plain trajectory. Roman's C1 and C5
 main effects both lose but interact beneficially; Yorkminster's main effects
