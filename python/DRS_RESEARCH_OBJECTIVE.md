@@ -194,6 +194,17 @@ maximum optimization-time CV is `1.75%`. Mean K16/K4 optimization ratios are
 K16 frozen as the global resource and latency endpoints. See
 `benchmark_results/stage_c_scaling_repeats_k4_16_i30/report.md`.
 
+Publication comparison gate (2026-08-11): the cohort-explicit final table is
+closed without new tuning. On all-15 1DSfM, specialized K1/T24/I80 is
+`1.022987x` Ceres, while frozen K4/K16 I30 are `2.052536x`/`1.957296x`; K1 is a
+local diagnostic with a different work budget, not the distributed method. On
+all-29 BAL, K4/K16 are `1.007309x`/`1.010098x` Ceres. Verified BAE is reported
+only as a six-scene RTX 5090 inset: CG is `0.944668x` Ceres and is
+basin-sensitive on Trafalgar. There is no authoritative K1 all-29 BAL, BAE
+all-15 1DSfM, or BAE all-29 BAL artifact. CPU/GPU times remain separate timing
+classes; no cross-hardware speedup is claimed. See
+`benchmark_results/stage_c_publication_comparison/report.md`.
+
 Loss-factorial clarification (2026-08-11): fallback safety does not imply
 endpoint dominance over a separately run plain trajectory. Roman's C1 and C5
 main effects both lose but interact beneficially; Yorkminster's main effects

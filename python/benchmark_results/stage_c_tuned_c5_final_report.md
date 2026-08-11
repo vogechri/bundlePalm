@@ -42,3 +42,11 @@ rejection/oracle counts and are SSE-bitwise identical in `7/8` cases; maximum
 relative SSE spread is `2.956e-09` and maximum optimization-time CV is `1.75%`.
 Mean K16/K4 optimization ratios are `0.5158x` on 1DSfM and `0.4190x` on BAL.
 See `stage_c_scaling_repeats_k4_16_i30/report.md`.
+
+## Final reference comparison
+
+The cohort-explicit publication table compares K1/K4/K16 with Ceres on all 15
+1DSfM scenes, K4/K16 with Ceres on all 29 BAL scenes, and verified BAE only on
+its matched six-scene 1DSfM cohort. K1 and BAE coverage gaps are explicit, and
+CPU/GPU timings are not turned into cross-hardware speedups. See
+`stage_c_publication_comparison/report.md`.

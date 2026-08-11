@@ -156,6 +156,40 @@ counts are identical, and the maximum optimization-time coefficient of
 variation is $1.75\%$.  Mean $K=16$/$K=4$ optimization-time ratios are $0.5158$
 on 1DSfM and $0.4190$ on BAL, with ratio CV below $0.5\%$.
 
+Table~\ref{tab:stage-c-final-reference} separates the complete cohorts.  K1 is
+the specialized local diagnostic at I80/T24; K4 and K16 are the frozen C1+C5
+I30 endpoints with one thread per cluster; Ceres is left-$\mathrm{SE}(3)$ at
+I90/T16.  Timings are reported within their named CPU boundary, not as matched
+work comparisons.
+
+\begin{table}[t]
+  \centering
+  \caption{Final complete-cohort comparison.  SSE values are geometric ratios
+  to independently evaluated Ceres states; time is aggregate optimizer time.}
+  \label{tab:stage-c-final-reference}
+  \small
+  \begin{tabular}{llrrr}
+    \hline
+    Cohort & Method & SSE/Ceres & W/T/L & Time (s) \\
+    \hline
+    1DSfM-15 & Ceres & 1.000000 & 0/15/0 & 219.521 \\
+    1DSfM-15 & K1 diagnostic & 1.022987 & 11/0/4 & 1048.950 \\
+    1DSfM-15 & K4 resource & 2.052536 & 0/0/15 & 160.607 \\
+    1DSfM-15 & K16 latency & 1.957296 & 0/0/15 & 93.793 \\
+    BAL-29 & Ceres & 1.000000 & 0/29/0 & 1803.780 \\
+    BAL-29 & K4 resource & 1.007309 & 8/0/21 & 939.466 \\
+    BAL-29 & K16 latency & 1.010098 & 8/0/21 & 479.087 \\
+    \hline
+  \end{tabular}
+\end{table}
+
+Verified BAE coverage is limited to six 1DSfM scenes.  On that matched inset,
+Ceres, K1, K4, K16, BAE-CG, and BAE-Nesterov are respectively $1.000000$,
+$1.041629$, $1.922802$, $1.745880$, $0.944668$, and $1.091773$ times Ceres.
+BAE-CG uses an RTX~5090 and is basin-sensitive on Trafalgar; its 56.170-second
+GPU time is not compared as a speedup against CPU timings.  No authoritative
+K1 BAL-29, BAE 1DSfM-15, or BAE BAL-29 result is available.
+
 \subsection{Coordinate and finite-solver interactions}
 
 The remaining components are reported as factorials because their effects are

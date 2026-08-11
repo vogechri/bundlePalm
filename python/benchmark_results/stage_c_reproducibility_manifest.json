@@ -5145,6 +5145,248 @@
     }
   },
   "objective": "standard Snavely pixel sum-squared error",
+  "publication_comparison": {
+    "coverage_limits": {
+      "bae_all15_1dsfm": "not available; verified matched coverage is six scenes",
+      "bae_all29_bal": "not available",
+      "k1_bal": "not available"
+    },
+    "cross_hardware_speedup_claimed": false,
+    "objective": "standard Snavely pixel sum-squared error",
+    "panels": {
+      "all15_1dsfm": [
+        {
+          "label": "Ceres",
+          "optimization_seconds": 219.52092426,
+          "overall_seconds": 223.853494569,
+          "peak_memory_mib": null,
+          "scenes": 15,
+          "specification": "left-SE3, I90, T16",
+          "sse_vs_ceres_geometric": 1.0,
+          "sse_vs_ceres_summed": 1.0,
+          "timing_class": "CPU native solve",
+          "wins_ties_losses_vs_ceres": [
+            0,
+            15,
+            0
+          ]
+        },
+        {
+          "label": "DRS K1",
+          "optimization_seconds": 1048.9502953140036,
+          "overall_seconds": 1067.792203178993,
+          "peak_memory_mib": null,
+          "scenes": 15,
+          "specification": "specialized local diagnostic, I80, T24",
+          "sse_vs_ceres_geometric": 1.022986601078463,
+          "sse_vs_ceres_summed": 1.0871270409684215,
+          "timing_class": "CPU DRS optimization",
+          "wins_ties_losses_vs_ceres": [
+            11,
+            0,
+            4
+          ]
+        },
+        {
+          "label": "DRS K4",
+          "optimization_seconds": 160.60661371600145,
+          "overall_seconds": 175.44511014998716,
+          "peak_memory_mib": null,
+          "scenes": 15,
+          "specification": "frozen C1+C5 resource endpoint, I30, T1/cluster",
+          "sse_vs_ceres_geometric": 2.052536241509064,
+          "sse_vs_ceres_summed": 1.9241827194254413,
+          "timing_class": "CPU DRS optimization",
+          "wins_ties_losses_vs_ceres": [
+            0,
+            0,
+            15
+          ]
+        },
+        {
+          "label": "DRS K16",
+          "optimization_seconds": 93.79306116799853,
+          "overall_seconds": 121.39260207900224,
+          "peak_memory_mib": null,
+          "scenes": 15,
+          "specification": "frozen C1+C5 latency endpoint, I30, T1/cluster",
+          "sse_vs_ceres_geometric": 1.9572964937772823,
+          "sse_vs_ceres_summed": 1.848750444487779,
+          "timing_class": "CPU DRS optimization",
+          "wins_ties_losses_vs_ceres": [
+            0,
+            0,
+            15
+          ]
+        }
+      ],
+      "all29_bal": [
+        {
+          "label": "Ceres",
+          "optimization_seconds": 1803.779569737,
+          "overall_seconds": 1827.4252217599999,
+          "peak_memory_mib": null,
+          "scenes": 29,
+          "specification": "left-SE3, I90, T16",
+          "sse_vs_ceres_geometric": 1.0,
+          "sse_vs_ceres_summed": 1.0,
+          "timing_class": "CPU native solve",
+          "wins_ties_losses_vs_ceres": [
+            0,
+            29,
+            0
+          ]
+        },
+        {
+          "label": "DRS K4",
+          "optimization_seconds": 939.4658011429856,
+          "overall_seconds": 1124.4428099309807,
+          "peak_memory_mib": null,
+          "scenes": 29,
+          "specification": "frozen C1+C5 resource endpoint, I30, T1/cluster",
+          "sse_vs_ceres_geometric": 1.0073093136226834,
+          "sse_vs_ceres_summed": 1.0107262618128918,
+          "timing_class": "CPU DRS optimization",
+          "wins_ties_losses_vs_ceres": [
+            8,
+            0,
+            21
+          ]
+        },
+        {
+          "label": "DRS K16",
+          "optimization_seconds": 479.0873021229927,
+          "overall_seconds": 703.5367292670053,
+          "peak_memory_mib": null,
+          "scenes": 29,
+          "specification": "frozen C1+C5 latency endpoint, I30, T1/cluster",
+          "sse_vs_ceres_geometric": 1.010097555028574,
+          "sse_vs_ceres_summed": 1.0160170641529662,
+          "timing_class": "CPU DRS optimization",
+          "wins_ties_losses_vs_ceres": [
+            8,
+            0,
+            21
+          ]
+        }
+      ],
+      "bae_six_scene_inset": [
+        {
+          "label": "Ceres",
+          "optimization_seconds": 103.50401621,
+          "overall_seconds": 105.958975252,
+          "peak_memory_mib": null,
+          "scenes": 6,
+          "specification": "left-SE3, I90, T16",
+          "sse_vs_bae_cg_geometric": 1.0585732296464545,
+          "sse_vs_ceres_geometric": 1.0,
+          "sse_vs_ceres_summed": 1.0,
+          "timing_class": "CPU native solve",
+          "wins_ties_losses_vs_ceres": [
+            0,
+            6,
+            0
+          ]
+        },
+        {
+          "label": "DRS K1",
+          "optimization_seconds": 543.5945131850094,
+          "overall_seconds": 553.5550814499875,
+          "peak_memory_mib": null,
+          "scenes": 6,
+          "specification": "specialized local diagnostic, I80, T24",
+          "sse_vs_bae_cg_geometric": 1.1026405667129016,
+          "sse_vs_ceres_geometric": 1.0416289925272006,
+          "sse_vs_ceres_summed": 1.1356375150863935,
+          "timing_class": "CPU DRS optimization",
+          "wins_ties_losses_vs_ceres": [
+            4,
+            0,
+            2
+          ]
+        },
+        {
+          "label": "DRS K4",
+          "optimization_seconds": 93.26179746900743,
+          "overall_seconds": 101.68569141599437,
+          "peak_memory_mib": null,
+          "scenes": 6,
+          "specification": "frozen C1+C5 resource endpoint, I30, T1/cluster",
+          "sse_vs_bae_cg_geometric": 2.0354268547875947,
+          "sse_vs_ceres_geometric": 1.9228021243909525,
+          "sse_vs_ceres_summed": 1.7206954761697502,
+          "timing_class": "CPU DRS optimization",
+          "wins_ties_losses_vs_ceres": [
+            0,
+            0,
+            6
+          ]
+        },
+        {
+          "label": "DRS K16",
+          "optimization_seconds": 52.82296428299014,
+          "overall_seconds": 65.4050691789962,
+          "peak_memory_mib": null,
+          "scenes": 6,
+          "specification": "frozen C1+C5 latency endpoint, I30, T1/cluster",
+          "sse_vs_bae_cg_geometric": 1.8481414933975822,
+          "sse_vs_ceres_geometric": 1.7458796818570879,
+          "sse_vs_ceres_summed": 1.627072867106782,
+          "timing_class": "CPU DRS optimization",
+          "wins_ties_losses_vs_ceres": [
+            0,
+            0,
+            6
+          ]
+        },
+        {
+          "label": "BAE Schur-PCG CG",
+          "optimization_seconds": 56.17,
+          "overall_seconds": null,
+          "peak_memory_mib": 1350.9,
+          "scenes": 6,
+          "specification": "verified exported state, I90",
+          "sse_vs_bae_cg_geometric": 1.0,
+          "sse_vs_ceres_geometric": 0.9446677584449995,
+          "sse_vs_ceres_summed": 0.8944840686685156,
+          "timing_class": "RTX 5090 GPU optimization",
+          "wins_ties_losses_vs_ceres": [
+            4,
+            0,
+            2
+          ]
+        },
+        {
+          "label": "BAE Schur-PCG Nesterov",
+          "optimization_seconds": 90.859,
+          "overall_seconds": null,
+          "peak_memory_mib": 1350.9,
+          "scenes": 6,
+          "specification": "verified exported state, I90",
+          "sse_vs_bae_cg_geometric": 1.1557219038966526,
+          "sse_vs_ceres_geometric": 1.091773220339838,
+          "sse_vs_ceres_summed": 1.1472302023672774,
+          "timing_class": "RTX 5090 GPU optimization",
+          "wins_ties_losses_vs_ceres": [
+            4,
+            0,
+            2
+          ]
+        }
+      ]
+    },
+    "report": "benchmark_results/stage_c_publication_comparison/report.md",
+    "source_artifacts": {
+      "bae_cg": "benchmark_results/sfm_init_1dsfm_bae_exported/results.jsonl",
+      "bae_nesterov": "benchmark_results/sfm_init_1dsfm_bae_k1_verified/results.jsonl",
+      "ceres_1dsfm": "benchmark_results/1dsfm_drs_ceres_se3_all15/ceres/results.jsonl",
+      "ceres_bal": "benchmark_results/bal_ceres_se3_all29/results.jsonl",
+      "k1": "benchmark_results/1dsfm_k1_schur_pcg_t24_all15_i80/custom/proximal_point_block_se3_left_lip0.00625_curvature_persistent_tr.jsonl",
+      "k4_k16_1dsfm": "benchmark_results/stage_c_scaling_confirmation_k4_16_i30/1dsfm/c1_c5/themelis_nesterov_ls01_block_full_se3_left_persistent_tr_adaptl1-2_h0.35_l0.20_w3_start5_stage_c_final_c1_c5.jsonl",
+      "k4_k16_bal": "benchmark_results/stage_c_scaling_confirmation_k4_16_i30/bal/c1_c5/themelis_nesterov_ls01_block_full_se3_left_persistent_tr_adaptl1-2_h0.35_l0.20_w3_start5_stage_c_final_c1_c5.jsonl"
+    },
+    "summary": "benchmark_results/stage_c_publication_comparison/summary.json"
+  },
   "recovery_boundary": {
     "artifact_only_paths": [
       "exact checkpoint/BAE handoff",
@@ -5242,7 +5484,7 @@
   },
   "repository": {
     "branch": "user/chvogel/notSamePerformanceNew2c",
-    "commit": "9b8e03a137eb56271a8bf95cfcf4557af8e1425a",
+    "commit": "445ed461c8ea0ceec94aecba6c71bd400b9ee982",
     "working_tree_clean": false
   },
   "scaling_confirmation": {

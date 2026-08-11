@@ -288,6 +288,7 @@ def build_manifest():
         "huber_sentinel": {},
         "scaling_confirmation": {},
         "scaling_repeatability": {},
+        "publication_comparison": {},
         "relative_summaries": {},
     }
 
@@ -620,6 +621,48 @@ def build_manifest():
         "endpoint_ratios": repeats["endpoint_ratios"],
         "summary": str(repeat_path.relative_to(ROOT)),
         "report": "benchmark_results/stage_c_scaling_repeats_k4_16_i30/report.md",
+    }
+
+    publication_path = RESULTS / "stage_c_publication_comparison/summary.json"
+    publication = json.loads(publication_path.read_text(encoding="utf-8"))
+    expected_panels = {
+        "all15_1dsfm": (["Ceres", "DRS K1", "DRS K4", "DRS K16"], 15),
+        "all29_bal": (["Ceres", "DRS K4", "DRS K16"], 29),
+        "bae_six_scene_inset": (
+            [
+                "Ceres",
+                "DRS K1",
+                "DRS K4",
+                "DRS K16",
+                "BAE Schur-PCG CG",
+                "BAE Schur-PCG Nesterov",
+            ],
+            6,
+        ),
+    }
+    for panel, (labels, scenes) in expected_panels.items():
+        rows = publication.get(panel, [])
+        if [row.get("label") for row in rows] != labels:
+            raise ValueError(f"publication method coverage mismatch for {panel}")
+        if any(row.get("scenes") != scenes for row in rows):
+            raise ValueError(f"publication scene coverage mismatch for {panel}")
+    coverage_limits = publication.get("coverage_limits", {})
+    if not (
+        coverage_limits.get("k1_bal") == "not available"
+        and coverage_limits.get("bae_all29_bal") == "not available"
+        and coverage_limits.get("bae_all15_1dsfm", "").startswith("not available")
+    ):
+        raise ValueError("publication coverage limits are incomplete")
+    manifest["publication_comparison"] = {
+        "objective": publication["objective"],
+        "panels": {
+            panel: publication[panel] for panel in expected_panels
+        },
+        "coverage_limits": coverage_limits,
+        "source_artifacts": publication["source_artifacts"],
+        "summary": str(publication_path.relative_to(ROOT)),
+        "report": "benchmark_results/stage_c_publication_comparison/report.md",
+        "cross_hardware_speedup_claimed": False,
     }
     return manifest
 
