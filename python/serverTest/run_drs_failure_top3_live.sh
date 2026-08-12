@@ -25,6 +25,7 @@ SHARED_CAMERA_STEP_GRID=${SHARED_CAMERA_STEP_GRID:-1}
 SHARED_CAMERA_STEP_SCALE=${SHARED_CAMERA_STEP_SCALE:-1.0}
 SHARED_CAMERA_DISAGREEMENT_SCALE=${SHARED_CAMERA_DISAGREEMENT_SCALE:-1.0}
 METRIC_PROPOSAL_DISAGREEMENT_SCALE=${METRIC_PROPOSAL_DISAGREEMENT_SCALE:-1.0}
+METRIC_PROPOSAL_DISAGREEMENT_UNTIL=${METRIC_PROPOSAL_DISAGREEMENT_UNTIL:-0}
 METRIC_PROPOSAL_DISAGREEMENT_GRID=${METRIC_PROPOSAL_DISAGREEMENT_GRID:-1}
 METRIC_PROPOSAL_SUBSPACE_SCALES=${METRIC_PROPOSAL_SUBSPACE_SCALES:-1,1,1}
 METRIC_PROPOSAL_DISAGREEMENT_THRESHOLD=${METRIC_PROPOSAL_DISAGREEMENT_THRESHOLD:--1.0}
@@ -96,6 +97,7 @@ TARGET_TRANSFORMED_LIPSCHITZ=${TARGET_TRANSFORMED_LIPSCHITZ:-0.475}
 MAXIMUM_BLOCK_REGULARIZATION=${MAXIMUM_BLOCK_REGULARIZATION:-0.5}
 RELAXATION=${RELAXATION:-1.0}
 OUTER_ACCELERATION=${OUTER_ACCELERATION:-none}
+OUTER_ACCELERATION_UNTIL=${OUTER_ACCELERATION_UNTIL:-0}
 LINE_SEARCH_GRID=${LINE_SEARCH_GRID:-0,1}
 ACCELERATION_RESTART_AFTER=${ACCELERATION_RESTART_AFTER:-3}
 PENALTY_MULTIPLIER=${PENALTY_MULTIPLIER:-1.0}
@@ -138,6 +140,9 @@ if [[ "$OUTER_ACCELERATION" != "none" ]]; then
   grid_name=${LINE_SEARCH_GRID//,/}
   grid_name=${grid_name//./p}
   VARIANT_NAME="${OUTER_ACCELERATION}_ls${grid_name}_${PROXIMAL_METRIC}_${CONSENSUS_METRIC}"
+fi
+if [[ "$OUTER_ACCELERATION_UNTIL" != "0" ]]; then
+  VARIANT_NAME="${VARIANT_NAME}_accel_until${OUTER_ACCELERATION_UNTIL}"
 fi
 if [[ "$RELAXATION" != "1" && "$RELAXATION" != "1.0" ]]; then
   VARIANT_NAME="${VARIANT_NAME}_relax${RELAXATION}"
@@ -186,6 +191,9 @@ if [[ "$SHARED_CAMERA_DISAGREEMENT_SCALE" != "1" && "$SHARED_CAMERA_DISAGREEMENT
 fi
 if [[ "$METRIC_PROPOSAL_DISAGREEMENT_SCALE" != "1" && "$METRIC_PROPOSAL_DISAGREEMENT_SCALE" != "1.0" ]]; then
   VARIANT_NAME="${VARIANT_NAME}_metric_proposal${METRIC_PROPOSAL_DISAGREEMENT_SCALE}"
+fi
+if [[ "$METRIC_PROPOSAL_DISAGREEMENT_UNTIL" != "0" ]]; then
+  VARIANT_NAME="${VARIANT_NAME}_until${METRIC_PROPOSAL_DISAGREEMENT_UNTIL}"
 fi
 if [[ "$METRIC_PROPOSAL_DISAGREEMENT_GRID" != "1" ]]; then
   grid_name=${METRIC_PROPOSAL_DISAGREEMENT_GRID//,/}
@@ -567,6 +575,7 @@ for problem in "${PROBLEMS[@]}"; do
             --shared-camera-step-scale "$SHARED_CAMERA_STEP_SCALE" \
             --shared-camera-disagreement-scale "$SHARED_CAMERA_DISAGREEMENT_SCALE" \
             --metric-proposal-disagreement-scale "$METRIC_PROPOSAL_DISAGREEMENT_SCALE" \
+            --metric-proposal-disagreement-until "$METRIC_PROPOSAL_DISAGREEMENT_UNTIL" \
             --metric-proposal-disagreement-grid "$METRIC_PROPOSAL_DISAGREEMENT_GRID" \
             --metric-proposal-subspace-scales "$METRIC_PROPOSAL_SUBSPACE_SCALES" \
             --metric-proposal-disagreement-threshold "$METRIC_PROPOSAL_DISAGREEMENT_THRESHOLD" \
@@ -600,6 +609,7 @@ for problem in "${PROBLEMS[@]}"; do
             --minimum-camera-landmarks "$MINIMUM_CAMERA_LANDMARKS" \
             --max-refinement-passes "$MAX_REFINEMENT_PASSES" \
             --outer-acceleration "$OUTER_ACCELERATION" \
+            --outer-acceleration-until "$OUTER_ACCELERATION_UNTIL" \
             --line-search-grid "$LINE_SEARCH_GRID" \
             --acceleration-restart-after "$ACCELERATION_RESTART_AFTER" \
             --proximal-metric "$PROXIMAL_METRIC" \
@@ -650,6 +660,7 @@ for problem in "${PROBLEMS[@]}"; do
             --shared-camera-step-scale "$SHARED_CAMERA_STEP_SCALE" \
             --shared-camera-disagreement-scale "$SHARED_CAMERA_DISAGREEMENT_SCALE" \
             --metric-proposal-disagreement-scale "$METRIC_PROPOSAL_DISAGREEMENT_SCALE" \
+            --metric-proposal-disagreement-until "$METRIC_PROPOSAL_DISAGREEMENT_UNTIL" \
             --metric-proposal-disagreement-grid "$METRIC_PROPOSAL_DISAGREEMENT_GRID" \
             --metric-proposal-subspace-scales "$METRIC_PROPOSAL_SUBSPACE_SCALES" \
             --metric-proposal-disagreement-threshold "$METRIC_PROPOSAL_DISAGREEMENT_THRESHOLD" \
@@ -683,6 +694,7 @@ for problem in "${PROBLEMS[@]}"; do
             --minimum-camera-landmarks "$MINIMUM_CAMERA_LANDMARKS" \
             --max-refinement-passes "$MAX_REFINEMENT_PASSES" \
             --outer-acceleration "$OUTER_ACCELERATION" \
+            --outer-acceleration-until "$OUTER_ACCELERATION_UNTIL" \
             --line-search-grid "$LINE_SEARCH_GRID" \
             --acceleration-restart-after "$ACCELERATION_RESTART_AFTER" \
             --proximal-metric "$PROXIMAL_METRIC" \

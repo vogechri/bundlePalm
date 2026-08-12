@@ -1,4 +1,246 @@
 {
+  "base_backbone_hybrid": {
+    "configuration": "K24 local Nesterov, persistent DRS trust, curvature 0.4 recovery/decay, metric 75, C1, shared-only camera proximal",
+    "decision": "shared-only proposal damping plus C1 passes I30 on both complete families; no tested I90 continuation is promoted",
+    "horizon_gates": {
+      "dual_until30_i90": {
+        "1dsfm": {
+          "base_optimization_seconds": 258.56243677588645,
+          "completed": 15,
+          "optimization_seconds": 160.68843776705035,
+          "optimization_vs_base": 0.6214686083977847,
+          "recovery_exhausted": 0,
+          "versus_base": {
+            "geometric_sse": 1.1362236697903592,
+            "losses": 14,
+            "wins": 1,
+            "worst": 1.3913862882773285
+          }
+        },
+        "bal": {
+          "base_optimization_seconds": 1271.5647784890025,
+          "completed": 29,
+          "optimization_seconds": 806.7584160820406,
+          "optimization_vs_base": 0.6344611220206255,
+          "recovery_exhausted": 0,
+          "versus_base": {
+            "geometric_sse": 1.0092610457532927,
+            "losses": 25,
+            "wins": 4,
+            "worst": 1.0452951471827119
+          }
+        }
+      },
+      "permanent_i90": {
+        "1dsfm": {
+          "base_optimization_seconds": 258.56243677588645,
+          "completed": 14,
+          "optimization_seconds": 283.06099485702,
+          "optimization_vs_base": 1.0947490996241194,
+          "recovery_exhausted": 1,
+          "versus_base": {
+            "geometric_sse": 1.0171873415590031,
+            "losses": 8,
+            "wins": 7,
+            "worst": 1.3938645368061342
+          }
+        },
+        "bal": {
+          "base_optimization_seconds": 1271.5647784890025,
+          "completed": 29,
+          "optimization_seconds": 1340.4354060870246,
+          "optimization_vs_base": 1.054162107006346,
+          "recovery_exhausted": 0,
+          "versus_base": {
+            "geometric_sse": 1.0019504777005734,
+            "losses": 18,
+            "wins": 11,
+            "worst": 1.0233623075933742
+          }
+        }
+      },
+      "proposal_until30_i90": {
+        "1dsfm": {
+          "base_optimization_seconds": 258.56243677588645,
+          "completed": 15,
+          "optimization_seconds": 263.2504408680252,
+          "optimization_vs_base": 1.0181310330711422,
+          "recovery_exhausted": 0,
+          "versus_base": {
+            "geometric_sse": 1.0228087061802515,
+            "losses": 9,
+            "wins": 6,
+            "worst": 1.3843185480472293
+          }
+        },
+        "bal": {
+          "base_optimization_seconds": 1271.5647784890025,
+          "completed": 29,
+          "optimization_seconds": 1262.14590626891,
+          "optimization_vs_base": 0.992592691792482,
+          "recovery_exhausted": 0,
+          "versus_base": {
+            "geometric_sse": 1.001477927267519,
+            "losses": 17,
+            "wins": 12,
+            "worst": 1.0238377001151782
+          }
+        }
+      }
+    },
+    "reports": {
+      "all_scene_c1_c5": "benchmark_results/stage_c_base_backbone_confirmation_k24_i30/report.md",
+      "dual_until30_i90": "benchmark_results/stage_c_transient_shared_proposal_c1_until30_k24_i90/report.md",
+      "permanent_i90": "benchmark_results/stage_c_shared_proposal_c1_k24_i90/report.md",
+      "proposal_until30_i90": "benchmark_results/stage_c_transient_shared_proposal_c1_k24_i90/report.md",
+      "sentinel_factorial": "benchmark_results/stage_c_base_backbone_factorial_v2_k24_i30/report.md",
+      "structural_factorial": "benchmark_results/stage_c_base_structure_factorial_k24_i30/report.md"
+    },
+    "structural_factorial": {
+      "1dsfm": {
+        "arms": {
+          "legacy_no_proposal": {
+            "completed": 15,
+            "optimization_seconds": 80.25030565801717,
+            "recovery_exhausted": 0,
+            "versus_base_i30": {
+              "geometric_sse": 0.9861060178124762,
+              "losses": 7,
+              "wins": 8,
+              "worst": 1.1321802333196334
+            }
+          },
+          "legacy_proposal": {
+            "completed": 15,
+            "optimization_seconds": 90.44209197400778,
+            "recovery_exhausted": 0,
+            "versus_base_i30": {
+              "geometric_sse": 0.9469050377719288,
+              "losses": 3,
+              "wins": 12,
+              "worst": 1.0267198287660428
+            }
+          },
+          "shared_no_proposal": {
+            "completed": 15,
+            "optimization_seconds": 86.10153747700679,
+            "recovery_exhausted": 0,
+            "versus_base_i30": {
+              "geometric_sse": 1.0189645468405988,
+              "losses": 11,
+              "wins": 4,
+              "worst": 1.1621249162808003
+            }
+          },
+          "shared_proposal": {
+            "completed": 15,
+            "optimization_seconds": 89.64453183305159,
+            "recovery_exhausted": 0,
+            "versus_base_i30": {
+              "geometric_sse": 0.9929774889603838,
+              "losses": 7,
+              "wins": 8,
+              "worst": 1.1224615561991755
+            }
+          }
+        },
+        "proposal_effect_with_legacy_proximal": {
+          "geometric_sse": 0.9602466881527519,
+          "losses": 3,
+          "wins": 12,
+          "worst": 1.045477557126253
+        },
+        "scene_count": 15,
+        "shared_only_effect_without_proposal": {
+          "geometric_sse": 1.0333214973183251,
+          "losses": 12,
+          "wins": 3,
+          "worst": 1.160648484030526
+        },
+        "shared_proposal_interaction": {
+          "geometric_sse": 1.0486558306806177,
+          "losses": 13,
+          "wins": 2,
+          "worst": 1.1860467443726508
+        }
+      },
+      "bal": {
+        "arms": {
+          "legacy_no_proposal": {
+            "completed": 29,
+            "optimization_seconds": 367.2926195910113,
+            "recovery_exhausted": 0,
+            "versus_base_i30": {
+              "geometric_sse": 0.9986298292323383,
+              "losses": 16,
+              "wins": 13,
+              "worst": 1.0384352332226396
+            }
+          },
+          "legacy_proposal": {
+            "completed": 28,
+            "optimization_seconds": 404.90867594699375,
+            "recovery_exhausted": 1,
+            "versus_base_i30": {
+              "geometric_sse": 1.0028730005173792,
+              "losses": 16,
+              "wins": 13,
+              "worst": 1.0680796479884875
+            }
+          },
+          "shared_no_proposal": {
+            "completed": 29,
+            "optimization_seconds": 378.5369638420161,
+            "recovery_exhausted": 0,
+            "versus_base_i30": {
+              "geometric_sse": 0.9988426285821929,
+              "losses": 16,
+              "wins": 13,
+              "worst": 1.0384352332226396
+            }
+          },
+          "shared_proposal": {
+            "completed": 29,
+            "optimization_seconds": 412.1913126879808,
+            "recovery_exhausted": 0,
+            "versus_base_i30": {
+              "geometric_sse": 0.9974278757615767,
+              "losses": 15,
+              "wins": 14,
+              "worst": 1.038204863152622
+            }
+          }
+        },
+        "proposal_effect_with_legacy_proximal": {
+          "geometric_sse": 1.0042489931312213,
+          "losses": 10,
+          "wins": 19,
+          "worst": 1.1718134755728828
+        },
+        "scene_count": 29,
+        "shared_only_effect_without_proposal": {
+          "geometric_sse": 1.0002130913213538,
+          "losses": 11,
+          "wins": 3,
+          "worst": 1.003452237638507
+        },
+        "shared_proposal_interaction": {
+          "geometric_sse": 0.9945704742744161,
+          "losses": 12,
+          "wins": 3,
+          "worst": 1.0065457360346204
+        }
+      }
+    },
+    "summaries": {
+      "all_scene_c1_c5": "benchmark_results/stage_c_base_backbone_confirmation_k24_i30/summary.json",
+      "dual_until30_i90": "benchmark_results/stage_c_transient_shared_proposal_c1_until30_k24_i90/summary.json",
+      "permanent_i90": "benchmark_results/stage_c_shared_proposal_c1_k24_i90/summary.json",
+      "proposal_until30_i90": "benchmark_results/stage_c_transient_shared_proposal_c1_k24_i90/summary.json",
+      "sentinel_factorial": "benchmark_results/stage_c_base_backbone_factorial_v2_k24_i30/summary.json",
+      "structural_factorial": "benchmark_results/stage_c_base_structure_factorial_k24_i30/summary.json"
+    }
+  },
   "c4_inner_solver": {
     "decision": {
       "artifact": "benchmark_results/c4_k24_postcrash_all15_i30/DECISION.md",
@@ -5590,7 +5832,7 @@
   },
   "repository": {
     "branch": "user/chvogel/notSamePerformanceNew2c",
-    "commit": "172f72027a070c99ee2c1ddfc115aef4054bc1f8",
+    "commit": "aec9253560383e0d4f4d15813b1d74fb4dd4506a",
     "working_tree_clean": false
   },
   "scaling_confirmation": {

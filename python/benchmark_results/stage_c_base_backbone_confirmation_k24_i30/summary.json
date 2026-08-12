@@ -1,0 +1,114 @@
+{
+  "1dsfm": {
+    "c1_c5_versus_c1": {
+      "geometric_sse": 1.0034971674653697,
+      "losses": 2,
+      "wins": 5,
+      "worst": 1.1303683380108838
+    },
+    "modes": {
+      "c1": {
+        "completed": 15,
+        "optimization_seconds": 86.10153747700679,
+        "recovery_exhausted": 0,
+        "versus_base_i30": {
+          "geometric_sse": 1.0189645468405988,
+          "losses": 11,
+          "wins": 4,
+          "worst": 1.1621249162808003
+        }
+      },
+      "c1_c5": {
+        "completed": 15,
+        "optimization_seconds": 95.89801495099528,
+        "recovery_exhausted": 0,
+        "versus_base_i30": {
+          "geometric_sse": 1.022528036502175,
+          "losses": 10,
+          "wins": 5,
+          "worst": 1.2645795061115022
+        }
+      }
+    },
+    "scenes": [
+      "alamo",
+      "ellis_island",
+      "gendarmenmarkt",
+      "madrid_metropolis",
+      "montreal_notre_dame",
+      "notre_dame",
+      "nyc_library",
+      "piazza_del_popolo",
+      "piccadilly",
+      "roman_forum",
+      "tower_of_london",
+      "trafalgar",
+      "union_square",
+      "vienna_cathedral",
+      "yorkminster"
+    ]
+  },
+  "bal": {
+    "c1_c5_versus_c1": {
+      "geometric_sse": 0.9998116433422539,
+      "losses": 1,
+      "wins": 5,
+      "worst": 1.0000815162150474
+    },
+    "modes": {
+      "c1": {
+        "completed": 29,
+        "optimization_seconds": 378.5369638420161,
+        "recovery_exhausted": 0,
+        "versus_base_i30": {
+          "geometric_sse": 0.9988426285821929,
+          "losses": 16,
+          "wins": 13,
+          "worst": 1.0384352332226396
+        }
+      },
+      "c1_c5": {
+        "completed": 29,
+        "optimization_seconds": 431.1267544459988,
+        "recovery_exhausted": 0,
+        "versus_base_i30": {
+          "geometric_sse": 0.9986544899230588,
+          "losses": 16,
+          "wins": 13,
+          "worst": 1.0384352332226396
+        }
+      }
+    },
+    "scenes": [
+      "bal1064",
+      "bal126",
+      "bal1266",
+      "bal135",
+      "bal142",
+      "bal1490",
+      "bal1723",
+      "bal173",
+      "bal1778",
+      "bal245",
+      "bal253",
+      "bal257",
+      "bal287",
+      "bal3068",
+      "bal308",
+      "bal356",
+      "bal394",
+      "bal427",
+      "bal49",
+      "bal52",
+      "bal646",
+      "bal744",
+      "bal783",
+      "bal871",
+      "bal88",
+      "bal89",
+      "bal931",
+      "bal951",
+      "bal961"
+    ]
+  }
+}

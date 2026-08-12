@@ -207,6 +207,23 @@ endpoints, not quality replacements for best base DRS. Verified BAE is only a
 six-scene RTX 5090 inset; no cross-hardware speedup is claimed. See
 `benchmark_results/stage_c_publication_comparison/report.md`.
 
+Base-backbone hybrid gate (2026-08-12): matched base-I30 analysis showed tuned
+C1+C5 was `1.129336x` base on all-15 1DSfM but `0.995443x` on all-29 BAL. A
+K24/I30 factorial restored local Nesterov, persistent DRS trust, curvature
+`0.4` recovery/decay, and camera metric `75`. C1 was the transferable component;
+C5 alone was neutral. The structural 2x2 then isolated proposal damping and
+shared-only proximal semantics. With C1 fixed, shared-only proposal damping
+applied only to duplicated cameras reaches `0.992977x` base-I30 on 1DSfM and
+`0.997428x` on BAL, completes all `15+29` scenes, and preserves the maintained
+product-space architecture. This is the first cross-family equal-I30 hybrid
+win. It is not promoted as a final endpoint: permanent I90 reaches
+`1.017187x`/`1.001950x` base with Tower recovery exhaustion; proposal cutoff
+I30 reaches `1.022809x`/`1.001478x`; cutting both proposal damping and C1 at
+I30 reaches `1.136224x`/`1.009261x`. The remaining problem is late-trajectory
+continuation, not initial component compatibility. See
+`benchmark_results/stage_c_base_structure_factorial_k24_i30/report.md` and
+`benchmark_results/stage_c_shared_proposal_c1_k24_i90/report.md`.
+
 Loss-factorial clarification (2026-08-11): fallback safety does not imply
 endpoint dominance over a separately run plain trajectory. Roman's C1 and C5
 main effects both lose but interact beneficially; Yorkminster's main effects

@@ -89,6 +89,20 @@ def test_drs_cli_exposes_themelis_fast_drs(monkeypatch):
     assert client_drs.parse_arguments().outer_acceleration == "themelis_nesterov"
 
 
+def test_outer_acceleration_cutoff_is_active_only_before_until():
+    assert client_drs.scheduled_outer_acceleration_active(30, 0)
+    assert client_drs.scheduled_outer_acceleration_active(30, 29)
+    assert not client_drs.scheduled_outer_acceleration_active(30, 30)
+    assert client_drs.scheduled_outer_acceleration_active(0, 90)
+
+
+def test_metric_proposal_cutoff_is_active_only_before_until():
+    assert client_drs.scheduled_metric_proposal_scale(0.5, 30, 0) == 0.5
+    assert client_drs.scheduled_metric_proposal_scale(0.5, 30, 29) == 0.5
+    assert client_drs.scheduled_metric_proposal_scale(0.5, 30, 30) == 1.0
+    assert client_drs.scheduled_metric_proposal_scale(0.5, 0, 90) == 0.5
+
+
 def test_factorized_metric_allows_themelis_acceleration(monkeypatch):
     monkeypatch.setenv("BUNDLE_PALM_CAMERA_UPDATE", "se3_left")
     monkeypatch.setenv("BUNDLE_PALM_DIRECT_TANGENT_NORMAL_EQUATIONS", "1")
@@ -135,6 +149,52 @@ def test_factorized_metric_allows_adaptive_local_depth(monkeypatch):
             "--global-schur-majorizer-observability-threshold",
             "0.55",
             "--adaptive-local-depth",
+        ],
+    )
+    client_drs.validate_arguments(client_drs.parse_arguments())
+
+
+def test_shared_only_proximal_allows_fixed_shared_proposal_damping(monkeypatch):
+    monkeypatch.setenv("BUNDLE_PALM_CAMERA_UPDATE", "se3_left")
+    monkeypatch.setenv("BUNDLE_PALM_DIRECT_TANGENT_NORMAL_EQUATIONS", "1")
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "client_drs.py",
+            "unused.bal",
+            "--proximal-metric",
+            "block",
+            "--consensus-metric",
+            "full",
+            "--shared-only-camera-proximal",
+            "--metric-proposal-disagreement-scale",
+            "0.5",
+        ],
+    )
+    client_drs.validate_arguments(client_drs.parse_arguments())
+
+
+def test_shared_proposal_damping_allows_iteration_cutoff(monkeypatch):
+    monkeypatch.setenv("BUNDLE_PALM_CAMERA_UPDATE", "se3_left")
+    monkeypatch.setenv("BUNDLE_PALM_DIRECT_TANGENT_NORMAL_EQUATIONS", "1")
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "client_drs.py",
+            "unused.bal",
+            "--iterations",
+            "90",
+            "--proximal-metric",
+            "block",
+            "--consensus-metric",
+            "full",
+            "--shared-only-camera-proximal",
+            "--metric-proposal-disagreement-scale",
+            "0.5",
+            "--metric-proposal-disagreement-until",
+            "30",
         ],
     )
     client_drs.validate_arguments(client_drs.parse_arguments())

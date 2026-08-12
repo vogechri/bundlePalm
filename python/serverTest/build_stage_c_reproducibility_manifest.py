@@ -289,6 +289,7 @@ def build_manifest():
         "scaling_confirmation": {},
         "scaling_repeatability": {},
         "publication_comparison": {},
+        "base_backbone_hybrid": {},
         "relative_summaries": {},
     }
 
@@ -676,6 +677,95 @@ def build_manifest():
         "report": "benchmark_results/stage_c_publication_comparison/report.md",
         "cross_hardware_speedup_claimed": False,
         "current_k4_k16_are_base_quality_replacements": False,
+    }
+
+    hybrid_paths = {
+        "sentinel_factorial": (
+            RESULTS / "stage_c_base_backbone_factorial_v2_k24_i30/summary.json"
+        ),
+        "all_scene_c1_c5": (
+            RESULTS / "stage_c_base_backbone_confirmation_k24_i30/summary.json"
+        ),
+        "structural_factorial": (
+            RESULTS / "stage_c_base_structure_factorial_k24_i30/summary.json"
+        ),
+        "permanent_i90": (
+            RESULTS / "stage_c_shared_proposal_c1_k24_i90/summary.json"
+        ),
+        "proposal_until30_i90": (
+            RESULTS / "stage_c_transient_shared_proposal_c1_k24_i90/summary.json"
+        ),
+        "dual_until30_i90": (
+            RESULTS
+            / "stage_c_transient_shared_proposal_c1_until30_k24_i90/summary.json"
+        ),
+    }
+    hybrid = {
+        name: json.loads(path.read_text(encoding="utf-8"))
+        for name, path in hybrid_paths.items()
+    }
+    shared_proposal = hybrid["structural_factorial"]
+    for family, expected_scenes in (("1dsfm", 15), ("bal", 29)):
+        if len(shared_proposal[family]["scenes"]) != expected_scenes:
+            raise ValueError(f"hybrid structural coverage mismatch for {family}")
+        arm = shared_proposal[family]["arms"]["shared_proposal"]
+        if arm["completed"] != expected_scenes or arm["recovery_exhausted"] != 0:
+            raise ValueError(f"hybrid shared-proposal completion mismatch for {family}")
+    if not (
+        shared_proposal["1dsfm"]["arms"]["shared_proposal"]
+        ["versus_base_i30"]["geometric_sse"] < 1.0
+        and shared_proposal["bal"]["arms"]["shared_proposal"]
+        ["versus_base_i30"]["geometric_sse"] < 1.0
+    ):
+        raise ValueError("hybrid shared-proposal I30 gate did not pass")
+    for gate in ("permanent_i90", "proposal_until30_i90", "dual_until30_i90"):
+        if not all(
+            hybrid[gate][family]["versus_base"]["geometric_sse"] > 1.0
+            for family in ("1dsfm", "bal")
+        ):
+            raise ValueError(f"hybrid I90 rejection mismatch for {gate}")
+    manifest["base_backbone_hybrid"] = {
+        "configuration": (
+            "K24 local Nesterov, persistent DRS trust, curvature 0.4 "
+            "recovery/decay, metric 75, C1, shared-only camera proximal"
+        ),
+        "structural_factorial": {
+            family: {
+                "scene_count": len(record["scenes"]),
+                "arms": record["arms"],
+                "proposal_effect_with_legacy_proximal": record[
+                    "proposal_effect_with_legacy_proximal"
+                ],
+                "shared_only_effect_without_proposal": record[
+                    "shared_only_effect_without_proposal"
+                ],
+                "shared_proposal_interaction": record[
+                    "shared_proposal_interaction"
+                ],
+            }
+            for family, record in shared_proposal.items()
+        },
+        "horizon_gates": {
+            gate: {
+                family: {
+                    key: value for key, value in record.items()
+                    if key not in ("rows", "scenes")
+                }
+                for family, record in hybrid[gate].items()
+            }
+            for gate in ("permanent_i90", "proposal_until30_i90", "dual_until30_i90")
+        },
+        "decision": (
+            "shared-only proposal damping plus C1 passes I30 on both complete "
+            "families; no tested I90 continuation is promoted"
+        ),
+        "summaries": {
+            name: str(path.relative_to(ROOT)) for name, path in hybrid_paths.items()
+        },
+        "reports": {
+            name: str(path.with_name("report.md").relative_to(ROOT))
+            for name, path in hybrid_paths.items()
+        },
     }
     return manifest
 

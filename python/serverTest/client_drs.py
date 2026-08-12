@@ -583,6 +583,16 @@ def damp_metric_projected_camera_proposals(
     return disagreement_ratio, applied_scale
 
 
+def scheduled_metric_proposal_scale(scale, until, iteration):
+    """Return the fixed proposal scale for this outer iteration."""
+    return scale if until == 0 or iteration < until else 1.0
+
+
+def scheduled_outer_acceleration_active(until, iteration):
+    """Return whether outer acceleration is active this iteration."""
+    return until == 0 or iteration < until
+
+
 def shared_camera_compatibility_ratio(
     local_cameras,
     centers,
@@ -1022,6 +1032,7 @@ def parse_arguments():
     parser.add_argument(
         "--metric-proposal-disagreement-scale", type=float, default=1.0
     )
+    parser.add_argument("--metric-proposal-disagreement-until", type=int, default=0)
     parser.add_argument(
         "--metric-proposal-disagreement-grid",
         default="1",
@@ -1218,6 +1229,7 @@ def parse_arguments():
         choices=("none", "nesterov", "themelis_nesterov", "lbfgs", "anderson"),
         default="none",
     )
+    parser.add_argument("--outer-acceleration-until", type=int, default=0)
     parser.add_argument(
         "--line-search-grid", choices=("0,1", "0,0.5,1"), default="0,1"
     )
@@ -1429,6 +1441,17 @@ def validate_arguments(arguments):
             )
     if not 0.0 <= arguments.metric_proposal_disagreement_scale <= 1.0:
         raise ValueError("metric proposal disagreement scale must be in [0, 1]")
+    if not 0 <= arguments.metric_proposal_disagreement_until <= arguments.iterations:
+        raise ValueError("metric proposal disagreement cutoff must be in [0, iterations]")
+    if arguments.metric_proposal_disagreement_until > 0:
+        if arguments.metric_proposal_disagreement_scale == 1.0:
+            raise ValueError("metric proposal disagreement cutoff requires fixed damping")
+        if (
+            arguments.metric_proposal_disagreement_grid != "1"
+            or arguments.metric_proposal_disagreement_hysteresis
+            or arguments.metric_proposal_subspace_scales != "1,1,1"
+        ):
+            raise ValueError("metric proposal disagreement cutoff supports fixed damping only")
     if arguments.metric_proposal_disagreement_scale != 1.0:
         if arguments.proximal_metric != "block":
             raise ValueError(
@@ -1633,7 +1656,6 @@ def validate_arguments(arguments):
             or arguments.shared_camera_step_grid != "1"
             or arguments.shared_camera_step_scale != 1.0
             or arguments.shared_camera_disagreement_scale != 1.0
-            or arguments.metric_proposal_disagreement_scale != 1.0
             or arguments.metric_proposal_disagreement_grid != "1"
             or arguments.metric_proposal_disagreement_hysteresis
             or arguments.metric_proposal_subspace_scales != "1,1,1"
@@ -1846,6 +1868,13 @@ def validate_arguments(arguments):
         raise ValueError("relaxation must be in (0, 2)")
     if arguments.acceleration_restart_after <= 0:
         raise ValueError("acceleration restart count must be positive")
+    if not 0 <= arguments.outer_acceleration_until <= arguments.iterations:
+        raise ValueError("outer acceleration cutoff must be in [0, iterations]")
+    if (
+        arguments.outer_acceleration_until > 0
+        and arguments.outer_acceleration == "none"
+    ):
+        raise ValueError("outer acceleration cutoff requires acceleration")
     if (
         arguments.outer_acceleration != "none"
         and arguments.consensus_landmark_refinement_steps > 0
@@ -2697,6 +2726,13 @@ def main():
             enhanced_inner_active = (
                 diagonal_trust_active or relative_residual_active
             )
+            iteration_metric_proposal_disagreement_scale = (
+                scheduled_metric_proposal_scale(
+                    arguments.metric_proposal_disagreement_scale,
+                    arguments.metric_proposal_disagreement_until,
+                    iteration,
+                )
+            )
             iteration_nesterov_maximum = (
                 arguments.enhanced_inner_max_iterations
                 if relative_residual_active
@@ -3104,7 +3140,7 @@ def main():
                         packed_request_buffers=arguments.packed_request_buffers,
                     ),
                 )
-            elif arguments.metric_proposal_disagreement_scale != 1.0:
+            elif iteration_metric_proposal_disagreement_scale != 1.0:
                 if (
                     camera_disagreement_diagnostic_ids
                     and iteration in camera_disagreement_diagnostic_iterations
@@ -3129,7 +3165,7 @@ def main():
                     consensus,
                     projection_metric_blocks,
                     arguments.consensus_metric,
-                    arguments.metric_proposal_disagreement_scale,
+                    iteration_metric_proposal_disagreement_scale,
                     (
                         arguments.metric_proposal_disagreement_threshold
                         if arguments.metric_proposal_disagreement_threshold >= 0.0
@@ -3616,11 +3652,21 @@ def main():
                     metric_proposal_subspace_energy_fractions.copy()
                 ),
             }
-            acceleration_proposal, proposal_is_accelerated = accelerator.propose(
-                oracle_input_centers,
-                candidate_centers,
-                iteration,
+            iteration_outer_acceleration_active = (
+                scheduled_outer_acceleration_active(
+                    arguments.outer_acceleration_until,
+                    iteration,
+                )
             )
+            if iteration_outer_acceleration_active:
+                acceleration_proposal, proposal_is_accelerated = accelerator.propose(
+                    oracle_input_centers,
+                    candidate_centers,
+                    iteration,
+                )
+            else:
+                acceleration_proposal = candidate_centers.copy()
+                proposal_is_accelerated = False
             selected_trial = nominal_trial
             evaluated_accelerated_trial = False
             selector_triggered = (
@@ -3630,7 +3676,10 @@ def main():
             )
             if (
                 proposal_is_accelerated
-                or accelerator.requires_first_trial_observation
+                or (
+                    iteration_outer_acceleration_active
+                    and accelerator.requires_first_trial_observation
+                )
                 or selector_triggered
             ):
                 nominal_landmark_state_id = iteration + 1
@@ -3658,7 +3707,10 @@ def main():
                     ))
                 if (
                     proposal_is_accelerated
-                    or accelerator.requires_first_trial_observation
+                    or (
+                        iteration_outer_acceleration_active
+                        and accelerator.requires_first_trial_observation
+                    )
                 ):
                     for acceleration_weight in line_search_weights:
                         if acceleration_weight != 0.0:
@@ -3907,7 +3959,7 @@ def main():
                                 ),
                             ),
                         )
-                    elif arguments.metric_proposal_disagreement_scale != 1.0:
+                    elif iteration_metric_proposal_disagreement_scale != 1.0:
                         (
                             trial_metric_proposal_disagreement_ratio,
                             trial_applied_metric_proposal_disagreement_scale,
@@ -3919,7 +3971,7 @@ def main():
                             consensus,
                             trial_projection_blocks,
                             arguments.consensus_metric,
-                            arguments.metric_proposal_disagreement_scale,
+                            iteration_metric_proposal_disagreement_scale,
                             (
                                 arguments.metric_proposal_disagreement_threshold
                                 if arguments.metric_proposal_disagreement_threshold >= 0.0
@@ -5316,6 +5368,9 @@ def main():
         "metricProposalDisagreementScale": (
             arguments.metric_proposal_disagreement_scale
         ),
+        "metricProposalDisagreementUntil": (
+            arguments.metric_proposal_disagreement_until
+        ),
         "metricProposalDisagreementGrid": (
             arguments.metric_proposal_disagreement_grid
         ),
@@ -5545,6 +5600,7 @@ def main():
         "optimizationSeconds": optimization_seconds,
         "relaxation": arguments.relaxation,
         "outerAcceleration": arguments.outer_acceleration,
+        "outerAccelerationUntil": arguments.outer_acceleration_until,
         "singleClusterProximal": arguments.single_cluster_proximal,
         "lineSearchGrid": arguments.line_search_grid,
         "accelerationRestartAfter": arguments.acceleration_restart_after,

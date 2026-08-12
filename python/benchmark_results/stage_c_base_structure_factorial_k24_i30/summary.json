@@ -1,0 +1,182 @@
+{
+  "1dsfm": {
+    "arms": {
+      "legacy_no_proposal": {
+        "completed": 15,
+        "optimization_seconds": 80.25030565801717,
+        "recovery_exhausted": 0,
+        "versus_base_i30": {
+          "geometric_sse": 0.9861060178124762,
+          "losses": 7,
+          "wins": 8,
+          "worst": 1.1321802333196334
+        }
+      },
+      "legacy_proposal": {
+        "completed": 15,
+        "optimization_seconds": 90.44209197400778,
+        "recovery_exhausted": 0,
+        "versus_base_i30": {
+          "geometric_sse": 0.9469050377719288,
+          "losses": 3,
+          "wins": 12,
+          "worst": 1.0267198287660428
+        }
+      },
+      "shared_no_proposal": {
+        "completed": 15,
+        "optimization_seconds": 86.10153747700679,
+        "recovery_exhausted": 0,
+        "versus_base_i30": {
+          "geometric_sse": 1.0189645468405988,
+          "losses": 11,
+          "wins": 4,
+          "worst": 1.1621249162808003
+        }
+      },
+      "shared_proposal": {
+        "completed": 15,
+        "optimization_seconds": 89.64453183305159,
+        "recovery_exhausted": 0,
+        "versus_base_i30": {
+          "geometric_sse": 0.9929774889603838,
+          "losses": 7,
+          "wins": 8,
+          "worst": 1.1224615561991755
+        }
+      }
+    },
+    "proposal_effect_with_legacy_proximal": {
+      "geometric_sse": 0.9602466881527519,
+      "losses": 3,
+      "wins": 12,
+      "worst": 1.045477557126253
+    },
+    "scenes": [
+      "alamo",
+      "ellis_island",
+      "gendarmenmarkt",
+      "madrid_metropolis",
+      "montreal_notre_dame",
+      "notre_dame",
+      "nyc_library",
+      "piazza_del_popolo",
+      "piccadilly",
+      "roman_forum",
+      "tower_of_london",
+      "trafalgar",
+      "union_square",
+      "vienna_cathedral",
+      "yorkminster"
+    ],
+    "shared_only_effect_without_proposal": {
+      "geometric_sse": 1.0333214973183251,
+      "losses": 12,
+      "wins": 3,
+      "worst": 1.160648484030526
+    },
+    "shared_proposal_interaction": {
+      "geometric_sse": 1.0486558306806177,
+      "losses": 13,
+      "wins": 2,
+      "worst": 1.1860467443726508
+    }
+  },
+  "bal": {
+    "arms": {
+      "legacy_no_proposal": {
+        "completed": 29,
+        "optimization_seconds": 367.2926195910113,
+        "recovery_exhausted": 0,
+        "versus_base_i30": {
+          "geometric_sse": 0.9986298292323383,
+          "losses": 16,
+          "wins": 13,
+          "worst": 1.0384352332226396
+        }
+      },
+      "legacy_proposal": {
+        "completed": 28,
+        "optimization_seconds": 404.90867594699375,
+        "recovery_exhausted": 1,
+        "versus_base_i30": {
+          "geometric_sse": 1.0028730005173792,
+          "losses": 16,
+          "wins": 13,
+          "worst": 1.0680796479884875
+        }
+      },
+      "shared_no_proposal": {
+        "completed": 29,
+        "optimization_seconds": 378.5369638420161,
+        "recovery_exhausted": 0,
+        "versus_base_i30": {
+          "geometric_sse": 0.9988426285821929,
+          "losses": 16,
+          "wins": 13,
+          "worst": 1.0384352332226396
+        }
+      },
+      "shared_proposal": {
+        "completed": 29,
+        "optimization_seconds": 412.1913126879808,
+        "recovery_exhausted": 0,
+        "versus_base_i30": {
+          "geometric_sse": 0.9974278757615767,
+          "losses": 15,
+          "wins": 14,
+          "worst": 1.038204863152622
+        }
+      }
+    },
+    "proposal_effect_with_legacy_proximal": {
+      "geometric_sse": 1.0042489931312213,
+      "losses": 10,
+      "wins": 19,
+      "worst": 1.1718134755728828
+    },
+    "scenes": [
+      "bal1064",
+      "bal126",
+      "bal1266",
+      "bal135",
+      "bal142",
+      "bal1490",
+      "bal1723",
+      "bal173",
+      "bal1778",
+      "bal245",
+      "bal253",
+      "bal257",
+      "bal287",
+      "bal3068",
+      "bal308",
+      "bal356",
+      "bal394",
+      "bal427",
+      "bal49",
+      "bal52",
+      "bal646",
+      "bal744",
+      "bal783",
+      "bal871",
+      "bal88",
+      "bal89",
+      "bal931",
+      "bal951",
+      "bal961"
+    ],
+    "shared_only_effect_without_proposal": {
+      "geometric_sse": 1.0002130913213538,
+      "losses": 11,
+      "wins": 3,
+      "worst": 1.003452237638507
+    },
+    "shared_proposal_interaction": {
+      "geometric_sse": 0.9945704742744161,
+      "losses": 12,
+      "wins": 3,
+      "worst": 1.0065457360346204
+    }
+  }
+}

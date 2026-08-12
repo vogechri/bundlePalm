@@ -56,3 +56,13 @@ table also includes preserved best base DRS. K4/K16 are faster, but reach
 `1.408725x`/`1.343358x` base SSE on 1DSfM and
 `1.008920x`/`1.011713x` on BAL. See
 `stage_c_publication_comparison/report.md`.
+
+## Base-backbone hybrid follow-up
+
+Restoring the preserved Nesterov/DRS-trust/curvature/metric-75 backbone shows
+that C1, not C5, is the transferable Stage-C component. With shared-only camera
+proximal semantics and fixed proposal damping applied only to duplicated
+cameras, C1 reaches `0.992977x` base-I30 on all 15 1DSfM and `0.997428x` on all
+29 BAL scenes. This equal-I30 hybrid is not a final replacement: all tested I90
+continuations regress both families, and permanent damping recovery-exhausts
+Tower. See `stage_c_base_structure_factorial_k24_i30/report.md`.

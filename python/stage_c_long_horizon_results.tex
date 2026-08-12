@@ -199,6 +199,18 @@ runs do not replace best base DRS in endpoint quality.  Their contribution is
 the measured latency/resource tradeoff; the remaining research problem is to
 retain that speed while recovering the longer-horizon base trajectory.
 
+A follow-up hybrid restores the base local Nesterov, persistent DRS trust,
+curvature-$0.4$ recovery/decay, and metric scale 75 while retaining shared-only
+product-space semantics.  With C1 fixed, applying proposal damping only to
+duplicated cameras reaches $0.992977$ times base I30 on all 15 1DSfM scenes and
+$0.997428$ on all 29 BAL scenes, with complete execution.  C5 is neutral or
+adverse on this backbone.  The equal-I30 gain does not survive the tested I90
+continuations: permanent damping reaches $1.017187$/$1.001950$ times base and
+exhausts Tower; proposal-only cutoff at I30 reaches $1.022809$/$1.001478$; and
+cutting both proposal damping and C1 reaches $1.136224$/$1.009261$.  We report
+the hybrid as positive component compatibility evidence, not as a promoted
+long-horizon replacement.
+
 \subsection{Coordinate and finite-solver interactions}
 
 The remaining components are reported as factorials because their effects are
