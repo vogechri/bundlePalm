@@ -311,6 +311,33 @@ and makes Schur work more expensive. This does not replace the lower-budget
 I30+10 fast preset or higher-budget I30+20 quality preset. See
 `benchmark_results/equal_time_all15/report.md`.
 
+With the later behavior-exact BSR systems optimizations, a fresh I60+10 run
+takes `289.498s` total and reaches `0.817178x` the nearest equal-time base-I101
+reference (`289.730s`), preserving the balanced-preset decision.
+
+Schur performance and orthogonal quality gates (2026-08-12): complete
+per-attempt phase telemetry is live. On all-15 I60+10, coordinator numeric BSR
+accumulation takes `28.755s` and CG `23.106s`, while symbolic graph construction
+takes only `0.314s`. A pattern-fingerprinted symbolic BSR cache preserves every
+accepted candidate and endpoint bitwise on all 15, with 153 hits/15 builds and
+reduces Schur time from `105.612s` to `102.351s` (`0.969122x`). Promote this
+behavior-exact cache. Duplicate-safe vectorized numeric accumulation is also
+all-15 bitwise exact, cuts numeric assembly from `28.755s` to `14.261s`, and
+reduces total Schur time further to `94.206s` (`0.920428x` cached). Promote both
+systems changes. A default-off seven-mode projection-preserving similarity
+preconditioner cuts Trafalgar CG iterations `507 -> 238` and Schur time
+`37.749s -> 31.211s`, but regresses Roman/Trafalgar SSE by `0.764%/1.902%`;
+retain it only as a conditioning diagnostic. The frozen removable relative-pose
+prior improves fixed-policy all-15 geometric SSE to `0.989513x` control but
+worsens summed SSE to `1.001376x`, with Trafalgar `+5.062%`; do not integrate it
+unconditionally. The historical I60 pixel-SSE selector plus Schur10 reaches
+`0.981565x` control but has a Notre Dame post-polishing reversal (`+0.517%`).
+Selection after correction nine is loss-free but costs about `1.9x` the
+balanced workflow, so it is an oracle rather than a practical policy. Retain
+the prior as an orthogonal basin proposal and require a cheaper post-Schur-safe
+global selector before promotion. See
+`benchmark_results/schur_performance_quality_gates/report.md`.
+
 Loss-factorial clarification (2026-08-11): fallback safety does not imply
 endpoint dominance over a separately run plain trajectory. Roman's C1 and C5
 main effects both lose but interact beneficially; Yorkminster's main effects

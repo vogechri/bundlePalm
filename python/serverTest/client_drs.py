@@ -1,6 +1,7 @@
 """Plain product-space Douglas-Rachford splitting for standard BAL pixels."""
 
 import argparse
+import hashlib
 import json
 import os
 import sys
@@ -10,8 +11,10 @@ from pathlib import Path
 import numpy as np
 from scipy import sparse
 from scipy.sparse import linalg as sparse_linalg
+from scipy.spatial.transform import Rotation
 
 from bal_evaluator import (
+    angle_axis_rotation_matrices,
     canonicalize_bal_problem,
     evaluate_bal_state,
     read_bal_problem,
@@ -64,6 +67,93 @@ from admm_scaling import (
 
 WORKER_SSE_RELATIVE_TOLERANCE = 1e-9
 WORKER_CONSENSUS_RELATIVE_TOLERANCE = 1e-11
+
+
+class SchurBSRSymbolicCache:
+    def __init__(self):
+        self.camera_count = None
+        self.pattern_fingerprint = None
+        self.source_inverse = None
+        self.source_is_unique = None
+        self.operator = None
+        self.builds = 0
+        self.hits = 0
+
+
+def schur_bsr_pattern_fingerprint(systems, camera_count):
+    digest = hashlib.blake2b(digest_size=16)
+    digest.update(np.asarray([camera_count, len(systems)], dtype=np.int64).tobytes())
+    for system in systems:
+        for values in (system.block_rows, system.block_columns):
+            contiguous = np.ascontiguousarray(values, dtype=np.int64)
+            digest.update(np.asarray(contiguous.shape, dtype=np.int64).tobytes())
+            digest.update(contiguous.tobytes())
+    return digest.digest()
+
+
+def transform_cameras_by_similarity(
+    cameras, scale, world_rotation, world_translation
+):
+    cameras = np.asarray(cameras, dtype=np.float64)
+    camera_rotations = angle_axis_rotation_matrices(cameras[:, :3])
+    centers = -np.einsum(
+        "nji,nj->ni", camera_rotations, cameras[:, 3:6]
+    )
+    transformed_centers = (
+        scale * centers @ world_rotation + world_translation
+    )
+    transformed_rotations = camera_rotations @ world_rotation
+    transformed = cameras.copy()
+    transformed[:, :3] = Rotation.from_matrix(
+        transformed_rotations
+    ).as_rotvec()
+    transformed[:, 3:6] = -np.einsum(
+        "nij,nj->ni", transformed_rotations, transformed_centers
+    )
+    return transformed
+
+
+def similarity_gauge_tangent_basis(cameras, epsilon=1e-6):
+    cameras = np.asarray(cameras, dtype=np.float64)
+    if cameras.ndim != 2 or cameras.shape[1] != 9:
+        raise ValueError("gauge basis cameras must have shape (camera_count, 9)")
+    if not np.isfinite(epsilon) or epsilon <= 0.0:
+        raise ValueError("gauge basis epsilon must be positive and finite")
+    identity = np.eye(3)
+    zero = np.zeros(3)
+    tangents = []
+    for coordinate in range(3):
+        translation = np.zeros(3)
+        translation[coordinate] = epsilon
+        transformed = transform_cameras_by_similarity(
+            cameras, 1.0, identity, translation
+        )
+        tangents.append(
+            left_se3_camera_minus(transformed, cameras).ravel() / epsilon
+        )
+    for coordinate in range(3):
+        rotation = np.zeros(3)
+        rotation[coordinate] = epsilon
+        transformed = transform_cameras_by_similarity(
+            cameras,
+            1.0,
+            Rotation.from_rotvec(rotation).as_matrix(),
+            zero,
+        )
+        tangents.append(
+            left_se3_camera_minus(transformed, cameras).ravel() / epsilon
+        )
+    transformed = transform_cameras_by_similarity(
+        cameras, 1.0 + epsilon, identity, zero
+    )
+    tangents.append(
+        left_se3_camera_minus(transformed, cameras).ravel() / epsilon
+    )
+    basis, triangular = np.linalg.qr(np.column_stack(tangents), mode="reduced")
+    retained = np.abs(np.diag(triangular)) > 1e-10
+    if not np.any(retained):
+        raise RuntimeError("similarity gauge basis has zero rank")
+    return basis[:, retained]
 
 
 def snapshot_metric_blocks(metric_blocks):
@@ -177,7 +267,11 @@ def solve_global_schur_system(
     maximum_iterations=500,
     initial_step=None,
     operator_mode="python",
+    bsr_symbolic_cache=None,
+    preconditioner_mode="jacobi",
+    coarse_basis=None,
 ):
+    solve_started_at = time.perf_counter()
     if camera_damping <= 0.0:
         raise ValueError("camera damping must be positive")
     if not 0.0 < step_scale <= 1.0:
@@ -192,6 +286,13 @@ def solve_global_schur_system(
         raise ValueError(
             "Schur operator must be python, bsr, or bsr_low_memory"
         )
+    if preconditioner_mode not in ("jacobi", "gauge_deflated"):
+        raise ValueError(
+            "Schur preconditioner must be jacobi or gauge_deflated"
+        )
+    if preconditioner_mode == "gauge_deflated" and coarse_basis is None:
+        raise ValueError("gauge-deflated Schur solve requires a coarse basis")
+    aggregate_started_at = time.perf_counter()
     gradient = np.zeros((camera_count, 9), dtype=np.float64)
     camera_diagonal = np.zeros((camera_count, 9, 9), dtype=np.float64)
     landmark_model_reduction = 0.0
@@ -201,6 +302,15 @@ def solve_global_schur_system(
         np.add.at(camera_diagonal, system.camera_ids, system.camera_diagonal)
         landmark_model_reduction += system.landmark_model_reduction
         block_count += system.blocks.shape[0]
+    aggregate_seconds = time.perf_counter() - aggregate_started_at
+    preconditioner_seconds = 0.0
+    symbolic_fingerprint_seconds = 0.0
+    symbolic_assembly_seconds = 0.0
+    numeric_assembly_seconds = 0.0
+    linear_solve_seconds = 0.0
+    coarse_setup_seconds = 0.0
+    coarse_basis_rank = 0
+    symbolic_cache_hit = False
     dimension = 9 * camera_count
     initial_vector = None
     if initial_step is not None:
@@ -221,6 +331,7 @@ def solve_global_schur_system(
     damping_diagonal = np.maximum(damping_diagonal, diagonal_floor)
 
     if linear_solver == "direct":
+        numeric_assembly_started_at = time.perf_counter()
         scalar_rows = []
         scalar_columns = []
         scalar_values = []
@@ -270,9 +381,14 @@ def solve_global_schur_system(
         damped_schur = schur + camera_damping * sparse.diags(
             damping_diagonal.ravel()
         )
+        numeric_assembly_seconds = (
+            time.perf_counter() - numeric_assembly_started_at
+        )
+        linear_solve_started_at = time.perf_counter()
         tangent_step = -sparse_linalg.spsolve(
             damped_schur.tocsc(), gradient.ravel()
         )
+        linear_solve_seconds = time.perf_counter() - linear_solve_started_at
         residual = damped_schur @ tangent_step + gradient.ravel()
         def damped_matrix_vector_product(flat_vector):
             return damped_schur @ flat_vector
@@ -280,6 +396,7 @@ def solve_global_schur_system(
         termination = 0
         scalar_nonzeros = int(schur.nnz)
     else:
+        preconditioner_started_at = time.perf_counter()
         preconditioner_blocks = np.zeros(
             (camera_count, 9, 9), dtype=np.float64
         )
@@ -313,6 +430,7 @@ def solve_global_schur_system(
             1.0 / np.maximum(eigenvalues, eigenvalue_floor),
             eigenvectors,
         )
+        preconditioner_seconds = time.perf_counter() - preconditioner_started_at
 
         if operator_mode == "python":
             def matrix_vector_product(flat_vector):
@@ -362,10 +480,11 @@ def solve_global_schur_system(
                 camera_damping * damping_diagonal
             )
             block_sources.append(damping_blocks)
-            block_rows = np.concatenate(block_rows)
-            block_columns = np.concatenate(block_columns)
-            block_keys = block_rows * camera_count + block_columns
             if operator_mode == "bsr":
+                numeric_assembly_started_at = time.perf_counter()
+                block_rows = np.concatenate(block_rows)
+                block_columns = np.concatenate(block_columns)
+                block_keys = block_rows * camera_count + block_columns
                 block_values = np.concatenate(block_sources)
                 order = np.argsort(block_keys, kind="stable")
                 block_keys = block_keys[order]
@@ -378,34 +497,104 @@ def solve_global_schur_system(
                     block_values, starts, axis=0
                 )
                 block_keys = block_keys[starts]
+                block_rows = block_keys // camera_count
+                block_columns = block_keys % camera_count
+                row_counts = np.bincount(
+                    block_rows, minlength=camera_count
+                )
+                indptr = np.empty(camera_count + 1, dtype=np.int64)
+                indptr[0] = 0
+                np.cumsum(row_counts, out=indptr[1:])
+                bsr_operator = sparse.bsr_matrix(
+                    (block_values, block_columns, indptr),
+                    shape=(dimension, dimension),
+                )
+                numeric_assembly_seconds = (
+                    time.perf_counter() - numeric_assembly_started_at
+                )
             else:
-                block_keys, inverse = np.unique(
-                    block_keys, return_inverse=True
+                fingerprint_started_at = time.perf_counter()
+                pattern_fingerprint = schur_bsr_pattern_fingerprint(
+                    systems, camera_count
                 )
-                block_values = np.zeros(
-                    (block_keys.size, 9, 9), dtype=np.float64
+                symbolic_fingerprint_seconds = (
+                    time.perf_counter() - fingerprint_started_at
                 )
-                source_offset = 0
-                for source in block_sources:
-                    source_end = source_offset + source.shape[0]
-                    np.add.at(
-                        block_values,
-                        inverse[source_offset:source_end],
-                        source,
+                cache = (
+                    bsr_symbolic_cache
+                    if bsr_symbolic_cache is not None
+                    else SchurBSRSymbolicCache()
+                )
+                symbolic_cache_hit = (
+                    cache.camera_count == camera_count
+                    and cache.pattern_fingerprint == pattern_fingerprint
+                )
+                if symbolic_cache_hit:
+                    cache.hits += 1
+                else:
+                    symbolic_assembly_started_at = time.perf_counter()
+                    concatenated_rows = np.concatenate(block_rows)
+                    concatenated_columns = np.concatenate(block_columns)
+                    block_keys = (
+                        concatenated_rows * camera_count
+                        + concatenated_columns
                     )
-                    source_offset = source_end
-            block_rows = block_keys // camera_count
-            block_columns = block_keys % camera_count
-            row_counts = np.bincount(
-                block_rows, minlength=camera_count
-            )
-            indptr = np.empty(camera_count + 1, dtype=np.int64)
-            indptr[0] = 0
-            np.cumsum(row_counts, out=indptr[1:])
-            bsr_operator = sparse.bsr_matrix(
-                (block_values, block_columns, indptr),
-                shape=(dimension, dimension),
-            )
+                    block_keys, inverse = np.unique(
+                        block_keys, return_inverse=True
+                    )
+                    source_inverse = []
+                    source_is_unique = []
+                    source_offset = 0
+                    for source in block_sources:
+                        source_end = source_offset + source.shape[0]
+                        source_mapping = inverse[
+                            source_offset:source_end
+                        ].copy()
+                        source_inverse.append(source_mapping)
+                        source_is_unique.append(
+                            np.unique(source_mapping).size
+                            == source_mapping.size
+                        )
+                        source_offset = source_end
+                    unique_rows = block_keys // camera_count
+                    indices = block_keys % camera_count
+                    row_counts = np.bincount(
+                        unique_rows, minlength=camera_count
+                    )
+                    indptr = np.empty(camera_count + 1, dtype=np.int64)
+                    indptr[0] = 0
+                    np.cumsum(row_counts, out=indptr[1:])
+                    block_values = np.zeros(
+                        (block_keys.size, 9, 9), dtype=np.float64
+                    )
+                    cache.camera_count = camera_count
+                    cache.pattern_fingerprint = pattern_fingerprint
+                    cache.source_inverse = tuple(source_inverse)
+                    cache.source_is_unique = tuple(source_is_unique)
+                    cache.operator = sparse.bsr_matrix(
+                        (block_values, indices, indptr),
+                        shape=(dimension, dimension),
+                        copy=False,
+                    )
+                    cache.builds += 1
+                    symbolic_assembly_seconds = (
+                        time.perf_counter() - symbolic_assembly_started_at
+                    )
+                numeric_assembly_started_at = time.perf_counter()
+                bsr_operator = cache.operator
+                bsr_operator.data.fill(0.0)
+                for source, inverse, source_is_unique in zip(
+                    block_sources,
+                    cache.source_inverse,
+                    cache.source_is_unique,
+                ):
+                    if source_is_unique:
+                        bsr_operator.data[inverse] += source
+                    else:
+                        np.add.at(bsr_operator.data, inverse, source)
+                numeric_assembly_seconds = (
+                    time.perf_counter() - numeric_assembly_started_at
+                )
             scalar_nonzeros = int(bsr_operator.nnz)
 
             def matrix_vector_product(flat_vector):
@@ -415,13 +604,74 @@ def solve_global_schur_system(
             (dimension, dimension), matvec=matrix_vector_product
         )
 
-        def apply_preconditioner(flat_vector):
+        def apply_block_jacobi(flat_vector):
             vector = flat_vector.reshape((camera_count, 9))
             return np.einsum(
                 "bij,bj->bi",
                 inverse_blocks,
                 vector,
             ).ravel()
+
+        if preconditioner_mode == "gauge_deflated":
+            coarse_setup_started_at = time.perf_counter()
+            coarse_basis = np.asarray(coarse_basis, dtype=np.float64)
+            if (
+                coarse_basis.ndim != 2
+                or coarse_basis.shape[0] != dimension
+                or not np.all(np.isfinite(coarse_basis))
+            ):
+                raise ValueError("Schur coarse basis has an invalid shape")
+            coarse_basis, triangular = np.linalg.qr(
+                coarse_basis, mode="reduced"
+            )
+            retained = np.abs(np.diag(triangular)) > 1e-10
+            coarse_basis = coarse_basis[:, retained]
+            if coarse_basis.shape[1] == 0:
+                raise ValueError("Schur coarse basis has zero rank")
+            coarse_action = np.column_stack([
+                matrix_vector_product(coarse_basis[:, column])
+                for column in range(coarse_basis.shape[1])
+            ])
+            coarse_matrix = 0.5 * (
+                coarse_basis.T @ coarse_action
+                + coarse_action.T @ coarse_basis
+            )
+            eigenvalues, eigenvectors = np.linalg.eigh(coarse_matrix)
+            positive = eigenvalues[eigenvalues > 0.0]
+            coarse_floor = max(
+                (
+                    float(np.median(positive)) * 1e-12
+                    if positive.size else 1e-12
+                ),
+                np.finfo(np.float64).tiny,
+            )
+            coarse_inverse = np.einsum(
+                "ij,j,kj->ik",
+                eigenvectors,
+                1.0 / np.maximum(eigenvalues, coarse_floor),
+                eigenvectors,
+            )
+            coarse_basis_rank = coarse_basis.shape[1]
+            coarse_setup_seconds = (
+                time.perf_counter() - coarse_setup_started_at
+            )
+
+            def apply_preconditioner(flat_vector):
+                coarse_coefficients = coarse_inverse @ (
+                    coarse_basis.T @ flat_vector
+                )
+                residual = flat_vector - coarse_action @ coarse_coefficients
+                fine = apply_block_jacobi(residual)
+                fine_coarse_coefficients = coarse_inverse @ (
+                    coarse_action.T @ fine
+                )
+                return (
+                    fine
+                    - coarse_basis @ fine_coarse_coefficients
+                    + coarse_basis @ coarse_coefficients
+                )
+        else:
+            apply_preconditioner = apply_block_jacobi
 
         preconditioner = sparse_linalg.LinearOperator(
             (dimension, dimension),
@@ -433,6 +683,7 @@ def solve_global_schur_system(
             nonlocal iterations
             iterations += 1
 
+        linear_solve_started_at = time.perf_counter()
         tangent_step, termination = sparse_linalg.cg(
             operator,
             -gradient.ravel(),
@@ -443,6 +694,7 @@ def solve_global_schur_system(
             maxiter=maximum_iterations,
             callback=count_iteration,
         )
+        linear_solve_seconds = time.perf_counter() - linear_solve_started_at
         residual = operator @ tangent_step + gradient.ravel()
     if not np.all(np.isfinite(tangent_step)):
         raise RuntimeError("global Schur solve produced a non-finite step")
@@ -472,7 +724,7 @@ def solve_global_schur_system(
         "gradientNorm": float(np.linalg.norm(gradient)),
         "stepNorm": float(np.linalg.norm(tangent_step)),
         "linearSolver": linear_solver,
-        "preconditioner": "jacobi",
+        "preconditioner": preconditioner_mode,
         "operator": operator_mode,
         "linearIterations": iterations,
         "linearTermination": int(termination),
@@ -483,6 +735,16 @@ def solve_global_schur_system(
         "landmarkModelReduction": float(landmark_model_reduction),
         "dampedPredictedReduction": damped_predicted_reduction,
         "undampedPredictedReduction": undamped_predicted_reduction,
+        "aggregateSeconds": aggregate_seconds,
+        "preconditionerSeconds": preconditioner_seconds,
+        "symbolicFingerprintSeconds": symbolic_fingerprint_seconds,
+        "symbolicAssemblySeconds": symbolic_assembly_seconds,
+        "numericAssemblySeconds": numeric_assembly_seconds,
+        "linearSolveSeconds": linear_solve_seconds,
+        "coarseSetupSeconds": coarse_setup_seconds,
+        "coarseBasisRank": coarse_basis_rank,
+        "totalLinearSystemSeconds": time.perf_counter() - solve_started_at,
+        "symbolicCacheHit": symbolic_cache_hit,
     }
 
 
@@ -1190,6 +1452,11 @@ def parse_arguments():
         "--shared-schur-minimum-relative-decrease", type=float, default=1e-4
     )
     parser.add_argument("--shared-schur-warm-start", action="store_true")
+    parser.add_argument(
+        "--shared-schur-preconditioner",
+        choices=("jacobi", "gauge_deflated"),
+        default="jacobi",
+    )
     parser.add_argument(
         "--shared-schur-operator",
         choices=("python", "bsr", "bsr_low_memory"),
@@ -2561,6 +2828,17 @@ def main():
                         if arguments.initial_shared_schur_operator == "inherit"
                         else arguments.initial_shared_schur_operator
                     ),
+                    preconditioner_mode=(
+                        arguments.shared_schur_preconditioner
+                    ),
+                    coarse_basis=(
+                        similarity_gauge_tangent_basis(
+                            to_physical_cameras(consensus, camera_scaling)
+                        )
+                        if arguments.shared_schur_preconditioner
+                        == "gauge_deflated"
+                        else None
+                    ),
                 )
             )
             (
@@ -2751,6 +3029,17 @@ def main():
                     arguments.shared_schur_relative_tolerance,
                     arguments.shared_schur_maximum_iterations,
                     operator_mode=arguments.shared_schur_operator,
+                    preconditioner_mode=(
+                        arguments.shared_schur_preconditioner
+                    ),
+                    coarse_basis=(
+                        similarity_gauge_tangent_basis(
+                            schur_alignment_base_cameras
+                        )
+                        if arguments.shared_schur_preconditioner
+                        == "gauge_deflated"
+                        else None
+                    ),
                 )
             shared_trust_region_active = (
                 iteration < arguments.shared_trust_region_until
@@ -5126,6 +5415,7 @@ def main():
             final_shared_schur_termination = "maximum_corrections"
             stop_schur_corrections = False
             previous_tangent_step = None
+            final_shared_schur_bsr_symbolic_cache = SchurBSRSymbolicCache()
             screening_correction = 0
             confirmation_correction = 0
             correction = 0
@@ -5164,12 +5454,19 @@ def main():
                 else:
                     correction_operator = arguments.shared_schur_operator
                 correction_accepted = False
+                correction_coarse_basis = (
+                    similarity_gauge_tangent_basis(best_cameras)
+                    if arguments.shared_schur_preconditioner
+                    == "gauge_deflated"
+                    else None
+                )
                 for attempt in range(arguments.shared_schur_maximum_attempts):
                     attempt_started = time.perf_counter()
                     attempt_initial_sse = best_sse
                     scaled_best_cameras = to_scaled_cameras(
                         best_cameras, camera_scaling
                     )
+                    schur_assembly_started_at = time.perf_counter()
                     schur_systems = worker.build_schur_systems(
                         camera_indices_in_cluster,
                         point_indices_in_cluster,
@@ -5177,6 +5474,9 @@ def main():
                         best_points,
                         cluster_count,
                         landmark_damping,
+                    )
+                    schur_assembly_seconds = (
+                        time.perf_counter() - schur_assembly_started_at
                     )
                     tangent_step, schur_diagnostics = (
                         solve_global_schur_system(
@@ -5193,9 +5493,17 @@ def main():
                                 else None
                             ),
                             correction_operator,
+                            bsr_symbolic_cache=(
+                                final_shared_schur_bsr_symbolic_cache
+                            ),
+                            preconditioner_mode=(
+                                arguments.shared_schur_preconditioner
+                            ),
+                            coarse_basis=correction_coarse_basis,
                         )
                     )
                     previous_tangent_step = tangent_step
+                    camera_step_started_at = time.perf_counter()
                     (
                         corrected_costs,
                         corrected_scaled_cameras,
@@ -5209,16 +5517,23 @@ def main():
                         cluster_count,
                         arguments.shared_schur_landmark_refinement_steps,
                     )
+                    camera_step_seconds = (
+                        time.perf_counter() - camera_step_started_at
+                    )
                     candidate_worker_sse = float(np.sum(corrected_costs))
                     corrected_cameras = to_physical_cameras(
                         corrected_scaled_cameras, camera_scaling
                     )
+                    evaluation_started_at = time.perf_counter()
                     corrected_metrics = evaluate_state(
                         corrected_cameras,
                         corrected_points,
                         camera_indices,
                         point_indices,
                         observations,
+                    )
+                    evaluation_seconds = (
+                        time.perf_counter() - evaluation_started_at
                     )
                     candidate_sse = corrected_metrics["objectiveValue"]
                     relative_decrease = (
@@ -5280,6 +5595,9 @@ def main():
                         "undampedGainRatio": undamped_gain_ratio,
                         "accepted": accepted,
                         "seconds": time.perf_counter() - attempt_started,
+                        "schurAssemblySeconds": schur_assembly_seconds,
+                        "cameraStepSeconds": camera_step_seconds,
+                        "evaluationSeconds": evaluation_seconds,
                         "diagnostics": schur_diagnostics,
                     })
                     if accepted:
@@ -5858,6 +6176,9 @@ def main():
             arguments.shared_schur_minimum_relative_decrease
         ),
         "sharedSchurWarmStart": arguments.shared_schur_warm_start,
+        "sharedSchurPreconditioner": (
+            arguments.shared_schur_preconditioner
+        ),
         "sharedSchurOperator": arguments.shared_schur_operator,
         "sharedSchurLandmarkRefinementSteps": (
             arguments.shared_schur_landmark_refinement_steps
