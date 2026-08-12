@@ -326,6 +326,23 @@ optimization time, with 10/15 wins. Promote I60+16 as the quality preset; retain
 I30+20 only as the frozen earlier-handoff frontier reference. See
 `benchmark_results/i60_s16_all15/report.md`.
 
+I60 performance and tail diagnostics (2026-08-12): current-source Roman and
+Trafalgar local profiles show assembly (`0.609s/1.341s`) exceeds Nesterov
+(`0.253s/1.006s`) on the local critical path; repeated $W^T/W$ actions dominate
+the Nesterov kernel. A default-off one-pass dual-coordinate assembly reduces
+local critical time `7.0%/4.6%` and all-15 total work `6.3%`, but changes every
+Schur decision sequence and regresses all-15 geometric SSE `0.584%` with a
+`4.40%` worst tail. The code was removed; worker speedups must preserve the
+metric and tangent systems exactly by construction. Extending unchanged
+I60+16 to I60+20 gives a separate higher-budget point: `0.813073x` base-I200
+and `1.184661x` Ceres in `430.320s`, improving I60+16 by `0.974832x` SSE at
+`1.130382x` time. Keep I60+16 as the named quality preset. Tail geometry is
+not uniform: Tower has `12.8%` low-8 camera-center mode energy versus base and
+improves another `11.67%` from corrections 17--20, while Madrid has only
+`0.045%` low-8 energy and improves `0.93%`. Treat Tower as under-polished and
+Madrid as a separate non-low-mode basin problem. See
+`benchmark_results/i60_performance_tail_diagnostics/report.md`.
+
 Schur performance and orthogonal quality gates (2026-08-12): complete
 per-attempt phase telemetry is live. On all-15 I60+10, coordinator numeric BSR
 accumulation takes `28.755s` and CG `23.106s`, while symbolic graph construction
