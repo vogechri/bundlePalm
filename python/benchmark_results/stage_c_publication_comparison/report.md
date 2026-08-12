@@ -12,7 +12,7 @@ All rows use independently evaluated standard pixel SSE. Iteration and thread bu
 | Base DRS K24 | preserved quality baseline, I200, T1/cluster | 15 | 1.457017 | 1.434854 | 1/0/14 | 572.399 | CPU DRS optimization | 1.000000 | 1.000000 |
 | DRS+Schur fast | K24/I30 + up to 10 corrections | 15 | 1.411625 | 1.273158 | 1/0/14 | 191.161 | CPU DRS + Schur optimization | 0.968846 | 0.333964 |
 | DRS+Schur balanced | K24/I60 + up to 10 corrections | 15 | 1.272048 | 1.147988 | 1/0/14 | 289.496 | CPU DRS + Schur optimization | 0.873049 | 0.505759 |
-| DRS+Schur quality | K24/I30 + up to 20 corrections | 15 | 1.267361 | 1.160986 | 2/0/13 | 385.234 | CPU DRS + Schur optimization | 0.869832 | 0.673017 |
+| DRS+Schur quality | K24/I60 + up to 16 corrections | 15 | 1.215246 | 1.109252 | 2/0/13 | 381.521 | CPU DRS + Schur optimization | 0.834064 | 0.666529 |
 | DRS K4 | frozen C1+C5 resource endpoint, I30, T1/cluster | 15 | 2.052536 | 1.924183 | 0/0/15 | 160.607 | CPU DRS optimization | 1.408725 | 0.280585 |
 | DRS K16 | frozen C1+C5 latency endpoint, I30, T1/cluster | 15 | 1.957296 | 1.848750 | 0/0/15 | 93.793 | CPU DRS optimization | 1.343358 | 0.163860 |
 

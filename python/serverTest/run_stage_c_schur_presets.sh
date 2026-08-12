@@ -28,8 +28,8 @@ run_preset() {
       corrections=10
       ;;
     quality)
-      iterations=30
-      corrections=20
+      iterations=60
+      corrections=16
       ;;
     *)
       echo "Unknown preset: $preset" >&2

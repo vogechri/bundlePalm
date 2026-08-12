@@ -68,8 +68,8 @@ work before handoff is more valuable than replacing it with additional Schur
 corrections at this budget. Very early I5 handoff leaves a substantially worse
 basin and also makes each Schur correction more expensive.
 
-This does not invalidate I30+10 as the fast preset or I30+20 as the
-quality-focused preset; those occupy different total-work budgets. The
+This does not invalidate I30+10 as the fast preset or the separately confirmed
+I60+16 quality-focused preset; those occupy different total-work budgets. The
 same-time result adds a balanced preset and establishes an allocation rule:
 do not hand off before I30, and near the middle budget prefer extending DRS to
 I60 before increasing the Schur tail beyond ten corrections.

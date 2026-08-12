@@ -317,6 +317,15 @@ reference (`289.730s`), preserving the balanced-preset decision.
 The named preset runner repeats every endpoint and Schur decision bitwise; its
 second measured total is `283.324s`, with `2.53%` per-scene time-ratio CV.
 
+Quality-budget allocation (2026-08-12): a frozen five-scene I60+20 frontier
+selected I60+16 as the allocation nearest the existing I30+20 quality budget.
+Unchanged all-15 confirmation completes every scene and reaches `0.834064x`
+base-I200 and `1.215246x` Ceres in `381.521s`. Relative to I30+20, I60+16 is
+`0.958879x` geometric SSE and `0.955439x` summed SSE at `0.990360x` measured
+optimization time, with 10/15 wins. Promote I60+16 as the quality preset; retain
+I30+20 only as the frozen earlier-handoff frontier reference. See
+`benchmark_results/i60_s16_all15/report.md`.
+
 Schur performance and orthogonal quality gates (2026-08-12): complete
 per-attempt phase telemetry is live. On all-15 I60+10, coordinator numeric BSR
 accumulation takes `28.755s` and CG `23.106s`, while symbolic graph construction

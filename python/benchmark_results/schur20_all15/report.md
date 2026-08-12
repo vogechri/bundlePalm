@@ -53,7 +53,9 @@ points:
 - cap 20: `0.869832x` base-I200 quality at `0.673017x` its optimization time.
 
 Neither dominates the other. Retain cap 10 as the faster quality preset and cap
-20 as the quality-focused preset. Do not tune damping, tolerance, or progress
-threshold from this cohort. Eight cap-limited scenes show that cap 20 is not a
-convergence claim; further budget extension is a separate quality-ceiling study,
-not required to establish the current Pareto frontier.
+20 as the frozen I30-handoff frontier reference. The later equal-budget
+allocation gate supersedes cap 20 as the quality preset with I60+16. Do not tune
+damping, tolerance, or progress threshold from this cohort. Eight cap-limited
+scenes show that cap 20 is not a convergence claim; further budget extension is
+a separate quality-ceiling study, not required to establish the current Pareto
+frontier.

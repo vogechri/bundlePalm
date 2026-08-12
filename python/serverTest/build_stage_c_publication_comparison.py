@@ -52,12 +52,12 @@ SCHUR_PRESET_SOURCES = {
         10,
     ),
     "quality": (
-        RESULTS / "schur20_all15/"
+        RESULTS / "i60_s16_all15/"
         "themelis_nesterov_ls01_block_full_se3_left_diag_metric75_lip0.4_"
         "metric_proposal0.5_curvature_persistent_tr_trust_drs_enhanced30_"
-        "decay5_final_schur20_bsr_low_memory_stop1e-3_s20.jsonl",
-        30,
-        20,
+        "decay5_final_schur16_bsr_low_memory_stop1e-3_i60s16.jsonl",
+        60,
+        16,
     ),
 }
 CERES_PATHS = {
@@ -395,7 +395,7 @@ def main():
         summarize("Base DRS K24", base_drs["1dsfm"], ceres["1dsfm"], one_d_sfm_scenes, "drs", "preserved quality baseline, I200, T1/cluster", "CPU DRS optimization", base_drs["1dsfm"]),
         summarize("DRS+Schur fast", schur_presets["fast"], ceres["1dsfm"], one_d_sfm_scenes, "drs", "K24/I30 + up to 10 corrections", "CPU DRS + Schur optimization", base_drs["1dsfm"]),
         summarize("DRS+Schur balanced", schur_presets["balanced"], ceres["1dsfm"], one_d_sfm_scenes, "drs", "K24/I60 + up to 10 corrections", "CPU DRS + Schur optimization", base_drs["1dsfm"]),
-        summarize("DRS+Schur quality", schur_presets["quality"], ceres["1dsfm"], one_d_sfm_scenes, "drs", "K24/I30 + up to 20 corrections", "CPU DRS + Schur optimization", base_drs["1dsfm"]),
+        summarize("DRS+Schur quality", schur_presets["quality"], ceres["1dsfm"], one_d_sfm_scenes, "drs", "K24/I60 + up to 16 corrections", "CPU DRS + Schur optimization", base_drs["1dsfm"]),
         summarize("DRS K4", scaling_1dsfm[4], ceres["1dsfm"], one_d_sfm_scenes, "drs", "frozen C1+C5 resource endpoint, I30, T1/cluster", "CPU DRS optimization", base_drs["1dsfm"]),
         summarize("DRS K16", scaling_1dsfm[16], ceres["1dsfm"], one_d_sfm_scenes, "drs", "frozen C1+C5 latency endpoint, I30, T1/cluster", "CPU DRS optimization", base_drs["1dsfm"]),
     ]
