@@ -283,6 +283,34 @@ Keep acceleration active; stale momentum history is not the cause of the late
 gap. Do not broaden the isolated reset. See
 `benchmark_results/stage_c_i100_acceleration_diagnostics_k24_i200/report.md`.
 
+Frozen Schur-budget frontier (2026-08-12): with damping, CG tolerance,
+operator, safeguards, and the `1e-3` progress stop unchanged, a five-scene
+development run remains productive through correction 20. The cap was frozen
+before all-15 confirmation. The all-15 cap-20 run reproduces the cap-10 I30
+handoffs and first ten corrections exactly, completes every scene, and reaches
+`0.673164x` its I30 handoff, `0.869832x` the established I200 base, and
+`1.267361x` Ceres. Combined I30 DRS plus Schur work is `385.234s`, or
+`0.673017x` base-I200 optimization time. Seven scenes stop naturally after
+13--20 corrections; eight remain cap-limited. Retain two global Pareto presets:
+cap 10 gives `0.968846x` base-I200 at `0.333964x` its time, while cap 20 gives
+`0.869832x` at `0.673017x`. Neither dominates. Do not tune damping, linear
+tolerance, or the progress threshold from this cohort. See
+`benchmark_results/schur20_all15/report.md`.
+
+Equal-time DRS/Schur allocation (2026-08-12): a frozen five-scene gate followed
+by unchanged all-15 confirmation compares I60+10 Schur, I30+15 Schur, and
+I5+17 Schur at approximately 300 seconds total optimization work. Shared
+prefixes are bitwise identical and safeguard annealing is fixed at I30. All 45
+all-15 runs complete without recovery exhaustion. Against the nearest
+equal-time base-DRS checkpoints, I60+10 reaches `0.819300x` SSE at `299.233s`,
+I30+15 reaches `0.852585x` at `301.016s`, and I5+17 reaches `0.951988x` at
+`289.837s`; time mismatch is at most `0.24%`. I60+10 is `0.961553x` I30+15
+and `0.858391x` I5+17, winning 10/15 pairwise in both comparisons. Retain
+I60+10 as the balanced-budget preset. Very early handoff leaves a poorer basin
+and makes Schur work more expensive. This does not replace the lower-budget
+I30+10 fast preset or higher-budget I30+20 quality preset. See
+`benchmark_results/equal_time_all15/report.md`.
+
 Loss-factorial clarification (2026-08-11): fallback safety does not imply
 endpoint dominance over a separately run plain trajectory. Roman's C1 and C5
 main effects both lose but interact beneficially; Yorkminster's main effects
