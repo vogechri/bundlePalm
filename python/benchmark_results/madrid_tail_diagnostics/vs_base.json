@@ -1,0 +1,250 @@
+{
+  "cameraResidualConcentration": {
+    "0.01": 0.13841691243368487,
+    "0.05": 0.3407585128761258,
+    "0.1": 0.49122315347675505
+  },
+  "candidateSSE": 283747.79271724843,
+  "centerSpectrum": {
+    "capturedEnergyFraction": {
+      "32": 0.24422103248510224,
+      "8": 0.00045250811075491344
+    },
+    "firstModeEigenvalues": [
+      0.0002327862248956194,
+      0.0008740179063150821,
+      0.0026512458360934636,
+      0.0035232657753379126,
+      0.006883699468415858,
+      0.008766768238500592,
+      0.011695342231942527,
+      0.01463182873366708,
+      0.02378016482110351,
+      0.027801751916927728,
+      0.03531066130384794,
+      0.03675529567631577,
+      0.03993831909251426,
+      0.04275593662532956,
+      0.05027038131974335,
+      0.057741849845015444,
+      0.05956561414997698,
+      0.060529533925591184,
+      0.0681278199066361,
+      0.09578740603916151,
+      0.09699070469785533,
+      0.10000053347876575,
+      0.10720129980353384,
+      0.11031397164981303,
+      0.13025226186382713,
+      0.1365562066026002,
+      0.15462965859876107,
+      0.15774280502128374,
+      0.16129030232849323,
+      0.16897054197659742,
+      0.17919788393248964,
+      0.20029836028644127
+    ],
+    "positiveModeCount": 275,
+    "positiveModeEnergyFraction": 0.6759341391760713,
+    "smallestPositiveEigenvalue": 0.0002327862248956194
+  },
+  "coordinateScales": {
+    "focal": 2077.1423153971546,
+    "radialK1": 0.47363583641154494,
+    "radialK2": 3.1691194168085395,
+    "rotationX": 1.734670257097623,
+    "rotationY": 1.1867384204455904,
+    "rotationZ": 14.358935686788634,
+    "translationX": 0.6746135754373931,
+    "translationY": 0.5034718357240129,
+    "translationZ": 0.16449471220154893
+  },
+  "normalizedTangentCameraConcentration": {
+    "intrinsics": {
+      "0.01": 0.9999998673322786,
+      "0.05": 0.999999998855748,
+      "0.1": 0.9999999998451017
+    },
+    "rotation": {
+      "0.01": 0.5152017653614609,
+      "0.05": 0.7510061426585922,
+      "0.1": 0.8088206058928568
+    },
+    "translation": {
+      "0.01": 0.8433346739102551,
+      "0.05": 0.9980233046441269,
+      "0.1": 0.9982265781853843
+    }
+  },
+  "normalizedTangentCoordinateRms": {
+    "focal": 0.8190175370442767,
+    "radialK1": 1038.9372913405316,
+    "radialK2": 884766.7038085432,
+    "rotationX": 0.03445678247527084,
+    "rotationY": 0.03861034322646974,
+    "rotationZ": 0.003901417611280489,
+    "translationX": 365.394031586007,
+    "translationY": 801.6019367088378,
+    "translationZ": 13726.846663717717
+  },
+  "normalizedTangentEnergyFractions": {
+    "intrinsics": 0.9997583629407495,
+    "rotation": 3.4396440103616482e-15,
+    "translation": 0.00024163705924719125
+  },
+  "observationResidualConcentration": {
+    "0.01": 0.45654244448392756,
+    "0.05": 0.7581988696540514,
+    "0.1": 0.8720955068877381
+  },
+  "positiveCameraExcessConcentration": {
+    "0.01": 0.2349279876992841,
+    "0.05": 0.4955014659375538,
+    "0.1": 0.6269246693172446
+  },
+  "referenceCameraResidualConcentration": {
+    "0.01": 0.12370976287792315,
+    "0.05": 0.33942277052121506,
+    "0.1": 0.5012241036737329
+  },
+  "referenceObservationResidualConcentration": {
+    "0.01": 0.5201202165331665,
+    "0.05": 0.7892090589603481,
+    "0.1": 0.8846019276373452
+  },
+  "referenceSSE": 226721.81250942827,
+  "tangentCameraConcentration": {
+    "intrinsics": {
+      "0.01": 0.9999997994657761,
+      "0.05": 0.9999999847259917,
+      "0.1": 0.9999999947501237
+    },
+    "rotation": {
+      "0.01": 0.5099470955997293,
+      "0.05": 0.7530330557637739,
+      "0.1": 0.8087555488024908
+    },
+    "translation": {
+      "0.01": 0.8386307145693932,
+      "0.05": 0.9956597298605838,
+      "0.1": 0.9959414093386381
+    }
+  },
+  "tangentEnergyFractions": {
+    "intrinsics": 0.9999993230538009,
+    "rotation": 1.1206203530976193e-15,
+    "translation": 6.769461978659416e-07
+  },
+  "worstExcessCameras": [
+    {
+      "camera": 177,
+      "candidateResidualSSE": 1538.4700472111044,
+      "excessSSE": 1104.55085661688,
+      "excessSSEPerObservation": 52.59765983889905,
+      "intrinsicsTangentNorm": 605.4108533370198,
+      "observations": 21,
+      "referenceResidualSSE": 433.91919059422446,
+      "rotationTangentDegrees": 8.891667392519453,
+      "translationTangentNorm": 635.3648458525934
+    },
+    {
+      "camera": 171,
+      "candidateResidualSSE": 4201.788251761345,
+      "excessSSE": 3722.018636320249,
+      "excessSSEPerObservation": 50.98655666192121,
+      "intrinsicsTangentNorm": 866.1813415984459,
+      "observations": 73,
+      "referenceResidualSSE": 479.76961544109645,
+      "rotationTangentDegrees": 24.350328237194873,
+      "translationTangentNorm": 197.42968114044777
+    },
+    {
+      "camera": 173,
+      "candidateResidualSSE": 623.5186646504538,
+      "excessSSE": 543.1496722845733,
+      "excessSSEPerObservation": 41.78074402189025,
+      "intrinsicsTangentNorm": 658.7714650855102,
+      "observations": 13,
+      "referenceResidualSSE": 80.36899236588053,
+      "rotationTangentDegrees": 6.192613581943418,
+      "translationTangentNorm": 149.27265421871806
+    },
+    {
+      "camera": 174,
+      "candidateResidualSSE": 1907.5803626236016,
+      "excessSSE": 1311.6429031888708,
+      "excessSSEPerObservation": 15.802926544444228,
+      "intrinsicsTangentNorm": 200.05647715775035,
+      "observations": 83,
+      "referenceResidualSSE": 595.9374594347307,
+      "rotationTangentDegrees": 12.569810902414478,
+      "translationTangentNorm": 154.53956324577803
+    },
+    {
+      "camera": 18,
+      "candidateResidualSSE": 2217.1634077288522,
+      "excessSSE": 1334.132582611087,
+      "excessSSEPerObservation": 15.160597529671442,
+      "intrinsicsTangentNorm": 686.1953345536497,
+      "observations": 88,
+      "referenceResidualSSE": 883.0308251177654,
+      "rotationTangentDegrees": 2.4683881972174824,
+      "translationTangentNorm": 161.14281182134576
+    },
+    {
+      "camera": 4,
+      "candidateResidualSSE": 536.2032313817626,
+      "excessSSE": 450.7507810962167,
+      "excessSSEPerObservation": 15.025026036540558,
+      "intrinsicsTangentNorm": 7754.406090629605,
+      "observations": 30,
+      "referenceResidualSSE": 85.45245028554594,
+      "rotationTangentDegrees": 2.244345624188922,
+      "translationTangentNorm": 2354.045201809299
+    },
+    {
+      "camera": 176,
+      "candidateResidualSSE": 223.35881196252043,
+      "excessSSE": 192.36502200347536,
+      "excessSSEPerObservation": 14.79730938488272,
+      "intrinsicsTangentNorm": 3844.8973674965296,
+      "observations": 13,
+      "referenceResidualSSE": 30.99378995904507,
+      "rotationTangentDegrees": 2.899709630134844,
+      "translationTangentNorm": 148.66685494663102
+    },
+    {
+      "camera": 119,
+      "candidateResidualSSE": 273.51647788940426,
+      "excessSSE": 270.43148562021133,
+      "excessSSEPerObservation": 14.23323608527428,
+      "intrinsicsTangentNorm": 874.1197386815649,
+      "observations": 19,
+      "referenceResidualSSE": 3.08499226919291,
+      "rotationTangentDegrees": 7.909642618187508,
+      "translationTangentNorm": 19436.64757892483
+    },
+    {
+      "camera": 160,
+      "candidateResidualSSE": 944.394973279674,
+      "excessSSE": 494.48836160863453,
+      "excessSSEPerObservation": 14.128238903103844,
+      "intrinsicsTangentNorm": 239.24685451150427,
+      "observations": 35,
+      "referenceResidualSSE": 449.90661167103946,
+      "rotationTangentDegrees": 5.6291391977116785,
+      "translationTangentNorm": 153.26953858671268
+    },
+    {
+      "camera": 212,
+      "candidateResidualSSE": 177.56266956582633,
+      "excessSSE": 156.60983605613868,
+      "excessSSEPerObservation": 13.05081967134489,
+      "intrinsicsTangentNorm": 2051.7166322630555,
+      "observations": 12,
+      "referenceResidualSSE": 20.952833509687654,
+      "rotationTangentDegrees": 24.036164493225666,
+      "translationTangentNorm": 160.07835585781206
+    }
+  ]
+}

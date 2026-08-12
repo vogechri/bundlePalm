@@ -349,6 +349,22 @@ time rises `14%/42%` because camera-sorted edge storage has better
 camera-vector locality. That experiment was also removed. Do not revisit edge
 reordering without a cache/layout design that preserves the current locality.
 
+Four-scene polishing ceiling and Madrid diagnosis (2026-08-12): unchanged
+I60+30 on NYC, Piazza, Roman, and Tower reaches `0.706069x` their base-I200 SSE
+and `1.130525x` Ceres. Corrections 21--30 improve cap 20 by `0.923502x` in
+`17.274s`; Piazza stops at 30 and Roman at 23, while NYC and Tower remain
+cap-limited. Keep this targeted ceiling separate from global presets. Madrid's
+I60+16 endpoint is `1.251524x` base, `1.314266x` Ceres, and `1.150461x`
+BAE-style K1. Its first eight camera-center graph modes explain below `0.1%`
+of the gap to every reference, and its heavy residual concentration is similar
+to all three references. Cameras 177/171/173 repeatedly dominate
+observation-normalized excess, but camera/point state swaps are catastrophic and
+weak radial/translation coordinates are ill-conditioned. Treat Madrid as a
+coupled non-low-mode camera/point basin centered on those tracks, not as a
+global prior, scalar subspace, or polishing-budget problem. See
+`benchmark_results/i60_s30_ceiling_four/report.md` and
+`benchmark_results/madrid_tail_diagnostics/report.md`.
+
 Schur performance and orthogonal quality gates (2026-08-12): complete
 per-attempt phase telemetry is live. On all-15 I60+10, coordinator numeric BSR
 accumulation takes `28.755s` and CG `23.106s`, while symbolic graph construction
