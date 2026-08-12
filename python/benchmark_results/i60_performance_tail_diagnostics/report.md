@@ -68,6 +68,11 @@ outliers and are not useful selectors, while P95 geometry remains finite.
 Madrid is primarily a different non-low-mode camera/point basin; Tower is a mix
 of low-mode basin error and remaining Schur descent.
 
+Tower-only continuation subsequently stops naturally at correction 53 with
+`0.701186x` base-I200 and `1.316613x` Ceres. Thus its cap-16 diagnosis was
+correct, but the final residual gap persists after the frozen Schur progress
+criterion and is a basin issue.
+
 ## Decision
 
 1. Keep I60+16 as the named quality preset and retain I60+20 as a higher-budget

@@ -1,0 +1,1 @@
+g20|/home/chvogel/bundlePalm/python/benchmark_results/colmap_datasets/perturbation_graph_modes/graham_hall_unique_edges_low_mean20p0px.txt

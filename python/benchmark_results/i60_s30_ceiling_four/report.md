@@ -35,3 +35,10 @@ Tower and NYC, but it is not a new global preset. Roman and Piazza have reached
 the frozen progress criterion; NYC is close. Tower remains materially
 under-polished even after 30 corrections and is the only scene in this cohort
 that justifies a further ceiling extension.
+
+A frozen Tower-only continuation naturally stops at correction 53 under the
+same `1e-3` rule. It reaches `1,040,623.738` SSE, `0.701186x` base-I200 and
+`1.316613x` Ceres, using `12.151s` Schur work. Corrections 51--53 improve the
+cap-50 state by only `1.41%`, and the last accepted gain is `0.0715%`. Tower's
+remaining gap after correction 53 is therefore a basin ceiling rather than
+missing distributed Schur descent.

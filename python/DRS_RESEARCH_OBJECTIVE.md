@@ -365,6 +365,21 @@ global prior, scalar subspace, or polishing-budget problem. See
 `benchmark_results/i60_s30_ceiling_four/report.md` and
 `benchmark_results/madrid_tail_diagnostics/report.md`.
 
+Tower-only continuation stops naturally at correction 53 with `0.701186x`
+base-I200 and `1.316613x` Ceres after `12.151s` Schur work. Its last accepted
+gain is `0.0715%`. Tower is no longer blocked by correction budget; its
+remaining Ceres gap is also a basin ceiling.
+
+COLMAP weak-mode transfer (2026-08-12): the fixed K24/I60+16 quality preset
+does not transfer to Graham Hall's low graph-mode 20-pixel perturbation. It
+reaches `1.002113x` the historical additive I30 SSE and retains `0.831443` of
+the injected mode versus `0.459892` for additive I30. An isolated restart from
+the old I30 state leaves the handoff SSE unchanged; Schur then improves SSE by
+only `0.0159%` and changes mode retention by `1.000013x`. Do not broaden this
+screen. Pixel-only global Schur cannot identify the nearly unobservable
+deformation; independent geometric evidence would be required. See
+`benchmark_results/colmap_graph_mode_schur_pilot_quality/report.md`.
+
 Schur performance and orthogonal quality gates (2026-08-12): complete
 per-attempt phase telemetry is live. On all-15 I60+10, coordinator numeric BSR
 accumulation takes `28.755s` and CG `23.106s`, while symbolic graph construction
