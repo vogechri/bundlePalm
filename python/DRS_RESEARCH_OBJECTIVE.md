@@ -314,6 +314,8 @@ I30+10 fast preset or higher-budget I30+20 quality preset. See
 With the later behavior-exact BSR systems optimizations, a fresh I60+10 run
 takes `289.498s` total and reaches `0.817178x` the nearest equal-time base-I101
 reference (`289.730s`), preserving the balanced-preset decision.
+The named preset runner repeats every endpoint and Schur decision bitwise; its
+second measured total is `283.324s`, with `2.53%` per-scene time-ratio CV.
 
 Schur performance and orthogonal quality gates (2026-08-12): complete
 per-attempt phase telemetry is live. On all-15 I60+10, coordinator numeric BSR
@@ -327,7 +329,9 @@ reduces total Schur time further to `94.206s` (`0.920428x` cached). Promote both
 systems changes. A default-off seven-mode projection-preserving similarity
 preconditioner cuts Trafalgar CG iterations `507 -> 238` and Schur time
 `37.749s -> 31.211s`, but regresses Roman/Trafalgar SSE by `0.764%/1.902%`;
-retain it only as a conditioning diagnostic. The frozen removable relative-pose
+matched `1e-8` tolerance does not repair the path (`1.034446x` tight-Jacobi SSE
+on Trafalgar and only seven accepted corrections). Retain it only as a
+conditioning diagnostic. The frozen removable relative-pose
 prior improves fixed-policy all-15 geometric SSE to `0.989513x` control but
 worsens summed SSE to `1.001376x`, with Trafalgar `+5.062%`; do not integrate it
 unconditionally. The historical I60 pixel-SSE selector plus Schur10 reaches

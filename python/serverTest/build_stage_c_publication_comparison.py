@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build cohort-explicit K1/K4/K16, Ceres, and BAE publication tables."""
+"""Build cohort-explicit DRS, Schur-preset, Ceres, and BAE tables."""
 
 import argparse
 import json
@@ -34,6 +34,32 @@ BASE_DRS_PATHS = {
     ),
 }
 SCALING_ROOT = RESULTS / "stage_c_scaling_confirmation_k4_16_i30"
+SCHUR_PRESET_SOURCES = {
+    "fast": (
+        RESULTS / "schur20_all15/"
+        "themelis_nesterov_ls01_block_full_se3_left_diag_metric75_lip0.4_"
+        "metric_proposal0.5_curvature_persistent_tr_trust_drs_enhanced30_"
+        "decay5_final_schur20_bsr_low_memory_stop1e-3_s20.jsonl",
+        30,
+        10,
+    ),
+    "balanced": (
+        RESULTS / "bsr_numeric_vectorized_all15_i60_s10/"
+        "themelis_nesterov_ls01_block_full_se3_left_diag_metric75_lip0.4_"
+        "metric_proposal0.5_curvature_persistent_tr_trust_drs_enhanced30_"
+        "decay5_final_schur10_bsr_low_memory_stop1e-3_numeric.jsonl",
+        60,
+        10,
+    ),
+    "quality": (
+        RESULTS / "schur20_all15/"
+        "themelis_nesterov_ls01_block_full_se3_left_diag_metric75_lip0.4_"
+        "metric_proposal0.5_curvature_persistent_tr_trust_drs_enhanced30_"
+        "decay5_final_schur20_bsr_low_memory_stop1e-3_s20.jsonl",
+        30,
+        20,
+    ),
+}
 CERES_PATHS = {
     "1dsfm": RESULTS / "1dsfm_drs_ceres_se3_all15/ceres/results.jsonl",
     "bal": RESULTS / "bal_ceres_se3_all29/results.jsonl",
@@ -139,6 +165,40 @@ def validate_base_drs(rows, expected, iterations):
             and row.get("completedIterations") == iterations
         ):
             raise ValueError(f"base DRS configuration mismatch for {scene}")
+
+
+def load_schur_preset(path, iterations, correction_cap):
+    rows = load_jsonl(path)
+    if len(rows) != 15:
+        raise ValueError(f"Schur preset coverage mismatch: {len(rows)}/15")
+    transformed = {}
+    for scene, row in rows.items():
+        if not (
+            row.get("clusters") == 24
+            and row.get("iterations") == iterations
+            and row.get("completedIterations") == iterations
+            and row.get("outerAcceleration") == "themelis_nesterov"
+            and row.get("sharedOnlyCameraProximal") is True
+            and row.get("sharedSchurOperator") == "bsr_low_memory"
+            and row.get("sharedSchurMinimumRelativeDecrease") == 1e-3
+        ):
+            raise ValueError(f"Schur preset configuration mismatch for {scene}")
+        endpoint_sse = row["finalSharedSchurInitialSSE"]
+        correction_seconds = 0.0
+        for attempt in row["finalSharedSchurAttempts"]:
+            if attempt["correction"] >= correction_cap:
+                continue
+            correction_seconds += attempt["seconds"]
+            if attempt["accepted"]:
+                endpoint_sse = attempt["candidateSSE"]
+        candidate = row.copy()
+        candidate["qualityMetrics"] = row["qualityMetrics"].copy()
+        candidate["qualityMetrics"]["sumSquaredError"] = endpoint_sse
+        candidate["optimizationSeconds"] = (
+            row["optimizationSeconds"] + correction_seconds
+        )
+        transformed[scene] = candidate
+    return transformed
 
 
 def validate_ceres(rows, expected):
@@ -303,6 +363,10 @@ def main():
     validate_base_drs(base_drs["bal"], 29, 90)
     scaling_1dsfm, scaling_1dsfm_path = load_scaling("1dsfm")
     scaling_bal, scaling_bal_path = load_scaling("bal")
+    schur_presets = {
+        name: load_schur_preset(*source)
+        for name, source in SCHUR_PRESET_SOURCES.items()
+    }
     ceres = {family: load_jsonl(path) for family, path in CERES_PATHS.items()}
     validate_ceres(ceres["1dsfm"], 15)
     validate_ceres(ceres["bal"], 29)
@@ -329,6 +393,9 @@ def main():
         summarize("DRS K1 BAE-style", k1_bae, ceres["1dsfm"], one_d_sfm_scenes, "drs", "best local diagnostic, I90, T1", "CPU DRS optimization", base_drs["1dsfm"]),
         summarize("DRS K1 Schur-PCG", k1_pcg, ceres["1dsfm"], one_d_sfm_scenes, "drs", "secondary local diagnostic, I80, T24", "CPU DRS optimization", base_drs["1dsfm"]),
         summarize("Base DRS K24", base_drs["1dsfm"], ceres["1dsfm"], one_d_sfm_scenes, "drs", "preserved quality baseline, I200, T1/cluster", "CPU DRS optimization", base_drs["1dsfm"]),
+        summarize("DRS+Schur fast", schur_presets["fast"], ceres["1dsfm"], one_d_sfm_scenes, "drs", "K24/I30 + up to 10 corrections", "CPU DRS + Schur optimization", base_drs["1dsfm"]),
+        summarize("DRS+Schur balanced", schur_presets["balanced"], ceres["1dsfm"], one_d_sfm_scenes, "drs", "K24/I60 + up to 10 corrections", "CPU DRS + Schur optimization", base_drs["1dsfm"]),
+        summarize("DRS+Schur quality", schur_presets["quality"], ceres["1dsfm"], one_d_sfm_scenes, "drs", "K24/I30 + up to 20 corrections", "CPU DRS + Schur optimization", base_drs["1dsfm"]),
         summarize("DRS K4", scaling_1dsfm[4], ceres["1dsfm"], one_d_sfm_scenes, "drs", "frozen C1+C5 resource endpoint, I30, T1/cluster", "CPU DRS optimization", base_drs["1dsfm"]),
         summarize("DRS K16", scaling_1dsfm[16], ceres["1dsfm"], one_d_sfm_scenes, "drs", "frozen C1+C5 latency endpoint, I30, T1/cluster", "CPU DRS optimization", base_drs["1dsfm"]),
     ]
@@ -374,6 +441,9 @@ def main():
             "base_drs_bal": str(BASE_DRS_PATHS["bal"].relative_to(ROOT)),
             "k4_k16_1dsfm": str(scaling_1dsfm_path.relative_to(ROOT)),
             "k4_k16_bal": str(scaling_bal_path.relative_to(ROOT)),
+            "schur_fast": str(SCHUR_PRESET_SOURCES["fast"][0].relative_to(ROOT)),
+            "schur_balanced": str(SCHUR_PRESET_SOURCES["balanced"][0].relative_to(ROOT)),
+            "schur_quality": str(SCHUR_PRESET_SOURCES["quality"][0].relative_to(ROOT)),
             "ceres_1dsfm": str(CERES_PATHS["1dsfm"].relative_to(ROOT)),
             "ceres_bal": str(CERES_PATHS["bal"].relative_to(ROOT)),
             "bae_cg": str(BAE_PATHS["BAE Schur-PCG CG"].relative_to(ROOT)),
@@ -387,7 +457,7 @@ def main():
     )
     report = arguments.output_root / "report.md"
     with report.open("w", encoding="utf-8") as output:
-        output.write("# Final K1/K4/K16, Ceres, And BAE Publication Comparison\n\n")
+        output.write("# Final DRS, Schur, Ceres, And BAE Publication Comparison\n\n")
         output.write(
             "All rows use independently evaluated standard pixel SSE. Iteration and "
             "thread budgets are fixed but intentionally differ by solver role. CPU "
@@ -409,6 +479,10 @@ def main():
             "quality than current K4/K16 on both families. K4 and K16 are therefore "
             "speed endpoints, not quality replacements: C1+C5 improves its matched "
             "I30 plain control, but that gain does not overcome the shorter horizon. "
+            "The three DRS+Schur rows are separately labeled polishing workflows "
+            "rather than DRS-only gains. Each improves both endpoint quality and "
+            "measured optimization time relative to the preserved I200 base; fast, "
+            "balanced, and quality expose distinct budget points. "
             "Verified BAE coverage is only six 1DSfM scenes, uses GPU "
             "hardware, and is basin-sensitive on Trafalgar; it is contextual evidence, "
             "not an all-scene or deterministic reference. No per-scene settings or "

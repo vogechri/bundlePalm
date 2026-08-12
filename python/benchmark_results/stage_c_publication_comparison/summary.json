@@ -73,6 +73,60 @@
       ]
     },
     {
+      "label": "DRS+Schur fast",
+      "optimization_seconds": 191.16079573384195,
+      "optimization_vs_base": 0.3339641081584398,
+      "overall_seconds": 401.73098866501823,
+      "peak_memory_mib": null,
+      "scenes": 15,
+      "specification": "K24/I30 + up to 10 corrections",
+      "sse_vs_base_geometric": 0.9688456329204709,
+      "sse_vs_ceres_geometric": 1.4116249011189006,
+      "sse_vs_ceres_summed": 1.2731576776778915,
+      "timing_class": "CPU DRS + Schur optimization",
+      "wins_ties_losses_vs_ceres": [
+        1,
+        0,
+        14
+      ]
+    },
+    {
+      "label": "DRS+Schur balanced",
+      "optimization_seconds": 289.4959482119011,
+      "optimization_vs_base": 0.5057588078607981,
+      "overall_seconds": 306.105655644089,
+      "peak_memory_mib": null,
+      "scenes": 15,
+      "specification": "K24/I60 + up to 10 corrections",
+      "sse_vs_base_geometric": 0.8730492841045613,
+      "sse_vs_ceres_geometric": 1.2720479583842985,
+      "sse_vs_ceres_summed": 1.1479876772909738,
+      "timing_class": "CPU DRS + Schur optimization",
+      "wins_ties_losses_vs_ceres": [
+        1,
+        0,
+        14
+      ]
+    },
+    {
+      "label": "DRS+Schur quality",
+      "optimization_seconds": 385.23433942810516,
+      "optimization_vs_base": 0.673016881443838,
+      "overall_seconds": 401.73098866501823,
+      "peak_memory_mib": null,
+      "scenes": 15,
+      "specification": "K24/I30 + up to 20 corrections",
+      "sse_vs_base_geometric": 0.8698323943674894,
+      "sse_vs_ceres_geometric": 1.2673608942094658,
+      "sse_vs_ceres_summed": 1.1609861366896481,
+      "timing_class": "CPU DRS + Schur optimization",
+      "wins_ties_losses_vs_ceres": [
+        2,
+        0,
+        13
+      ]
+    },
+    {
       "label": "DRS K4",
       "optimization_seconds": 160.60661371600145,
       "optimization_vs_base": 0.2805849615142397,
@@ -337,6 +391,9 @@
     "k1_bae_style": "benchmark_results/1dsfm_k1_bae_nesterov_exact_i90/proximal_point_block_se3_left_scene_raw_lip0.00625_curvature_persistent_tr.jsonl",
     "k1_schur_pcg": "benchmark_results/1dsfm_k1_schur_pcg_t24_all15_i80/custom/proximal_point_block_se3_left_lip0.00625_curvature_persistent_tr.jsonl",
     "k4_k16_1dsfm": "benchmark_results/stage_c_scaling_confirmation_k4_16_i30/1dsfm/c1_c5/themelis_nesterov_ls01_block_full_se3_left_persistent_tr_adaptl1-2_h0.35_l0.20_w3_start5_stage_c_final_c1_c5.jsonl",
-    "k4_k16_bal": "benchmark_results/stage_c_scaling_confirmation_k4_16_i30/bal/c1_c5/themelis_nesterov_ls01_block_full_se3_left_persistent_tr_adaptl1-2_h0.35_l0.20_w3_start5_stage_c_final_c1_c5.jsonl"
+    "k4_k16_bal": "benchmark_results/stage_c_scaling_confirmation_k4_16_i30/bal/c1_c5/themelis_nesterov_ls01_block_full_se3_left_persistent_tr_adaptl1-2_h0.35_l0.20_w3_start5_stage_c_final_c1_c5.jsonl",
+    "schur_balanced": "benchmark_results/bsr_numeric_vectorized_all15_i60_s10/themelis_nesterov_ls01_block_full_se3_left_diag_metric75_lip0.4_metric_proposal0.5_curvature_persistent_tr_trust_drs_enhanced30_decay5_final_schur10_bsr_low_memory_stop1e-3_numeric.jsonl",
+    "schur_fast": "benchmark_results/schur20_all15/themelis_nesterov_ls01_block_full_se3_left_diag_metric75_lip0.4_metric_proposal0.5_curvature_persistent_tr_trust_drs_enhanced30_decay5_final_schur20_bsr_low_memory_stop1e-3_s20.jsonl",
+    "schur_quality": "benchmark_results/schur20_all15/themelis_nesterov_ls01_block_full_se3_left_diag_metric75_lip0.4_metric_proposal0.5_curvature_persistent_tr_trust_drs_enhanced30_decay5_final_schur20_bsr_low_memory_stop1e-3_s20.jsonl"
   }
 }

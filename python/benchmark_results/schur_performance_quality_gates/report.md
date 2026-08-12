@@ -72,6 +72,14 @@ Gauge deflation materially helps Trafalgar conditioning and time, but changes
 the inexact nonlinear path and regresses both endpoints. Keep it as a
 diagnostic preconditioner; do not promote or broaden it.
 
+A matched tighter-tolerance (`rtol=1e-8`) gate does not recover
+quality-preserving behavior. Relative to matched tight Jacobi, gauge deflation
+is `1.034446x` SSE on Trafalgar and terminates after seven accepted corrections;
+relative to the promoted default it is `1.044057x`. Roman improves relative to
+tight Jacobi but gauge is slower (`5.527s` versus `4.932s`). Tight Jacobi itself
+changes the nonlinear path relative to the promoted `1e-6` default. Reject
+tolerance tightening as a repair for gauge-deflation trajectory drift.
+
 ## 4. Removable Relative-Pose Prior
 
 The repository already contains the globally frozen eight-mode relative

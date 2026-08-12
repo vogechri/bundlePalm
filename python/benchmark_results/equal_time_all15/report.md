@@ -56,6 +56,11 @@ bitwise endpoint-identical. A fresh all-15 I60+10 run takes `195.292s` DRS plus
 `289.730s`; the optimized balanced preset reaches `0.817178x` geometric and
 `0.755262x` summed SSE, W/T/L `13/0/2`, with a `0.999199x` time ratio.
 
+The named preset runner reproduces every endpoint and accepted/rejected Schur
+decision bitwise on all 15. Its repeat takes `283.324s` versus `289.498s`
+(`0.978669x` summed); the geometric mean per-scene time ratio is `0.996718x`
+with `2.53%` ratio CV.
+
 ## Decision
 
 For a balanced approximately 300-second all-15 budget, use I60+10. More DRS
