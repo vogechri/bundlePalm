@@ -380,6 +380,16 @@ screen. Pixel-only global Schur cannot identify the nearly unobservable
 deformation; independent geometric evidence would be required. See
 `benchmark_results/colmap_graph_mode_schur_pilot_quality/report.md`.
 
+Pose-prior selector compression (2026-08-13): complete artifact replay confirms
+that correction nine is the first loss-free physical-SSE branch decision, at
+`1.900388x` estimated balanced-workflow time. A development-selected I5 rule
+requiring a 5% prior lead reaches `0.993792x` raw on the six-scene development
+split without losses, but frozen held-out evaluation is W/T/L `4/3/2`:
+Notre Dame and Yorkminster reverse despite strong I5 leads. Reject the early
+branch race and do not retune on held-out outcomes. A new basin mechanism must
+be robust without selection or use independently justified information beyond
+pixel SSE. See `benchmark_results/pose_prior_early_selector_replay/report.md`.
+
 Schur performance and orthogonal quality gates (2026-08-12): complete
 per-attempt phase telemetry is live. On all-15 I60+10, coordinator numeric BSR
 accumulation takes `28.755s` and CG `23.106s`, while symbolic graph construction

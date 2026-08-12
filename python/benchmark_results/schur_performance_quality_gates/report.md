@@ -137,3 +137,10 @@ The next systems target is a quality-preserving conditioning method or a
 compiled numeric reduction beyond the now-vectorized Python path. The next
 quality target is a selector whose decision remains valid after Schur
 polishing; existing pre-Schur pixel SSE is insufficient on Notre Dame.
+
+The subsequent early-selector replay closes that quality target for physical
+SSE alone. A development-selected I5 rule requiring a 5% prior lead is
+aggregate-positive but loses held-out Notre Dame and Yorkminster, while the
+first loss-free Schur-prefix rule remains correction nine at `1.900388x`
+estimated control time. Do not implement or retune this branch race. See
+`benchmark_results/pose_prior_early_selector_replay/report.md`.
