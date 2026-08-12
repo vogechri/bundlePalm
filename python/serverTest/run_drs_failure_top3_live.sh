@@ -103,6 +103,7 @@ MAXIMUM_BLOCK_REGULARIZATION=${MAXIMUM_BLOCK_REGULARIZATION:-0.5}
 RELAXATION=${RELAXATION:-1.0}
 OUTER_ACCELERATION=${OUTER_ACCELERATION:-none}
 OUTER_ACCELERATION_UNTIL=${OUTER_ACCELERATION_UNTIL:-0}
+OUTER_ACCELERATION_RESTART_ITERATION=${OUTER_ACCELERATION_RESTART_ITERATION:-0}
 LINE_SEARCH_GRID=${LINE_SEARCH_GRID:-0,1}
 ACCELERATION_RESTART_AFTER=${ACCELERATION_RESTART_AFTER:-3}
 PENALTY_MULTIPLIER=${PENALTY_MULTIPLIER:-1.0}
@@ -148,6 +149,9 @@ if [[ "$OUTER_ACCELERATION" != "none" ]]; then
 fi
 if [[ "$OUTER_ACCELERATION_UNTIL" != "0" ]]; then
   VARIANT_NAME="${VARIANT_NAME}_accel_until${OUTER_ACCELERATION_UNTIL}"
+fi
+if [[ "$OUTER_ACCELERATION_RESTART_ITERATION" != "0" ]]; then
+  VARIANT_NAME="${VARIANT_NAME}_accel_restart${OUTER_ACCELERATION_RESTART_ITERATION}"
 fi
 if [[ "$RELAXATION" != "1" && "$RELAXATION" != "1.0" ]]; then
   VARIANT_NAME="${VARIANT_NAME}_relax${RELAXATION}"
@@ -637,6 +641,7 @@ for problem in "${PROBLEMS[@]}"; do
             --max-refinement-passes "$MAX_REFINEMENT_PASSES" \
             --outer-acceleration "$OUTER_ACCELERATION" \
             --outer-acceleration-until "$OUTER_ACCELERATION_UNTIL" \
+            --outer-acceleration-restart-iteration "$OUTER_ACCELERATION_RESTART_ITERATION" \
             --line-search-grid "$LINE_SEARCH_GRID" \
             --acceleration-restart-after "$ACCELERATION_RESTART_AFTER" \
             --proximal-metric "$PROXIMAL_METRIC" \
@@ -723,6 +728,7 @@ for problem in "${PROBLEMS[@]}"; do
             --max-refinement-passes "$MAX_REFINEMENT_PASSES" \
             --outer-acceleration "$OUTER_ACCELERATION" \
             --outer-acceleration-until "$OUTER_ACCELERATION_UNTIL" \
+            --outer-acceleration-restart-iteration "$OUTER_ACCELERATION_RESTART_ITERATION" \
             --line-search-grid "$LINE_SEARCH_GRID" \
             --acceleration-restart-after "$ACCELERATION_RESTART_AFTER" \
             --proximal-metric "$PROXIMAL_METRIC" \

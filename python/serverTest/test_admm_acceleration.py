@@ -96,6 +96,13 @@ def test_outer_acceleration_cutoff_is_active_only_before_until():
     assert client_drs.scheduled_outer_acceleration_active(0, 90)
 
 
+def test_outer_acceleration_restart_is_active_once():
+    assert not client_drs.outer_acceleration_restart_is_active(100, 99)
+    assert client_drs.outer_acceleration_restart_is_active(100, 100)
+    assert not client_drs.outer_acceleration_restart_is_active(100, 101)
+    assert not client_drs.outer_acceleration_restart_is_active(0, 100)
+
+
 def test_metric_proposal_cutoff_is_active_only_before_until():
     assert client_drs.scheduled_metric_proposal_scale(0.5, 30, 0) == 0.5
     assert client_drs.scheduled_metric_proposal_scale(0.5, 30, 29) == 0.5

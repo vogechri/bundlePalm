@@ -593,6 +593,11 @@ def scheduled_outer_acceleration_active(until, iteration):
     return until == 0 or iteration < until
 
 
+def outer_acceleration_restart_is_active(restart_iteration, iteration):
+    """Return whether outer acceleration state resets this iteration."""
+    return restart_iteration > 0 and iteration == restart_iteration
+
+
 def local_state_rebase_is_active(rebase_iteration, iteration):
     """Return whether local trust/curvature state rebases this iteration."""
     return rebase_iteration > 0 and iteration == rebase_iteration
@@ -1237,6 +1242,9 @@ def parse_arguments():
     )
     parser.add_argument("--outer-acceleration-until", type=int, default=0)
     parser.add_argument(
+        "--outer-acceleration-restart-iteration", type=int, default=0
+    )
+    parser.add_argument(
         "--line-search-grid", choices=("0,1", "0,0.5,1"), default="0,1"
     )
     parser.add_argument("--acceleration-restart-after", type=int, default=3)
@@ -1878,11 +1886,20 @@ def validate_arguments(arguments):
         raise ValueError("acceleration restart count must be positive")
     if not 0 <= arguments.outer_acceleration_until <= arguments.iterations:
         raise ValueError("outer acceleration cutoff must be in [0, iterations]")
+    if not 0 <= arguments.outer_acceleration_restart_iteration < arguments.iterations:
+        raise ValueError(
+            "outer acceleration restart iteration must be in [0, iterations)"
+        )
     if (
         arguments.outer_acceleration_until > 0
         and arguments.outer_acceleration == "none"
     ):
         raise ValueError("outer acceleration cutoff requires acceleration")
+    if (
+        arguments.outer_acceleration_restart_iteration > 0
+        and arguments.outer_acceleration == "none"
+    ):
+        raise ValueError("outer acceleration restart requires acceleration")
     if (
         arguments.outer_acceleration != "none"
         and arguments.consensus_landmark_refinement_steps > 0
@@ -2679,6 +2696,15 @@ def main():
             arguments.safeguard_annealing_iterations or arguments.iterations
         )
         for iteration in range(arguments.iterations):
+            outer_acceleration_restart_applied = (
+                outer_acceleration_restart_is_active(
+                    arguments.outer_acceleration_restart_iteration,
+                    iteration,
+                )
+            )
+            if outer_acceleration_restart_applied:
+                accelerator.reset()
+                acceleration_failures = 0
             local_state_rebase_applied = local_state_rebase_is_active(
                 arguments.local_state_rebase_iteration,
                 iteration,
@@ -4867,6 +4893,9 @@ def main():
                     unique_metric_selector_rejected
                 ),
                 "outerAcceleration": arguments.outer_acceleration,
+                "outerAccelerationRestartApplied": (
+                    outer_acceleration_restart_applied
+                ),
                 "localStateRebaseApplied": local_state_rebase_applied,
                 "forcedLocalTrustRegionRadius": (
                     iteration_forced_trust_region_radius
@@ -5636,6 +5665,9 @@ def main():
         "relaxation": arguments.relaxation,
         "outerAcceleration": arguments.outer_acceleration,
         "outerAccelerationUntil": arguments.outer_acceleration_until,
+        "outerAccelerationRestartIteration": (
+            arguments.outer_acceleration_restart_iteration
+        ),
         "singleClusterProximal": arguments.single_cluster_proximal,
         "lineSearchGrid": arguments.line_search_grid,
         "accelerationRestartAfter": arguments.acceleration_restart_after,

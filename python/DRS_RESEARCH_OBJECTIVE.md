@@ -258,6 +258,31 @@ and its BAL gain is too small for the added memory. Do not retune from this
 confirmation cohort. See
 `benchmark_results/stage_c_themelis_final_schur3_bsr_low_memory_stop1e3_all15_all29_k24_i30/report.md`.
 
+Deeper-Schur and I100 diagnosis (2026-08-12): extending the frozen all-15
+1DSfM I30 handoff from three to ten `bsr_low_memory` corrections resolves the
+apparent quality gap. All 15 scenes accept all ten corrections. Correction
+eight crosses the established I200 base (`0.996373x`), and correction ten
+reaches `0.968846x` base-I200, `0.749791x` its I30 handoff, and `1.411625x`
+Ceres. I30 DRS plus the tail takes `188.491s`, `0.329301x` the established
+I200 base optimization time (`572.399s`), making this a genuine Pareto
+improvement. Every accepted CG solve converges and physical SSE decreases on
+every scene. Median damped model gain falls below one after correction seven,
+indicating declining model calibration, but not a broken correction because
+independent SSE acceptance remains positive. The three-correction gate was
+under-polished; the ten-correction cap is still active everywhere, so this is
+a quality point rather than convergence. See
+`benchmark_results/stage_c_themelis_final_schur10_bsr_low_memory_stop1e3_all15_k24_i30/report.md`.
+
+The separate I100 acceleration diagnostic uses Madrid, Montreal, Roman, Tower,
+and Trafalgar with bitwise-identical prefixes through I100 and proposal damping
+retained. Permanent acceleration reaches `1.052528x` their established I200
+base; an isolated acceleration-only reset at I100 is aggregate-neutral at
+`1.051481x`. Disabling acceleration after I100 is already `1.02014x` permanent
+at the fully matched I150 checkpoint and later exhausts recovery on Trafalgar.
+Keep acceleration active; stale momentum history is not the cause of the late
+gap. Do not broaden the isolated reset. See
+`benchmark_results/stage_c_i100_acceleration_diagnostics_k24_i200/report.md`.
+
 Loss-factorial clarification (2026-08-11): fallback safety does not imply
 endpoint dominance over a separately run plain trajectory. Roman's C1 and C5
 main effects both lose but interact beneficially; Yorkminster's main effects
