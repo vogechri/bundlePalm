@@ -80,6 +80,15 @@ tight Jacobi but gauge is slower (`5.527s` versus `4.932s`). Tight Jacobi itself
 changes the nonlinear path relative to the promoted `1e-6` default. Reject
 tolerance tightening as a repair for gauge-deflation trajectory drift.
 
+A final gauge-staged/Jacobi-polished gate uses gauge deflation only to reach
+`rtol=1e-3`, then finishes with Jacobi to the promoted `rtol=1e-6`. Final
+residuals satisfy the original contract, but finite-Krylov path dependence
+remains. Roman improves `1.69%` but Schur time rises `14.5%`; Trafalgar Schur
+time falls `7.0%` but SSE regresses `1.25%`. The experimental mode was removed
+from production. Matching the final residual is insufficient for trajectory
+equivalence, so further preconditioner search is closed until a mechanism can
+preserve the accepted nonlinear path by construction.
+
 ## 4. Removable Relative-Pose Prior
 
 The repository already contains the globally frozen eight-mode relative

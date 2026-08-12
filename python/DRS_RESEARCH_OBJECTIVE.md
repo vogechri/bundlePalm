@@ -330,8 +330,11 @@ systems changes. A default-off seven-mode projection-preserving similarity
 preconditioner cuts Trafalgar CG iterations `507 -> 238` and Schur time
 `37.749s -> 31.211s`, but regresses Roman/Trafalgar SSE by `0.764%/1.902%`;
 matched `1e-8` tolerance does not repair the path (`1.034446x` tight-Jacobi SSE
-on Trafalgar and only seven accepted corrections). Retain it only as a
-conditioning diagnostic. The frozen removable relative-pose
+on Trafalgar and only seven accepted corrections). Gauge staging followed by
+Jacobi polishing to the original `1e-6` residual also fails: Roman is slower,
+while Trafalgar is `1.012483x` promoted-Jacobi SSE. Remove that mode and close
+preconditioner search for now; retain plain gauge only as a conditioning
+diagnostic. The frozen removable relative-pose
 prior improves fixed-policy all-15 geometric SSE to `0.989513x` control but
 worsens summed SSE to `1.001376x`, with Trafalgar `+5.062%`; do not integrate it
 unconditionally. The historical I60 pixel-SSE selector plus Schur10 reaches
