@@ -78,6 +78,15 @@ _REQUIRED_PROTO_FIELDS = {
         "step_size_upper_f32",
         "unique_camera_interior_defect_squared",
     },
+    "return_schur_system_proto": {
+        "block_columns_u32",
+        "block_rows_u32",
+        "blocks_f64",
+        "camera_diagonal_f64",
+        "camera_ids_u32",
+        "landmark_model_reduction",
+        "reduced_gradient_f64",
+    },
 }
 _missing_proto_fields = {
     message_name: sorted(
@@ -108,6 +117,17 @@ class SingleNodeConsensusSummary:
     reflection_projection_squared: float
     center_step_squared: float
     splitting_term: float
+
+
+@dataclass
+class ClusterSchurSystem:
+    camera_ids: np.ndarray
+    block_rows: np.ndarray
+    block_columns: np.ndarray
+    blocks: np.ndarray
+    reduced_gradient: np.ndarray
+    camera_diagonal: np.ndarray
+    landmark_model_reduction: float = 0.0
 
 
 def _timed_operation(name):
@@ -209,6 +229,8 @@ class AdmmWorkerClient:
         self.operation_seconds = {
             "solveBatch": 0.0,
             "updatePreconditioning": 0.0,
+            "buildSchurSystems": 0.0,
+            "applyCameraStep": 0.0,
             "refineLandmarksAtConsensus": 0.0,
             "evaluateConsensusSSE": 0.0,
             "controlLandmarkState": 0.0,
@@ -841,6 +863,190 @@ class AdmmWorkerClient:
                 ].ravel()
             update.cluster_id = cluster_id
             self._send(request)
+
+    @_timed_operation("buildSchurSystems")
+    def build_schur_systems(
+        self,
+        camera_indices_in_cluster,
+        point_indices_in_cluster,
+        consensus,
+        landmarks,
+        cluster_count,
+        landmark_damping,
+    ):
+        if landmark_damping < 0.0:
+            raise ValueError("landmark damping must be nonnegative")
+        self.phase_id += 1
+        phase_id = self.phase_id
+        for cluster_id in range(cluster_count):
+            unique_cameras = np.unique(camera_indices_in_cluster[cluster_id])
+            unique_points = np.unique(point_indices_in_cluster[cluster_id])
+            request = test_pb2.request_proto()
+            update = request.schur_system
+            update.cluster_id = cluster_id
+            update.run_id = self.run_id
+            update.phase_id = phase_id
+            update.cameras_f64 = np.ascontiguousarray(
+                consensus[unique_cameras], dtype="<f8"
+            ).tobytes()
+            update.landmarks_f64 = np.ascontiguousarray(
+                landmarks[unique_points], dtype="<f8"
+            ).tobytes()
+            update.landmark_damping = landmark_damping
+            self._send(request)
+
+        systems = [None] * cluster_count
+        pending = set(range(cluster_count))
+        while pending:
+            payload = self.pull_socket.recv()
+            self.received_bytes += len(payload)
+            reply = test_pb2.return_schur_system_proto()
+            reply.ParseFromString(payload)
+            if reply.run_id != self.run_id or reply.phase_id != phase_id:
+                continue
+            cluster_id = reply.cluster_id
+            if cluster_id not in pending:
+                raise RuntimeError(
+                    f"duplicate Schur reply for cluster {cluster_id}"
+                )
+            pending.remove(cluster_id)
+            camera_ids = np.frombuffer(
+                reply.camera_ids_u32, dtype="<u4"
+            ).astype(np.int64)
+            block_rows = np.frombuffer(
+                reply.block_rows_u32, dtype="<u4"
+            ).astype(np.int64)
+            block_columns = np.frombuffer(
+                reply.block_columns_u32, dtype="<u4"
+            ).astype(np.int64)
+            blocks = np.frombuffer(reply.blocks_f64, dtype="<f8")
+            reduced_gradient = np.frombuffer(
+                reply.reduced_gradient_f64, dtype="<f8"
+            )
+            camera_diagonal = np.frombuffer(
+                reply.camera_diagonal_f64, dtype="<f8"
+            )
+            if block_rows.size != block_columns.size or (
+                blocks.size != 81 * block_rows.size
+            ):
+                raise RuntimeError("worker returned invalid Schur blocks")
+            if reduced_gradient.size != 9 * camera_ids.size:
+                raise RuntimeError("worker returned invalid Schur gradient")
+            if camera_diagonal.size != 81 * camera_ids.size:
+                raise RuntimeError(
+                    "worker returned invalid Schur camera diagonal"
+                )
+            finite_fields = {
+                "blocks": np.all(np.isfinite(blocks)),
+                "reduced_gradient": np.all(np.isfinite(reduced_gradient)),
+                "camera_diagonal": np.all(np.isfinite(camera_diagonal)),
+                "landmark_model_reduction": np.isfinite(
+                    reply.landmark_model_reduction
+                ),
+            }
+            if not all(finite_fields.values()):
+                invalid = sorted(
+                    name for name, finite in finite_fields.items() if not finite
+                )
+                raise RuntimeError(
+                    f"worker cluster {cluster_id} returned non-finite Schur "
+                    f"fields: {invalid}"
+                )
+            systems[cluster_id] = ClusterSchurSystem(
+                camera_ids,
+                block_rows,
+                block_columns,
+                blocks.reshape((-1, 9, 9)),
+                reduced_gradient.reshape((-1, 9)),
+                camera_diagonal.reshape((-1, 9, 9)),
+                reply.landmark_model_reduction,
+            )
+        return systems
+
+    @_timed_operation("applyCameraStep")
+    def apply_camera_step(
+        self,
+        camera_indices_in_cluster,
+        point_indices_in_cluster,
+        consensus,
+        landmarks,
+        tangent_step,
+        cluster_count,
+        landmark_refinement_steps,
+        rebase_trust_state=False,
+    ):
+        tangent_step = np.asarray(tangent_step, dtype=np.float64)
+        if tangent_step.shape != consensus.shape:
+            raise ValueError("tangent step shape must match consensus")
+        if not 0 <= landmark_refinement_steps <= 20:
+            raise ValueError("landmark refinement steps must be in [0, 20]")
+        self.phase_id += 1
+        phase_id = self.phase_id
+        for cluster_id in range(cluster_count):
+            unique_cameras = np.unique(camera_indices_in_cluster[cluster_id])
+            unique_points = np.unique(point_indices_in_cluster[cluster_id])
+            request = test_pb2.request_proto()
+            update = request.camera_step
+            update.cluster_id = cluster_id
+            update.run_id = self.run_id
+            update.phase_id = phase_id
+            update.cameras_f64 = np.ascontiguousarray(
+                consensus[unique_cameras], dtype="<f8"
+            ).tobytes()
+            update.landmarks_f64 = np.ascontiguousarray(
+                landmarks[unique_points], dtype="<f8"
+            ).tobytes()
+            update.tangent_step_f64 = np.ascontiguousarray(
+                tangent_step[unique_cameras], dtype="<f8"
+            ).tobytes()
+            update.landmark_refinement_steps = landmark_refinement_steps
+            update.rebase_trust_state = rebase_trust_state
+            self._send(request)
+
+        corrected_cameras = np.full_like(consensus, np.nan)
+        corrected_landmarks = landmarks.copy()
+        costs = np.empty(cluster_count, dtype=np.float64)
+        trust_region_radii = np.empty(cluster_count, dtype=np.float64)
+        pending = set(range(cluster_count))
+        while pending:
+            payload = self.pull_socket.recv()
+            self.received_bytes += len(payload)
+            reply = test_pb2.return_cluster_proto()
+            reply.ParseFromString(payload)
+            if reply.run_id != self.run_id or reply.phase_id != phase_id:
+                continue
+            cluster_id = reply.cluster_id
+            if cluster_id not in pending:
+                raise RuntimeError(
+                    f"duplicate camera-step reply for cluster {cluster_id}"
+                )
+            pending.remove(cluster_id)
+            unique_cameras = np.unique(camera_indices_in_cluster[cluster_id])
+            unique_points = np.unique(point_indices_in_cluster[cluster_id])
+            local_cameras = np.frombuffer(
+                reply.cameras_f64, dtype="<f8"
+            ).reshape((-1, 9))
+            local_landmarks = np.frombuffer(
+                reply.landmarks_f64, dtype="<f8"
+            ).reshape((-1, 3))
+            if local_cameras.shape[0] != unique_cameras.size:
+                raise RuntimeError("worker returned invalid corrected cameras")
+            if local_landmarks.shape[0] != unique_points.size:
+                raise RuntimeError("worker returned invalid corrected landmarks")
+            existing = corrected_cameras[unique_cameras]
+            overlap = np.all(np.isfinite(existing), axis=1)
+            if np.any(overlap) and not np.allclose(
+                existing[overlap], local_cameras[overlap], rtol=1e-10, atol=1e-12
+            ):
+                raise RuntimeError("workers disagree on corrected camera state")
+            corrected_cameras[unique_cameras] = local_cameras
+            corrected_landmarks[unique_points] = local_landmarks
+            costs[cluster_id] = reply.cost
+            trust_region_radii[cluster_id] = reply.trust_region_radius
+        if not np.all(np.isfinite(corrected_cameras)):
+            raise RuntimeError("corrected camera state is incomplete")
+        self.last_trust_region_radii = trust_region_radii
+        return costs, corrected_cameras, corrected_landmarks
 
     @_timed_operation("refineLandmarksAtConsensus")
     def refine_landmarks_at_consensus(

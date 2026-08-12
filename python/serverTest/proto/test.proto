@@ -212,6 +212,39 @@ message landmark_state_reply_proto {
   bytes landmarks_f64 = 5; // packed physical landmarks for explicit materialization
 }
 
+message schur_system_proto {
+  int32 cluster_id = 1;
+  uint64 run_id = 2;
+  uint64 phase_id = 3;
+  bytes cameras_f64 = 4; // scaled camera state for locally active cameras
+  bytes landmarks_f64 = 5; // physical state for locally owned landmarks
+  double landmark_damping = 6; // relative diagonal damping before elimination
+}
+
+message return_schur_system_proto {
+  int32 cluster_id = 1;
+  uint64 run_id = 2;
+  uint64 phase_id = 3;
+  bytes camera_ids_u32 = 4; // global camera id for each reduced-gradient block
+  bytes block_rows_u32 = 5; // global row camera id for each upper block
+  bytes block_columns_u32 = 6; // global column camera id for each upper block
+  bytes blocks_f64 = 7; // row-major 9x9 upper camera-pair blocks
+  bytes reduced_gradient_f64 = 8; // 9 values per camera_ids_u32 entry
+  bytes camera_diagonal_f64 = 9; // row-major 9x9 uneliminated data blocks
+  double landmark_model_reduction = 10; // 0.5 g_l' (V + lambda D)^-1 g_l
+}
+
+message camera_step_proto {
+  int32 cluster_id = 1;
+  uint64 run_id = 2;
+  uint64 phase_id = 3;
+  bytes cameras_f64 = 4; // scaled camera state for locally active cameras
+  bytes landmarks_f64 = 5; // physical state for locally owned landmarks
+  bytes tangent_step_f64 = 6; // 9 values per locally active camera
+  int32 landmark_refinement_steps = 7;
+  bool rebase_trust_state = 8; // commit external geometry as a fresh trust state
+}
+
 // can be one of messages. so proto converts to correct message. client messages server messages
 message request_proto {
     oneof options {
@@ -222,6 +255,8 @@ message request_proto {
         preconditioning_proto preconditioning_update = 5;
         best_cost_proto best_cost = 6;
         landmark_state_proto landmark_state = 7;
+        schur_system_proto schur_system = 8;
+        camera_step_proto camera_step = 9;
   }
 }
 

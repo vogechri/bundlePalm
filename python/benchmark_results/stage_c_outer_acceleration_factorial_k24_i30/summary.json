@@ -1,0 +1,236 @@
+{
+  "1dsfm": {
+    "anderson": {
+      "accelerated_acceptances": 45,
+      "completed": 2,
+      "losses": 0,
+      "nominal_fallbacks": 8,
+      "optimization_seconds": 34.13209524100239,
+      "optimization_vs_plain": 2.0629452537488957,
+      "oracle_calls": 120,
+      "recovery_exhausted": 0,
+      "rows": {
+        "roman_forum": {
+          "sse": 4606830.4153276365,
+          "sse_vs_plain": 0.5382848396503532
+        },
+        "trafalgar": {
+          "sse": 20466103.875394624,
+          "sse_vs_plain": 0.9958844426418889
+        }
+      },
+      "sse_vs_plain": 0.7321676703582114,
+      "wins": 2,
+      "worst": 0.9958844426418889
+    },
+    "lbfgs": {
+      "accelerated_acceptances": 34,
+      "completed": 2,
+      "losses": 1,
+      "nominal_fallbacks": 25,
+      "optimization_seconds": 34.29819022199081,
+      "optimization_vs_plain": 2.0729840412971607,
+      "oracle_calls": 120,
+      "recovery_exhausted": 0,
+      "rows": {
+        "roman_forum": {
+          "sse": 4826787.0893137995,
+          "sse_vs_plain": 0.5639856647974509
+        },
+        "trafalgar": {
+          "sse": 21363286.612192314,
+          "sse_vs_plain": 1.039541522427255
+        }
+      },
+      "sse_vs_plain": 0.7656934873764368,
+      "wins": 1,
+      "worst": 1.039541522427255
+    },
+    "nesterov": {
+      "accelerated_acceptances": 34,
+      "completed": 2,
+      "losses": 1,
+      "nominal_fallbacks": 9,
+      "optimization_seconds": 27.18653833399003,
+      "optimization_vs_plain": 1.6431555058651612,
+      "oracle_calls": 106,
+      "recovery_exhausted": 0,
+      "rows": {
+        "roman_forum": {
+          "sse": 4882650.470842135,
+          "sse_vs_plain": 0.5705130184565432
+        },
+        "trafalgar": {
+          "sse": 21886694.396835536,
+          "sse_vs_plain": 1.065010643128363
+        }
+      },
+      "sse_vs_plain": 0.7794885738094605,
+      "wins": 1,
+      "worst": 1.065010643128363
+    },
+    "none": {
+      "accelerated_acceptances": 0,
+      "completed": 2,
+      "losses": 0,
+      "nominal_fallbacks": 0,
+      "optimization_seconds": 16.545322847989155,
+      "optimization_vs_plain": 1.0,
+      "oracle_calls": 60,
+      "recovery_exhausted": 0,
+      "rows": {
+        "roman_forum": {
+          "sse": 8558350.664900828,
+          "sse_vs_plain": 1.0
+        },
+        "trafalgar": {
+          "sse": 20550681.383376174,
+          "sse_vs_plain": 1.0
+        }
+      },
+      "sse_vs_plain": 1.0,
+      "wins": 0,
+      "worst": 1.0
+    },
+    "themelis_nesterov": {
+      "accelerated_acceptances": 39,
+      "completed": 2,
+      "losses": 0,
+      "nominal_fallbacks": 6,
+      "optimization_seconds": 27.424248284994974,
+      "optimization_vs_plain": 1.6575227051751362,
+      "oracle_calls": 108,
+      "recovery_exhausted": 0,
+      "rows": {
+        "roman_forum": {
+          "sse": 4373429.6657470595,
+          "sse_vs_plain": 0.5110131422498493
+        },
+        "trafalgar": {
+          "sse": 16371979.073582496,
+          "sse_vs_plain": 0.7966635640035806
+        }
+      },
+      "sse_vs_plain": 0.638048235760772,
+      "wins": 2,
+      "worst": 0.7966635640035806
+    }
+  },
+  "bal": {
+    "anderson": {
+      "accelerated_acceptances": 47,
+      "completed": 1,
+      "losses": 1,
+      "nominal_fallbacks": 2,
+      "optimization_seconds": 33.013906605003285,
+      "optimization_vs_plain": 2.0262824571893527,
+      "oracle_calls": 118,
+      "recovery_exhausted": 1,
+      "rows": {
+        "bal3068": {
+          "sse": 4163152.0878078653,
+          "sse_vs_plain": 1.0932506264964537
+        },
+        "bal52": {
+          "sse": 504287.92364752106,
+          "sse_vs_plain": 0.8116298150734419
+        }
+      },
+      "sse_vs_plain": 0.9419738870118647,
+      "wins": 1,
+      "worst": 1.0932506264964537
+    },
+    "lbfgs": {
+      "accelerated_acceptances": 44,
+      "completed": 1,
+      "losses": 1,
+      "nominal_fallbacks": 2,
+      "optimization_seconds": 29.752453064007568,
+      "optimization_vs_plain": 1.8261054174307143,
+      "oracle_calls": 110,
+      "recovery_exhausted": 1,
+      "rows": {
+        "bal3068": {
+          "sse": 4025226.7965158103,
+          "sse_vs_plain": 1.0570312167957279
+        },
+        "bal52": {
+          "sse": 494625.5045758927,
+          "sse_vs_plain": 0.7960785654072903
+        }
+      },
+      "sse_vs_plain": 0.9173221324362917,
+      "wins": 1,
+      "worst": 1.0570312167957279
+    },
+    "nesterov": {
+      "accelerated_acceptances": 51,
+      "completed": 2,
+      "losses": 0,
+      "nominal_fallbacks": 0,
+      "optimization_seconds": 28.033539925992955,
+      "optimization_vs_plain": 1.720604315162997,
+      "oracle_calls": 112,
+      "recovery_exhausted": 0,
+      "rows": {
+        "bal3068": {
+          "sse": 3483183.5013763336,
+          "sse_vs_plain": 0.9146897506420216
+        },
+        "bal52": {
+          "sse": 501471.7045935929,
+          "sse_vs_plain": 0.8070972311213748
+        }
+      },
+      "sse_vs_plain": 0.8592110131267385,
+      "wins": 2,
+      "worst": 0.9146897506420216
+    },
+    "none": {
+      "accelerated_acceptances": 0,
+      "completed": 2,
+      "losses": 0,
+      "nominal_fallbacks": 0,
+      "optimization_seconds": 16.29284529798315,
+      "optimization_vs_plain": 1.0,
+      "oracle_calls": 60,
+      "recovery_exhausted": 0,
+      "rows": {
+        "bal3068": {
+          "sse": 3808049.121498829,
+          "sse_vs_plain": 1.0
+        },
+        "bal52": {
+          "sse": 621327.4996580671,
+          "sse_vs_plain": 1.0
+        }
+      },
+      "sse_vs_plain": 1.0,
+      "wins": 0,
+      "worst": 1.0
+    },
+    "themelis_nesterov": {
+      "accelerated_acceptances": 54,
+      "completed": 2,
+      "losses": 0,
+      "nominal_fallbacks": 2,
+      "optimization_seconds": 29.812756346000242,
+      "optimization_vs_plain": 1.8298066298886844,
+      "oracle_calls": 116,
+      "recovery_exhausted": 0,
+      "rows": {
+        "bal3068": {
+          "sse": 3348759.113539102,
+          "sse_vs_plain": 0.879389683981032
+        },
+        "bal52": {
+          "sse": 496270.46590035106,
+          "sse_vs_plain": 0.798726060207317
+        }
+      },
+      "sse_vs_plain": 0.838087977287067,
+      "wins": 2,
+      "worst": 0.879389683981032
+    }
+  }
+}

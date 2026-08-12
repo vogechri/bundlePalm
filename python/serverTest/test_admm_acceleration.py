@@ -103,6 +103,13 @@ def test_metric_proposal_cutoff_is_active_only_before_until():
     assert client_drs.scheduled_metric_proposal_scale(0.5, 0, 90) == 0.5
 
 
+def test_local_state_rebase_is_active_once():
+    assert not client_drs.local_state_rebase_is_active(30, 29)
+    assert client_drs.local_state_rebase_is_active(30, 30)
+    assert not client_drs.local_state_rebase_is_active(30, 31)
+    assert not client_drs.local_state_rebase_is_active(0, 0)
+
+
 def test_factorized_metric_allows_themelis_acceleration(monkeypatch):
     monkeypatch.setenv("BUNDLE_PALM_CAMERA_UPDATE", "se3_left")
     monkeypatch.setenv("BUNDLE_PALM_DIRECT_TANGENT_NORMAL_EQUATIONS", "1")

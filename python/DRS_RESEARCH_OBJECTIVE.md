@@ -224,6 +224,40 @@ continuation, not initial component compatibility. See
 `benchmark_results/stage_c_base_structure_factorial_k24_i30/report.md` and
 `benchmark_results/stage_c_shared_proposal_c1_k24_i90/report.md`.
 
+Outer-acceleration and global-Schur gate (2026-08-12): on matched Roman,
+Trafalgar, BAL52, and BAL3068 K24/I30 sentinels, safeguarded Themelis Nesterov
+is the best tested outer accelerator and completes all four cases. One final
+distributed global Schur correction from its best checkpoint improves all
+four; the reductions are `5.075%`, `3.223%`, `0.016%`, and `0.048%`.
+Allowing up to three accepted corrections with the same global damping and
+acceptance policy gives another `12.021%`/`5.244%` after correction one on
+Roman/Trafalgar, while BAL52/BAL3068 stop after correction two for only
+`0.00071%`/`0.00836%` additional gain. The up-to-three endpoint is
+`0.875121x` the uncorrected I30 state on the 1DSfM pair and `0.999636x` on the
+BAL pair. Retain this as separately labeled polishing, not a DRS-core gain.
+The four-case operator gate showed that `bsr_low_memory` preserves every
+acceptance and termination decision while reducing BAL3068 correction time
+from `87.90s` to `23.18s`; correction-three endpoint drift versus Python is
+`+0.190%` on Roman and `+0.043%` on Trafalgar. Freeze `bsr_low_memory`, a
+three-correction cap, and the predeclared `1e-3` relative-progress stop for
+breadth confirmation. See
+`benchmark_results/stage_c_themelis_final_schur3_k24_i30/report.md` and
+`benchmark_results/stage_c_themelis_final_schur3_bsr_low_memory_k24_i30/report.md`.
+
+Final-Schur breadth confirmation (2026-08-12): the frozen policy completed all
+15 1DSfM and all 29 BAL scenes with no scene-specific settings. All 15 1DSfM
+scenes accept all three corrections and reach `0.864158x` their best I30
+handoffs, `0.858090x` base-I30, and `1.626944x` Ceres. This is a strong
+polishing result but remains `1.116626x` the established I200 base. On BAL,
+27/29 scenes stop after one correction and only BAL135/BAL142 accept a second;
+the endpoint is `0.999320x` its I30 handoff, `0.996749x` base-I30,
+`1.011023x` Ceres, and `1.012640x` the established I90 base. Peak coordinator
+RSS is `12.134 GiB` on BAL961. Retain bounded global Schur as separately
+labeled 1DSfM-oriented polishing; it does not replace either long-horizon base
+and its BAL gain is too small for the added memory. Do not retune from this
+confirmation cohort. See
+`benchmark_results/stage_c_themelis_final_schur3_bsr_low_memory_stop1e3_all15_all29_k24_i30/report.md`.
+
 Loss-factorial clarification (2026-08-11): fallback safety does not imply
 endpoint dominance over a separately run plain trajectory. Roman's C1 and C5
 main effects both lose but interact beneficially; Yorkminster's main effects

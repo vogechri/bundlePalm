@@ -23,10 +23,14 @@ def main():
     parser.add_argument("--iterations", type=int, required=True)
     parser.add_argument("--proposal-until", type=int, default=0)
     parser.add_argument("--acceleration-until", type=int, default=0)
+    parser.add_argument("--rebase-iteration", type=int, default=0)
+    parser.add_argument("--mode", choices=("plain", "c1"), default="c1")
+    parser.add_argument("--proposal-scale", type=float, default=0.5)
+    parser.add_argument("--shared-only", type=int, choices=(0, 1), default=1)
     arguments = parser.parse_args()
     summary = {}
     for family, expected_count in (("1dsfm", 15), ("bal", 29)):
-        rows = load_directory(arguments.root / family / "c1")
+        rows = load_directory(arguments.root / family / arguments.mode)
         scenes = tuple(sorted(rows))
         if len(scenes) != expected_count:
             raise ValueError(f"coverage mismatch {family}: {len(scenes)}/{expected_count}")
@@ -35,16 +39,19 @@ def main():
                 "clusters": 24,
                 "iterations": arguments.iterations,
                 "localSolver": "nesterov",
-                "outerAcceleration": "themelis_nesterov",
+                "outerAcceleration": (
+                    "themelis_nesterov" if arguments.mode == "c1" else "none"
+                ),
                 "outerAccelerationUntil": arguments.acceleration_until,
                 "trustRegionPolicy": "drs",
                 "persistentTrustRegion": True,
                 "blockRecoveryMode": "curvature",
                 "initialBlockCurvatureMultiplier": 0.4,
                 "cameraDiagonalMetricScale": 75.0,
-                "sharedOnlyCameraProximal": True,
-                "metricProposalDisagreementScale": 0.5,
+                "sharedOnlyCameraProximal": bool(arguments.shared_only),
+                "metricProposalDisagreementScale": arguments.proposal_scale,
                 "metricProposalDisagreementUntil": arguments.proposal_until,
+                "localStateRebaseIteration": arguments.rebase_iteration,
             }
             for key, value in expected.items():
                 actual = row.get(key, 0) if key in (
@@ -63,6 +70,16 @@ def main():
                 raise ValueError(
                     f"unexpected early termination {family}/{scene}: "
                     f"{completed}/{arguments.iterations}, {row.get('terminationReason')}"
+                )
+            rebase_events = sum(
+                bool(event.get("localStateRebaseApplied"))
+                for event in row.get("trajectory", [])
+            )
+            expected_rebase_events = 1 if arguments.rebase_iteration > 0 else 0
+            if rebase_events != expected_rebase_events:
+                raise ValueError(
+                    f"rebase telemetry mismatch {family}/{scene}: "
+                    f"{rebase_events}, expected {expected_rebase_events}"
                 )
         base = base_checkpoints(family, scenes, arguments.iterations)
         quality = compare(rows, base, scenes)
@@ -106,13 +123,19 @@ def main():
     )
     report = arguments.root / "report.md"
     with report.open("w", encoding="utf-8") as output:
-        output.write(f"# Shared-Only Proposal C1 At I{arguments.iterations}\n\n")
+        output.write(
+            f"# Shared-Only {arguments.mode.upper()} At I{arguments.iterations}\n\n"
+        )
         output.write(
             "The candidate uses K24, local Nesterov, C1, persistent DRS trust, "
-            "curvature 0.4 recovery/decay, camera metric 75, shared-only camera "
-            "proximal terms, and proposal damping 0.5 applied only to duplicated "
+            "curvature 0.4 recovery/decay, camera metric 75, "
+            f"{'shared-only' if arguments.shared_only else 'legacy all-camera'} camera "
+            f"proximal terms, and proposal damping {arguments.proposal_scale} "
+            "applied only to duplicated "
             f"cameras through outer iteration {arguments.proposal_until or 'all'}. "
             f"C1 is active through iteration {arguments.acceleration_until or 'all'}.\n\n"
+            f"Local trust/curvature state rebases at iteration "
+            f"{arguments.rebase_iteration or 'never'}.\n\n"
         )
         output.write(
             "| Family | SSE/base | W/L | Worst | Optimization s | Base s | "

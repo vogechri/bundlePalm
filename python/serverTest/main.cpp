@@ -1206,6 +1206,10 @@ class BlockEdgeMatrix {
       THROW_IF(edge.camera < 0 || edge.camera >= num_cameras_ ||
                edge.landmark < 0 || edge.landmark >= num_landmarks_);
     }
+    landmark_edges_.assign(num_landmarks_, {});
+    for (int edge = 0; edge < edges_.size(); ++edge) {
+      landmark_edges_[edges_[edge].landmark].push_back(edge);
+    }
   }
 
   void ClearValues() {
@@ -1304,11 +1308,67 @@ class BlockEdgeMatrix {
     }
   }
 
+  std::map<std::pair<int, int>, Eigen::Matrix<double, 9, 9>>
+  MaterializeSchurComplement(
+      const SparseMatrix<double, RowMajor>& camera_hessian,
+      const SparseMatrix<double, RowMajor>& landmark_inverse) const {
+    THROW_IF(camera_hessian.rows() != rows() ||
+             landmark_inverse.rows() != cols());
+    std::map<std::pair<int, int>, Eigen::Matrix<double, 9, 9>> blocks;
+    for (int camera = 0; camera < num_cameras_; ++camera) {
+      Eigen::Matrix<double, 9, 9>& diagonal = blocks[{camera, camera}];
+      for (int row = 0; row < 9; ++row) {
+        for (int column = 0; column < 9; ++column) {
+          diagonal(row, column) = camera_hessian.coeff(
+              9 * camera + row, 9 * camera + column);
+        }
+      }
+    }
+    for (int landmark = 0; landmark < num_landmarks_; ++landmark) {
+      Eigen::Matrix3d inverse_block;
+      for (int row = 0; row < 3; ++row) {
+        for (int column = 0; column < 3; ++column) {
+          inverse_block(row, column) = landmark_inverse.coeff(
+              3 * landmark + row, 3 * landmark + column);
+        }
+      }
+      const std::vector<int>& landmark_edges = landmark_edges_[landmark];
+      for (int left_index = 0; left_index < landmark_edges.size(); ++left_index) {
+        const CameraLandmarkEdge& left = edges_[landmark_edges[left_index]];
+        const Eigen::Map<const Eigen::Matrix<double, 9, 3, Eigen::RowMajor>>
+            left_cross(left.values.data());
+        for (int right_index = left_index;
+             right_index < landmark_edges.size(); ++right_index) {
+          const CameraLandmarkEdge& right = edges_[landmark_edges[right_index]];
+          const Eigen::Map<
+              const Eigen::Matrix<double, 9, 3, Eigen::RowMajor>>
+              right_cross(right.values.data());
+          Eigen::Matrix<double, 9, 9> contribution =
+              left_cross * inverse_block * right_cross.transpose();
+          const int row_camera = std::min(left.camera, right.camera);
+          const int column_camera = std::max(left.camera, right.camera);
+          if (left.camera > right.camera) {
+            contribution.transposeInPlace();
+          }
+          const std::pair<int, int> key{row_camera, column_camera};
+          auto block = blocks.find(key);
+          if (block == blocks.end()) {
+            block = blocks.emplace(
+                key, Eigen::Matrix<double, 9, 9>::Zero()).first;
+          }
+          block->second -= contribution;
+        }
+      }
+    }
+    return blocks;
+  }
+
  private:
   int num_cameras_ = 0;
   int num_landmarks_ = 0;
   std::vector<CameraLandmarkEdge> edges_;
   std::vector<int> observation_edges_;
+  std::vector<std::vector<int>> landmark_edges_;
 };
 
 struct NormalEquations {
@@ -2653,6 +2713,148 @@ public:
       return result;
     }
 #endif
+
+    void SetExternalState(const std::string& camera_bytes,
+                          const std::string& landmark_bytes) {
+      THROW_IF(camera_bytes.size() != cameras.size() * sizeof(double));
+      THROW_IF(landmark_bytes.size() != landmarks.size() * sizeof(double));
+      std::memcpy(cameras.data(), camera_bytes.data(), camera_bytes.size());
+      const double* physical_landmarks =
+          reinterpret_cast<const double*>(landmark_bytes.data());
+      for (int index = 0; index < landmarks.size(); ++index) {
+        landmarks[index] = physical_landmarks[index] / vnorm[index];
+      }
+    }
+
+    return_schur_system_proto BuildSchurSystem(
+        const schur_system_proto& request) {
+      THROW_IF(!ManifoldCameraUpdatesEnabled() ||
+               !DirectTangentNormalEquationsEnabled());
+      THROW_IF(request.cluster_id() != cluster_id ||
+               request.landmark_damping() < 0.);
+      const std::vector<double> saved_cameras = cameras;
+      const std::vector<double> saved_landmarks = landmarks;
+      const double saved_cost = cost;
+      SetExternalState(request.cameras_f64(), request.landmarks_f64());
+      const NormalEquations normal_equations = GetBatchedNormalEquations(true);
+      SparseMatrix<double, RowMajor> landmark_inverse =
+          normal_equations.landmark_hessian;
+      if (request.landmark_damping() > 0.) {
+        SparseMatrix<double, RowMajor> landmark_diagonal_source =
+            normal_equations.landmark_hessian;
+        landmark_inverse += request.landmark_damping()
+            * Diagonal<3>(landmark_diagonal_source);
+      }
+        FloorSymmetricBlocks<3>(
+          landmark_inverse, std::max(PobaBlockRelativeFloor(), 1e-12));
+      BlockInverse<3>(landmark_inverse);
+
+      Eigen::VectorXd landmark_workspace =
+          landmark_inverse * normal_equations.landmark_gradient;
+      const double landmark_model_reduction = 0.5
+          * normal_equations.landmark_gradient.dot(landmark_workspace);
+      Eigen::VectorXd camera_workspace(camera_landmark_hessian.rows());
+      camera_landmark_hessian.Multiply(landmark_workspace, camera_workspace);
+      const Eigen::VectorXd reduced_gradient =
+          normal_equations.camera_gradient - camera_workspace;
+      const auto schur_blocks =
+          camera_landmark_hessian.MaterializeSchurComplement(
+              normal_equations.camera_hessian, landmark_inverse);
+
+      std::vector<std::uint32_t> block_rows;
+      std::vector<std::uint32_t> block_columns;
+      std::vector<double> block_values;
+      block_rows.reserve(schur_blocks.size());
+      block_columns.reserve(schur_blocks.size());
+      block_values.reserve(81 * schur_blocks.size());
+      for (const auto& entry : schur_blocks) {
+        std::uint32_t row_camera = global_camera_ids[entry.first.first];
+        std::uint32_t column_camera = global_camera_ids[entry.first.second];
+        Eigen::Matrix<double, 9, 9> block = entry.second;
+        if (row_camera > column_camera) {
+          std::swap(row_camera, column_camera);
+          block.transposeInPlace();
+        }
+        block_rows.push_back(row_camera);
+        block_columns.push_back(column_camera);
+        for (int row = 0; row < 9; ++row) {
+          for (int column = 0; column < 9; ++column) {
+            block_values.push_back(block(row, column));
+          }
+        }
+      }
+
+      std::vector<double> camera_diagonal;
+      camera_diagonal.reserve(81 * numCameras);
+      for (int camera = 0; camera < numCameras; ++camera) {
+        for (int row = 0; row < 9; ++row) {
+          for (int column = 0; column < 9; ++column) {
+            camera_diagonal.push_back(normal_equations.camera_hessian.coeff(
+                9 * camera + row, 9 * camera + column));
+          }
+        }
+      }
+
+      return_schur_system_proto response;
+      response.set_cluster_id(cluster_id);
+      response.set_run_id(request.run_id());
+      response.set_phase_id(request.phase_id());
+      response.set_camera_ids_u32(
+          reinterpret_cast<const char*>(global_camera_ids.data()),
+          global_camera_ids.size() * sizeof(std::uint32_t));
+      response.set_block_rows_u32(
+          reinterpret_cast<const char*>(block_rows.data()),
+          block_rows.size() * sizeof(std::uint32_t));
+      response.set_block_columns_u32(
+          reinterpret_cast<const char*>(block_columns.data()),
+          block_columns.size() * sizeof(std::uint32_t));
+      response.set_blocks_f64(
+          reinterpret_cast<const char*>(block_values.data()),
+          block_values.size() * sizeof(double));
+      response.set_reduced_gradient_f64(
+          reinterpret_cast<const char*>(reduced_gradient.data()),
+          reduced_gradient.size() * sizeof(double));
+      response.set_camera_diagonal_f64(
+          reinterpret_cast<const char*>(camera_diagonal.data()),
+          camera_diagonal.size() * sizeof(double));
+      response.set_landmark_model_reduction(landmark_model_reduction);
+      cameras = saved_cameras;
+      landmarks = saved_landmarks;
+      cost = saved_cost;
+      return response;
+    }
+
+    return_cluster_proto ApplyExternalCameraStep(
+        const camera_step_proto& request) {
+      THROW_IF(request.cluster_id() != cluster_id ||
+               request.landmark_refinement_steps() < 0 ||
+               request.landmark_refinement_steps() > 20);
+      SetExternalState(request.cameras_f64(), request.landmarks_f64());
+      THROW_IF(request.tangent_step_f64().size()
+               != cameras.size() * sizeof(double));
+      const Eigen::Map<const Eigen::VectorXd> tangent_step(
+          reinterpret_cast<const double*>(request.tangent_step_f64().data()),
+          cameras.size());
+      ApplyCameraStep(tangent_step);
+      RefineLandmarksWithFixedCameras(request.landmark_refinement_steps());
+      cost = 2. * GetCost();
+      if (request.rebase_trust_state()) {
+        tr_radius = std::min(max_trust_region_radius, init_trust_region_radius);
+        if (trust_region_policy == 1 && persistent_trust_region) {
+          tr_radius = std::min(
+              DabaInitialTrustRegionCap(), max_trust_region_radius);
+        }
+        last_cameras = cameras;
+        last_landmarks = landmarks;
+        last_tr_radius = tr_radius;
+        persistent_trust_region_active = persistent_trust_region;
+        last_linear_iterations = 0;
+        last_linear_relative_residual =
+            std::numeric_limits<double>::quiet_NaN();
+        options.initial_trust_region_radius = tr_radius;
+      }
+      return FillReturnProto(true, false, false);
+    }
 
     //void SetBe(double be) { be = be; }
     
@@ -5414,6 +5616,48 @@ int main() {
       update_thread.detach();
       /// update_thread.join();
 
+      break;
+    }
+
+    case request_proto::OptionsCase::kSchurSystem: {
+      const schur_system_proto schur_request = request_p.schur_system();
+      const int cluster_id = schur_request.cluster_id();
+      THROW_IF(cluster_to_program.find(cluster_id) == cluster_to_program.end());
+      auto schur_lambda = [&cluster_to_program, &push_socket, &mtx](
+          int cluster_id, schur_system_proto request) {
+        return_schur_system_proto response =
+            cluster_to_program[cluster_id].BuildSchurSystem(request);
+        const size_t bytes = response.ByteSizeLong();
+        zmq::message_t reply(bytes);
+        response.SerializeToArray(reply.data(), bytes);
+        std::lock_guard<std::mutex> lock(mtx);
+        push_socket.send(reply, zmq::send_flags::none);
+      };
+      std::thread schur_thread(
+          schur_lambda, cluster_id, std::move(schur_request));
+      schur_thread.detach();
+      break;
+    }
+
+    case request_proto::OptionsCase::kCameraStep: {
+      const camera_step_proto camera_step_request = request_p.camera_step();
+      const int cluster_id = camera_step_request.cluster_id();
+      THROW_IF(cluster_to_program.find(cluster_id) == cluster_to_program.end());
+      auto camera_step_lambda = [&cluster_to_program, &push_socket, &mtx](
+          int cluster_id, camera_step_proto request) {
+        return_cluster_proto response =
+            cluster_to_program[cluster_id].ApplyExternalCameraStep(request);
+        response.set_run_id(request.run_id());
+        response.set_phase_id(request.phase_id());
+        const size_t bytes = response.ByteSizeLong();
+        zmq::message_t reply(bytes);
+        response.SerializeToArray(reply.data(), bytes);
+        std::lock_guard<std::mutex> lock(mtx);
+        push_socket.send(reply, zmq::send_flags::none);
+      };
+      std::thread camera_step_thread(
+          camera_step_lambda, cluster_id, std::move(camera_step_request));
+      camera_step_thread.detach();
       break;
     }
 

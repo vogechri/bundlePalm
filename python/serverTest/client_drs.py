@@ -593,6 +593,11 @@ def scheduled_outer_acceleration_active(until, iteration):
     return until == 0 or iteration < until
 
 
+def local_state_rebase_is_active(rebase_iteration, iteration):
+    """Return whether local trust/curvature state rebases this iteration."""
+    return rebase_iteration > 0 and iteration == rebase_iteration
+
+
 def shared_camera_compatibility_ratio(
     local_cameras,
     centers,
@@ -1207,6 +1212,7 @@ def parse_arguments():
     parser.add_argument("--persistent-trust-region", action="store_true")
     parser.add_argument("--trust-region-recovery-ratio", type=float, default=0.5)
     parser.add_argument("--shared-trust-region-until", type=int, default=0)
+    parser.add_argument("--local-state-rebase-iteration", type=int, default=0)
     parser.add_argument(
         "--shared-trust-region-initial-radius", type=float, default=1e6
     )
@@ -1864,6 +1870,8 @@ def validate_arguments(arguments):
         raise ValueError("diagonal trust cutoff must be in [0, iterations]")
     if not 0 <= arguments.relative_residual_until <= arguments.iterations:
         raise ValueError("relative residual cutoff must be in [0, iterations]")
+    if not 0 <= arguments.local_state_rebase_iteration < arguments.iterations:
+        raise ValueError("local state rebase must be in [0, iterations)")
     if not 0.0 < arguments.relaxation < 2.0:
         raise ValueError("relaxation must be in (0, 2)")
     if arguments.acceleration_restart_after <= 0:
@@ -2662,10 +2670,25 @@ def main():
             worker.transport_phase_seconds.copy()
         )
         optimization_started_at = time.perf_counter()
+        initial_local_trust_region_radius = float(os.environ.get(
+            "BUNDLE_PALM_INITIAL_TRUST_REGION_RADIUS", "10"
+        ))
+        if not np.isfinite(initial_local_trust_region_radius) or initial_local_trust_region_radius <= 0.0:
+            raise ValueError("initial local trust-region radius must be positive and finite")
         safeguard_annealing_iterations = (
             arguments.safeguard_annealing_iterations or arguments.iterations
         )
         for iteration in range(arguments.iterations):
+            local_state_rebase_applied = local_state_rebase_is_active(
+                arguments.local_state_rebase_iteration,
+                iteration,
+            )
+            if local_state_rebase_applied:
+                block_curvature_multiplier = arguments.block_curvature_multiplier
+                block_regularization = arguments.block_regularization
+                accepted_since_curvature_increase = 0
+                accelerator.reset()
+                acceleration_failures = 0
             schur_alignment_tangent = None
             schur_alignment_base_cameras = None
             schur_alignment_diagnostics = None
@@ -2709,6 +2732,11 @@ def main():
             iteration_shared_trust_region_radius = (
                 shared_trust_region_radius
                 if shared_trust_region_active else None
+            )
+            iteration_forced_trust_region_radius = (
+                initial_local_trust_region_radius
+                if local_state_rebase_applied
+                else iteration_shared_trust_region_radius
             )
             shared_trust_region_log_spread = float("nan")
             diagonal_trust_until = (
@@ -2848,7 +2876,7 @@ def main():
                 nesterov_relative_residual=relative_residual_active,
                 camera_proximal_multipliers=camera_proximal_multipliers,
                 forced_trust_region_radius=(
-                    iteration_shared_trust_region_radius
+                    iteration_forced_trust_region_radius
                 ),
                 outer_iteration=iteration,
                 oracle_kind=1,
@@ -3798,7 +3826,7 @@ def main():
                         nesterov_relative_residual=relative_residual_active,
                         camera_proximal_multipliers=trial_camera_multipliers,
                         forced_trust_region_radius=(
-                            iteration_shared_trust_region_radius
+                            iteration_forced_trust_region_radius
                         ),
                         outer_iteration=iteration,
                         oracle_kind=2,
@@ -4839,6 +4867,12 @@ def main():
                     unique_metric_selector_rejected
                 ),
                 "outerAcceleration": arguments.outer_acceleration,
+                "localStateRebaseApplied": local_state_rebase_applied,
+                "forcedLocalTrustRegionRadius": (
+                    iteration_forced_trust_region_radius
+                    if iteration_forced_trust_region_radius is not None
+                    else float("nan")
+                ),
                 "enhancedInnerActive": enhanced_inner_active,
                 "diagonalTrustActive": diagonal_trust_active,
                 "relativeResidualActive": relative_residual_active,
@@ -5439,6 +5473,7 @@ def main():
         "persistentTrustRegion": arguments.persistent_trust_region,
         "trustRegionRecoveryRatio": arguments.trust_region_recovery_ratio,
         "sharedTrustRegionUntil": arguments.shared_trust_region_until,
+        "localStateRebaseIteration": arguments.local_state_rebase_iteration,
         "sharedTrustRegionInitialRadius": (
             arguments.shared_trust_region_initial_radius
         ),

@@ -1,0 +1,2 @@
+roman_forum|benchmark_results/sfm_init_1dsfm/roman_forum/roman_forum_sfm_init_derived.txt
+trafalgar|benchmark_results/sfm_init_1dsfm/trafalgar/trafalgar_sfm_init_derived.txt

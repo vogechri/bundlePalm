@@ -57,6 +57,7 @@ PERSISTENT_TRUST_REGION=${PERSISTENT_TRUST_REGION:-0}
 TRUST_REGION_RECOVERY_RATIO=${TRUST_REGION_RECOVERY_RATIO:-0.5}
 SHARED_TRUST_REGION_UNTIL=${SHARED_TRUST_REGION_UNTIL:-0}
 SHARED_TRUST_REGION_INITIAL_RADIUS=${SHARED_TRUST_REGION_INITIAL_RADIUS:-1000000}
+LOCAL_STATE_REBASE_ITERATION=${LOCAL_STATE_REBASE_ITERATION:-0}
 SCENE_NORMALIZATION=${SCENE_NORMALIZATION:-points_p95}
 CAMERA_SCALING=${CAMERA_SCALING:-jacobi_initial}
 CAMERA_SCALING_MAXIMUM_RATIO=${CAMERA_SCALING_MAXIMUM_RATIO:-}
@@ -89,6 +90,10 @@ WORKER_OWNED_CAMERAS=${WORKER_OWNED_CAMERAS:-1}
 WORKER_CONSENSUS_SHADOW=${WORKER_CONSENSUS_SHADOW:-0}
 PACKED_REQUEST_BUFFERS=${PACKED_REQUEST_BUFFERS:-1}
 SHARED_ONLY_CAMERA_PROXIMAL=${SHARED_ONLY_CAMERA_PROXIMAL:-0}
+FINAL_SHARED_SCHUR_CORRECTION=${FINAL_SHARED_SCHUR_CORRECTION:-0}
+SHARED_SCHUR_MAXIMUM_CORRECTIONS=${SHARED_SCHUR_MAXIMUM_CORRECTIONS:-1}
+SHARED_SCHUR_MINIMUM_RELATIVE_DECREASE=${SHARED_SCHUR_MINIMUM_RELATIVE_DECREASE:-1e-4}
+SHARED_SCHUR_OPERATOR=${SHARED_SCHUR_OPERATOR:-python}
 VARIANT_TAG=${VARIANT_TAG:-}
 LANDMARK_REFINEMENT_STEPS=${LANDMARK_REFINEMENT_STEPS:-0}
 CONSENSUS_LANDMARK_REFINEMENT_STEPS=${CONSENSUS_LANDMARK_REFINEMENT_STEPS:-0}
@@ -222,6 +227,9 @@ fi
 if [[ "$TRUST_REGION_POLICY" != "daba" ]]; then
   VARIANT_NAME="${VARIANT_NAME}_trust_${TRUST_REGION_POLICY}"
 fi
+if [[ "$LOCAL_STATE_REBASE_ITERATION" != "0" ]]; then
+  VARIANT_NAME="${VARIANT_NAME}_rebase${LOCAL_STATE_REBASE_ITERATION}"
+fi
 if [[ "$SHARED_TRUST_REGION_UNTIL" != "0" ]]; then
   VARIANT_NAME="${VARIANT_NAME}_shared_tr${SHARED_TRUST_REGION_UNTIL}"
 fi
@@ -262,6 +270,15 @@ fi
 if [[ "$HUBER_DELTA" != "0" && "$HUBER_DELTA" != "0.0" ]]; then
   VARIANT_NAME="${VARIANT_NAME}_huber${HUBER_DELTA}"
 fi
+if [[ "$FINAL_SHARED_SCHUR_CORRECTION" == "1" ]]; then
+  VARIANT_NAME="${VARIANT_NAME}_final_schur${SHARED_SCHUR_MAXIMUM_CORRECTIONS}"
+  if [[ "$SHARED_SCHUR_OPERATOR" != "python" ]]; then
+    VARIANT_NAME="${VARIANT_NAME}_${SHARED_SCHUR_OPERATOR}"
+  fi
+  if [[ "$SHARED_SCHUR_MINIMUM_RELATIVE_DECREASE" != "1e-4" ]]; then
+    VARIANT_NAME="${VARIANT_NAME}_stop${SHARED_SCHUR_MINIMUM_RELATIVE_DECREASE}"
+  fi
+fi
 if [[ -n "$VARIANT_TAG" ]]; then
   if [[ ! "$VARIANT_TAG" =~ ^[a-zA-Z0-9._-]+$ ]]; then
     echo "VARIANT_TAG may contain only letters, digits, dots, underscores, and hyphens" >&2
@@ -284,7 +301,7 @@ if [[ ! -x "$WORKER" ]]; then
   exit 2
 fi
 
-for flag in LIVE_OUTPUT DEBUG_OUTPUT OVERWRITE PERSISTENT_TRUST_REGION ALL_PROBLEMS WORKER_SSE_SHADOW SUPPRESS_ACCELERATED_LANDMARK_REPLIES WORKER_OWNED_LANDMARKS WORKER_OWNED_CAMERAS WORKER_CONSENSUS_SHADOW PACKED_REQUEST_BUFFERS SHARED_ONLY_CAMERA_PROXIMAL ADAPTIVE_LOCAL_DEPTH; do
+for flag in LIVE_OUTPUT DEBUG_OUTPUT OVERWRITE PERSISTENT_TRUST_REGION ALL_PROBLEMS WORKER_SSE_SHADOW SUPPRESS_ACCELERATED_LANDMARK_REPLIES WORKER_OWNED_LANDMARKS WORKER_OWNED_CAMERAS WORKER_CONSENSUS_SHADOW PACKED_REQUEST_BUFFERS SHARED_ONLY_CAMERA_PROXIMAL FINAL_SHARED_SCHUR_CORRECTION ADAPTIVE_LOCAL_DEPTH; do
   value=${!flag}
   if [[ "$value" != "0" && "$value" != "1" ]]; then
     echo "$flag must be 0 or 1" >&2
@@ -547,6 +564,15 @@ for problem in "${PROBLEMS[@]}"; do
     [[ "$SINGLE_CLUSTER_PROXIMAL" == "1" ]] && single_cluster_args+=(--single-cluster-proximal)
     shared_only_args=()
     [[ "$SHARED_ONLY_CAMERA_PROXIMAL" == "1" ]] && shared_only_args+=(--shared-only-camera-proximal)
+    final_shared_schur_args=()
+    if [[ "$FINAL_SHARED_SCHUR_CORRECTION" == "1" ]]; then
+      final_shared_schur_args+=(
+        --final-shared-schur-correction
+        --shared-schur-maximum-corrections "$SHARED_SCHUR_MAXIMUM_CORRECTIONS"
+        --shared-schur-minimum-relative-decrease "$SHARED_SCHUR_MINIMUM_RELATIVE_DECREASE"
+        --shared-schur-operator "$SHARED_SCHUR_OPERATOR"
+      )
+    fi
     initial_state_args=()
     if [[ -n "$INITIAL_STATE_DIRECTORY" ]]; then
       initial_state_path="$INITIAL_STATE_DIRECTORY/${scene}.npz"
@@ -599,6 +625,7 @@ for problem in "${PROBLEMS[@]}"; do
             --trust-region-recovery-ratio "$TRUST_REGION_RECOVERY_RATIO" \
             --shared-trust-region-until "$SHARED_TRUST_REGION_UNTIL" \
             --shared-trust-region-initial-radius "$SHARED_TRUST_REGION_INITIAL_RADIUS" \
+            --local-state-rebase-iteration "$LOCAL_STATE_REBASE_ITERATION" \
             --scene-normalization "$SCENE_NORMALIZATION" \
             --camera-scaling "$CAMERA_SCALING" \
             --camera-diagonal-relative-floor "$CAMERA_DIAGONAL_RELATIVE_FLOOR" \
@@ -641,7 +668,7 @@ for problem in "${PROBLEMS[@]}"; do
             --catastrophic-ratio "$CATASTROPHIC_RATIO" \
             --recovery-penalty-ratio "$RECOVERY_PENALTY_RATIO" \
             --results "$RESULT_FILE" --state "$state_file" \
-            "${debug_args[@]}" "${trust_args[@]}" "${scaling_args[@]}" "${worker_sse_args[@]}" "${adaptive_depth_args[@]}" "${single_cluster_args[@]}" "${shared_only_args[@]}" "${initial_state_args[@]}") 2>&1 | tee "$log_file"
+            "${debug_args[@]}" "${trust_args[@]}" "${scaling_args[@]}" "${worker_sse_args[@]}" "${adaptive_depth_args[@]}" "${single_cluster_args[@]}" "${shared_only_args[@]}" "${final_shared_schur_args[@]}" "${initial_state_args[@]}") 2>&1 | tee "$log_file"
       exit_code=${PIPESTATUS[0]}
     else
       (cd "$SCRIPT_DIR" && /usr/bin/time -v -o "$coordinator_time" \
@@ -684,6 +711,7 @@ for problem in "${PROBLEMS[@]}"; do
             --trust-region-recovery-ratio "$TRUST_REGION_RECOVERY_RATIO" \
             --shared-trust-region-until "$SHARED_TRUST_REGION_UNTIL" \
             --shared-trust-region-initial-radius "$SHARED_TRUST_REGION_INITIAL_RADIUS" \
+            --local-state-rebase-iteration "$LOCAL_STATE_REBASE_ITERATION" \
             --scene-normalization "$SCENE_NORMALIZATION" \
             --camera-scaling "$CAMERA_SCALING" \
             --camera-diagonal-relative-floor "$CAMERA_DIAGONAL_RELATIVE_FLOOR" \
@@ -726,7 +754,7 @@ for problem in "${PROBLEMS[@]}"; do
             --catastrophic-ratio "$CATASTROPHIC_RATIO" \
             --recovery-penalty-ratio "$RECOVERY_PENALTY_RATIO" \
             --results "$RESULT_FILE" --state "$state_file" \
-            "${debug_args[@]}" "${trust_args[@]}" "${scaling_args[@]}" "${worker_sse_args[@]}" "${adaptive_depth_args[@]}" "${single_cluster_args[@]}" "${shared_only_args[@]}" "${initial_state_args[@]}") > "$log_file" 2>&1
+            "${debug_args[@]}" "${trust_args[@]}" "${scaling_args[@]}" "${worker_sse_args[@]}" "${adaptive_depth_args[@]}" "${single_cluster_args[@]}" "${shared_only_args[@]}" "${final_shared_schur_args[@]}" "${initial_state_args[@]}") > "$log_file" 2>&1
       exit_code=$?
     fi
     set -e
