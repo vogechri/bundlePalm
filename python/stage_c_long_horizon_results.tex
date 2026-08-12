@@ -159,8 +159,11 @@ on 1DSfM and $0.4190$ on BAL, with ratio CV below $0.5\%$.
 Table~\ref{tab:stage-c-final-reference} separates the complete cohorts and
 restores the best base DRS comparison.  The best K1 row is the BAE-style local
 diagnostic at I90/T1; K4 and K16 are the frozen C1+C5 I30 endpoints with one
-thread per cluster; Ceres is left-$\mathrm{SE}(3)$ at I90/T16.  Timings are
-reported within their named CPU boundary, not as matched work comparisons.
+thread per cluster; Ceres is left-$\mathrm{SE}(3)$ at I90/T16.  The three
+DRS+Schur rows use the base-backbone Themelis trajectory followed by safeguarded
+distributed global Schur corrections and are explicitly polishing workflows,
+not DRS-only gains.  Timings are reported within their named CPU boundary, not
+as matched work comparisons.
 
 \begin{table}[t]
   \centering
@@ -175,6 +178,9 @@ reported within their named CPU boundary, not as matched work comparisons.
     1DSfM-15 & Ceres & 1.000000 & 0.686334 & 0/15/0 & 219.521 \\
     1DSfM-15 & K1 BAE-style & 0.993529 & 0.681892 & 5/0/10 & 2060.937 \\
     1DSfM-15 & Base K24/I200 & 1.457017 & 1.000000 & 1/0/14 & 572.399 \\
+    1DSfM-15 & DRS+Schur fast & 1.411625 & 0.968846 & 1/0/14 & 191.161 \\
+    1DSfM-15 & DRS+Schur balanced & 1.272048 & 0.873049 & 1/0/14 & 289.496 \\
+    1DSfM-15 & DRS+Schur quality & 1.215246 & 0.834064 & 2/0/13 & 381.521 \\
     1DSfM-15 & K4 resource & 2.052536 & 1.408725 & 0/0/15 & 160.607 \\
     1DSfM-15 & K16 latency & 1.957296 & 1.343358 & 0/0/15 & 93.793 \\
     BAL-29 & Ceres & 1.000000 & 1.001599 & 0/29/0 & 1803.780 \\
@@ -198,6 +204,13 @@ Consequently, C1+C5 remains a valid matched-I30 component improvement
 runs do not replace best base DRS in endpoint quality.  Their contribution is
 the measured latency/resource tradeoff; the remaining research problem is to
 retain that speed while recovering the longer-horizon base trajectory.
+
+Distributed Schur polishing changes that endpoint frontier without changing
+the DRS-only attribution.  Fast I30+10, balanced I60+10, and quality I60+16
+reach $0.968846$, $0.873049$, and $0.834064$ times base-I200 SSE at $0.333964$,
+$0.505759$, and $0.666529$ times its optimization time.  An I60+20 ceiling
+reaches $0.813073$ times base-I200 and $1.184661$ times Ceres in $430.320$ s;
+it is a higher-budget quality reference rather than a named deployment preset.
 
 A follow-up hybrid restores the base local Nesterov, persistent DRS trust,
 curvature-$0.4$ recovery/decay, and metric scale 75 while retaining shared-only

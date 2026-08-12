@@ -26,6 +26,13 @@ However, all-15 I60+16 changed every Schur decision sequence: total work fell
 scene regressed `4.40%`. The experimental code was removed. A one-pass dual
 assembly is not exact enough for the accepted nonlinear trajectory.
 
+A second default-off experiment traversed edges by conflict-free camera and
+landmark adjacency while preserving each output block's edge order. It is
+bitwise trajectory-exact through I10, but worsens optimization time
+`3.3%/2.4%` on Roman/Trafalgar. In particular, iterative $W^T$ time rises
+`14%/42%`; camera-sorted edge storage gives better camera-vector locality than
+landmark adjacency. The code was removed.
+
 ## I60 Correction Frontier
 
 The unchanged all-15 I60 handoff was extended from 16 to 20 corrections.

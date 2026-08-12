@@ -343,6 +343,12 @@ improves another `11.67%` from corrections 17--20, while Madrid has only
 Madrid as a separate non-low-mode basin problem. See
 `benchmark_results/i60_performance_tail_diagnostics/report.md`.
 
+Conflict-free camera/landmark adjacency traversal preserves I10 trajectories
+bitwise but slows Roman/Trafalgar optimization `3.3%/2.4%`; iterative $W^T$
+time rises `14%/42%` because camera-sorted edge storage has better
+camera-vector locality. That experiment was also removed. Do not revisit edge
+reordering without a cache/layout design that preserves the current locality.
+
 Schur performance and orthogonal quality gates (2026-08-12): complete
 per-attempt phase telemetry is live. On all-15 I60+10, coordinator numeric BSR
 accumulation takes `28.755s` and CG `23.106s`, while symbolic graph construction
