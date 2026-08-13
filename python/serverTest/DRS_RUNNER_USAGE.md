@@ -145,6 +145,26 @@ low threshold. Every trajectory row records
 one global configuration across all scenes; C1 and C5 remain separately
 switchable for ablations.
 
+## Initial distributed Schur corrections
+
+The default-off startup phase can apply a bounded number of independently
+safeguarded global Schur corrections before DRS:
+
+```bash
+INITIAL_SHARED_SCHUR_CORRECTION=1 \
+INITIAL_SHARED_SCHUR_MAXIMUM_CORRECTIONS=3 \
+INITIAL_SHARED_SCHUR_MAXIMUM_ITERATIONS=1000 \
+INITIAL_SHARED_SCHUR_OPERATOR=bsr_low_memory \
+SHARED_SCHUR_RELATIVE_TOLERANCE=1e-6 \
+... ./run_drs_failure_top3_live.sh
+```
+
+The maximum correction count defaults to `1`, preserving the original
+bootstrap. Additional corrections relinearize at each accepted state and stop
+on a rejected/nonconverged solve or the shared minimum-relative-decrease rule.
+Result JSON records every attempt, the accepted count, and the termination
+reason. This remains diagnostic infrastructure, not a promoted preset.
+
 ## Partition cache and repartitioning
 
 The cache stores only the landmark-to-cluster assignment. It does not cache

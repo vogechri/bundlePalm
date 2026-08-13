@@ -222,12 +222,33 @@ def test_bootstrap_trust_rebase_cli_flag(monkeypatch):
             "client_drs.py",
             "unused.bal",
             "--initial-shared-schur-correction",
+            "--initial-shared-schur-maximum-corrections",
+            "3",
             "--initial-shared-schur-rebase-trust-state",
         ],
     )
     arguments = client_drs.parse_arguments()
     assert arguments.initial_shared_schur_correction
+    assert arguments.initial_shared_schur_maximum_corrections == 3
     assert arguments.initial_shared_schur_rebase_trust_state
+
+
+def test_initial_shared_schur_rejects_nonpositive_correction_cap(monkeypatch):
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "client_drs.py",
+            "unused.bal",
+            "--initial-shared-schur-maximum-corrections",
+            "0",
+        ],
+    )
+    with pytest.raises(
+        ValueError,
+        match="initial shared Schur maximum corrections must be positive",
+    ):
+        client_drs.validate_arguments(client_drs.parse_arguments())
 
 
 @pytest.mark.parametrize(

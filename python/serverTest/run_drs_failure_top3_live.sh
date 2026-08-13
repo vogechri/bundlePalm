@@ -90,6 +90,10 @@ WORKER_OWNED_CAMERAS=${WORKER_OWNED_CAMERAS:-1}
 WORKER_CONSENSUS_SHADOW=${WORKER_CONSENSUS_SHADOW:-0}
 PACKED_REQUEST_BUFFERS=${PACKED_REQUEST_BUFFERS:-1}
 SHARED_ONLY_CAMERA_PROXIMAL=${SHARED_ONLY_CAMERA_PROXIMAL:-0}
+INITIAL_SHARED_SCHUR_CORRECTION=${INITIAL_SHARED_SCHUR_CORRECTION:-0}
+INITIAL_SHARED_SCHUR_MAXIMUM_CORRECTIONS=${INITIAL_SHARED_SCHUR_MAXIMUM_CORRECTIONS:-1}
+INITIAL_SHARED_SCHUR_MAXIMUM_ITERATIONS=${INITIAL_SHARED_SCHUR_MAXIMUM_ITERATIONS:-0}
+INITIAL_SHARED_SCHUR_OPERATOR=${INITIAL_SHARED_SCHUR_OPERATOR:-inherit}
 FINAL_SHARED_SCHUR_CORRECTION=${FINAL_SHARED_SCHUR_CORRECTION:-0}
 SHARED_SCHUR_MAXIMUM_CORRECTIONS=${SHARED_SCHUR_MAXIMUM_CORRECTIONS:-1}
 SHARED_SCHUR_MINIMUM_RELATIVE_DECREASE=${SHARED_SCHUR_MINIMUM_RELATIVE_DECREASE:-1e-4}
@@ -276,6 +280,12 @@ fi
 if [[ "$HUBER_DELTA" != "0" && "$HUBER_DELTA" != "0.0" ]]; then
   VARIANT_NAME="${VARIANT_NAME}_huber${HUBER_DELTA}"
 fi
+if [[ "$INITIAL_SHARED_SCHUR_CORRECTION" == "1" ]]; then
+  VARIANT_NAME="${VARIANT_NAME}_initial_schur${INITIAL_SHARED_SCHUR_MAXIMUM_CORRECTIONS}"
+  if [[ "$INITIAL_SHARED_SCHUR_OPERATOR" != "inherit" ]]; then
+    VARIANT_NAME="${VARIANT_NAME}_${INITIAL_SHARED_SCHUR_OPERATOR}"
+  fi
+fi
 if [[ "$FINAL_SHARED_SCHUR_CORRECTION" == "1" ]]; then
   VARIANT_NAME="${VARIANT_NAME}_final_schur${SHARED_SCHUR_MAXIMUM_CORRECTIONS}"
   if [[ "$SHARED_SCHUR_OPERATOR" != "python" ]]; then
@@ -313,7 +323,7 @@ if [[ ! -x "$WORKER" ]]; then
   exit 2
 fi
 
-for flag in LIVE_OUTPUT DEBUG_OUTPUT OVERWRITE PERSISTENT_TRUST_REGION ALL_PROBLEMS WORKER_SSE_SHADOW SUPPRESS_ACCELERATED_LANDMARK_REPLIES WORKER_OWNED_LANDMARKS WORKER_OWNED_CAMERAS WORKER_CONSENSUS_SHADOW PACKED_REQUEST_BUFFERS SHARED_ONLY_CAMERA_PROXIMAL FINAL_SHARED_SCHUR_CORRECTION ADAPTIVE_LOCAL_DEPTH; do
+for flag in LIVE_OUTPUT DEBUG_OUTPUT OVERWRITE PERSISTENT_TRUST_REGION ALL_PROBLEMS WORKER_SSE_SHADOW SUPPRESS_ACCELERATED_LANDMARK_REPLIES WORKER_OWNED_LANDMARKS WORKER_OWNED_CAMERAS WORKER_CONSENSUS_SHADOW PACKED_REQUEST_BUFFERS SHARED_ONLY_CAMERA_PROXIMAL INITIAL_SHARED_SCHUR_CORRECTION FINAL_SHARED_SCHUR_CORRECTION ADAPTIVE_LOCAL_DEPTH; do
   value=${!flag}
   if [[ "$value" != "0" && "$value" != "1" ]]; then
     echo "$flag must be 0 or 1" >&2
@@ -576,6 +586,19 @@ for problem in "${PROBLEMS[@]}"; do
     [[ "$SINGLE_CLUSTER_PROXIMAL" == "1" ]] && single_cluster_args+=(--single-cluster-proximal)
     shared_only_args=()
     [[ "$SHARED_ONLY_CAMERA_PROXIMAL" == "1" ]] && shared_only_args+=(--shared-only-camera-proximal)
+    initial_shared_schur_args=()
+    if [[ "$INITIAL_SHARED_SCHUR_CORRECTION" == "1" ]]; then
+      initial_shared_schur_args+=(
+        --initial-shared-schur-correction
+        --initial-shared-schur-maximum-corrections "$INITIAL_SHARED_SCHUR_MAXIMUM_CORRECTIONS"
+        --initial-shared-schur-maximum-iterations "$INITIAL_SHARED_SCHUR_MAXIMUM_ITERATIONS"
+        --initial-shared-schur-operator "$INITIAL_SHARED_SCHUR_OPERATOR"
+        --shared-schur-minimum-relative-decrease "$SHARED_SCHUR_MINIMUM_RELATIVE_DECREASE"
+        --shared-schur-relative-tolerance "$SHARED_SCHUR_RELATIVE_TOLERANCE"
+        --shared-schur-operator "$SHARED_SCHUR_OPERATOR"
+        --shared-schur-preconditioner "$SHARED_SCHUR_PRECONDITIONER"
+      )
+    fi
     final_shared_schur_args=()
     if [[ "$FINAL_SHARED_SCHUR_CORRECTION" == "1" ]]; then
       final_shared_schur_args+=(
@@ -683,7 +706,7 @@ for problem in "${PROBLEMS[@]}"; do
             --catastrophic-ratio "$CATASTROPHIC_RATIO" \
             --recovery-penalty-ratio "$RECOVERY_PENALTY_RATIO" \
             --results "$RESULT_FILE" --state "$state_file" \
-            "${debug_args[@]}" "${trust_args[@]}" "${scaling_args[@]}" "${worker_sse_args[@]}" "${adaptive_depth_args[@]}" "${single_cluster_args[@]}" "${shared_only_args[@]}" "${final_shared_schur_args[@]}" "${initial_state_args[@]}") 2>&1 | tee "$log_file"
+            "${debug_args[@]}" "${trust_args[@]}" "${scaling_args[@]}" "${worker_sse_args[@]}" "${adaptive_depth_args[@]}" "${single_cluster_args[@]}" "${shared_only_args[@]}" "${initial_shared_schur_args[@]}" "${final_shared_schur_args[@]}" "${initial_state_args[@]}") 2>&1 | tee "$log_file"
       exit_code=${PIPESTATUS[0]}
     else
       (cd "$SCRIPT_DIR" && /usr/bin/time -v -o "$coordinator_time" \
@@ -770,7 +793,7 @@ for problem in "${PROBLEMS[@]}"; do
             --catastrophic-ratio "$CATASTROPHIC_RATIO" \
             --recovery-penalty-ratio "$RECOVERY_PENALTY_RATIO" \
             --results "$RESULT_FILE" --state "$state_file" \
-            "${debug_args[@]}" "${trust_args[@]}" "${scaling_args[@]}" "${worker_sse_args[@]}" "${adaptive_depth_args[@]}" "${single_cluster_args[@]}" "${shared_only_args[@]}" "${final_shared_schur_args[@]}" "${initial_state_args[@]}") > "$log_file" 2>&1
+            "${debug_args[@]}" "${trust_args[@]}" "${scaling_args[@]}" "${worker_sse_args[@]}" "${adaptive_depth_args[@]}" "${single_cluster_args[@]}" "${shared_only_args[@]}" "${initial_shared_schur_args[@]}" "${final_shared_schur_args[@]}" "${initial_state_args[@]}") > "$log_file" 2>&1
       exit_code=$?
     fi
     set -e

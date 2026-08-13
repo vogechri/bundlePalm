@@ -1389,6 +1389,9 @@ def parse_arguments():
     parser.add_argument(
         "--initial-shared-schur-maximum-iterations", type=int, default=0
     )
+    parser.add_argument(
+        "--initial-shared-schur-maximum-corrections", type=int, default=1
+    )
     parser.add_argument("--final-shared-schur-correction", action="store_true")
     parser.add_argument(
         "--shared-schur-landmark-damping", type=float, default=3.0
@@ -2064,6 +2067,14 @@ def validate_arguments(arguments):
         raise ValueError(
             "initial shared Schur trust rebase requires the initial correction"
         )
+    if arguments.initial_shared_schur_maximum_corrections <= 0:
+        raise ValueError(
+            "initial shared Schur maximum corrections must be positive"
+        )
+    if (
+        arguments.initial_shared_schur_correction
+        or arguments.final_shared_schur_correction
+    ):
         if arguments.shared_schur_landmark_damping < 0.0:
             raise ValueError("shared Schur landmark damping must be nonnegative")
         if arguments.shared_schur_camera_damping <= 0.0:
@@ -2704,6 +2715,9 @@ def main():
     initial_shared_schur_worker_sse = float("nan")
     initial_shared_schur_seconds = 0.0
     initial_shared_schur_diagnostics = {}
+    initial_shared_schur_attempts = []
+    initial_shared_schur_accepted_corrections = 0
+    initial_shared_schur_termination = "disabled"
     initial_shared_schur_trust_rebased = False
     initial_shared_schur_pre_rebase_trust_radii = []
     initial_shared_schur_post_rebase_trust_radii = []
@@ -2802,6 +2816,7 @@ def main():
         if arguments.initial_shared_schur_correction:
             initial_shared_schur_attempted = True
             initial_shared_schur_initial_sse = best_sse
+            initial_shared_schur_termination = "maximum_corrections"
             initial_schur_started = time.perf_counter()
             schur_systems = worker.build_schur_systems(
                 camera_indices_in_cluster,
@@ -2873,7 +2888,25 @@ def main():
                 and np.isfinite(initial_shared_schur_candidate_sse)
                 and initial_shared_schur_candidate_sse < best_sse
             )
+            initial_relative_decrease = (
+                (best_sse - initial_shared_schur_candidate_sse)
+                / max(best_sse, np.finfo(np.float64).tiny)
+                if np.isfinite(initial_shared_schur_candidate_sse)
+                else float("-inf")
+            )
+            initial_shared_schur_attempts.append({
+                "correction": 0,
+                "cameraDamping": arguments.shared_schur_camera_damping,
+                "landmarkDamping": arguments.shared_schur_landmark_damping,
+                "initialSSE": best_sse,
+                "candidateSSE": initial_shared_schur_candidate_sse,
+                "workerSSE": initial_shared_schur_worker_sse,
+                "relativeDecrease": initial_relative_decrease,
+                "accepted": initial_shared_schur_accepted,
+                "diagnostics": initial_shared_schur_diagnostics,
+            })
             if initial_shared_schur_accepted:
+                initial_shared_schur_accepted_corrections = 1
                 scaled_cameras = corrected_scaled_cameras.copy()
                 local_cameras = np.repeat(
                     scaled_cameras[None, :, :], cluster_count, axis=0
@@ -2891,12 +2924,177 @@ def main():
                 accepted_fixed_point_squared = 0.0
                 accepted_consensus = consensus.copy()
                 accepted_landmarks = landmarks.copy()
+                camera_damping = (
+                    arguments.shared_schur_camera_damping
+                    * arguments.shared_schur_damping_decrease
+                )
+                landmark_damping = (
+                    arguments.shared_schur_landmark_damping
+                    * arguments.shared_schur_damping_decrease
+                )
+                if initial_relative_decrease < (
+                    arguments.shared_schur_minimum_relative_decrease
+                ):
+                    initial_shared_schur_termination = (
+                        "minimum_relative_decrease"
+                    )
+                else:
+                    for correction in range(
+                        1,
+                        arguments.initial_shared_schur_maximum_corrections,
+                    ):
+                        correction_initial_sse = best_sse
+                        schur_systems = worker.build_schur_systems(
+                            camera_indices_in_cluster,
+                            point_indices_in_cluster,
+                            consensus,
+                            landmarks,
+                            cluster_count,
+                            landmark_damping,
+                        )
+                        tangent_step, initial_shared_schur_diagnostics = (
+                            solve_global_schur_system(
+                                schur_systems,
+                                camera_count,
+                                camera_damping,
+                                arguments.shared_schur_step_scale,
+                                arguments.shared_schur_linear_solver,
+                                arguments.shared_schur_relative_tolerance,
+                                (
+                                    arguments.
+                                    initial_shared_schur_maximum_iterations
+                                    or arguments.shared_schur_maximum_iterations
+                                ),
+                                operator_mode=(
+                                    arguments.shared_schur_operator
+                                    if arguments.initial_shared_schur_operator
+                                    == "inherit"
+                                    else arguments.initial_shared_schur_operator
+                                ),
+                                preconditioner_mode=(
+                                    arguments.shared_schur_preconditioner
+                                ),
+                                coarse_basis=(
+                                    similarity_gauge_tangent_basis(
+                                        to_physical_cameras(
+                                            consensus, camera_scaling
+                                        )
+                                    )
+                                    if arguments.shared_schur_preconditioner
+                                    == "gauge_deflated"
+                                    else None
+                                ),
+                            )
+                        )
+                        (
+                            corrected_costs,
+                            corrected_scaled_cameras,
+                            corrected_points,
+                        ) = worker.apply_camera_step(
+                            camera_indices_in_cluster,
+                            point_indices_in_cluster,
+                            consensus,
+                            landmarks,
+                            tangent_step,
+                            cluster_count,
+                            arguments.shared_schur_landmark_refinement_steps,
+                        )
+                        initial_shared_schur_worker_sse = float(
+                            np.sum(corrected_costs)
+                        )
+                        corrected_cameras = to_physical_cameras(
+                            corrected_scaled_cameras, camera_scaling
+                        )
+                        corrected_metrics = evaluate_state(
+                            corrected_cameras,
+                            corrected_points,
+                            camera_indices,
+                            point_indices,
+                            observations,
+                        )
+                        initial_shared_schur_candidate_sse = (
+                            corrected_metrics["sumSquaredError"]
+                        )
+                        relative_decrease = (
+                            (
+                                correction_initial_sse
+                                - initial_shared_schur_candidate_sse
+                            )
+                            / max(
+                                correction_initial_sse,
+                                np.finfo(np.float64).tiny,
+                            )
+                            if np.isfinite(initial_shared_schur_candidate_sse)
+                            else float("-inf")
+                        )
+                        accepted = (
+                            initial_shared_schur_diagnostics[
+                                "linearTermination"
+                            ] == 0
+                            and np.isfinite(initial_shared_schur_candidate_sse)
+                            and initial_shared_schur_candidate_sse
+                            < correction_initial_sse
+                        )
+                        initial_shared_schur_attempts.append({
+                            "correction": correction,
+                            "cameraDamping": camera_damping,
+                            "landmarkDamping": landmark_damping,
+                            "initialSSE": correction_initial_sse,
+                            "candidateSSE": initial_shared_schur_candidate_sse,
+                            "workerSSE": initial_shared_schur_worker_sse,
+                            "relativeDecrease": relative_decrease,
+                            "accepted": accepted,
+                            "diagnostics": initial_shared_schur_diagnostics,
+                        })
+                        if not accepted:
+                            worker.apply_camera_step(
+                                camera_indices_in_cluster,
+                                point_indices_in_cluster,
+                                consensus,
+                                landmarks,
+                                np.zeros_like(tangent_step),
+                                cluster_count,
+                                0,
+                            )
+                            initial_shared_schur_termination = "rejected"
+                            break
+                        initial_shared_schur_accepted_corrections += 1
+                        scaled_cameras = corrected_scaled_cameras.copy()
+                        local_cameras = np.repeat(
+                            scaled_cameras[None, :, :],
+                            cluster_count,
+                            axis=0,
+                        )
+                        centers = local_cameras.copy()
+                        consensus = scaled_cameras.copy()
+                        landmarks = corrected_points.copy()
+                        best_sse = initial_shared_schur_candidate_sse
+                        best_metrics = corrected_metrics.copy()
+                        best_cameras = corrected_cameras.copy()
+                        best_points = corrected_points.copy()
+                        accepted_metrics = corrected_metrics.copy()
+                        accepted_dre = initial_shared_schur_candidate_sse
+                        accepted_model_dre = initial_shared_schur_candidate_sse
+                        accepted_fixed_point_squared = 0.0
+                        accepted_consensus = consensus.copy()
+                        accepted_landmarks = landmarks.copy()
+                        camera_damping *= (
+                            arguments.shared_schur_damping_decrease
+                        )
+                        landmark_damping *= (
+                            arguments.shared_schur_damping_decrease
+                        )
+                        if relative_decrease < (
+                            arguments.shared_schur_minimum_relative_decrease
+                        ):
+                            initial_shared_schur_termination = (
+                                "minimum_relative_decrease"
+                            )
+                            break
                 bootstrap_basin_guard_active = (
                     arguments.initial_shared_schur_basin_guard
                 )
-                bootstrap_basin_guard_ceiling = (
-                    initial_shared_schur_candidate_sse
-                )
+                bootstrap_basin_guard_ceiling = best_sse
                 if arguments.initial_shared_schur_rebase_trust_state:
                     initial_shared_schur_pre_rebase_trust_radii = (
                         worker.last_trust_region_radii.tolist()
@@ -2938,6 +3136,7 @@ def main():
                     )
                     initial_shared_schur_trust_rebased = True
             else:
+                initial_shared_schur_termination = "rejected"
                 worker.apply_camera_step(
                     camera_indices_in_cluster,
                     point_indices_in_cluster,
@@ -6106,6 +6305,9 @@ def main():
             arguments.initial_shared_schur_maximum_iterations
             or arguments.shared_schur_maximum_iterations
         ),
+        "initialSharedSchurMaximumCorrections": (
+            arguments.initial_shared_schur_maximum_corrections
+        ),
         "initialSharedSchurAttempted": initial_shared_schur_attempted,
         "initialSharedSchurAccepted": initial_shared_schur_accepted,
         "initialSharedSchurInitialSSE": initial_shared_schur_initial_sse,
@@ -6113,6 +6315,11 @@ def main():
         "initialSharedSchurWorkerSSE": initial_shared_schur_worker_sse,
         "initialSharedSchurSeconds": initial_shared_schur_seconds,
         "initialSharedSchurDiagnostics": initial_shared_schur_diagnostics,
+        "initialSharedSchurAttempts": initial_shared_schur_attempts,
+        "initialSharedSchurAcceptedCorrections": (
+            initial_shared_schur_accepted_corrections
+        ),
+        "initialSharedSchurTermination": initial_shared_schur_termination,
         "initialSharedSchurTrustRebase": (
             arguments.initial_shared_schur_rebase_trust_state
         ),

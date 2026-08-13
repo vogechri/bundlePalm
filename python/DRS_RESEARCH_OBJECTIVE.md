@@ -390,6 +390,18 @@ branch race and do not retune on held-out outcomes. A new basin mechanism must
 be robust without selection or use independently justified information beyond
 pixel SSE. See `benchmark_results/pose_prior_early_selector_replay/report.md`.
 
+Repeated initial distributed Schur (2026-08-13): the bootstrap now supports a
+default-off bounded correction count; one correction remains the default. The
+global cap-three low-memory policy is strong at I5 on large BAL (`0.928729x`
+preserved raw geometrically), with strict rejection of nonconverged solves.
+Matched current-source I30 on active 1490/3068 is `0.958353x` cap one but costs
+`1.791232x` time and has a bounded 1490 loss. Composed with the named I60+16
+workflow, Roman improves to `0.962247x` control but Trafalgar regresses to
+`1.081335x`; geometric SSE is `1.020055x` at `1.008093x` time. Retain the
+mechanism only as short-handoff diagnostic infrastructure. Do not broaden or
+tune correction count. See
+`benchmark_results/initial_schur_repeat_gate/report.md`.
+
 Schur performance and orthogonal quality gates (2026-08-12): complete
 per-attempt phase telemetry is live. On all-15 I60+10, coordinator numeric BSR
 accumulation takes `28.755s` and CG `23.106s`, while symbolic graph construction
