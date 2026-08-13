@@ -60,6 +60,7 @@ from outer_acceleration import create_accelerator, interpolate_line_search_cente
 from partition_cache import PARTITION_CACHE_MODES, partition_with_cache
 from admm_scaling import (
     compute_initial_jacobi_scaling,
+    compute_initial_ruiz_scaling,
     to_physical_cameras,
     to_scaled_cameras,
 )
@@ -1517,7 +1518,9 @@ def parse_arguments():
         "--shared-trust-region-initial-radius", type=float, default=1e6
     )
     parser.add_argument(
-        "--camera-scaling", choices=("none", "jacobi_initial"), default="jacobi_initial"
+        "--camera-scaling",
+        choices=("none", "jacobi_initial", "ruiz_initial"),
+        default="jacobi_initial",
     )
     parser.add_argument(
         "--scene-normalization",
@@ -2688,8 +2691,13 @@ def main():
         )
 
     scaling_started = time.perf_counter()
-    if arguments.camera_scaling == "jacobi_initial":
-        camera_scaling = compute_initial_jacobi_scaling(
+    if arguments.camera_scaling in {"jacobi_initial", "ruiz_initial"}:
+        scaling_function = (
+            compute_initial_ruiz_scaling
+            if arguments.camera_scaling == "ruiz_initial"
+            else compute_initial_jacobi_scaling
+        )
+        camera_scaling = scaling_function(
             cameras,
             points,
             camera_indices,

@@ -1,0 +1,2 @@
+variant	dataset	clusters	iterations	local_steps	threads_per_cluster	status	exit_code	elapsed_seconds	coordinator_max_rss_kb	worker_max_rss_kb
+plain_drs_block_full_se3_left_scale_ruiz_initial_lip0.00625_curvature_persistent_tr_ruiz_initial	problem-1778-993923-pre.txt	24	5	1	1	completed	0	54	2782856	5366076

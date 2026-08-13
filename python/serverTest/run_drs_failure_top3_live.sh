@@ -178,6 +178,9 @@ elif [[ "$SCENE_NORMALIZATION" != "points_p95" ]]; then
   echo "SCENE_NORMALIZATION must be points_p95 or none" >&2
   exit 2
 fi
+if [[ "$CAMERA_SCALING" != "jacobi_initial" ]]; then
+  VARIANT_NAME="${VARIANT_NAME}_scale_${CAMERA_SCALING}"
+fi
 if [[ -n "$CAMERA_SCALING_MAXIMUM_RATIO" ]]; then
   VARIANT_NAME="${VARIANT_NAME}_scale_cap${CAMERA_SCALING_MAXIMUM_RATIO}"
 fi

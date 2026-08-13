@@ -727,6 +727,33 @@ state mutation remain owned by the core coordinator.
    the race/commit infrastructure and remain separately budgeted from final
    polishing; do not start it until the short-race failure is understood.
 
+### Ordered SSE Research Queue (2026-08-13)
+
+Test these mechanisms one at a time with one global policy and freeze each
+result before advancing. The numbering preserves the original proposal list;
+testing began with item 2 at the user's request.
+
+1. **Refreshed cross-camera C3:** rebuild the coupled factorized metric after
+   accepted startup iterations instead of freezing stale I1 factors. Gate
+   Roman and BAL1490 at K24/I3; do not retune the observability threshold.
+2. **C2 block-coordinate Ruiz equilibration:** diagonal symmetric Ruiz from
+   full initial `9x9` camera Hessian blocks is now tested and rejected: Roman,
+   Trafalgar, and BAL1778 reproduce Jacobi SSE trajectories to about `1e-9`
+   while adding runtime. Full matrix-valued `9x9` camera transforms remain a
+   separate C2 subgate. See
+   `benchmark_results/c2_diagonal_ruiz_gate/report.md`.
+3. **Model-ratio nonlinear startup LM:** replace fixed damping halving in the
+   repeated initial Schur diagnostic with globally safeguarded gain-ratio
+   damping/retries. Keep the correction cap frozen while testing the policy.
+4. **Transient external pose-factor continuation:** add independently justified
+   relative rotation/translation information only during basin acquisition,
+   anneal it completely away, and evaluate the unchanged pixel objective.
+
+After the requested C2 gate, refreshed C3 has the strongest existing quality
+evidence but larger systems cost; model-ratio startup is narrower; external
+pose factors add a new information contract and carry the largest validation
+burden.
+
 Trust-rebase artifacts:
 
 - `benchmark_results/bootstrap_trust_rebase_bal49_off/`

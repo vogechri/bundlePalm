@@ -165,6 +165,16 @@ on a rejected/nonconverged solve or the shared minimum-relative-decrease rule.
 Result JSON records every attempt, the accepted count, and the termination
 reason. This remains diagnostic infrastructure, not a promoted preset.
 
+## Camera coordinate scaling
+
+`CAMERA_SCALING=jacobi_initial` is the default. The diagnostic
+`CAMERA_SCALING=ruiz_initial` computes full initial `9x9` camera Hessian blocks
+and derives diagonal symmetric Ruiz scales from their absolute row norms. It
+uses the same geometric-mean normalization, optional ratio cap, percentile
+clipping, and diagonal worker transport as Jacobi. The diagonal Ruiz gate did
+not improve SSE or local linear work and is not promoted; it is distinct from a
+future full matrix-valued block-coordinate transform.
+
 ## Collective trust trial diagnostics
 
 An opt-in startup diagnostic compares each nominal local solve with one

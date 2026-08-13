@@ -123,6 +123,116 @@ def compute_initial_jacobi_scaling(
     return scaling
 
 
+def symmetric_ruiz_scaling_from_blocks(
+    blocks, max_iterations=10, tolerance=1e-3
+):
+    """Equilibrate symmetric camera blocks with diagonal Ruiz scaling."""
+    blocks = np.asarray(blocks, dtype=np.float64)
+    if blocks.ndim != 3 or blocks.shape[1:] != (9, 9):
+        raise ValueError("camera Hessian blocks must have shape (camera_count, 9, 9)")
+    if max_iterations <= 0:
+        raise ValueError("Ruiz maximum iterations must be positive")
+    if tolerance <= 0.0:
+        raise ValueError("Ruiz tolerance must be positive")
+    absolute = np.abs(blocks)
+    scaling = np.ones(blocks.shape[:2], dtype=np.float64)
+    for _ in range(max_iterations):
+        equilibrated = absolute / (
+            scaling[:, :, None] * scaling[:, None, :]
+        )
+        row_norms = np.max(equilibrated, axis=2)
+        positive = np.where(
+            np.isfinite(row_norms) & (row_norms > 0.0), row_norms, np.nan
+        )
+        medians = np.nanmedian(positive, axis=1)
+        medians = np.where(
+            np.isfinite(medians) & (medians > 0.0),
+            medians,
+            1.0,
+        )
+        floors = np.maximum(
+            1e-12 * medians, np.finfo(np.float64).tiny
+        )
+        safe_norms = np.maximum(
+            np.where(np.isfinite(row_norms), row_norms, floors[:, None]),
+            floors[:, None],
+        )
+        update = np.sqrt(safe_norms)
+        scaling *= update
+        if np.max(np.abs(np.log(update))) < tolerance:
+            break
+    return scaling
+
+
+def compute_initial_ruiz_scaling(
+    cameras,
+    points,
+    camera_indices,
+    point_indices,
+    chunk_size=200_000,
+    maximum_ratio=None,
+    clipping_percentile=None,
+    max_iterations=10,
+    tolerance=1e-3,
+):
+    """Return full-camera-block-informed diagonal symmetric Ruiz scaling."""
+    cameras = np.asarray(cameras, dtype=np.float64)
+    points = np.asarray(points, dtype=np.float64)
+    camera_indices = np.asarray(camera_indices, dtype=np.int64)
+    point_indices = np.asarray(point_indices, dtype=np.int64)
+    if camera_indices.shape != point_indices.shape:
+        raise ValueError("camera_indices and point_indices must have equal shape")
+    if chunk_size <= 0:
+        raise ValueError("chunk_size must be positive")
+
+    blocks = np.zeros((len(cameras), 9, 9), dtype=np.float64)
+    for start in range(0, camera_indices.size, chunk_size):
+        stop = min(start + chunk_size, camera_indices.size)
+        selected_cameras = camera_indices[start:stop]
+        observed_cameras = torch.tensor(
+            cameras[selected_cameras], dtype=torch.float64, requires_grad=True
+        )
+        observed_points = torch.tensor(
+            points[point_indices[start:stop]], dtype=torch.float64
+        )
+        projections = _project_observations(observed_cameras, observed_points)
+        with warnings.catch_warnings():
+            warnings.filterwarnings(
+                "ignore",
+                message=(
+                    "CUDA initialization: The NVIDIA driver on your system "
+                    "is too old.*"
+                ),
+            )
+            gradient_x = torch.autograd.grad(
+                projections[:, 0].sum(), observed_cameras, retain_graph=True
+            )[0]
+            gradient_y = torch.autograd.grad(
+                projections[:, 1].sum(), observed_cameras
+            )[0]
+        gradient_x = gradient_x.detach().numpy()
+        gradient_y = gradient_y.detach().numpy()
+        contribution = (
+            gradient_x[:, :, None] * gradient_x[:, None, :]
+            + gradient_y[:, :, None] * gradient_y[:, None, :]
+        )
+        np.add.at(blocks, selected_cameras, contribution)
+
+    scaling = symmetric_ruiz_scaling_from_blocks(
+        blocks, max_iterations=max_iterations, tolerance=tolerance
+    )
+    if clipping_percentile is not None:
+        scaling = clip_parameterwise_percentiles(
+            scaling, clipping_percentile
+        )
+    scaling = normalize_geometric_mean(
+        scaling, maximum_ratio=maximum_ratio
+    )
+    if not np.all(np.isfinite(scaling)) or np.any(scaling <= 0.0):
+        raise ValueError("camera scaling must be finite and positive")
+    return scaling
+
+
 def to_scaled_cameras(physical_cameras, scaling):
     return np.asarray(physical_cameras, dtype=np.float64) * np.asarray(
         scaling, dtype=np.float64)

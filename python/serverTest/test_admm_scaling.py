@@ -3,7 +3,9 @@ import numpy as np
 from admm_scaling import (
     clip_parameterwise_percentiles,
     compute_initial_jacobi_scaling,
+    compute_initial_ruiz_scaling,
     normalize_geometric_mean,
+    symmetric_ruiz_scaling_from_blocks,
     to_physical_cameras,
     to_scaled_cameras,
 )
@@ -56,6 +58,53 @@ def test_camera_scaling_round_trip():
     scaled = to_scaled_cameras(cameras, scaling)
 
     np.testing.assert_allclose(to_physical_cameras(scaled, scaling), cameras)
+
+
+def test_ruiz_scaling_matches_jacobi_for_diagonal_blocks():
+    diagonal = np.geomspace(1e-8, 1e8, 18).reshape(2, 9)
+    blocks = np.zeros((2, 9, 9))
+    blocks[:, np.arange(9), np.arange(9)] = diagonal
+
+    scaling = symmetric_ruiz_scaling_from_blocks(blocks)
+
+    np.testing.assert_allclose(scaling, np.sqrt(diagonal), rtol=1e-12)
+
+
+def test_ruiz_scaling_reduces_correlated_block_row_norm_spread():
+    generator = np.random.default_rng(4)
+    basis = generator.standard_normal((9, 9))
+    weights = np.geomspace(1e-8, 1e8, 9)
+    block = basis @ np.diag(weights) @ basis.T
+    blocks = block[None, :, :]
+
+    scaling = symmetric_ruiz_scaling_from_blocks(blocks)
+    before = np.max(np.abs(block), axis=1)
+    equilibrated = block / (scaling[0, :, None] * scaling[0, None, :])
+    after = np.max(np.abs(equilibrated), axis=1)
+
+    assert np.max(after) / np.min(after) < np.max(before) / np.min(before)
+
+
+def test_initial_ruiz_scaling_is_positive_and_normalized():
+    cameras = np.array([
+        [0.01, -0.02, 0.03, 0.1, -0.2, 0.3, 800.0, 1e-4, -1e-7],
+        [-0.02, 0.01, 0.04, -0.1, 0.1, 0.2, 900.0, -2e-4, 2e-7],
+    ])
+    points = np.array([
+        [0.2, -0.1, -4.0],
+        [-0.3, 0.4, -5.0],
+        [0.1, 0.2, -6.0],
+    ])
+    camera_indices = np.array([0, 0, 1, 1])
+    point_indices = np.array([0, 1, 1, 2])
+
+    scaling = compute_initial_ruiz_scaling(
+        cameras, points, camera_indices, point_indices, chunk_size=2
+    )
+
+    assert np.all(np.isfinite(scaling))
+    assert np.all(scaling > 0.0)
+    np.testing.assert_allclose(np.exp(np.mean(np.log(scaling))), 1.0)
 
 
 def test_scaling_ratio_cap_preserves_geometric_mean():
