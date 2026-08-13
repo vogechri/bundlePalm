@@ -1,6 +1,9 @@
 import numpy as np
+import pytest
 
 from admm_scaling import (
+    block_jacobi_coordinate_maps,
+    camera_coordinate_scale_values,
     clip_parameterwise_percentiles,
     compute_initial_jacobi_scaling,
     compute_initial_ruiz_scaling,
@@ -60,6 +63,39 @@ def test_camera_scaling_round_trip():
     np.testing.assert_allclose(to_physical_cameras(scaled, scaling), cameras)
 
 
+def test_camera_block_transform_round_trip():
+    cameras = np.arange(18, dtype=np.float64).reshape(2, 9) - 4.0
+    generator = np.random.default_rng(7)
+    factors = generator.standard_normal((2, 9, 9))
+    transforms = np.einsum("...ji,...jk->...ik", factors, factors)
+    transforms += 0.5 * np.eye(9)[None, :, :]
+
+    scaled = to_scaled_cameras(cameras, transforms)
+
+    np.testing.assert_allclose(
+        to_physical_cameras(scaled, transforms), cameras, rtol=1e-12, atol=1e-12
+    )
+
+    repeated = np.repeat(cameras[None, :, :], 3, axis=0)
+    repeated_scaled = to_scaled_cameras(repeated, transforms)
+    np.testing.assert_allclose(
+        to_physical_cameras(repeated_scaled, transforms), repeated,
+        rtol=1e-12, atol=1e-12,
+    )
+
+
+def test_camera_coordinate_map_rejects_invalid_shape():
+    with pytest.raises(ValueError, match="camera coordinate map"):
+        to_scaled_cameras(np.zeros((2, 9)), np.ones((2, 8, 8)))
+
+
+def test_block_coordinate_scale_summary_uses_inverse_singular_values():
+    transforms = np.stack((np.eye(9), 2.0 * np.eye(9)))
+    values = camera_coordinate_scale_values(transforms)
+    np.testing.assert_allclose(values[0], 1.0)
+    np.testing.assert_allclose(values[1], 0.5)
+
+
 def test_ruiz_scaling_matches_jacobi_for_diagonal_blocks():
     diagonal = np.geomspace(1e-8, 1e8, 18).reshape(2, 9)
     blocks = np.zeros((2, 9, 9))
@@ -105,6 +141,26 @@ def test_initial_ruiz_scaling_is_positive_and_normalized():
     assert np.all(np.isfinite(scaling))
     assert np.all(scaling > 0.0)
     np.testing.assert_allclose(np.exp(np.mean(np.log(scaling))), 1.0)
+
+
+def test_block_jacobi_maps_whiten_camera_blocks():
+    generator = np.random.default_rng(9)
+    factors = generator.standard_normal((3, 9, 9))
+    blocks = np.einsum("...ji,...jk->...ik", factors, factors)
+    blocks += 1e-3 * np.eye(9)[None, :, :]
+
+    transforms = block_jacobi_coordinate_maps(blocks)
+    transformed = np.einsum(
+        "...ji,...jk,...kl->...il", transforms, blocks, transforms
+    )
+    normalized = transformed / np.trace(transformed, axis1=1, axis2=2)[:, None, None]
+
+    np.testing.assert_allclose(
+        normalized,
+        np.broadcast_to(np.eye(9) / 9.0, normalized.shape),
+        rtol=1e-9,
+        atol=1e-10,
+    )
 
 
 def test_scaling_ratio_cap_preserves_geometric_mean():

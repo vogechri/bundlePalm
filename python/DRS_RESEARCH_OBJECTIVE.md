@@ -739,9 +739,12 @@ testing began with item 2 at the user's request.
 2. **C2 block-coordinate Ruiz equilibration:** diagonal symmetric Ruiz from
    full initial `9x9` camera Hessian blocks is now tested and rejected: Roman,
    Trafalgar, and BAL1778 reproduce Jacobi SSE trajectories to about `1e-9`
-   while adding runtime. Full matrix-valued `9x9` camera transforms remain a
-   separate C2 subgate. See
-   `benchmark_results/c2_diagonal_ruiz_gate/report.md`.
+   while adding runtime. Full matrix-valued `9x9` inverse-square-root transforms
+   are also tested and rejected: every Roman, Trafalgar, and BAL1778 I3
+   candidate is rejected, with final/control ratios `3.864440x`, `3.018749x`,
+   and `92.449861x`. Close C2 without floor, normalization, trust, or curvature
+   tuning. See `benchmark_results/c2_diagonal_ruiz_gate/report.md` and
+   `benchmark_results/c2_full_block_gate/report.md`.
 3. **Model-ratio nonlinear startup LM:** replace fixed damping halving in the
    repeated initial Schur diagnostic with globally safeguarded gain-ratio
    damping/retries. Keep the correction cap frozen while testing the policy.
@@ -749,7 +752,7 @@ testing began with item 2 at the user's request.
    relative rotation/translation information only during basin acquisition,
    anneal it completely away, and evaluate the unchanged pixel objective.
 
-After the requested C2 gate, refreshed C3 has the strongest existing quality
+After the completed C2 gate, refreshed C3 has the strongest existing quality
 evidence but larger systems cost; model-ratio startup is narrower; external
 pose factors add a new information contract and carry the largest validation
 burden.

@@ -434,11 +434,17 @@ class AdmmWorkerClient:
                 program.num_clusters = cluster_count
                 program.run_id = self.run_id
                 program.phase_id = phase_id
-                program.unorm[:] = (1.0 / camera_scaling[
-                    unique_cameras]).ravel()
+                if np.asarray(camera_scaling).ndim == 2:
+                    program.unorm[:] = (1.0 / camera_scaling[
+                        unique_cameras]).ravel()
+                    program.camera_transform[:] = np.tile(
+                        np.eye(9), (unique_cameras.size, 1, 1)).ravel()
+                else:
+                    program.unorm[:] = np.ones(9 * unique_cameras.size)
+                    program.camera_transform[:] = camera_scaling[
+                        unique_cameras
+                    ].ravel()
                 program.vnorm[:] = np.ones(3 * unique_points.size)
-                program.camera_transform[:] = np.tile(
-                    np.eye(9), (unique_cameras.size, 1, 1)).ravel()
                 program.scalar_proximal_prior = scalar_proximal_prior
                 program.proximal_rho = extrinsics_penalty
                 program.split_camera_penalty = split_camera_penalty
@@ -873,7 +879,15 @@ class AdmmWorkerClient:
             unique_points = np.unique(point_indices_in_cluster[cluster_id])
             request = test_pb2.request_proto()
             update = request.preconditioning_update
-            update.unorm[:] = (1.0 / camera_scaling[unique_cameras]).ravel()
+            if np.asarray(camera_scaling).ndim == 2:
+                update.unorm[:] = (
+                    1.0 / camera_scaling[unique_cameras]
+                ).ravel()
+            else:
+                update.unorm[:] = np.ones(9 * unique_cameras.size)
+                update.camera_transform[:] = camera_scaling[
+                    unique_cameras
+                ].ravel()
             update.vnorm[:] = np.ones(3 * unique_points.size)
             if camera_state is not None:
                 update.cameras[:] = camera_state[cluster_id][

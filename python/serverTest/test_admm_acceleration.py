@@ -261,6 +261,21 @@ def test_ruiz_camera_scaling_cli_choice(monkeypatch):
     assert arguments.camera_scaling == "ruiz_initial"
 
 
+def test_block_jacobi_camera_scaling_cli_choice(monkeypatch):
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "client_drs.py",
+            "unused.bal",
+            "--camera-scaling",
+            "block_jacobi_initial",
+        ],
+    )
+    arguments = client_drs.parse_arguments()
+    assert arguments.camera_scaling == "block_jacobi_initial"
+
+
 def test_collective_trust_trial_radius_uses_geometric_mean():
     radius = client_drs.collective_trust_trial_radius(
         np.array([4.0, 16.0]), 0.5

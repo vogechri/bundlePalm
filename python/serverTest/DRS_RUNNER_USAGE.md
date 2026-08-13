@@ -175,6 +175,13 @@ clipping, and diagonal worker transport as Jacobi. The diagonal Ruiz gate did
 not improve SSE or local linear work and is not promoted; it is distinct from a
 future full matrix-valued block-coordinate transform.
 
+`CAMERA_SCALING=block_jacobi_initial` is the default-off full-matrix C2
+diagnostic. It sends determinant-normalized inverse square roots of initial
+`9x9` camera Hessian blocks through the worker's full transform payload. The
+I3 gate is catastrophically worse on Roman, Trafalgar, and BAL1778 despite
+valid safeguards, so this mode is not a quality preset and its numerical floors
+must not be tuned from those scenes.
+
 ## Collective trust trial diagnostics
 
 An opt-in startup diagnostic compares each nominal local solve with one

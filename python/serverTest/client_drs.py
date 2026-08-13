@@ -59,6 +59,8 @@ from drs_safeguards import (
 from outer_acceleration import create_accelerator, interpolate_line_search_center
 from partition_cache import PARTITION_CACHE_MODES, partition_with_cache
 from admm_scaling import (
+    camera_coordinate_scale_values,
+    compute_initial_block_jacobi_maps,
     compute_initial_jacobi_scaling,
     compute_initial_ruiz_scaling,
     to_physical_cameras,
@@ -978,12 +980,21 @@ def camera_copy_disagreement_diagnostics(
         if clusters.size <= 1:
             continue
         scaled_copies = local_cameras[clusters, camera_id]
-        physical_copies = to_physical_cameras(
-            scaled_copies, camera_scaling[camera_id]
-        )
-        physical_projection = to_physical_cameras(
-            projected[camera_id], camera_scaling[camera_id]
-        )
+        if np.asarray(camera_scaling).ndim == 3:
+            camera_coordinate_map = camera_scaling[camera_id:camera_id + 1]
+            physical_copies = to_physical_cameras(
+                scaled_copies[:, None, :], camera_coordinate_map
+            )[:, 0, :]
+            physical_projection = to_physical_cameras(
+                projected[camera_id][None, :], camera_coordinate_map
+            )[0]
+        else:
+            physical_copies = to_physical_cameras(
+                scaled_copies, camera_scaling[camera_id]
+            )
+            physical_projection = to_physical_cameras(
+                projected[camera_id], camera_scaling[camera_id]
+            )
         physical_residual = physical_copies - physical_projection
         if isinstance(selected_metrics, ActiveCameraMetricBlocks):
             selected = selected_metrics.camera_indices == camera_id
@@ -1000,11 +1011,17 @@ def camera_copy_disagreement_diagnostics(
         copy_energies = np.einsum(
             "bi,bij,bj->b", scaled_residual, blocks, scaled_residual
         )
-        physical_metrics = (
-            camera_scaling[camera_id][None, :, None]
-            * blocks
-            * camera_scaling[camera_id][None, None, :]
-        )
+        if np.asarray(camera_scaling).ndim == 3:
+            inverse_map = np.linalg.inv(camera_scaling[camera_id])
+            physical_metrics = np.einsum(
+                "ji,bjk,kl->bil", inverse_map, blocks, inverse_map
+            )
+        else:
+            physical_metrics = (
+                camera_scaling[camera_id][None, :, None]
+                * blocks
+                * camera_scaling[camera_id][None, None, :]
+            )
         metric_sum = np.sum(blocks, axis=0)
         metric_sum_eigenvalues = np.linalg.eigvalsh(
             0.5 * (metric_sum + metric_sum.T)
@@ -1519,7 +1536,9 @@ def parse_arguments():
     )
     parser.add_argument(
         "--camera-scaling",
-        choices=("none", "jacobi_initial", "ruiz_initial"),
+        choices=(
+            "none", "jacobi_initial", "ruiz_initial", "block_jacobi_initial"
+        ),
         default="jacobi_initial",
     )
     parser.add_argument(
@@ -2691,7 +2710,12 @@ def main():
         )
 
     scaling_started = time.perf_counter()
-    if arguments.camera_scaling in {"jacobi_initial", "ruiz_initial"}:
+    if arguments.camera_scaling == "block_jacobi_initial":
+        camera_scaling = compute_initial_block_jacobi_maps(
+            cameras, points, camera_indices, point_indices
+        )
+        camera_scaling *= np.sqrt(cluster_count) / 2.0
+    elif arguments.camera_scaling in {"jacobi_initial", "ruiz_initial"}:
         scaling_function = (
             compute_initial_ruiz_scaling
             if arguments.camera_scaling == "ruiz_initial"
@@ -6294,14 +6318,19 @@ def main():
         "cameraScalingClippingPercentile": (
             arguments.camera_scaling_clipping_percentile
         ),
-        "cameraScalingMinimum": float(np.min(camera_scaling)),
-        "cameraScalingMaximum": float(np.max(camera_scaling)),
+        "cameraScalingMinimum": float(np.min(
+            camera_coordinate_scale_values(camera_scaling)
+        )),
+        "cameraScalingMaximum": float(np.max(
+            camera_coordinate_scale_values(camera_scaling)
+        )),
         "cameraScalingRatio": float(
-            np.max(camera_scaling) / np.min(camera_scaling)
+            np.max(camera_coordinate_scale_values(camera_scaling))
+            / np.min(camera_coordinate_scale_values(camera_scaling))
         ),
-        "cameraScalingGeometricMean": float(
-            np.exp(np.mean(np.log(camera_scaling)))
-        ),
+        "cameraScalingGeometricMean": float(np.exp(np.mean(np.log(
+            camera_coordinate_scale_values(camera_scaling)
+        )))),
         "cameraDiagonalRelativeFloor": arguments.camera_diagonal_relative_floor,
         "cameraDiagonalTranslationFloor": float(os.environ.get(
             "BUNDLE_PALM_CAMERA_DIAGONAL_TRANSLATION_FLOOR",
