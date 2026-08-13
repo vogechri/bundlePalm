@@ -2,6 +2,7 @@ import numpy as np
 import pytest
 
 from admm_scaling import (
+    aggregate_camera_metric_blocks,
     block_jacobi_coordinate_maps,
     camera_coordinate_scale_values,
     clip_parameterwise_percentiles,
@@ -161,6 +162,18 @@ def test_block_jacobi_maps_whiten_camera_blocks():
         rtol=1e-9,
         atol=1e-10,
     )
+
+
+def test_aggregate_camera_metric_blocks_sums_worker_copies():
+    metric = type("Metric", (), {
+        "camera_indices": np.array([0, 1, 0]),
+        "blocks": np.stack((np.eye(9), 2 * np.eye(9), 3 * np.eye(9))),
+    })()
+
+    aggregate = aggregate_camera_metric_blocks(metric, 2)
+
+    np.testing.assert_allclose(aggregate[0], 4 * np.eye(9))
+    np.testing.assert_allclose(aggregate[1], 2 * np.eye(9))
 
 
 def test_scaling_ratio_cap_preserves_geometric_mean():

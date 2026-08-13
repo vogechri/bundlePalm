@@ -200,6 +200,21 @@ def block_jacobi_coordinate_maps(blocks, relative_floor=1e-10):
     return transforms
 
 
+def aggregate_camera_metric_blocks(metric_blocks, camera_count):
+    """Sum active worker-copy metric blocks into one block per camera."""
+    camera_ids = np.asarray(metric_blocks.camera_indices, dtype=np.int64)
+    blocks = np.asarray(metric_blocks.blocks, dtype=np.float64)
+    if camera_ids.ndim != 1 or blocks.shape != (camera_ids.size, 9, 9):
+        raise ValueError("active camera metrics have incompatible shapes")
+    if np.any(camera_ids < 0) or np.any(camera_ids >= camera_count):
+        raise ValueError("active camera metric index is out of range")
+    aggregate = np.zeros((camera_count, 9, 9), dtype=np.float64)
+    np.add.at(aggregate, camera_ids, blocks)
+    if np.any(~np.isfinite(aggregate)):
+        raise ValueError("aggregated camera metrics must be finite")
+    return aggregate
+
+
 def compute_initial_block_jacobi_maps(
     cameras,
     points,

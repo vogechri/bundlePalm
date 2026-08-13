@@ -182,6 +182,12 @@ I3 gate is catastrophically worse on Roman, Trafalgar, and BAL1778 despite
 valid safeguards, so this mode is not a quality preset and its numerical floors
 must not be tuned from those scenes.
 
+`CAMERA_SCALING=worker_block_jacobi_initial` is the faithful old-style
+diagnostic: workers first perform the unscaled local proximal solve, then the
+coordinator aggregates their packed full camera metrics and installs a `1e-6`
+floored inverse-square-root transform. It improves Roman under current
+left-SE3 DRS but fails Trafalgar and BAL1778, so it also remains default-off.
+
 ## Collective trust trial diagnostics
 
 An opt-in startup diagnostic compares each nominal local solve with one

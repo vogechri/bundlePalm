@@ -2,7 +2,7 @@
 
 ## Mechanism
 
-The current DRS coordinator now supports a default-off
+This first full-block diagnostic supports a default-off
 `CAMERA_SCALING=block_jacobi_initial` mode. It accumulates each camera's full
 initial `9x9` Gauss--Newton block, floors eigenvalues at `1e-10` of the block
 maximum, and uses a globally determinant-normalized inverse square root as the
@@ -42,8 +42,8 @@ current DRS resolvent. This is not a generic linear-conditioning win.
 
 ## Decision
 
-Reject full block-coordinate C2 and close idea 2. Do not tune eigenvalue floors,
-normalization, trust radii, or proximal curvature from these failures. Retain
-both Ruiz and full-block modes default-off as coordinate-invariance and
-conditioning diagnostics. The next queued mechanism is idea 1, refreshed
-cross-camera C3.
+Reject raw-initial-Jacobian full block-coordinate C2. Do not tune eigenvalue
+floors, normalization, trust radii, or proximal curvature from these failures.
+This result does not represent the old successful worker-metric preconditioner;
+that faithful post-proximal metric source is evaluated separately in
+`benchmark_results/c2_worker_metric_block_gate/report.md`.

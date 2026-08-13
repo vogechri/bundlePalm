@@ -59,6 +59,8 @@ from drs_safeguards import (
 from outer_acceleration import create_accelerator, interpolate_line_search_center
 from partition_cache import PARTITION_CACHE_MODES, partition_with_cache
 from admm_scaling import (
+    aggregate_camera_metric_blocks,
+    block_jacobi_coordinate_maps,
     camera_coordinate_scale_values,
     compute_initial_block_jacobi_maps,
     compute_initial_jacobi_scaling,
@@ -1537,7 +1539,11 @@ def parse_arguments():
     parser.add_argument(
         "--camera-scaling",
         choices=(
-            "none", "jacobi_initial", "ruiz_initial", "block_jacobi_initial"
+            "none",
+            "jacobi_initial",
+            "ruiz_initial",
+            "block_jacobi_initial",
+            "worker_block_jacobi_initial",
         ),
         default="jacobi_initial",
     )
@@ -2710,6 +2716,9 @@ def main():
         )
 
     scaling_started = time.perf_counter()
+    worker_block_scaling = (
+        arguments.camera_scaling == "worker_block_jacobi_initial"
+    )
     if arguments.camera_scaling == "block_jacobi_initial":
         camera_scaling = compute_initial_block_jacobi_maps(
             cameras, points, camera_indices, point_indices
@@ -2845,7 +2854,7 @@ def main():
         bootstrap_cameras = np.repeat(
             cameras[None, :, :], cluster_count, axis=0
         )
-        worker.solve_batch(
+        bootstrap_result = worker.solve_batch(
             camera_indices_in_cluster,
             point_indices_in_cluster,
             points_2d_in_cluster,
@@ -2878,13 +2887,34 @@ def main():
             camera_proximal_multipliers=camera_proximal_multipliers,
             huber_delta=arguments.huber_delta,
         )
+        if worker_block_scaling:
+            if arguments.proximal_metric != "block":
+                raise ValueError(
+                    "worker block scaling requires block proximal metrics"
+                )
+            _, bootstrap_metric_blocks = bootstrap_result
+            aggregate_blocks = aggregate_camera_metric_blocks(
+                bootstrap_metric_blocks, camera_count
+            )
+            camera_scaling = block_jacobi_coordinate_maps(
+                aggregate_blocks, relative_floor=1e-6
+            )
+            camera_scaling *= np.sqrt(cluster_count) / 2.0
+            local_cameras = to_scaled_cameras(
+                bootstrap_cameras, camera_scaling
+            )
+            centers = to_scaled_cameras(centers, camera_scaling)
+            consensus = to_scaled_cameras(consensus, camera_scaling)
+            accepted_consensus = consensus.copy()
         worker.update_preconditioning(
             camera_indices_in_cluster,
             point_indices_in_cluster,
             camera_scaling,
             cluster_count,
             camera_state=(
-                local_cameras if arguments.worker_owned_cameras else None
+                local_cameras
+                if arguments.worker_owned_cameras or worker_block_scaling
+                else None
             ),
         )
         if arguments.initial_shared_schur_correction:

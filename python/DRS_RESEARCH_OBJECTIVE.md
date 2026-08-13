@@ -740,11 +740,17 @@ testing began with item 2 at the user's request.
    full initial `9x9` camera Hessian blocks is now tested and rejected: Roman,
    Trafalgar, and BAL1778 reproduce Jacobi SSE trajectories to about `1e-9`
    while adding runtime. Full matrix-valued `9x9` inverse-square-root transforms
-   are also tested and rejected: every Roman, Trafalgar, and BAL1778 I3
+   from raw initial pixel Hessians are also tested and rejected: every Roman,
+   Trafalgar, and BAL1778 I3
    candidate is rejected, with final/control ratios `3.864440x`, `3.018749x`,
-   and `92.449861x`. Close C2 without floor, normalization, trust, or curvature
-   tuning. See `benchmark_results/c2_diagonal_ruiz_gate/report.md` and
-   `benchmark_results/c2_full_block_gate/report.md`.
+   and `92.449861x`. A faithful old-style transform derived after the first
+   local solve from aggregated worker proximal metrics improves Roman to
+   `0.973334x` Jacobi, but Trafalgar and BAL1778 are `1.395777x` and
+   `87.637697x`. Close C2 for current direct left-SE3 DRS without scalar tuning;
+   preserve the old additive-coordinate result as distinct evidence. See
+   `benchmark_results/c2_diagonal_ruiz_gate/report.md`,
+   `benchmark_results/c2_full_block_gate/report.md`, and
+   `benchmark_results/c2_worker_metric_block_gate/report.md`.
 3. **Model-ratio nonlinear startup LM:** replace fixed damping halving in the
    repeated initial Schur diagnostic with globally safeguarded gain-ratio
    damping/retries. Keep the correction cap frozen while testing the policy.
