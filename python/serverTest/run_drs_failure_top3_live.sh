@@ -56,6 +56,7 @@ TRUST_REGION_POLICY=${TRUST_REGION_POLICY:-daba}
 PERSISTENT_TRUST_REGION=${PERSISTENT_TRUST_REGION:-0}
 TRUST_REGION_RECOVERY_RATIO=${TRUST_REGION_RECOVERY_RATIO:-0.5}
 SHARED_TRUST_REGION_UNTIL=${SHARED_TRUST_REGION_UNTIL:-0}
+COLLECTIVE_TRUST_TRIAL_UNTIL=${COLLECTIVE_TRUST_TRIAL_UNTIL:-0}
 SHARED_TRUST_REGION_INITIAL_RADIUS=${SHARED_TRUST_REGION_INITIAL_RADIUS:-1000000}
 LOCAL_STATE_REBASE_ITERATION=${LOCAL_STATE_REBASE_ITERATION:-0}
 SCENE_NORMALIZATION=${SCENE_NORMALIZATION:-points_p95}
@@ -242,6 +243,9 @@ if [[ "$LOCAL_STATE_REBASE_ITERATION" != "0" ]]; then
 fi
 if [[ "$SHARED_TRUST_REGION_UNTIL" != "0" ]]; then
   VARIANT_NAME="${VARIANT_NAME}_shared_tr${SHARED_TRUST_REGION_UNTIL}"
+fi
+if [[ "$COLLECTIVE_TRUST_TRIAL_UNTIL" != "0" ]]; then
+  VARIANT_NAME="${VARIANT_NAME}_collective_tr${COLLECTIVE_TRUST_TRIAL_UNTIL}"
 fi
 if [[ "$ENHANCED_INNER_UNTIL" != "0" ]]; then
   VARIANT_NAME="${VARIANT_NAME}_enhanced${ENHANCED_INNER_UNTIL}"
@@ -661,6 +665,7 @@ for problem in "${PROBLEMS[@]}"; do
             --trust-region-policy "$TRUST_REGION_POLICY" \
             --trust-region-recovery-ratio "$TRUST_REGION_RECOVERY_RATIO" \
             --shared-trust-region-until "$SHARED_TRUST_REGION_UNTIL" \
+            --collective-trust-trial-until "$COLLECTIVE_TRUST_TRIAL_UNTIL" \
             --shared-trust-region-initial-radius "$SHARED_TRUST_REGION_INITIAL_RADIUS" \
             --local-state-rebase-iteration "$LOCAL_STATE_REBASE_ITERATION" \
             --scene-normalization "$SCENE_NORMALIZATION" \
@@ -748,6 +753,7 @@ for problem in "${PROBLEMS[@]}"; do
             --trust-region-policy "$TRUST_REGION_POLICY" \
             --trust-region-recovery-ratio "$TRUST_REGION_RECOVERY_RATIO" \
             --shared-trust-region-until "$SHARED_TRUST_REGION_UNTIL" \
+            --collective-trust-trial-until "$COLLECTIVE_TRUST_TRIAL_UNTIL" \
             --shared-trust-region-initial-radius "$SHARED_TRUST_REGION_INITIAL_RADIUS" \
             --local-state-rebase-iteration "$LOCAL_STATE_REBASE_ITERATION" \
             --scene-normalization "$SCENE_NORMALIZATION" \

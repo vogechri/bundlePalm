@@ -251,6 +251,34 @@ def test_initial_shared_schur_rejects_nonpositive_correction_cap(monkeypatch):
         client_drs.validate_arguments(client_drs.parse_arguments())
 
 
+def test_collective_trust_trial_radius_uses_geometric_mean():
+    radius = client_drs.collective_trust_trial_radius(
+        np.array([4.0, 16.0]), 0.5
+    )
+    assert radius == pytest.approx(4.0)
+
+
+@pytest.mark.parametrize("radii", [[], [1.0, np.nan], [1.0, 0.0]])
+def test_collective_trust_trial_radius_rejects_invalid_radii(radii):
+    with pytest.raises(ValueError, match="collective trust radii"):
+        client_drs.collective_trust_trial_radius(radii, 0.5)
+
+
+def test_collective_trust_trial_requires_material_sse_improvement():
+    assert not client_drs.prefer_collective_trust_trial(
+        False, 100.0, False, 100.0 - 1e-11
+    )
+    assert client_drs.prefer_collective_trust_trial(
+        False, 100.0, False, 99.0
+    )
+    assert client_drs.prefer_collective_trust_trial(
+        True, 100.0, False, 101.0
+    )
+    assert not client_drs.prefer_collective_trust_trial(
+        False, 100.0, True, 99.0
+    )
+
+
 @pytest.mark.parametrize(
     "accelerator_type", [LBFGSAcceleration, AndersonAcceleration]
 )

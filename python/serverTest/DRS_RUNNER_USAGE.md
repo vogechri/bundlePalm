@@ -165,6 +165,24 @@ on a rejected/nonconverged solve or the shared minimum-relative-decrease rule.
 Result JSON records every attempt, the accepted count, and the termination
 reason. This remains diagnostic infrastructure, not a promoted preset.
 
+## Collective trust trial diagnostics
+
+An opt-in startup diagnostic compares each nominal local solve with one
+globally evaluated alternative started from a shared trust radius:
+
+```bash
+PERSISTENT_TRUST_REGION=1 \
+WORKER_OWNED_CAMERAS=0 \
+COLLECTIVE_TRUST_TRIAL_UNTIL=5 \
+... ./run_drs_failure_top3_live.sh
+```
+
+The alternative radius is the geometric mean of the nominal workers' returned
+radii multiplied by `TRUST_REGION_RECOVERY_RATIO`. Both trials use identical
+DRS safeguards; the alternative commits only for a material physical-SSE
+improvement, including its resulting per-worker trust radii. This mechanism is
+default-off and retained for diagnostics, not as a promoted quality policy.
+
 ## Partition cache and repartitioning
 
 The cache stores only the landmark-to-cluster assignment. It does not cache

@@ -855,6 +855,30 @@ def scheduled_outer_acceleration_active(until, iteration):
     return until == 0 or iteration < until
 
 
+def collective_trust_trial_radius(radii, recovery_ratio):
+    """Return one shrunken shared radius from completed local trials."""
+    radii = np.asarray(radii, dtype=np.float64)
+    if radii.ndim != 1 or radii.size == 0:
+        raise ValueError("collective trust radii must be a nonempty vector")
+    if np.any(~np.isfinite(radii)) or np.any(radii <= 0.0):
+        raise ValueError("collective trust radii must be finite and positive")
+    if not 0.0 < recovery_ratio < 1.0:
+        raise ValueError("collective trust recovery ratio must be in (0, 1)")
+    return float(recovery_ratio * np.exp(np.mean(np.log(radii))))
+
+
+def prefer_collective_trust_trial(
+    nominal_rejected, nominal_sse, trial_rejected, trial_sse
+):
+    """Prefer only a safely accepted, materially lower physical SSE trial."""
+    if trial_rejected or not np.isfinite(trial_sse):
+        return False
+    if nominal_rejected or not np.isfinite(nominal_sse):
+        return True
+    tolerance = 1e-12 * max(abs(nominal_sse), 1.0)
+    return trial_sse < nominal_sse - tolerance
+
+
 def outer_acceleration_restart_is_active(restart_iteration, iteration):
     """Return whether outer acceleration state resets this iteration."""
     return restart_iteration > 0 and iteration == restart_iteration
@@ -1487,6 +1511,7 @@ def parse_arguments():
     parser.add_argument("--persistent-trust-region", action="store_true")
     parser.add_argument("--trust-region-recovery-ratio", type=float, default=0.5)
     parser.add_argument("--shared-trust-region-until", type=int, default=0)
+    parser.add_argument("--collective-trust-trial-until", type=int, default=0)
     parser.add_argument("--local-state-rebase-iteration", type=int, default=0)
     parser.add_argument(
         "--shared-trust-region-initial-radius", type=float, default=1e6
@@ -2156,6 +2181,22 @@ def validate_arguments(arguments):
         raise ValueError("diagonal trust cutoff must be in [0, iterations]")
     if not 0 <= arguments.relative_residual_until <= arguments.iterations:
         raise ValueError("relative residual cutoff must be in [0, iterations]")
+    if not 0 <= arguments.collective_trust_trial_until <= arguments.iterations:
+        raise ValueError(
+            "collective trust trial cutoff must be in [0, iterations]"
+        )
+    if (
+        arguments.collective_trust_trial_until > 0
+        and not arguments.persistent_trust_region
+    ):
+        raise ValueError("collective trust trials require persistent trust")
+    if (
+        arguments.collective_trust_trial_until > 0
+        and arguments.worker_owned_cameras
+    ):
+        raise ValueError(
+            "collective trust trials require coordinator-owned cameras"
+        )
     if not 0 <= arguments.local_state_rebase_iteration < arguments.iterations:
         raise ValueError("local state rebase must be in [0, iterations)")
     if not 0.0 < arguments.relaxation < 2.0:
@@ -2689,6 +2730,7 @@ def main():
     revert_landmark_mode = 0
     trust_region_recovery_ratio = 1.0
     shared_trust_region_radius = arguments.shared_trust_region_initial_radius
+    collective_trust_region_radii = None
     trajectory = []
     termination_reason = "iteration_limit"
     final_polishing_applied = False
@@ -3243,6 +3285,9 @@ def main():
             shared_trust_region_active = (
                 iteration < arguments.shared_trust_region_until
             )
+            collective_trust_trial_active = (
+                iteration < arguments.collective_trust_trial_until
+            )
             iteration_shared_trust_region_radius = (
                 shared_trust_region_radius
                 if shared_trust_region_active else None
@@ -3250,7 +3295,12 @@ def main():
             iteration_forced_trust_region_radius = (
                 initial_local_trust_region_radius
                 if local_state_rebase_applied
-                else iteration_shared_trust_region_radius
+                else (
+                    collective_trust_region_radii
+                    if collective_trust_trial_active
+                    and collective_trust_region_radii is not None
+                    else iteration_shared_trust_region_radius
+                )
             )
             shared_trust_region_log_spread = float("nan")
             diagonal_trust_until = (
@@ -3315,6 +3365,12 @@ def main():
             unique_metric_selector_sse = float("nan")
             unique_metric_selector_dre = float("nan")
             unique_metric_selector_rejected = False
+            collective_trust_trial_radius_value = float("nan")
+            collective_trust_trial_evaluated = False
+            collective_trust_trial_selected = False
+            collective_trust_trial_sse = float("nan")
+            collective_trust_trial_dre = float("nan")
+            collective_trust_trial_rejected = False
             iteration_schur_observability_diagnostic = (
                 arguments.global_schur_majorizer_observability_threshold >= 0.0
                 and not global_schur_majorizer_decided
@@ -3410,6 +3466,16 @@ def main():
             local_linear_relative_residuals = (
                 worker.last_linear_relative_residuals.copy()
             )
+            nominal_trust_region_radii = (
+                worker.last_trust_region_radii.copy()
+            )
+            if collective_trust_trial_active:
+                collective_trust_trial_radius_value = (
+                    collective_trust_trial_radius(
+                        worker.last_trust_region_radii,
+                        arguments.trust_region_recovery_ratio,
+                    )
+                )
             if shared_trust_region_active:
                 returned_radii = worker.last_trust_region_radii
                 valid_radii = returned_radii[
@@ -4193,6 +4259,7 @@ def main():
                 "metric_proposal_subspace_energy_fractions": (
                     metric_proposal_subspace_energy_fractions.copy()
                 ),
+                "trust_region_radii": nominal_trust_region_radii,
             }
             iteration_outer_acceleration_active = (
                 scheduled_outer_acceleration_active(
@@ -4211,6 +4278,7 @@ def main():
                 proposal_is_accelerated = False
             selected_trial = nominal_trial
             evaluated_accelerated_trial = False
+            evaluated_collective_trust_trial = False
             selector_triggered = (
                 unique_metric_selector is not None
                 and np.isfinite(shared_camera_compatibility)
@@ -4223,6 +4291,7 @@ def main():
                     and accelerator.requires_first_trial_observation
                 )
                 or selector_triggered
+                or collective_trust_trial_active
             ):
                 nominal_landmark_state_id = iteration + 1
                 if (
@@ -4236,6 +4305,14 @@ def main():
                         "save",
                     )
                 trial_specs = []
+                if collective_trust_trial_active:
+                    trial_specs.append((
+                        "collective_trust",
+                        0.0,
+                        oracle_input_centers.copy(),
+                        camera_proximal_multipliers,
+                        collective_trust_trial_radius_value,
+                    ))
                 if selector_triggered:
                     trial_specs.append((
                         "unique_metric",
@@ -4246,6 +4323,7 @@ def main():
                             arguments.shared_camera_metric_beta,
                             unique_metric_selector[0],
                         ),
+                        iteration_forced_trust_region_radius,
                     ))
                 if (
                     proposal_is_accelerated
@@ -4265,18 +4343,26 @@ def main():
                                     acceleration_weight,
                                 ),
                                 camera_proximal_multipliers,
+                                iteration_forced_trust_region_radius,
                             ))
                 for (
                     trial_kind,
                     acceleration_weight,
                     trial_centers,
                     trial_camera_multipliers,
+                    trial_forced_trust_region_radius,
                 ) in trial_specs:
                     evaluated_accelerated_trial |= (
                         trial_kind == "acceleration"
                     )
                     unique_metric_selector_attempted |= (
                         trial_kind == "unique_metric"
+                    )
+                    evaluated_collective_trust_trial |= (
+                        trial_kind == "collective_trust"
+                    )
+                    collective_trust_trial_evaluated |= (
+                        trial_kind == "collective_trust"
                     )
                     accelerated_trials += trial_kind == "acceleration"
                     oracle_calls_this_iteration += 1
@@ -4340,7 +4426,7 @@ def main():
                         nesterov_relative_residual=relative_residual_active,
                         camera_proximal_multipliers=trial_camera_multipliers,
                         forced_trust_region_radius=(
-                            iteration_forced_trust_region_radius
+                            trial_forced_trust_region_radius
                         ),
                         outer_iteration=iteration,
                         oracle_kind=2,
@@ -4351,6 +4437,9 @@ def main():
                         schur_offdiagonal_majorizer=(
                             iteration_schur_majorizer_active
                         ),
+                    )
+                    trial_trust_region_radii = (
+                        worker.last_trust_region_radii.copy()
                     )
                     trial_projection_blocks = (
                         worker.last_consensus_metric_blocks
@@ -4801,6 +4890,10 @@ def main():
                         unique_metric_selector_sse = trial_sse
                         unique_metric_selector_dre = trial_dre
                         unique_metric_selector_rejected = trial_rejected
+                    elif trial_kind == "collective_trust":
+                        collective_trust_trial_sse = trial_sse
+                        collective_trust_trial_dre = trial_dre
+                        collective_trust_trial_rejected = trial_rejected
                     trial_is_better = prefer_metric_selector_trial(
                         nominal_trial["rejected"],
                         nominal_trial["douglas_rachford_envelope"],
@@ -4809,6 +4902,13 @@ def main():
                         trial_dre,
                         trial_sse,
                     )
+                    if trial_kind == "collective_trust":
+                        trial_is_better = prefer_collective_trust_trial(
+                            nominal_trial["rejected"],
+                            nominal_trial["candidate_sse"],
+                            trial_rejected,
+                            trial_sse,
+                        )
                     if not trial_rejected and (
                         trial_kind == "acceleration" or trial_is_better
                     ):
@@ -4842,11 +4942,14 @@ def main():
                             "metric_proposal_subspace_energy_fractions": (
                                 trial_metric_proposal_subspace_energy_fractions
                             ),
+                            "trust_region_radii": trial_trust_region_radii,
                         }
                         if trial_kind == "unique_metric":
                             unique_metric_selector_selected = True
-                        else:
+                        elif trial_kind == "acceleration":
                             accepted_acceleration_weight = acceleration_weight
+                        else:
+                            collective_trust_trial_selected = True
                         break
 
             if selected_trial is not nominal_trial:
@@ -4892,6 +4995,7 @@ def main():
                 if (
                     evaluated_accelerated_trial
                     or unique_metric_selector_attempted
+                    or evaluated_collective_trust_trial
                 ) and not rejected:
                     override_landmarks = not arguments.worker_owned_landmarks
                     if evaluated_accelerated_trial:
@@ -4904,6 +5008,11 @@ def main():
                 elif rejected:
                     accelerator.reset()
                     acceleration_failures = 0
+
+            if collective_trust_trial_active:
+                collective_trust_region_radii = selected_trial[
+                    "trust_region_radii"
+                ].copy()
 
             proximal_point_sse = float("nan")
             if (
@@ -4920,7 +5029,10 @@ def main():
                 )["objectiveValue"]
 
             if (
-                evaluated_accelerated_trial
+                (
+                    evaluated_accelerated_trial
+                    or evaluated_collective_trust_trial
+                )
                 and (
                     arguments.worker_sse_shadow
                     or arguments.suppress_accelerated_landmark_replies
@@ -5380,13 +5492,33 @@ def main():
                 "uniqueMetricSelectorRejected": (
                     unique_metric_selector_rejected
                 ),
+                "collectiveTrustTrialActive": collective_trust_trial_active,
+                "collectiveTrustTrialEvaluated": (
+                    collective_trust_trial_evaluated
+                ),
+                "collectiveTrustTrialSelected": (
+                    collective_trust_trial_selected
+                ),
+                "collectiveTrustTrialRadius": (
+                    collective_trust_trial_radius_value
+                ),
+                "collectiveTrustTrialSSE": collective_trust_trial_sse,
+                "collectiveTrustTrialDRE": collective_trust_trial_dre,
+                "collectiveTrustTrialRejected": (
+                    collective_trust_trial_rejected
+                ),
                 "outerAcceleration": arguments.outer_acceleration,
                 "outerAccelerationRestartApplied": (
                     outer_acceleration_restart_applied
                 ),
                 "localStateRebaseApplied": local_state_rebase_applied,
                 "forcedLocalTrustRegionRadius": (
-                    iteration_forced_trust_region_radius
+                    float(np.exp(np.mean(np.log(
+                        np.asarray(
+                            iteration_forced_trust_region_radius,
+                            dtype=np.float64,
+                        )
+                    ))))
                     if iteration_forced_trust_region_radius is not None
                     else float("nan")
                 ),
@@ -6019,6 +6151,7 @@ def main():
         "persistentTrustRegion": arguments.persistent_trust_region,
         "trustRegionRecoveryRatio": arguments.trust_region_recovery_ratio,
         "sharedTrustRegionUntil": arguments.shared_trust_region_until,
+        "collectiveTrustTrialUntil": arguments.collective_trust_trial_until,
         "localStateRebaseIteration": arguments.local_state_rebase_iteration,
         "sharedTrustRegionInitialRadius": (
             arguments.shared_trust_region_initial_radius

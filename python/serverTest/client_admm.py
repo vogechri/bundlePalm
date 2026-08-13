@@ -361,6 +361,24 @@ class AdmmWorkerClient:
             )
         if np.any(local_steps_by_cluster <= 0):
             raise ValueError("local steps must be positive")
+        forced_trust_region_radii = None
+        if forced_trust_region_radius is not None:
+            forced_trust_region_radii = np.asarray(
+                forced_trust_region_radius, dtype=np.float64
+            )
+            if forced_trust_region_radii.ndim == 0:
+                forced_trust_region_radii = np.full(
+                    cluster_count, float(forced_trust_region_radii)
+                )
+            elif forced_trust_region_radii.shape != (cluster_count,):
+                raise ValueError(
+                    "forced trust radius must be scalar or one per cluster"
+                )
+            if (
+                np.any(~np.isfinite(forced_trust_region_radii))
+                or np.any(forced_trust_region_radii <= 0.0)
+            ):
+                raise ValueError("forced trust radii must be finite and positive")
         self.phase_id += 1
         phase_id = self.phase_id
         unique_cameras_by_cluster = [
@@ -402,9 +420,9 @@ class AdmmWorkerClient:
                 program.nesterov_max_iterations = nesterov_max_iterations
                 program.nesterov_min_iterations = nesterov_min_iterations
                 program.nesterov_stop_tolerance = nesterov_stop_tolerance
-                if forced_trust_region_radius is not None:
+                if forced_trust_region_radii is not None:
                     program.forced_trust_region_radius = (
-                        forced_trust_region_radius
+                        forced_trust_region_radii[cluster_id]
                     )
                 program.outer_iteration = outer_iteration
                 program.oracle_kind = oracle_kind
@@ -466,9 +484,9 @@ class AdmmWorkerClient:
                 update.nesterov_max_iterations = nesterov_max_iterations
                 update.nesterov_min_iterations = nesterov_min_iterations
                 update.nesterov_stop_tolerance = nesterov_stop_tolerance
-                if forced_trust_region_radius is not None:
+                if forced_trust_region_radii is not None:
                     update.forced_trust_region_radius = (
-                        forced_trust_region_radius
+                        forced_trust_region_radii[cluster_id]
                     )
                 update.outer_iteration = outer_iteration
                 update.oracle_kind = oracle_kind

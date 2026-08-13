@@ -716,9 +716,13 @@ state mutation remain owned by the core coordinator.
 3. **Full cross-camera Schur metric:** not implemented. Next large research
    mechanism after startup policy is stable; requires coupled local proximal
    operators and coupled consensus transport, not diagonal majorization.
-4. **Collective trust trial/commit:** not implemented. Per-worker radius capture
-   and one-shot restoration now support coherent race rollback, but globally
-   compatible retry evaluation and commit still require a dedicated protocol.
+4. **Collective trust trial/commit:** implemented default-off without a new
+   protocol. The coordinator compares nominal local solves with one globally
+   safeguarded shared-radius alternative and carries only the selected trial's
+   per-worker radii forward. On Roman/Trafalgar K24/I5, no shared alternative
+   wins; SSE is unchanged to about `1e-9` while time rises `1.074614x`. Reject
+   as a quality mechanism and retain only as trial-state infrastructure. See
+   `benchmark_results/collective_trust_trial_gate/report.md`.
 5. **Early nonlinear distributed bootstrap:** not implemented. It should reuse
    the race/commit infrastructure and remain separately budgeted from final
    polishing; do not start it until the short-race failure is understood.
