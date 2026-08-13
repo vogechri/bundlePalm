@@ -2,7 +2,7 @@
 
 ## Correction To The Earlier C2 Test
 
-The older successful `client_acc.py` block preconditioner did not form its
+The older `client_acc.py` block preconditioner did not form its
 transform from the raw global initial pixel Jacobian. It first ran one local
 proximal solve per worker, collected each worker's full `9x9` camera metric,
 aggregated those copy metrics into `U_all`, and formed `U_all^{-1/2}` with a
@@ -43,8 +43,8 @@ still `87.64x` its Jacobi I3 state.
 
 ## Interpretation
 
-The user's recollection is correct: worker-metric block preconditioning is a
-real and materially better mechanism than raw-Jacobian whitening. The remaining
+Worker-metric block preconditioning is materially better than raw-Jacobian
+whitening. The remaining
 transfer boundary is the current direct left-SE3 formulation. The old path used
 camera-coordinate worker metrics directly; current workers rebuild direct
 tangent normal equations and congruence-transform the proximal metric. Applying
@@ -59,3 +59,8 @@ BAL1778 fail the fixed gate. Idea 2 is closed for the current production
 formulation, but the old result is not invalidated: a future additive-coordinate
 reproduction or a tangent-space-only block preconditioner is a distinct
 mechanism and must not be represented by the rejected raw-Jacobian experiment.
+
+Source audit subsequently confirmed that historical `block_jacobi_gmean` used
+this dense map with unit diagonal `unorm`; the separately requested
+`diag(U_all)^{-1/2}` variant is reported in
+`benchmark_results/c2_worker_diagonal_gate/report.md`.

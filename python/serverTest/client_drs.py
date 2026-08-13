@@ -65,6 +65,7 @@ from admm_scaling import (
     compute_initial_block_jacobi_maps,
     compute_initial_jacobi_scaling,
     compute_initial_ruiz_scaling,
+    diagonal_jacobi_scaling_from_blocks,
     to_physical_cameras,
     to_scaled_cameras,
 )
@@ -1544,6 +1545,7 @@ def parse_arguments():
             "ruiz_initial",
             "block_jacobi_initial",
             "worker_block_jacobi_initial",
+            "worker_diagonal_jacobi_initial",
         ),
         default="jacobi_initial",
     )
@@ -2719,6 +2721,9 @@ def main():
     worker_block_scaling = (
         arguments.camera_scaling == "worker_block_jacobi_initial"
     )
+    worker_diagonal_scaling = (
+        arguments.camera_scaling == "worker_diagonal_jacobi_initial"
+    )
     if arguments.camera_scaling == "block_jacobi_initial":
         camera_scaling = compute_initial_block_jacobi_maps(
             cameras, points, camera_indices, point_indices
@@ -2887,7 +2892,7 @@ def main():
             camera_proximal_multipliers=camera_proximal_multipliers,
             huber_delta=arguments.huber_delta,
         )
-        if worker_block_scaling:
+        if worker_block_scaling or worker_diagonal_scaling:
             if arguments.proximal_metric != "block":
                 raise ValueError(
                     "worker block scaling requires block proximal metrics"
@@ -2896,10 +2901,18 @@ def main():
             aggregate_blocks = aggregate_camera_metric_blocks(
                 bootstrap_metric_blocks, camera_count
             )
-            camera_scaling = block_jacobi_coordinate_maps(
-                aggregate_blocks, relative_floor=1e-6
-            )
-            camera_scaling *= np.sqrt(cluster_count) / 2.0
+            if worker_diagonal_scaling:
+                camera_scaling = diagonal_jacobi_scaling_from_blocks(
+                    aggregate_blocks,
+                    relative_floor=1e-6,
+                    maximum_ratio=arguments.camera_scaling_maximum_ratio,
+                )
+                camera_scaling *= 2.0 / np.sqrt(cluster_count)
+            else:
+                camera_scaling = block_jacobi_coordinate_maps(
+                    aggregate_blocks, relative_floor=1e-6
+                )
+                camera_scaling *= np.sqrt(cluster_count) / 2.0
             local_cameras = to_scaled_cameras(
                 bootstrap_cameras, camera_scaling
             )
@@ -2913,7 +2926,11 @@ def main():
             cluster_count,
             camera_state=(
                 local_cameras
-                if arguments.worker_owned_cameras or worker_block_scaling
+                if (
+                    arguments.worker_owned_cameras
+                    or worker_block_scaling
+                    or worker_diagonal_scaling
+                )
                 else None
             ),
         )

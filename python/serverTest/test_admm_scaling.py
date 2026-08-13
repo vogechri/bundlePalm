@@ -8,6 +8,7 @@ from admm_scaling import (
     clip_parameterwise_percentiles,
     compute_initial_jacobi_scaling,
     compute_initial_ruiz_scaling,
+    diagonal_jacobi_scaling_from_blocks,
     normalize_geometric_mean,
     symmetric_ruiz_scaling_from_blocks,
     to_physical_cameras,
@@ -174,6 +175,32 @@ def test_aggregate_camera_metric_blocks_sums_worker_copies():
 
     np.testing.assert_allclose(aggregate[0], 4 * np.eye(9))
     np.testing.assert_allclose(aggregate[1], 2 * np.eye(9))
+
+
+def test_diagonal_jacobi_scaling_uses_aggregated_block_diagonal():
+    diagonal = np.geomspace(1e-8, 1e8, 18).reshape(2, 9)
+    blocks = np.zeros((2, 9, 9))
+    blocks[:, np.arange(9), np.arange(9)] = diagonal
+
+    scaling = diagonal_jacobi_scaling_from_blocks(
+        blocks, relative_floor=1e-20
+    )
+    expected = normalize_geometric_mean(np.sqrt(diagonal))
+
+    np.testing.assert_allclose(scaling, expected, rtol=1e-12)
+
+
+def test_diagonal_jacobi_scaling_floors_weak_coordinates():
+    blocks = np.zeros((1, 9, 9))
+    blocks[0, np.arange(9), np.arange(9)] = np.array(
+        [1.0, 1e-20, 1e-10, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
+    )
+
+    scaling = diagonal_jacobi_scaling_from_blocks(
+        blocks, relative_floor=1e-6
+    )
+
+    np.testing.assert_allclose(scaling[0, 1], scaling[0, 2])
 
 
 def test_scaling_ratio_cap_preserves_geometric_mean():

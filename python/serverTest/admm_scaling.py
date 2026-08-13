@@ -215,6 +215,27 @@ def aggregate_camera_metric_blocks(metric_blocks, camera_count):
     return aggregate
 
 
+def diagonal_jacobi_scaling_from_blocks(
+    blocks, relative_floor=1e-6, maximum_ratio=None
+):
+    """Return normalized sqrt diagonals from aggregated camera blocks."""
+    blocks = np.asarray(blocks, dtype=np.float64)
+    if blocks.ndim != 3 or blocks.shape[1:] != (9, 9):
+        raise ValueError("camera Hessian blocks must have shape (camera_count, 9, 9)")
+    if not 0.0 < relative_floor < 1.0:
+        raise ValueError("diagonal eigenvalue floor must be in (0, 1)")
+    diagonal = np.diagonal(
+        0.5 * (blocks + np.swapaxes(blocks, 1, 2)), axis1=1, axis2=2
+    )
+    largest = np.maximum(
+        np.max(diagonal, axis=1), np.finfo(np.float64).tiny
+    )
+    diagonal = np.maximum(diagonal, relative_floor * largest[:, None])
+    return normalize_geometric_mean(
+        np.sqrt(diagonal), maximum_ratio=maximum_ratio
+    )
+
+
 def compute_initial_block_jacobi_maps(
     cameras,
     points,

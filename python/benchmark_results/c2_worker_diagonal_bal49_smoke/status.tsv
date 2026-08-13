@@ -1,0 +1,2 @@
+variant	dataset	clusters	iterations	local_steps	threads_per_cluster	status	exit_code	elapsed_seconds	coordinator_max_rss_kb	worker_max_rss_kb
+plain_drs_block_full_se3_left_scale_worker_diagonal_jacobi_initial_persistent_tr_workerdiag	/home/chvogel/bundlePalm/python/problem-49-7776-pre.txt	2	1	1	1	completed	0	1	687272	47420

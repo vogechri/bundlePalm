@@ -746,11 +746,17 @@ testing began with item 2 at the user's request.
    and `92.449861x`. A faithful old-style transform derived after the first
    local solve from aggregated worker proximal metrics improves Roman to
    `0.973334x` Jacobi, but Trafalgar and BAL1778 are `1.395777x` and
-   `87.637697x`. Close C2 for current direct left-SE3 DRS without scalar tuning;
-   preserve the old additive-coordinate result as distinct evidence. See
+   `87.637697x`. The requested worker-derived diagonal `diag(U_all)^{-1/2}`
+   variant reproduces current Jacobi trajectories on Roman/Trafalgar to about
+   `1e-9` and is `1.000083x` on BAL1778 with identical linear work. Historical
+   source audit confirms `block_jacobi_gmean` used the dense map and unit
+   diagonal scaling; diagonal Jacobi was separate. Close C2 for current direct
+   left-SE3 DRS without scalar tuning; preserve the old additive-coordinate
+   result as distinct evidence. See
    `benchmark_results/c2_diagonal_ruiz_gate/report.md`,
    `benchmark_results/c2_full_block_gate/report.md`, and
-   `benchmark_results/c2_worker_metric_block_gate/report.md`.
+   `benchmark_results/c2_worker_metric_block_gate/report.md`, and
+   `benchmark_results/c2_worker_diagonal_gate/report.md`.
 3. **Model-ratio nonlinear startup LM:** replace fixed damping halving in the
    repeated initial Schur diagnostic with globally safeguarded gain-ratio
    damping/retries. Keep the correction cap frozen while testing the policy.

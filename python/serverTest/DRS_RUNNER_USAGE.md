@@ -188,6 +188,12 @@ coordinator aggregates their packed full camera metrics and installs a `1e-6`
 floored inverse-square-root transform. It improves Roman under current
 left-SE3 DRS but fails Trafalgar and BAL1778, so it also remains default-off.
 
+`CAMERA_SCALING=worker_diagonal_jacobi_initial` uses the same post-proximal
+worker metric source but retains only `sqrt(diag(U_all))` with a `1e-6` relative
+floor and diagonal transport. It reproduces current `jacobi_initial` behavior
+and is retained only for provenance. Historical `block_jacobi_gmean` used the
+dense worker-derived transform, not this diagonal mode.
+
 ## Collective trust trial diagnostics
 
 An opt-in startup diagnostic compares each nominal local solve with one
