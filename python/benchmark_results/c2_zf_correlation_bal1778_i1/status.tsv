@@ -1,0 +1,2 @@
+variant	dataset	clusters	iterations	local_steps	threads_per_cluster	status	exit_code	elapsed_seconds	coordinator_max_rss_kb	worker_max_rss_kb
+plain_drs_block_full_se3_left_scale_worker_diagonal_jacobi_initial_lip0.00625_curvature_persistent_tr_zfcorr	problem-1778-993923-pre.txt	24	1	1	1	completed	0	15	2734820	5295160

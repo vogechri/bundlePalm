@@ -306,6 +306,21 @@ def test_worker_diagonal_jacobi_camera_scaling_cli_choice(monkeypatch):
     assert arguments.camera_scaling == "worker_diagonal_jacobi_initial"
 
 
+def test_worker_z_f_block_camera_scaling_cli_choice(monkeypatch):
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "client_drs.py",
+            "unused.bal",
+            "--camera-scaling",
+            "worker_z_f_block_jacobi_initial",
+        ],
+    )
+    arguments = client_drs.parse_arguments()
+    assert arguments.camera_scaling == "worker_z_f_block_jacobi_initial"
+
+
 def test_collective_trust_trial_radius_uses_geometric_mean():
     radius = client_drs.collective_trust_trial_radius(
         np.array([4.0, 16.0]), 0.5

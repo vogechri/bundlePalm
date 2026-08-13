@@ -751,12 +751,17 @@ testing began with item 2 at the user's request.
    `1e-9` and is `1.000083x` on BAL1778 with identical linear work. Historical
    source audit confirms `block_jacobi_gmean` used the dense map and unit
    diagonal scaling; diagonal Jacobi was separate. Close C2 for current direct
-   left-SE3 DRS without scalar tuning; preserve the old additive-coordinate
+   left-SE3 DRS without scalar tuning. A restricted translation-z/focal `2x2`
+   block is supported by high worker-metric correlation and improves
+   Roman/Trafalgar I3 by `0.299%/0.130%`, but BAL1778 rejects all candidates
+   and is `92.442181x` diagonal I3. Correlation cannot select it because BAL1778
+   has the strongest coupling. Preserve the old additive-coordinate
    result as distinct evidence. See
    `benchmark_results/c2_diagonal_ruiz_gate/report.md`,
    `benchmark_results/c2_full_block_gate/report.md`, and
    `benchmark_results/c2_worker_metric_block_gate/report.md`, and
-   `benchmark_results/c2_worker_diagonal_gate/report.md`.
+   `benchmark_results/c2_worker_diagonal_gate/report.md`, and
+   `benchmark_results/c2_z_focal_block_gate/report.md`.
 3. **Model-ratio nonlinear startup LM:** replace fixed damping halving in the
    repeated initial Schur diagnostic with globally safeguarded gain-ratio
    damping/retries. Keep the correction cap frozen while testing the policy.

@@ -4,11 +4,13 @@ import pytest
 from admm_scaling import (
     aggregate_camera_metric_blocks,
     block_jacobi_coordinate_maps,
+    camera_block_correlation,
     camera_coordinate_scale_values,
     clip_parameterwise_percentiles,
     compute_initial_jacobi_scaling,
     compute_initial_ruiz_scaling,
     diagonal_jacobi_scaling_from_blocks,
+    restricted_block_jacobi_coordinate_maps,
     normalize_geometric_mean,
     symmetric_ruiz_scaling_from_blocks,
     to_physical_cameras,
@@ -201,6 +203,35 @@ def test_diagonal_jacobi_scaling_floors_weak_coordinates():
     )
 
     np.testing.assert_allclose(scaling[0, 1], scaling[0, 2])
+
+
+def test_camera_block_correlation_recovers_signed_normalized_coupling():
+    blocks = np.zeros((2, 9, 9))
+    blocks[:, 5, 5] = 4.0
+    blocks[:, 6, 6] = 9.0
+    blocks[:, 5, 6] = np.array([3.0, -4.5])
+    blocks[:, 6, 5] = blocks[:, 5, 6]
+
+    correlation = camera_block_correlation(blocks, 5, 6)
+
+    np.testing.assert_allclose(correlation, np.array([0.5, -0.75]))
+
+
+def test_restricted_block_map_whitens_z_focal_and_leaves_other_axes_diagonal():
+    blocks = np.zeros((1, 9, 9))
+    blocks[0, np.arange(9), np.arange(9)] = np.arange(1.0, 10.0)
+    blocks[0, 5, 6] = blocks[0, 6, 5] = 5.0
+
+    transform = restricted_block_jacobi_coordinate_maps(blocks)
+    transformed = transform[0].T @ blocks[0] @ transform[0]
+
+    assert np.count_nonzero(
+        transform[0] - np.diag(np.diagonal(transform[0]))
+    ) == 2
+    np.testing.assert_allclose(transformed[5, 6], 0.0, atol=1e-10)
+    np.testing.assert_allclose(
+        transformed[5, 5], transformed[6, 6], rtol=1e-10
+    )
 
 
 def test_scaling_ratio_cap_preserves_geometric_mean():

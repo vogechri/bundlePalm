@@ -194,6 +194,11 @@ floor and diagonal transport. It reproduces current `jacobi_initial` behavior
 and is retained only for provenance. Historical `block_jacobi_gmean` used the
 dense worker-derived transform, not this diagonal mode.
 
+`CAMERA_SCALING=worker_z_f_block_jacobi_initial` keeps worker-derived diagonal
+Jacobi scaling except for one dense `2x2` block coupling physical translation-z
+and focal length. It gives small Roman/Trafalgar I3 gains but is catastrophic on
+BAL1778, so it is retained only as a default-off structural diagnostic.
+
 ## Collective trust trial diagnostics
 
 An opt-in startup diagnostic compares each nominal local solve with one

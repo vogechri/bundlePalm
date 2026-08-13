@@ -61,11 +61,13 @@ from partition_cache import PARTITION_CACHE_MODES, partition_with_cache
 from admm_scaling import (
     aggregate_camera_metric_blocks,
     block_jacobi_coordinate_maps,
+    camera_block_correlation,
     camera_coordinate_scale_values,
     compute_initial_block_jacobi_maps,
     compute_initial_jacobi_scaling,
     compute_initial_ruiz_scaling,
     diagonal_jacobi_scaling_from_blocks,
+    restricted_block_jacobi_coordinate_maps,
     to_physical_cameras,
     to_scaled_cameras,
 )
@@ -1546,6 +1548,7 @@ def parse_arguments():
             "block_jacobi_initial",
             "worker_block_jacobi_initial",
             "worker_diagonal_jacobi_initial",
+            "worker_z_f_block_jacobi_initial",
         ),
         default="jacobi_initial",
     )
@@ -2724,6 +2727,9 @@ def main():
     worker_diagonal_scaling = (
         arguments.camera_scaling == "worker_diagonal_jacobi_initial"
     )
+    worker_z_f_scaling = (
+        arguments.camera_scaling == "worker_z_f_block_jacobi_initial"
+    )
     if arguments.camera_scaling == "block_jacobi_initial":
         camera_scaling = compute_initial_block_jacobi_maps(
             cameras, points, camera_indices, point_indices
@@ -2853,6 +2859,7 @@ def main():
     global_schur_majorizer_selected = False
     global_schur_observability_statistic = float("nan")
     global_schur_observability_valid_clusters = 0
+    worker_translation_z_focal_correlation = np.empty(0, dtype=np.float64)
 
     worker = DrsWorkerClient()
     try:
@@ -2892,7 +2899,7 @@ def main():
             camera_proximal_multipliers=camera_proximal_multipliers,
             huber_delta=arguments.huber_delta,
         )
-        if worker_block_scaling or worker_diagonal_scaling:
+        if worker_block_scaling or worker_diagonal_scaling or worker_z_f_scaling:
             if arguments.proximal_metric != "block":
                 raise ValueError(
                     "worker block scaling requires block proximal metrics"
@@ -2901,6 +2908,9 @@ def main():
             aggregate_blocks = aggregate_camera_metric_blocks(
                 bootstrap_metric_blocks, camera_count
             )
+            worker_translation_z_focal_correlation = (
+                camera_block_correlation(aggregate_blocks, 5, 6)
+            )
             if worker_diagonal_scaling:
                 camera_scaling = diagonal_jacobi_scaling_from_blocks(
                     aggregate_blocks,
@@ -2908,6 +2918,13 @@ def main():
                     maximum_ratio=arguments.camera_scaling_maximum_ratio,
                 )
                 camera_scaling *= 2.0 / np.sqrt(cluster_count)
+            elif worker_z_f_scaling:
+                camera_scaling = restricted_block_jacobi_coordinate_maps(
+                    aggregate_blocks,
+                    coupled_coordinates=(5, 6),
+                    relative_floor=1e-6,
+                )
+                camera_scaling *= np.sqrt(cluster_count) / 2.0
             else:
                 camera_scaling = block_jacobi_coordinate_maps(
                     aggregate_blocks, relative_floor=1e-6
@@ -2930,6 +2947,7 @@ def main():
                     arguments.worker_owned_cameras
                     or worker_block_scaling
                     or worker_diagonal_scaling
+                    or worker_z_f_scaling
                 )
                 else None
             ),
@@ -6378,6 +6396,20 @@ def main():
         "cameraScalingGeometricMean": float(np.exp(np.mean(np.log(
             camera_coordinate_scale_values(camera_scaling)
         )))),
+        "workerTranslationZFocalCorrelationMedian": (
+            float(np.median(worker_translation_z_focal_correlation))
+            if worker_translation_z_focal_correlation.size else float("nan")
+        ),
+        "workerTranslationZFocalCorrelationP95Absolute": (
+            float(np.percentile(
+                np.abs(worker_translation_z_focal_correlation), 95
+            ))
+            if worker_translation_z_focal_correlation.size else float("nan")
+        ),
+        "workerTranslationZFocalCorrelationMaximumAbsolute": (
+            float(np.max(np.abs(worker_translation_z_focal_correlation)))
+            if worker_translation_z_focal_correlation.size else float("nan")
+        ),
         "cameraDiagonalRelativeFloor": arguments.camera_diagonal_relative_floor,
         "cameraDiagonalTranslationFloor": float(os.environ.get(
             "BUNDLE_PALM_CAMERA_DIAGONAL_TRANSLATION_FLOOR",

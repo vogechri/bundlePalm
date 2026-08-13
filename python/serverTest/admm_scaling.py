@@ -236,6 +236,70 @@ def diagonal_jacobi_scaling_from_blocks(
     )
 
 
+def camera_block_correlation(blocks, first, second):
+    """Return normalized Hessian correlation for two camera coordinates."""
+    blocks = np.asarray(blocks, dtype=np.float64)
+    if blocks.ndim != 3 or blocks.shape[1:] != (9, 9):
+        raise ValueError("camera Hessian blocks must have shape (camera_count, 9, 9)")
+    if not 0 <= first < 9 or not 0 <= second < 9 or first == second:
+        raise ValueError("camera correlation coordinates must be distinct in [0, 9)")
+    symmetric = 0.5 * (blocks + np.swapaxes(blocks, 1, 2))
+    denominator = np.sqrt(np.maximum(
+        symmetric[:, first, first] * symmetric[:, second, second],
+        np.finfo(np.float64).tiny,
+    ))
+    correlation = symmetric[:, first, second] / denominator
+    return np.clip(correlation, -1.0, 1.0)
+
+
+def restricted_block_jacobi_coordinate_maps(
+    blocks, coupled_coordinates=(5, 6), relative_floor=1e-6
+):
+    """Whiten one coordinate pair and Jacobi-scale all other coordinates."""
+    blocks = np.asarray(blocks, dtype=np.float64)
+    if blocks.ndim != 3 or blocks.shape[1:] != (9, 9):
+        raise ValueError("camera Hessian blocks must have shape (camera_count, 9, 9)")
+    first, second = coupled_coordinates
+    if not 0 <= first < 9 or not 0 <= second < 9 or first == second:
+        raise ValueError("coupled camera coordinates must be distinct in [0, 9)")
+    if not 0.0 < relative_floor < 1.0:
+        raise ValueError("block eigenvalue floor must be in (0, 1)")
+    symmetric = 0.5 * (blocks + np.swapaxes(blocks, 1, 2))
+    diagonal = np.diagonal(symmetric, axis1=1, axis2=2)
+    largest = np.maximum(
+        np.max(diagonal, axis=1), np.finfo(np.float64).tiny
+    )
+    diagonal = np.maximum(diagonal, relative_floor * largest[:, None])
+    transforms = np.zeros_like(symmetric)
+    indices = np.arange(9)
+    transforms[:, indices, indices] = np.reciprocal(np.sqrt(diagonal))
+
+    pair_indices = np.array((first, second))
+    pair_blocks = symmetric[:, pair_indices[:, None], pair_indices[None, :]]
+    eigenvalues, eigenvectors = np.linalg.eigh(pair_blocks)
+    pair_largest = np.maximum(
+        eigenvalues[:, -1], np.finfo(np.float64).tiny
+    )
+    eigenvalues = np.maximum(
+        eigenvalues, relative_floor * pair_largest[:, None]
+    )
+    pair_transforms = np.einsum(
+        "...ij,...j,...kj->...ik",
+        eigenvectors,
+        np.reciprocal(np.sqrt(eigenvalues)),
+        eigenvectors,
+    )
+    transforms[:, pair_indices[:, None], pair_indices[None, :]] = (
+        pair_transforms
+    )
+
+    signs, log_determinants = np.linalg.slogdet(transforms)
+    if np.any(signs <= 0.0) or not np.all(np.isfinite(log_determinants)):
+        raise ValueError("restricted camera transform is not positive definite")
+    transforms /= np.exp(np.mean(log_determinants) / 9.0)
+    return transforms
+
+
 def compute_initial_block_jacobi_maps(
     cameras,
     points,
