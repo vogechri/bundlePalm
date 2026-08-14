@@ -1,4 +1,5 @@
-| `CAMERA_UPDATE` | `additive` | Camera update mode: `additive`, `angle_axis_left`, `se3_left`, or `se3_right`. |
+| `CAMERA_UPDATE` | `additive` | Camera update mode: `additive`, legacy `angle_axis_left`, translation-first product `so3_left`, `se3_left`, or `se3_right`. |
+| `BUNDLE_PALM_SO3_TRANSLATION_METRIC_RATIO` | `1` | Product-`SO(3)` translation-to-rotation tangent metric ratio; ignored by other camera modes. |
 # DRS benchmark runner usage
 
 This guide covers `run_drs_failure_top3_live.sh`, the recommended wrapper for

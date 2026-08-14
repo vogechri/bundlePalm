@@ -1,0 +1,392 @@
+{
+  "25.0": {
+    "1dsfm": {
+      "maximumLinearIterations": 690.0,
+      "oracleCalls": 300,
+      "rejections": 34,
+      "vsLeftSE3": {
+        "geometric": 0.9874319373940067,
+        "losses": 4,
+        "optimization": 1.8814002920481667,
+        "ratios": {
+          "gendarmenmarkt": 1.0138017630450353,
+          "piccadilly": 1.084378277571159,
+          "roman_forum": 0.9567485123617704,
+          "trafalgar": 0.8409401192639122,
+          "union_square": 1.0200427171770696,
+          "vienna_cathedral": 1.0273725098613364
+        },
+        "summed": 0.9447687212401719,
+        "ties": 0,
+        "wins": 2,
+        "worst": 1.084378277571159
+      },
+      "vsScale25": {
+        "geometric": 1.0,
+        "losses": 0,
+        "optimization": 1.0,
+        "ratios": {
+          "gendarmenmarkt": 1.0,
+          "piccadilly": 1.0,
+          "roman_forum": 1.0,
+          "trafalgar": 1.0,
+          "union_square": 1.0,
+          "vienna_cathedral": 1.0
+        },
+        "summed": 1.0,
+        "ties": 6,
+        "wins": 0,
+        "worst": 1.0
+      }
+    },
+    "bal": {
+      "maximumLinearIterations": 99.0,
+      "oracleCalls": 264,
+      "rejections": 25,
+      "vsLeftSE3": {
+        "geometric": 0.9979549897723332,
+        "losses": 1,
+        "optimization": 1.9182705792218708,
+        "ratios": {
+          "bal1723": 0.9980526165383806,
+          "bal245": 0.9936387644382974,
+          "bal394": 0.9968953987412932,
+          "bal52": 0.9999498707682998,
+          "bal871": 1.0012556646388941
+        },
+        "summed": 0.9985234874495968,
+        "ties": 0,
+        "wins": 4,
+        "worst": 1.0012556646388941
+      },
+      "vsScale25": {
+        "geometric": 1.0,
+        "losses": 0,
+        "optimization": 1.0,
+        "ratios": {
+          "bal1723": 1.0,
+          "bal245": 1.0,
+          "bal394": 1.0,
+          "bal52": 1.0,
+          "bal871": 1.0
+        },
+        "summed": 1.0,
+        "ties": 5,
+        "wins": 0,
+        "worst": 1.0
+      }
+    }
+  },
+  "35.0": {
+    "1dsfm": {
+      "maximumLinearIterations": 323.0,
+      "oracleCalls": 307,
+      "rejections": 28,
+      "vsLeftSE3": {
+        "geometric": 0.9453584045292954,
+        "losses": 1,
+        "optimization": 1.9128677581869356,
+        "ratios": {
+          "gendarmenmarkt": 0.9000390449205139,
+          "piccadilly": 1.0659662929080838,
+          "roman_forum": 0.9241528493654058,
+          "trafalgar": 0.8466269939987279,
+          "union_square": 0.9779224190967153,
+          "vienna_cathedral": 0.9723750220852164
+        },
+        "summed": 0.9253080142846424,
+        "ties": 0,
+        "wins": 5,
+        "worst": 1.0659662929080838
+      },
+      "vsScale25": {
+        "geometric": 0.9573909539772937,
+        "losses": 1,
+        "optimization": 1.0167255561040187,
+        "ratios": {
+          "gendarmenmarkt": 0.88778603246573,
+          "piccadilly": 0.9830206994700086,
+          "roman_forum": 0.9659307931235754,
+          "trafalgar": 1.006762520427487,
+          "union_square": 0.95870731943764,
+          "vienna_cathedral": 0.9464678222862484
+        },
+        "summed": 0.9794016180700987,
+        "ties": 0,
+        "wins": 5,
+        "worst": 1.006762520427487
+      }
+    },
+    "bal": {
+      "maximumLinearIterations": 72.0,
+      "oracleCalls": 268,
+      "rejections": 20,
+      "vsLeftSE3": {
+        "geometric": 0.9971902680600453,
+        "losses": 3,
+        "optimization": 2.132375247205969,
+        "ratios": {
+          "bal1723": 0.9933507673562988,
+          "bal245": 0.98578440343498,
+          "bal394": 1.0018481271780626,
+          "bal52": 1.0047985405608728,
+          "bal871": 1.000287165574586
+        },
+        "summed": 0.9963006919629167,
+        "ties": 0,
+        "wins": 2,
+        "worst": 1.0047985405608728
+      },
+      "vsScale25": {
+        "geometric": 0.9992337112193183,
+        "losses": 2,
+        "optimization": 1.111613382545307,
+        "ratios": {
+          "bal1723": 0.995288976648957,
+          "bal245": 0.9920953556922093,
+          "bal394": 1.0049681525694902,
+          "bal52": 1.0048489128648495,
+          "bal871": 0.9990327155206082
+        },
+        "summed": 0.9977739176748285,
+        "ties": 0,
+        "wins": 3,
+        "worst": 1.0049681525694902
+      }
+    }
+  },
+  "40.0": {
+    "1dsfm": {
+      "maximumLinearIterations": 243.0,
+      "oracleCalls": 300,
+      "rejections": 33,
+      "vsLeftSE3": {
+        "geometric": 0.9658564071281596,
+        "losses": 2,
+        "optimization": 2.119491724042921,
+        "ratios": {
+          "gendarmenmarkt": 0.8948911682156819,
+          "piccadilly": 1.0563747082402688,
+          "roman_forum": 1.1200491786541498,
+          "trafalgar": 0.8455109276561329,
+          "union_square": 0.9737315515199559,
+          "vienna_cathedral": 0.9313043134972522
+        },
+        "summed": 0.9406247448968916,
+        "ties": 0,
+        "wins": 4,
+        "worst": 1.1200491786541498
+      },
+      "vsScale25": {
+        "geometric": 0.9781498557533105,
+        "losses": 2,
+        "optimization": 1.1265501196109409,
+        "ratios": {
+          "gendarmenmarkt": 0.8827082382731355,
+          "piccadilly": 0.9741754608054176,
+          "roman_forum": 1.1706829581467186,
+          "trafalgar": 1.0054353553689668,
+          "union_square": 0.9545987977981175,
+          "vienna_cathedral": 0.9064913695451609
+        },
+        "summed": 0.9956137663640678,
+        "ties": 0,
+        "wins": 4,
+        "worst": 1.1706829581467186
+      }
+    },
+    "bal": {
+      "maximumLinearIterations": 87.0,
+      "oracleCalls": 263,
+      "rejections": 23,
+      "vsLeftSE3": {
+        "geometric": 0.9967023231975709,
+        "losses": 2,
+        "optimization": 2.2916065714920624,
+        "ratios": {
+          "bal1723": 1.0002864733621757,
+          "bal245": 0.9805845407813333,
+          "bal394": 0.9963157987233938,
+          "bal52": 1.0070118378386628,
+          "bal871": 0.9995081084663999
+        },
+        "summed": 0.9950307498308328,
+        "ties": 0,
+        "wins": 3,
+        "worst": 1.0070118378386628
+      },
+      "vsScale25": {
+        "geometric": 0.9987447664598099,
+        "losses": 2,
+        "optimization": 1.194621132343922,
+        "ratios": {
+          "bal1723": 1.0022382154876193,
+          "bal245": 0.9868622037261765,
+          "bal394": 0.9994185949512545,
+          "bal52": 1.0070623210990937,
+          "bal871": 0.9982546354200907
+        },
+        "summed": 0.9965020976845672,
+        "ties": 0,
+        "wins": 3,
+        "worst": 1.0070623210990937
+      }
+    }
+  },
+  "45.0": {
+    "1dsfm": {
+      "maximumLinearIterations": 231.0,
+      "oracleCalls": 309,
+      "rejections": 30,
+      "vsLeftSE3": {
+        "geometric": 0.9517773628480581,
+        "losses": 2,
+        "optimization": 1.8008496255301787,
+        "ratios": {
+          "gendarmenmarkt": 0.8850339078232725,
+          "piccadilly": 1.0195906650895445,
+          "roman_forum": 0.9582096845804802,
+          "trafalgar": 0.8847417510841133,
+          "union_square": 1.0040585343433623,
+          "vienna_cathedral": 0.9678105615446915
+        },
+        "summed": 0.940368657705866,
+        "ties": 0,
+        "wins": 4,
+        "worst": 1.0195906650895445
+      },
+      "vsScale25": {
+        "geometric": 0.9638916129854512,
+        "losses": 2,
+        "optimization": 0.9571857903613392,
+        "ratios": {
+          "gendarmenmarkt": 0.8729851733192906,
+          "piccadilly": 0.9402536791619169,
+          "roman_forum": 1.0015272270610622,
+          "trafalgar": 1.0520865051111385,
+          "union_square": 0.9843298887737338,
+          "vienna_cathedral": 0.942024973663463
+        },
+        "summed": 0.9953427082889343,
+        "ties": 0,
+        "wins": 4,
+        "worst": 1.0520865051111385
+      }
+    },
+    "bal": {
+      "maximumLinearIterations": 75.0,
+      "oracleCalls": 250,
+      "rejections": 35,
+      "vsLeftSE3": {
+        "geometric": 1.000009302005583,
+        "losses": 3,
+        "optimization": 1.714521258183587,
+        "ratios": {
+          "bal1723": 1.0070407316956853,
+          "bal245": 0.9813141049555627,
+          "bal394": 0.9966397915639168,
+          "bal52": 1.013579327150436,
+          "bal871": 1.0017726119577046
+        },
+        "summed": 0.9975139504439606,
+        "ties": 0,
+        "wins": 2,
+        "worst": 1.013579327150436
+      },
+      "vsScale25": {
+        "geometric": 1.0020585219316538,
+        "losses": 3,
+        "optimization": 0.8937848897620413,
+        "ratios": {
+          "bal1723": 1.0090056526162707,
+          "bal245": 0.9875964385410206,
+          "bal394": 0.9997435967929041,
+          "bal52": 1.013630139650565,
+          "bal871": 1.0005162990203875
+        },
+        "summed": 0.9989889701961696,
+        "ties": 0,
+        "wins": 2,
+        "worst": 1.013630139650565
+      }
+    }
+  },
+  "50.0": {
+    "1dsfm": {
+      "maximumLinearIterations": 232.0,
+      "oracleCalls": 311,
+      "rejections": 27,
+      "vsLeftSE3": {
+        "geometric": 0.934825501564667,
+        "losses": 1,
+        "optimization": 1.7834801284432442,
+        "ratios": {
+          "gendarmenmarkt": 0.8808451570235353,
+          "piccadilly": 1.0296630357751115,
+          "roman_forum": 0.9636042078247153,
+          "trafalgar": 0.817062767279313,
+          "union_square": 0.9523919189878751,
+          "vienna_cathedral": 0.9813384246068132
+        },
+        "summed": 0.909249054743921,
+        "ties": 0,
+        "wins": 5,
+        "worst": 1.0296630357751115
+      },
+      "vsScale25": {
+        "geometric": 0.9467239879153833,
+        "losses": 1,
+        "optimization": 0.9479535726560759,
+        "ratios": {
+          "gendarmenmarkt": 0.8688534476186408,
+          "piccadilly": 0.9495422926410872,
+          "roman_forum": 1.007165619151078,
+          "trafalgar": 0.9716063588386062,
+          "union_square": 0.9336784655681718,
+          "vienna_cathedral": 0.9551924109194468
+        },
+        "summed": 0.9624038500664742,
+        "ties": 0,
+        "wins": 5,
+        "worst": 1.007165619151078
+      }
+    },
+    "bal": {
+      "maximumLinearIterations": 98.0,
+      "oracleCalls": 262,
+      "rejections": 26,
+      "vsLeftSE3": {
+        "geometric": 1.0007936140604068,
+        "losses": 2,
+        "optimization": 2.205235499862329,
+        "ratios": {
+          "bal1723": 1.0033004616701595,
+          "bal245": 0.9860761382799936,
+          "bal394": 0.9997910385455212,
+          "bal52": 1.0150310058672747,
+          "bal871": 0.9999830012400578
+        },
+        "summed": 0.997809674278398,
+        "ties": 0,
+        "wins": 3,
+        "worst": 1.0150310058672747
+      },
+      "vsScale25": {
+        "geometric": 1.0028444411994184,
+        "losses": 3,
+        "optimization": 1.149595642944627,
+        "ratios": {
+          "bal1723": 1.0052580846388444,
+          "bal245": 0.9923889582120129,
+          "bal394": 1.0029046576078937,
+          "bal52": 1.0150818911425905,
+          "bal871": 0.9987289326355068
+        },
+        "summed": 0.9992851313162177,
+        "ties": 0,
+        "wins": 2,
+        "worst": 1.0150818911425905
+      }
+    }
+  }
+}

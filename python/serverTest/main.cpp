@@ -116,6 +116,7 @@ int EnvironmentInteger(const char* name, int default_value,
 enum class CameraUpdateMode {
   kAdditive,
   kAngleAxisLeft,
+  kSo3Left,
   kSe3Left,
   kSe3Right,
 };
@@ -129,6 +130,9 @@ CameraUpdateMode GetCameraUpdateMode() {
     if (std::strcmp(value, "angle_axis_left") == 0) {
       return CameraUpdateMode::kAngleAxisLeft;
     }
+    if (std::strcmp(value, "so3_left") == 0) {
+      return CameraUpdateMode::kSo3Left;
+    }
     if (std::strcmp(value, "se3_left") == 0) {
       return CameraUpdateMode::kSe3Left;
     }
@@ -136,8 +140,8 @@ CameraUpdateMode GetCameraUpdateMode() {
       return CameraUpdateMode::kSe3Right;
     }
     throw std::runtime_error(
-        "BUNDLE_PALM_CAMERA_UPDATE must be additive, angle_axis_left, "
-        "se3_left, or se3_right");
+      "BUNDLE_PALM_CAMERA_UPDATE must be additive, angle_axis_left, "
+      "so3_left, se3_left, or se3_right");
   }();
   return mode;
 }
@@ -295,6 +299,12 @@ double CameraPreconditionerDiagonalFloor() {
 double CameraDiagonalMetricScale() {
   static const double value = EnvironmentDouble(
       "BUNDLE_PALM_CAMERA_DIAGONAL_METRIC_SCALE", 25.0, 0.0, 1e12);
+  return value;
+}
+
+double So3TranslationMetricRatio() {
+  static const double value = EnvironmentDouble(
+      "BUNDLE_PALM_SO3_TRANSLATION_METRIC_RATIO", 1.0, 1e-6, 1e6);
   return value;
 }
 
@@ -2158,6 +2168,38 @@ public:
     return base + winding * two_pi * canonical.axis();
   }
 
+  static Eigen::Matrix<double, 9, 9> PhysicalTangentJacobian(
+      const Eigen::Matrix<double, 9, 1>& physical_camera,
+      CameraUpdateMode update_mode) {
+    THROW_IF(update_mode == CameraUpdateMode::kAdditive);
+    Eigen::Matrix<double, 9, 9> result =
+        Eigen::Matrix<double, 9, 9>::Zero();
+    if (update_mode == CameraUpdateMode::kAngleAxisLeft) {
+      result.topLeftCorner<3, 3>() =
+          So3LeftJacobian(physical_camera.head<3>()).inverse();
+      result.block<3, 3>(3, 3).setIdentity();
+    } else {
+      Eigen::Vector3d rotation_for_jacobian = physical_camera.head<3>();
+      if (update_mode == CameraUpdateMode::kSe3Right) {
+        rotation_for_jacobian = -rotation_for_jacobian;
+      }
+      result.block<3, 3>(0, 3) =
+          So3LeftJacobian(rotation_for_jacobian).inverse();
+      if (update_mode == CameraUpdateMode::kSe3Right) {
+        result.block<3, 3>(3, 0) =
+            RotationMatrix(physical_camera.head<3>());
+      } else {
+        result.block<3, 3>(3, 0).setIdentity();
+        if (update_mode == CameraUpdateMode::kSe3Left) {
+          result.block<3, 3>(3, 3) =
+              -Skew(physical_camera.segment<3>(3));
+        }
+      }
+    }
+    result.bottomRightCorner<3, 3>().setIdentity();
+    return result;
+  }
+
   std::vector<Eigen::Matrix<double, 9, 9>>
   TangentToScaledJacobians() const {
     const CameraUpdateMode update_mode = GetCameraUpdateMode();
@@ -2178,32 +2220,53 @@ public:
           &cameras[camera_offset]);
       const Eigen::Matrix<double, 9, 1> physical_camera =
           physical_transform * scaled_camera;
-      Eigen::Matrix<double, 9, 9> physical_jacobian =
-          Eigen::Matrix<double, 9, 9>::Identity();
-      if (update_mode == CameraUpdateMode::kAngleAxisLeft) {
-        physical_jacobian.topLeftCorner<3, 3>() =
-            So3LeftJacobian(physical_camera.head<3>()).inverse();
-        } else if (update_mode == CameraUpdateMode::kSe3Right) {
-        physical_jacobian.setZero();
-        physical_jacobian.block<3, 3>(0, 3) =
-          So3LeftJacobian(-physical_camera.head<3>()).inverse();
-        physical_jacobian.block<3, 3>(3, 0) =
-          RotationMatrix(physical_camera.head<3>());
-        physical_jacobian.bottomRightCorner<3, 3>().setIdentity();
-      } else {
-        physical_jacobian.setZero();
-        physical_jacobian.block<3, 3>(0, 3) =
-            So3LeftJacobian(physical_camera.head<3>()).inverse();
-        physical_jacobian.block<3, 3>(3, 0).setIdentity();
-        physical_jacobian.block<3, 3>(3, 3) =
-            -Skew(physical_camera.segment<3>(3));
-        physical_jacobian.bottomRightCorner<3, 3>().setIdentity();
-      }
+      const Eigen::Matrix<double, 9, 9> physical_jacobian =
+          PhysicalTangentJacobian(physical_camera, update_mode);
       result[camera] =
           physical_transform.partialPivLu().solve(physical_jacobian);
       THROW_IF(!result[camera].allFinite());
     }
     return result;
+  }
+
+  void ApplySo3SubspaceMetricRatio(
+      SparseMatrix<double, RowMajor>& metric) const {
+    const double ratio = So3TranslationMetricRatio();
+    if (GetCameraUpdateMode() != CameraUpdateMode::kSo3Left || ratio == 1.0) {
+      return;
+    }
+    THROW_IF(metric.rows() != 9 * numCameras ||
+             metric.cols() != 9 * numCameras);
+    const auto tangent_to_scaled = TangentToScaledJacobians();
+    Eigen::Matrix<double, 9, 9> subspace_scale =
+        Eigen::Matrix<double, 9, 9>::Identity();
+    subspace_scale.topLeftCorner<3, 3>() *= std::sqrt(ratio);
+    for (int camera = 0; camera < numCameras; ++camera) {
+      Eigen::Matrix<double, 9, 9> stored_metric;
+      for (int row = 0; row < 9; ++row) {
+        for (int column = 0; column < 9; ++column) {
+          stored_metric(row, column) = metric.coeff(
+              9 * camera + row, 9 * camera + column);
+        }
+      }
+      const Eigen::Matrix<double, 9, 9> inverse_tangent =
+          tangent_to_scaled[camera].inverse();
+      const Eigen::Matrix<double, 9, 9> tangent_metric =
+          tangent_to_scaled[camera].transpose()
+          * stored_metric * tangent_to_scaled[camera];
+      Eigen::Matrix<double, 9, 9> adjusted =
+          inverse_tangent.transpose()
+          * subspace_scale * tangent_metric * subspace_scale
+          * inverse_tangent;
+      adjusted = 0.5 * (adjusted + adjusted.transpose()).eval();
+      THROW_IF(!adjusted.allFinite());
+      for (int row = 0; row < 9; ++row) {
+        for (int column = 0; column < 9; ++column) {
+          metric.coeffRef(9 * camera + row, 9 * camera + column) =
+              adjusted(row, column);
+        }
+      }
+    }
   }
 
   static SparseMatrix<double, RowMajor> TransformCameraBlockMatrix(
@@ -2420,10 +2483,11 @@ public:
       const Eigen::Vector3d translation = physical_camera.segment<3>(3);
       const bool se3_left = update_mode == CameraUpdateMode::kSe3Left;
       const bool se3_right = update_mode == CameraUpdateMode::kSe3Right;
-      const Eigen::Vector3d left_rotation = se3_left
-          ? step.segment<3>(camera_offset + 3)
-          : (se3_right ? step.segment<3>(camera_offset + 3)
-                       : step.segment<3>(camera_offset));
+        const bool so3_left = update_mode == CameraUpdateMode::kSo3Left;
+        const Eigen::Vector3d left_rotation =
+          (se3_left || se3_right || so3_left)
+            ? step.segment<3>(camera_offset + 3)
+            : step.segment<3>(camera_offset);
       const Eigen::Matrix3d rotation_increment = RotationMatrix(left_rotation);
 
       Eigen::Matrix<double, 9, 1> updated_physical = physical_camera;
@@ -2443,6 +2507,9 @@ public:
         updated_physical.segment<3>(3) = translation
           + RotationMatrix(rotation) * So3LeftJacobian(left_rotation)
               * right_translation;
+        } else if (so3_left) {
+        updated_physical.segment<3>(3) +=
+          step.segment<3>(camera_offset);
         } else {
         updated_physical.segment<3>(3) +=
           step.segment<3>(camera_offset + 3);
@@ -4493,6 +4560,7 @@ void UpdateStepSizeAndSolve() {//bool keep_cameras_fixed = false) { // Recompute
         stepSize = scale * metricCameraHessian;
         stepSize += consensusDiagUP * current_be;
         ScaleCameraProximalMetric(stepSize);
+        ApplySo3SubspaceMetricRatio(stepSize);
       }
     }
     const double* values = stepSize.valuePtr();
@@ -4520,6 +4588,7 @@ void UpdateStepSizeAndSolve() {//bool keep_cameras_fixed = false) { // Recompute
       voteMetric += current_be * CameraDiagonalMetricScale()
           * metricCameraHessian.diagonal().asDiagonal();
       ScaleCameraProximalMetric(voteMetric);
+        ApplySo3SubspaceMetricRatio(voteMetric);
       const double* voteValues = voteMetric.valuePtr();
       std::copy(voteValues, voteValues + consensus_stepSize.size(),
           consensus_stepSize.data());
@@ -5346,12 +5415,8 @@ private:
       if (tangent_coordinates) {
         const Eigen::Map<const Eigen::Matrix<double, 9, 1>> physical_camera(
             &weighted_cameras[cameraOffset]);
-        physical_jacobian.block<3, 3>(0, 3) =
-            So3LeftJacobian(physical_camera.head<3>()).inverse();
-        physical_jacobian.block<3, 3>(3, 0).setIdentity();
-        physical_jacobian.block<3, 3>(3, 3) =
-            -Skew(physical_camera.segment<3>(3));
-        physical_jacobian.bottomRightCorner<3, 3>().setIdentity();
+        physical_jacobian = PhysicalTangentJacobian(
+            physical_camera, GetCameraUpdateMode());
       }
       for (int row = 0; row < 9; ++row) {
         camera[row].a = weighted_cameras[cameraOffset + row];

@@ -956,6 +956,59 @@ Product-space collapse explains part of the stall but is not the common basin
 cause. Retain the mode default-off as state-transition diagnostic
 infrastructure. See `benchmark_results/mid_schur_transport_i10_gate/report.md`.
 
+### Direct-Tangent Camera Parameterizations (2026-08-14)
+
+The `microlie.pdf` convention audit confirms production `se3_left` is Sola's
+left/global perturbation for `p_c = R p_w + t`, with tangent `[rho, theta]`,
+`R+ = Exp(theta) R`, and `t+ = Exp(theta)t + J_l(theta)rho`. Its direct map
+`dr/dtheta = J_l(r)^-1`, `dt/drho = I`, `dt/dtheta = -[t]x` is correct.
+`se3_right` also matches the paper's right/local perturbation.
+
+A translation-first `so3_left` mode now implements the product manifold
+`SO(3) x R3` with independent translation while preserving the common tangent
+order `[translation, rotation, intrinsics]`. One shared helper supplies the
+mode-correct direct tangent map to residual assembly and proximal metrics.
+State and point-action Jacobians pass central finite differences for left-SE3,
+right-SE3, and product-SO3. The historical manifold factorial used the
+non-direct path and is not the current comparison.
+
+Frozen K24/I30 C1+C5 evaluation with global Schur-PCG tolerance `1e-2` and cap
+1000 gives product-SO3/left-SE3 `0.996338x` geometric and `0.981871x` summed SSE
+over all 15 1DSfM, but W/T/L `4/0/11` and a `1.246462x` Piazza tail. On all 29
+BAL it gives `0.996646x` geometric, `0.995410x` summed, W/T/L `23/0/6`, worst
+`1.001555x`, and `0.987873x` optimization time. The larger cap is necessary:
+Trafalgar needs up to 690 PCG iterations; cap 400 violates the residual gate.
+
+True I90 sentinels reject global promotion: Roman is `0.999458x` left-SE3 but
+Trafalgar is `1.060555x`, so their ratio is `1.029553x` and the I30 Trafalgar
+gain reverses. BAL1490 remains `0.998090x`; BAL3068 is stability-only because
+left-SE3 exhausts at I54 while product-SO3 completes. Right-SE3 is rejected by
+its `1.398362x` Roman/Trafalgar I30 ratio despite favorable BAL sentinels.
+
+Keep left-SE3 as the common default. Retain product-SO3 default-off as a strong,
+bounded BAL-oriented ablation and frozen component, not a scene-selected or
+cross-family policy. See
+`benchmark_results/camera_parameterization_direct_tangent_report.md`.
+
+Product-SO3 tuning follow-up (2026-08-14): a frozen C1 x C5 factorial identifies
+C1 as robust and C5 as interaction-sensitive. C1/plain is `0.772264x` on six
+1DSfM and `0.955724x` on BAL5, 11/11 wins. C1+C5/C1 is `0.988354x` 1DSfM but
+loses 4/6; BAL is neutral. Delaying C5 to start 15 improves development tails
+but fails held-out transfer (`1.008025x` left-SE3 all-15), so close C5 timing.
+
+Product camera metric scales `10/25/35/40/45/50/75` show scale 35 as the
+development leader, but confirmation remains unsafe: `0.994506x` left-SE3
+all-15 with Piazza `1.316080x`, Tower `1.193405x`, and `2.031953x` time;
+BAL29 is `0.997011x` left-SE3 but `1.000366x` scale 25. A coherent
+translation/rotation tangent metric ratio `{0.5,1,2}` also rejects both
+non-unit values on both families; ratio 1 is bitwise neutral and best.
+
+Retain product-SO3 scale 25/start5/ratio1 as the frozen diagnostic component.
+Do not continue C5 timing, scalar metric, or subspace-ratio grids. The next
+parameter direction is a bounded product-aware trust envelope; the next
+structural direction is camera-center `SO(3) x R3`. Full details remain in
+`benchmark_results/camera_parameterization_direct_tangent_report.md`.
+
 Trust-rebase artifacts:
 
 - `benchmark_results/bootstrap_trust_rebase_bal49_off/`

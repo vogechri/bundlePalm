@@ -7154,6 +7154,9 @@ def main():
         )),
         "cameraTrustDiagonalScale": arguments.camera_trust_diagonal_scale,
         "cameraDiagonalMetricScale": arguments.camera_diagonal_metric_scale,
+        "so3TranslationMetricRatio": float(
+            os.environ.get("BUNDLE_PALM_SO3_TRANSLATION_METRIC_RATIO", "1")
+        ),
         "scalingSeconds": scaling_seconds,
         "initializationSeconds": initialization_seconds,
         "optimizationSeconds": optimization_seconds,

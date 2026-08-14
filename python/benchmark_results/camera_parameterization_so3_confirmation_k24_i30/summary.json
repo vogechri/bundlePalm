@@ -1,0 +1,442 @@
+{
+  "se3_left": {
+    "1dsfm": {
+      "geometricSSEVsLeftSE3": 1.0,
+      "losses": 0,
+      "optimizationSeconds": 50.80533249599466,
+      "optimizationVsLeftSE3": 1.0,
+      "oracleCalls": 453,
+      "rejections": 50,
+      "scenes": {
+        "alamo": {
+          "optimizationSeconds": 6.988383217001683,
+          "sse": 1337895.18882597,
+          "sseVsLeftSE3": 1.0
+        },
+        "ellis_island": {
+          "optimizationSeconds": 3.4785084420000203,
+          "sse": 1849509.9538425687,
+          "sseVsLeftSE3": 1.0
+        },
+        "madrid_metropolis": {
+          "optimizationSeconds": 2.5264831009990303,
+          "sse": 484421.1712098648,
+          "sseVsLeftSE3": 1.0
+        },
+        "montreal_notre_dame": {
+          "optimizationSeconds": 11.477008876998298,
+          "sse": 10988766.324611291,
+          "sseVsLeftSE3": 1.0
+        },
+        "notre_dame": {
+          "optimizationSeconds": 10.590941472997656,
+          "sse": 6324056.786392265,
+          "sseVsLeftSE3": 1.0
+        },
+        "nyc_library": {
+          "optimizationSeconds": 3.011799367999629,
+          "sse": 2183730.9264031914,
+          "sseVsLeftSE3": 1.0
+        },
+        "piazza_del_popolo": {
+          "optimizationSeconds": 3.7353720069986593,
+          "sse": 1504869.2159811747,
+          "sseVsLeftSE3": 1.0
+        },
+        "tower_of_london": {
+          "optimizationSeconds": 3.6811194559995783,
+          "sse": 2445566.6548485467,
+          "sseVsLeftSE3": 1.0
+        },
+        "yorkminster": {
+          "optimizationSeconds": 5.315716555000108,
+          "sse": 6130130.60642421,
+          "sseVsLeftSE3": 1.0
+        }
+      },
+      "summedSSEVsLeftSE3": 1.0,
+      "ties": 9,
+      "wins": 0,
+      "worst": 1.0
+    },
+    "bal": {
+      "geometricSSEVsLeftSE3": 1.0,
+      "losses": 0,
+      "optimizationSeconds": 511.2370332559949,
+      "optimizationVsLeftSE3": 1.0,
+      "oracleCalls": 1571,
+      "rejections": 101,
+      "scenes": {
+        "bal1064": {
+          "optimizationSeconds": 7.9870139739978185,
+          "sse": 565578.5993071699,
+          "sseVsLeftSE3": 1.0
+        },
+        "bal126": {
+          "optimizationSeconds": 3.476193174999935,
+          "sse": 188857.2702493965,
+          "sseVsLeftSE3": 1.0
+        },
+        "bal1266": {
+          "optimizationSeconds": 8.337071407997428,
+          "sse": 663609.3098768389,
+          "sseVsLeftSE3": 1.0
+        },
+        "bal135": {
+          "optimizationSeconds": 7.410176708999643,
+          "sse": 743545.7129665171,
+          "sseVsLeftSE3": 1.0
+        },
+        "bal142": {
+          "optimizationSeconds": 7.470857732998411,
+          "sse": 545591.6954844687,
+          "sseVsLeftSE3": 1.0
+        },
+        "bal1490": {
+          "optimizationSeconds": 58.87120150299961,
+          "sse": 3088565.6208167723,
+          "sseVsLeftSE3": 1.0
+        },
+        "bal1723": {
+          "optimizationSeconds": 9.380349693001335,
+          "sse": 769875.3926450897,
+          "sseVsLeftSE3": 1.0
+        },
+        "bal173": {
+          "optimizationSeconds": 8.847906076996878,
+          "sse": 520070.07295828895,
+          "sseVsLeftSE3": 1.0
+        },
+        "bal1778": {
+          "optimizationSeconds": 76.44254421300138,
+          "sse": 3347965.950951648,
+          "sseVsLeftSE3": 1.0
+        },
+        "bal245": {
+          "optimizationSeconds": 13.067417155001749,
+          "sse": 1807507.4942744395,
+          "sseVsLeftSE3": 1.0
+        },
+        "bal253": {
+          "optimizationSeconds": 10.846818289999646,
+          "sse": 695637.6973864562,
+          "sseVsLeftSE3": 1.0
+        },
+        "bal257": {
+          "optimizationSeconds": 4.265897234003205,
+          "sse": 200157.58502741146,
+          "sseVsLeftSE3": 1.0
+        },
+        "bal287": {
+          "optimizationSeconds": 13.15964770500068,
+          "sse": 714170.2087372583,
+          "sseVsLeftSE3": 1.0
+        },
+        "bal3068": {
+          "optimizationSeconds": 22.33119822200024,
+          "sse": 3696251.4889710965,
+          "sseVsLeftSE3": 1.0
+        },
+        "bal308": {
+          "optimizationSeconds": 14.71453313999882,
+          "sse": 791313.2890293234,
+          "sseVsLeftSE3": 1.0
+        },
+        "bal356": {
+          "optimizationSeconds": 17.520212409002852,
+          "sse": 1026265.5919499941,
+          "sseVsLeftSE3": 1.0
+        },
+        "bal394": {
+          "optimizationSeconds": 7.561065994999808,
+          "sse": 606237.4687605215,
+          "sseVsLeftSE3": 1.0
+        },
+        "bal427": {
+          "optimizationSeconds": 22.104187041997648,
+          "sse": 2132606.680166091,
+          "sseVsLeftSE3": 1.0
+        },
+        "bal49": {
+          "optimizationSeconds": 2.3780356690003828,
+          "sse": 26975.17446816175,
+          "sseVsLeftSE3": 1.0
+        },
+        "bal52": {
+          "optimizationSeconds": 4.721436009000172,
+          "sse": 477621.1424148866,
+          "sseVsLeftSE3": 1.0
+        },
+        "bal646": {
+          "optimizationSeconds": 7.649845362000633,
+          "sse": 361460.33213587117,
+          "sseVsLeftSE3": 1.0
+        },
+        "bal744": {
+          "optimizationSeconds": 41.780427699999564,
+          "sse": 3093084.567953513,
+          "sseVsLeftSE3": 1.0
+        },
+        "bal783": {
+          "optimizationSeconds": 5.573220409998612,
+          "sse": 397006.76059501804,
+          "sseVsLeftSE3": 1.0
+        },
+        "bal871": {
+          "optimizationSeconds": 39.7353226769992,
+          "sse": 3476137.2587691797,
+          "sseVsLeftSE3": 1.0
+        },
+        "bal88": {
+          "optimizationSeconds": 6.862750135998795,
+          "sse": 577807.3150336691,
+          "sseVsLeftSE3": 1.0
+        },
+        "bal89": {
+          "optimizationSeconds": 7.0904999260019395,
+          "sse": 576458.7899550188,
+          "sseVsLeftSE3": 1.0
+        },
+        "bal931": {
+          "optimizationSeconds": 6.220402165999985,
+          "sse": 504682.12623750156,
+          "sseVsLeftSE3": 1.0
+        },
+        "bal951": {
+          "optimizationSeconds": 53.30527320100009,
+          "sse": 3228009.0717340726,
+          "sseVsLeftSE3": 1.0
+        },
+        "bal961": {
+          "optimizationSeconds": 22.125528322998434,
+          "sse": 3178297.6631614054,
+          "sseVsLeftSE3": 1.0
+        }
+      },
+      "summedSSEVsLeftSE3": 1.0,
+      "ties": 29,
+      "wins": 0,
+      "worst": 1.0
+    }
+  },
+  "so3_left": {
+    "1dsfm": {
+      "geometricSSEVsLeftSE3": 1.002319838754925,
+      "losses": 7,
+      "optimizationSeconds": 49.51151630299137,
+      "optimizationVsLeftSE3": 0.9745338504948217,
+      "oracleCalls": 443,
+      "rejections": 53,
+      "scenes": {
+        "alamo": {
+          "optimizationSeconds": 7.2468179589996,
+          "sse": 1346017.6635669982,
+          "sseVsLeftSE3": 1.006071084498148
+        },
+        "ellis_island": {
+          "optimizationSeconds": 3.209568219001085,
+          "sse": 2013732.824786751,
+          "sseVsLeftSE3": 1.0887926396951746
+        },
+        "madrid_metropolis": {
+          "optimizationSeconds": 2.6054589969971857,
+          "sse": 517172.57465769385,
+          "sseVsLeftSE3": 1.0676093560610302
+        },
+        "montreal_notre_dame": {
+          "optimizationSeconds": 10.740097286998207,
+          "sse": 11583109.142342843,
+          "sseVsLeftSE3": 1.0540864006180946
+        },
+        "notre_dame": {
+          "optimizationSeconds": 9.968787612997403,
+          "sse": 7081313.846162409,
+          "sseVsLeftSE3": 1.1197422928585279
+        },
+        "nyc_library": {
+          "optimizationSeconds": 3.460131559997535,
+          "sse": 1266914.787536758,
+          "sseVsLeftSE3": 0.5801606655008018
+        },
+        "piazza_del_popolo": {
+          "optimizationSeconds": 3.1766486989981786,
+          "sse": 1875762.9286863508,
+          "sseVsLeftSE3": 1.2464624226254462
+        },
+        "tower_of_london": {
+          "optimizationSeconds": 3.672896439999022,
+          "sse": 2527153.032579002,
+          "sseVsLeftSE3": 1.0333609298968414
+        },
+        "yorkminster": {
+          "optimizationSeconds": 5.431109529003152,
+          "sse": 6068294.506847429,
+          "sseVsLeftSE3": 0.9899127598501771
+        }
+      },
+      "summedSSEVsLeftSE3": 1.0309941991228007,
+      "ties": 0,
+      "wins": 2,
+      "worst": 1.2464624226254462
+    },
+    "bal": {
+      "geometricSSEVsLeftSE3": 0.996646096379466,
+      "losses": 6,
+      "optimizationSeconds": 505.03705957099737,
+      "optimizationVsLeftSE3": 0.9878726045225816,
+      "oracleCalls": 1576,
+      "rejections": 103,
+      "scenes": {
+        "bal1064": {
+          "optimizationSeconds": 7.7866377950012975,
+          "sse": 566342.0542860888,
+          "sseVsLeftSE3": 1.0013498653942248
+        },
+        "bal126": {
+          "optimizationSeconds": 3.226037032000022,
+          "sse": 188816.63403740135,
+          "sseVsLeftSE3": 0.999784831095242
+        },
+        "bal1266": {
+          "optimizationSeconds": 8.2569731399999,
+          "sse": 664641.4316311593,
+          "sseVsLeftSE3": 1.0015553153624561
+        },
+        "bal135": {
+          "optimizationSeconds": 7.268792129998474,
+          "sse": 740062.5392011254,
+          "sseVsLeftSE3": 0.9953154544439575
+        },
+        "bal142": {
+          "optimizationSeconds": 7.440400095998484,
+          "sse": 543613.2663037006,
+          "sseVsLeftSE3": 0.9963737916153373
+        },
+        "bal1490": {
+          "optimizationSeconds": 54.61495643099988,
+          "sse": 3081011.0802435502,
+          "sseVsLeftSE3": 0.9975540294425655
+        },
+        "bal1723": {
+          "optimizationSeconds": 11.492171417001373,
+          "sse": 768376.1500379449,
+          "sseVsLeftSE3": 0.9980526165383806
+        },
+        "bal173": {
+          "optimizationSeconds": 8.712359551998816,
+          "sse": 517444.12621817837,
+          "sseVsLeftSE3": 0.9949507828336025
+        },
+        "bal1778": {
+          "optimizationSeconds": 75.358073727999,
+          "sse": 3344306.78395643,
+          "sseVsLeftSE3": 0.9989070477272393
+        },
+        "bal245": {
+          "optimizationSeconds": 13.123836614002357,
+          "sse": 1796009.513323817,
+          "sseVsLeftSE3": 0.9936387644382974
+        },
+        "bal253": {
+          "optimizationSeconds": 11.299322226001095,
+          "sse": 692762.7823922132,
+          "sseVsLeftSE3": 0.995867223692672
+        },
+        "bal257": {
+          "optimizationSeconds": 4.075022048000392,
+          "sse": 200224.29220633337,
+          "sseVsLeftSE3": 1.0003332733001988
+        },
+        "bal287": {
+          "optimizationSeconds": 13.414076807999663,
+          "sse": 710524.4639847563,
+          "sseVsLeftSE3": 0.9948951318496634
+        },
+        "bal3068": {
+          "optimizationSeconds": 25.244036033000157,
+          "sse": 3656092.0964184077,
+          "sseVsLeftSE3": 0.9891351027730346
+        },
+        "bal308": {
+          "optimizationSeconds": 15.202974040999834,
+          "sse": 787972.6090543383,
+          "sseVsLeftSE3": 0.99577830927232
+        },
+        "bal356": {
+          "optimizationSeconds": 17.512125412999012,
+          "sse": 1024004.4470422138,
+          "sseVsLeftSE3": 0.9977967254037193
+        },
+        "bal394": {
+          "optimizationSeconds": 8.183351575000415,
+          "sse": 604355.3431519323,
+          "sseVsLeftSE3": 0.9968953987412932
+        },
+        "bal427": {
+          "optimizationSeconds": 21.666702004997205,
+          "sse": 2115402.145479619,
+          "sseVsLeftSE3": 0.991932626467656
+        },
+        "bal49": {
+          "optimizationSeconds": 2.417587518997607,
+          "sse": 26975.199608360406,
+          "sseVsLeftSE3": 1.0000009319753866
+        },
+        "bal52": {
+          "optimizationSeconds": 4.699486225999863,
+          "sse": 477597.1996339736,
+          "sseVsLeftSE3": 0.9999498707682998
+        },
+        "bal646": {
+          "optimizationSeconds": 5.695482785002241,
+          "sse": 361541.372269382,
+          "sseVsLeftSE3": 1.000224202011413
+        },
+        "bal744": {
+          "optimizationSeconds": 42.14081509500102,
+          "sse": 3085896.396233809,
+          "sseVsLeftSE3": 0.9976760506989759
+        },
+        "bal783": {
+          "optimizationSeconds": 5.856630442001915,
+          "sse": 396910.0774603727,
+          "sseVsLeftSE3": 0.9997564698029312
+        },
+        "bal871": {
+          "optimizationSeconds": 34.18652523700075,
+          "sse": 3480502.121404959,
+          "sseVsLeftSE3": 1.0012556646388941
+        },
+        "bal88": {
+          "optimizationSeconds": 4.914381573002174,
+          "sse": 572189.2520605316,
+          "sseVsLeftSE3": 0.99027692653422
+        },
+        "bal89": {
+          "optimizationSeconds": 7.553068774999701,
+          "sse": 572210.8991879276,
+          "sseVsLeftSE3": 0.9926310590780953
+        },
+        "bal931": {
+          "optimizationSeconds": 6.413195279998035,
+          "sse": 504485.1488566245,
+          "sseVsLeftSE3": 0.9996097001050036
+        },
+        "bal951": {
+          "optimizationSeconds": 55.139286695997725,
+          "sse": 3169765.133550323,
+          "sseVsLeftSE3": 0.9819566993495278
+        },
+        "bal961": {
+          "optimizationSeconds": 22.142751858998963,
+          "sse": 3176871.2865597773,
+          "sseVsLeftSE3": 0.9995512136518361
+        }
+      },
+      "summedSSEVsLeftSE3": 0.995409597330912,
+      "ties": 0,
+      "wins": 23,
+      "worst": 1.0015553153624561
+    }
+  }
+}
