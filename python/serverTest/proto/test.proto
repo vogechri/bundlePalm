@@ -205,6 +205,7 @@ message landmark_state_proto {
     MATERIALIZE_BEST = 8;
     RESTORE_NOMINAL_ROUNDTRIP = 9;
     RESTORE_BEST = 10;
+    MATERIALIZE_ACCEPTED = 11;
   }
   int32 cluster_id = 1;
   uint64 run_id = 2;
@@ -252,6 +253,8 @@ message camera_step_proto {
   bytes tangent_step_f64 = 6; // 9 values per locally active camera
   int32 landmark_refinement_steps = 7;
   bool rebase_trust_state = 8; // commit external geometry as a fresh trust state
+  bool transport_product_state = 9; // commit tangent-updated local copies without resetting trust
+  bytes centers_f64 = 10; // transported local DRS centers for active cameras
 }
 
 // can be one of messages. so proto converts to correct message. client messages server messages

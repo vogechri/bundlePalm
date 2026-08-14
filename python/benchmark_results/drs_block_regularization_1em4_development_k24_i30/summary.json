@@ -1,0 +1,158 @@
+{
+  "block_1em4": {
+    "1dsfm": {
+      "acceleratedAcceptances": 105,
+      "geometricSSEVsControl": 0.9882138109693558,
+      "losses": 3,
+      "nominalFallbacks": 7,
+      "optimizationSeconds": 70.56498274799924,
+      "optimizationVsControl": 0.9746814319385397,
+      "oracleCalls": 303,
+      "scenes": {
+        "gendarmenmarkt": {
+          "sse": 1046115.3907546077,
+          "sseVsControl": 1.0232804310896833
+        },
+        "piccadilly": {
+          "sse": 7752841.175757231,
+          "sseVsControl": 1.0683114926073936
+        },
+        "roman_forum": {
+          "sse": 5335039.626908989,
+          "sseVsControl": 0.9949520039590389
+        },
+        "trafalgar": {
+          "sse": 17172350.03642402,
+          "sseVsControl": 0.8834861598052386
+        },
+        "union_square": {
+          "sse": 4611137.956932151,
+          "sseVsControl": 1.0013574946433157
+        },
+        "vienna_cathedral": {
+          "sse": 6134174.304650769,
+          "sseVsControl": 0.9678808816913527
+        }
+      },
+      "stepLimitHits": 0,
+      "summedSSEVsControl": 0.9552597258199,
+      "ties": 0,
+      "wins": 3,
+      "worst": 1.0683114926073936
+    },
+    "bal": {
+      "acceleratedAcceptances": 109,
+      "geometricSSEVsControl": 1.0055339493203386,
+      "losses": 3,
+      "nominalFallbacks": 7,
+      "optimizationSeconds": 74.86571940000067,
+      "optimizationVsControl": 1.0427835397794776,
+      "oracleCalls": 269,
+      "scenes": {
+        "bal1723": {
+          "sse": 772670.9610203448,
+          "sseVsControl": 1.0036311959077562
+        },
+        "bal245": {
+          "sse": 1835112.643405694,
+          "sseVsControl": 1.0152724949792453
+        },
+        "bal394": {
+          "sse": 603829.8337142084,
+          "sseVsControl": 0.9960285611325945
+        },
+        "bal52": {
+          "sse": 484057.2007745457,
+          "sseVsControl": 1.0134752375640617
+        },
+        "bal871": {
+          "sse": 3474072.681269884,
+          "sseVsControl": 0.9994060713528825
+        }
+      },
+      "stepLimitHits": 3,
+      "summedSSEVsControl": 1.0045345167214832,
+      "ties": 0,
+      "wins": 2,
+      "worst": 1.0152724949792453
+    }
+  },
+  "control": {
+    "1dsfm": {
+      "acceleratedAcceptances": 104,
+      "geometricSSEVsControl": 1.0,
+      "losses": 0,
+      "nominalFallbacks": 11,
+      "optimizationSeconds": 72.39799634599876,
+      "optimizationVsControl": 1.0,
+      "oracleCalls": 302,
+      "scenes": {
+        "gendarmenmarkt": {
+          "sse": 1022315.4464515732,
+          "sseVsControl": 1.0
+        },
+        "piccadilly": {
+          "sse": 7257097.980697671,
+          "sseVsControl": 1.0
+        },
+        "roman_forum": {
+          "sse": 5362107.524463689,
+          "sseVsControl": 1.0
+        },
+        "trafalgar": {
+          "sse": 19437033.44510751,
+          "sseVsControl": 1.0
+        },
+        "union_square": {
+          "sse": 4604886.847703319,
+          "sseVsControl": 1.0
+        },
+        "vienna_cathedral": {
+          "sse": 6337736.823493632,
+          "sseVsControl": 1.0
+        }
+      },
+      "stepLimitHits": 0,
+      "summedSSEVsControl": 1.0,
+      "ties": 6,
+      "wins": 0,
+      "worst": 1.0
+    },
+    "bal": {
+      "acceleratedAcceptances": 102,
+      "geometricSSEVsControl": 1.0,
+      "losses": 0,
+      "nominalFallbacks": 4,
+      "optimizationSeconds": 71.7941131059979,
+      "optimizationVsControl": 1.0,
+      "oracleCalls": 261,
+      "scenes": {
+        "bal1723": {
+          "sse": 769875.3926450897,
+          "sseVsControl": 1.0
+        },
+        "bal245": {
+          "sse": 1807507.4942744395,
+          "sseVsControl": 1.0
+        },
+        "bal394": {
+          "sse": 606237.4687605215,
+          "sseVsControl": 1.0
+        },
+        "bal52": {
+          "sse": 477621.1424148866,
+          "sseVsControl": 1.0
+        },
+        "bal871": {
+          "sse": 3476137.2587691797,
+          "sseVsControl": 1.0
+        }
+      },
+      "stepLimitHits": 1,
+      "summedSSEVsControl": 1.0,
+      "ties": 5,
+      "wins": 0,
+      "worst": 1.0
+    }
+  }
+}

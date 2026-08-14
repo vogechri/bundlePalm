@@ -98,6 +98,8 @@ INITIAL_SHARED_SCHUR_MAXIMUM_ITERATIONS=${INITIAL_SHARED_SCHUR_MAXIMUM_ITERATION
 INITIAL_SHARED_SCHUR_OPERATOR=${INITIAL_SHARED_SCHUR_OPERATOR:-inherit}
 INITIAL_SHARED_SCHUR_DAMPING_POLICY=${INITIAL_SHARED_SCHUR_DAMPING_POLICY:-geometric}
 INITIAL_SHARED_SCHUR_MODEL_RATIO_MINIMUM_FACTOR=${INITIAL_SHARED_SCHUR_MODEL_RATIO_MINIMUM_FACTOR:-0.3333333333333333}
+MID_SHARED_SCHUR_CORRECTION_ITERATION=${MID_SHARED_SCHUR_CORRECTION_ITERATION:-0}
+MID_SHARED_SCHUR_TRANSPORT_PRODUCT_STATE=${MID_SHARED_SCHUR_TRANSPORT_PRODUCT_STATE:-0}
 FINAL_SHARED_SCHUR_CORRECTION=${FINAL_SHARED_SCHUR_CORRECTION:-0}
 SHARED_SCHUR_MAXIMUM_CORRECTIONS=${SHARED_SCHUR_MAXIMUM_CORRECTIONS:-1}
 SHARED_SCHUR_MINIMUM_RELATIVE_DECREASE=${SHARED_SCHUR_MINIMUM_RELATIVE_DECREASE:-1e-4}
@@ -122,6 +124,8 @@ SAFEGUARD_MODE=${SAFEGUARD_MODE:-relative}
 DRE_RELATIVE_INCREASE=${DRE_RELATIVE_INCREASE:-0.01}
 MINIMUM_PRIMAL_RATIO=${MINIMUM_PRIMAL_RATIO:-1.001}
 SAFEGUARD_ANNEALING_ITERATIONS=${SAFEGUARD_ANNEALING_ITERATIONS:-0}
+SAFEGUARD_REFERENCE_ITERATION=${SAFEGUARD_REFERENCE_ITERATION:-5}
+SAFEGUARD_ANNEALING_EXPONENT=${SAFEGUARD_ANNEALING_EXPONENT:-4}
 SAFEGUARD_RELATIVE_DEADBAND=${SAFEGUARD_RELATIVE_DEADBAND:-0}
 CATASTROPHIC_RATIO=${CATASTROPHIC_RATIO:-${SAFEGUARD_RATIO:-1000000}}
 RECOVERY_PENALTY_RATIO=${RECOVERY_PENALTY_RATIO:-2.0}
@@ -300,6 +304,12 @@ if [[ "$INITIAL_SHARED_SCHUR_CORRECTION" == "1" ]]; then
   fi
   if [[ "$INITIAL_SHARED_SCHUR_OPERATOR" != "inherit" ]]; then
     VARIANT_NAME="${VARIANT_NAME}_${INITIAL_SHARED_SCHUR_OPERATOR}"
+  fi
+fi
+if [[ "$MID_SHARED_SCHUR_CORRECTION_ITERATION" != "0" ]]; then
+  VARIANT_NAME="${VARIANT_NAME}_mid_schur${MID_SHARED_SCHUR_CORRECTION_ITERATION}"
+  if [[ "$MID_SHARED_SCHUR_TRANSPORT_PRODUCT_STATE" == "1" ]]; then
+    VARIANT_NAME="${VARIANT_NAME}_transport"
   fi
 fi
 if [[ "$FINAL_SHARED_SCHUR_CORRECTION" == "1" ]]; then
@@ -617,6 +627,18 @@ for problem in "${PROBLEMS[@]}"; do
         --shared-schur-preconditioner "$SHARED_SCHUR_PRECONDITIONER"
       )
     fi
+    mid_shared_schur_args=()
+    if [[ "$MID_SHARED_SCHUR_CORRECTION_ITERATION" != "0" ]]; then
+      mid_shared_schur_args+=(
+        --mid-shared-schur-correction-iteration "$MID_SHARED_SCHUR_CORRECTION_ITERATION"
+        --shared-schur-relative-tolerance "$SHARED_SCHUR_RELATIVE_TOLERANCE"
+        --shared-schur-operator "$SHARED_SCHUR_OPERATOR"
+        --shared-schur-preconditioner "$SHARED_SCHUR_PRECONDITIONER"
+      )
+      if [[ "$MID_SHARED_SCHUR_TRANSPORT_PRODUCT_STATE" == "1" ]]; then
+        mid_shared_schur_args+=(--mid-shared-schur-transport-product-state)
+      fi
+    fi
     final_shared_schur_args=()
     if [[ "$FINAL_SHARED_SCHUR_CORRECTION" == "1" ]]; then
       final_shared_schur_args+=(
@@ -724,11 +746,13 @@ for problem in "${PROBLEMS[@]}"; do
             --dre-relative-increase "$DRE_RELATIVE_INCREASE" \
             --minimum-primal-ratio "$MINIMUM_PRIMAL_RATIO" \
             --safeguard-annealing-iterations "$SAFEGUARD_ANNEALING_ITERATIONS" \
+            --safeguard-reference-iteration "$SAFEGUARD_REFERENCE_ITERATION" \
+            --safeguard-annealing-exponent "$SAFEGUARD_ANNEALING_EXPONENT" \
             --safeguard-relative-deadband "$SAFEGUARD_RELATIVE_DEADBAND" \
             --catastrophic-ratio "$CATASTROPHIC_RATIO" \
             --recovery-penalty-ratio "$RECOVERY_PENALTY_RATIO" \
             --results "$RESULT_FILE" --state "$state_file" \
-            "${debug_args[@]}" "${trust_args[@]}" "${scaling_args[@]}" "${worker_sse_args[@]}" "${adaptive_depth_args[@]}" "${single_cluster_args[@]}" "${shared_only_args[@]}" "${initial_shared_schur_args[@]}" "${final_shared_schur_args[@]}" "${initial_state_args[@]}") 2>&1 | tee "$log_file"
+            "${debug_args[@]}" "${trust_args[@]}" "${scaling_args[@]}" "${worker_sse_args[@]}" "${adaptive_depth_args[@]}" "${single_cluster_args[@]}" "${shared_only_args[@]}" "${initial_shared_schur_args[@]}" "${mid_shared_schur_args[@]}" "${final_shared_schur_args[@]}" "${initial_state_args[@]}") 2>&1 | tee "$log_file"
       exit_code=${PIPESTATUS[0]}
     else
       (cd "$SCRIPT_DIR" && /usr/bin/time -v -o "$coordinator_time" \
@@ -812,11 +836,13 @@ for problem in "${PROBLEMS[@]}"; do
             --dre-relative-increase "$DRE_RELATIVE_INCREASE" \
             --minimum-primal-ratio "$MINIMUM_PRIMAL_RATIO" \
             --safeguard-annealing-iterations "$SAFEGUARD_ANNEALING_ITERATIONS" \
+            --safeguard-reference-iteration "$SAFEGUARD_REFERENCE_ITERATION" \
+            --safeguard-annealing-exponent "$SAFEGUARD_ANNEALING_EXPONENT" \
             --safeguard-relative-deadband "$SAFEGUARD_RELATIVE_DEADBAND" \
             --catastrophic-ratio "$CATASTROPHIC_RATIO" \
             --recovery-penalty-ratio "$RECOVERY_PENALTY_RATIO" \
             --results "$RESULT_FILE" --state "$state_file" \
-            "${debug_args[@]}" "${trust_args[@]}" "${scaling_args[@]}" "${worker_sse_args[@]}" "${adaptive_depth_args[@]}" "${single_cluster_args[@]}" "${shared_only_args[@]}" "${initial_shared_schur_args[@]}" "${final_shared_schur_args[@]}" "${initial_state_args[@]}") > "$log_file" 2>&1
+            "${debug_args[@]}" "${trust_args[@]}" "${scaling_args[@]}" "${worker_sse_args[@]}" "${adaptive_depth_args[@]}" "${single_cluster_args[@]}" "${shared_only_args[@]}" "${initial_shared_schur_args[@]}" "${mid_shared_schur_args[@]}" "${final_shared_schur_args[@]}" "${initial_state_args[@]}") > "$log_file" 2>&1
       exit_code=$?
     fi
     set -e

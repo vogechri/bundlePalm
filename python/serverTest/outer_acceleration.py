@@ -55,6 +55,7 @@ class FixedPointAccelerator:
         self.last_proposal_accelerated = False
         self.current_residual = None
         self.proposal_direction = None
+        self.step_limit_hits = 0
         if self.max_step_ratio < 1.0:
             raise ValueError(
                 "BUNDLE_PALM_ACCEL_MAX_STEP_RATIO must be at least 1")
@@ -91,6 +92,7 @@ class FixedPointAccelerator:
         candidate_norm = np.linalg.norm(candidate_step)
         step_limit = self.max_step_ratio * max(plain_norm, np.finfo(float).eps)
         if candidate_norm > step_limit:
+            self.step_limit_hits += 1
             candidate = current + candidate_step * (step_limit / candidate_norm)
 
         self.current_residual = current - mapped

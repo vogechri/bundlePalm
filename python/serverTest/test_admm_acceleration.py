@@ -1,4 +1,5 @@
 import sys
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -78,6 +79,22 @@ def test_legacy_nesterov_has_two_nominal_startup_proposals():
     assert not first_accelerated
     assert not second_accelerated
     assert third_accelerated
+
+
+def test_acceleration_step_limit_hits_are_counted(monkeypatch):
+    monkeypatch.setenv("BUNDLE_PALM_ACCEL_MAX_STEP_RATIO", "1")
+    accelerator = LegacyNesterov()
+
+    accelerator.propose(np.array([0.0]), np.array([2.0]), 0)
+    accelerator.propose(np.array([2.0]), np.array([3.0]), 1)
+    candidate, accelerated = accelerator.propose(
+        np.array([3.0]), np.array([4.0]), 2
+    )
+    accelerator.reset()
+
+    np.testing.assert_allclose(candidate, [4.0])
+    assert not accelerated
+    assert accelerator.step_limit_hits == 1
 
 
 def test_drs_cli_exposes_themelis_fast_drs(monkeypatch):
@@ -254,6 +271,317 @@ def test_initial_shared_schur_rejects_nonpositive_correction_cap(monkeypatch):
         client_drs.validate_arguments(client_drs.parse_arguments())
 
 
+def test_mid_shared_schur_cli_iteration(monkeypatch):
+    monkeypatch.setenv("BUNDLE_PALM_CAMERA_UPDATE", "se3_left")
+    monkeypatch.setenv("BUNDLE_PALM_DIRECT_TANGENT_NORMAL_EQUATIONS", "1")
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "client_drs.py",
+            "unused.bal",
+            "--iterations",
+            "30",
+            "--proximal-metric",
+            "block",
+            "--consensus-metric",
+            "full",
+            "--shared-only-camera-proximal",
+            "--mid-shared-schur-correction-iteration",
+            "10",
+            "--mid-shared-schur-transport-product-state",
+        ],
+    )
+
+    arguments = client_drs.parse_arguments()
+    client_drs.validate_arguments(arguments)
+
+    assert arguments.mid_shared_schur_correction_iteration == 10
+    assert arguments.mid_shared_schur_transport_product_state
+
+
+def test_mid_shared_schur_transport_requires_iteration(monkeypatch):
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "client_drs.py",
+            "unused.bal",
+            "--mid-shared-schur-transport-product-state",
+        ],
+    )
+    with pytest.raises(
+        ValueError,
+        match="product transport requires a correction iteration",
+    ):
+        client_drs.validate_arguments(client_drs.parse_arguments())
+
+
+def test_mid_shared_schur_rejects_iteration_at_budget(monkeypatch):
+    monkeypatch.setenv("BUNDLE_PALM_CAMERA_UPDATE", "se3_left")
+    monkeypatch.setenv("BUNDLE_PALM_DIRECT_TANGENT_NORMAL_EQUATIONS", "1")
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "client_drs.py",
+            "unused.bal",
+            "--iterations",
+            "10",
+            "--proximal-metric",
+            "block",
+            "--consensus-metric",
+            "full",
+            "--shared-only-camera-proximal",
+            "--mid-shared-schur-correction-iteration",
+            "10",
+        ],
+    )
+    with pytest.raises(
+        ValueError,
+        match="mid shared Schur correction must be in",
+    ):
+        client_drs.validate_arguments(client_drs.parse_arguments())
+
+
+@pytest.mark.parametrize("accept_candidate", [False, True])
+def test_mid_shared_schur_rebase_restores_or_commits(
+    monkeypatch, accept_candidate
+):
+    class FakeWorker:
+        def __init__(self):
+            self.last_trust_region_radii = np.array([10.0, 20.0])
+            self.steps = []
+
+        def build_schur_systems(self, *args):
+            return []
+
+        def apply_camera_step(
+            self,
+            camera_indices_in_cluster,
+            point_indices_in_cluster,
+            consensus,
+            landmarks,
+            tangent_step,
+            cluster_count,
+            landmark_refinement_steps,
+            rebase_trust_state=False,
+        ):
+            self.steps.append((tangent_step.copy(), rebase_trust_state))
+            if np.any(tangent_step):
+                cameras = consensus + 1.0
+                points = landmarks + 1.0
+            else:
+                cameras = consensus.copy()
+                points = landmarks.copy()
+            self.last_trust_region_radii = np.array(
+                [30.0, 30.0] if rebase_trust_state else [5.0, 6.0]
+            )
+            return np.array([40.0, 40.0]), cameras, points
+
+    monkeypatch.setattr(
+        client_drs,
+        "solve_global_schur_system",
+        lambda *args, **kwargs: (
+            np.ones((2, 9)),
+            {"linearTermination": 0},
+        ),
+    )
+    worker = FakeWorker()
+    arguments = SimpleNamespace(
+        worker_owned_landmarks=False,
+        mid_shared_schur_transport_product_state=False,
+        shared_schur_landmark_damping=3.0,
+        shared_schur_camera_damping=3.0,
+        shared_schur_step_scale=1.0,
+        shared_schur_linear_solver="cg",
+        shared_schur_relative_tolerance=1e-6,
+        shared_schur_maximum_iterations=500,
+        shared_schur_operator="python",
+        shared_schur_preconditioner="jacobi",
+        shared_schur_landmark_refinement_steps=0,
+    )
+    consensus = np.zeros((2, 9))
+    landmarks = np.zeros((1, 3))
+
+    def evaluate_state(cameras, points, *_):
+        changed = np.any(cameras != 0.0)
+        return {
+            "objectiveValue": (
+                80.0 if accept_candidate else 120.0
+            ) if changed else 100.0
+        }
+
+    result = client_drs.run_mid_shared_schur_rebase(
+        worker,
+        arguments,
+        [np.array([0]), np.array([1])],
+        [np.array([0]), np.array([0])],
+        consensus,
+        landmarks,
+        np.ones_like(consensus),
+        2,
+        2,
+        evaluate_state,
+        np.array([0, 1]),
+        np.array([0, 0]),
+        np.zeros((2, 2)),
+        1,
+    )
+
+    assert result["accepted"] is accept_candidate
+    assert len(worker.steps) == 2
+    if accept_candidate:
+        assert result["trustRebased"]
+        assert worker.steps[1][1]
+        np.testing.assert_array_equal(result["consensus"], 1.0)
+        np.testing.assert_array_equal(result["landmarks"], 1.0)
+    else:
+        assert not result["trustRebased"]
+        assert not worker.steps[1][1]
+        np.testing.assert_array_equal(result["consensus"], consensus)
+        np.testing.assert_array_equal(result["landmarks"], landmarks)
+
+
+def test_product_camera_transport_preserves_scaled_dual_offsets():
+    local_cameras = np.zeros((2, 2, 9))
+    local_cameras[0, 0, :6] = [0.01, 0.02, 0.03, 1.0, 2.0, 3.0]
+    local_cameras[1, 0, :6] = [-0.02, 0.01, 0.04, 1.1, 1.9, 3.2]
+    centers = local_cameras - 0.25
+    tangent_step = np.zeros((2, 9))
+    tangent_step[:, :6] = [0.1, -0.2, 0.3, 0.01, 0.02, -0.03]
+    scaling = np.full((2, 9), 2.0)
+
+    transported, transported_centers = (
+        client_drs.transport_product_camera_state(
+            local_cameras,
+            centers,
+            tangent_step,
+            scaling,
+        )
+    )
+
+    assert not np.array_equal(transported, local_cameras)
+    np.testing.assert_allclose(
+        transported - transported_centers,
+        local_cameras - centers,
+        rtol=0.0,
+        atol=2e-16,
+    )
+
+
+def test_mid_shared_schur_transports_product_state_without_trust_reset(
+    monkeypatch,
+):
+    class FakeWorker:
+        def __init__(self):
+            self.last_trust_region_radii = np.array([10.0, 20.0])
+
+        def build_schur_systems(self, *args):
+            return []
+
+        def apply_camera_step(
+            self,
+            camera_indices_in_cluster,
+            point_indices_in_cluster,
+            consensus,
+            landmarks,
+            tangent_step,
+            cluster_count,
+            landmark_refinement_steps,
+            rebase_trust_state=False,
+        ):
+            assert not rebase_trust_state
+            return (
+                np.array([40.0, 40.0]),
+                consensus + tangent_step,
+                landmarks + 1.0,
+            )
+
+        def transport_product_state(
+            self,
+            camera_indices_in_cluster,
+            point_indices_in_cluster,
+            local_cameras,
+            centers,
+            landmarks,
+            tangent_step,
+            cluster_count,
+        ):
+            repeated_step = np.broadcast_to(tangent_step, local_cameras.shape)
+            transported = client_drs.left_se3_camera_plus(
+                local_cameras,
+                repeated_step,
+            )
+            active = np.zeros(local_cameras.shape[:2], dtype=bool)
+            for cluster_id, indices in enumerate(camera_indices_in_cluster):
+                active[cluster_id, np.unique(indices)] = True
+            transported = np.where(
+                active[..., None], transported, local_cameras
+            )
+            return np.array([30.0, 30.0]), transported, landmarks.copy()
+
+    tangent_step = np.zeros((2, 9))
+    tangent_step[:, 6:] = 0.5
+    monkeypatch.setattr(
+        client_drs,
+        "solve_global_schur_system",
+        lambda *args, **kwargs: (tangent_step, {"linearTermination": 0}),
+    )
+    worker = FakeWorker()
+    arguments = SimpleNamespace(
+        worker_owned_landmarks=False,
+        mid_shared_schur_transport_product_state=True,
+        shared_schur_landmark_damping=3.0,
+        shared_schur_camera_damping=3.0,
+        shared_schur_step_scale=1.0,
+        shared_schur_linear_solver="cg",
+        shared_schur_relative_tolerance=1e-6,
+        shared_schur_maximum_iterations=500,
+        shared_schur_operator="python",
+        shared_schur_preconditioner="jacobi",
+        shared_schur_landmark_refinement_steps=0,
+    )
+    consensus = np.zeros((2, 9))
+    landmarks = np.zeros((1, 3))
+    local_cameras = np.zeros((2, 2, 9))
+    local_cameras[0] += 0.1
+    local_cameras[1] -= 0.2
+    centers = local_cameras - 0.3
+
+    result = client_drs.run_mid_shared_schur_rebase(
+        worker,
+        arguments,
+        [np.array([0]), np.array([1])],
+        [np.array([0]), np.array([0])],
+        consensus,
+        landmarks,
+        np.ones_like(consensus),
+        2,
+        2,
+        lambda cameras, points, *_: {
+            "objectiveValue": 80.0 if np.any(cameras) else 100.0
+        },
+        np.array([0, 1]),
+        np.array([0, 0]),
+        np.zeros((2, 2)),
+        1,
+        local_cameras=local_cameras,
+        centers=centers,
+    )
+
+    assert result["accepted"]
+    assert result["productStateTransported"]
+    assert not result["trustRebased"]
+    assert result["preRebaseTrustRadii"] == [10.0, 20.0]
+    assert result["postRebaseTrustRadii"] == [10.0, 20.0]
+    assert result["transportOffsetError"] == pytest.approx(0.0)
+    np.testing.assert_allclose(
+        result["localCameras"] - result["centers"],
+        local_cameras - centers,
+    )
+
+
 def test_schur_trial_model_ratio_requires_model_agreement():
     diagnostics = {
         "linearTermination": 0,
@@ -315,6 +643,46 @@ def test_canonical_initial_state_cli_choice(monkeypatch):
 
     assert arguments.initial_state == "stage.npz"
     assert arguments.initial_state_frame == "canonical"
+
+
+def test_local_solver_switch_cli(monkeypatch):
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "client_drs.py",
+            "unused.bal",
+            "--iterations",
+            "30",
+            "--local-solver",
+            "schur_pcg",
+            "--local-solver-switch-iteration",
+            "10",
+            "--local-solver-after-switch",
+            "nesterov",
+        ],
+    )
+    arguments = client_drs.parse_arguments()
+    client_drs.validate_arguments(arguments)
+    assert arguments.local_solver_switch_iteration == 10
+    assert arguments.local_solver_after_switch == "nesterov"
+
+
+def test_local_solver_switch_requires_second_solver(monkeypatch):
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "client_drs.py",
+            "unused.bal",
+            "--iterations",
+            "30",
+            "--local-solver-switch-iteration",
+            "10",
+        ],
+    )
+    with pytest.raises(ValueError, match="requires --local-solver-after-switch"):
+        client_drs.validate_arguments(client_drs.parse_arguments())
 
 
 def test_ruiz_camera_scaling_cli_choice(monkeypatch):

@@ -847,6 +847,115 @@ path dependence, not evidence of a materially better converged minimum. Retain
 continuation only as a default-off basin diagnostic; do not promote it for BAL
 or globally. See `benchmark_results/cluster_continuation_bal29_i30_i40/report.md`.
 
+### Mid-Run Global Schur Rebase (2026-08-14)
+
+A default-off I10 global Schur rebase now materializes the worker's accepted
+landmarks, applies one converged strict physical-SSE-decreasing correction,
+resets product-space centers, and rebases worker trust without changing the
+accepted geometry. Rejected corrections restore the original accepted state.
+
+The four-scene sentinel is strong (`0.939472x` final I30 SSE at `1.164859x`
+time), but breadth and time controls reject promotion. On all 15 1DSfM scenes,
+candidate/direct-I30 is `0.977835x` geometric and `0.948698x` summed, W/T/L
+`12/0/3`, at `1.822800x` time. Against the nearer direct I40 control it is
+`1.030822x` geometric and `1.001725x` summed, W/T/L `3/0/12`, while still
+costing `1.419161x` I40 time. BAL29 is harmful already versus I30:
+`1.017020x` geometric, `1.013890x` summed, W/T/L `2/2/25`, at `2.040605x`
+time; versus direct I60 it is `1.025366x`, W/T/L `1/0/28`.
+
+The correction itself is effective, but subsequent DRS commonly stalls or
+rejects after the product-space reset, and direct K24 catches up more
+efficiently. Retain only as a diagnostic for global-step opportunity; do not
+tune trigger iteration/damping or promote. See
+`benchmark_results/mid_schur_rebase_i10_breadth/report.md`.
+
+### Fixed-K Repartition Continuation (2026-08-14)
+
+K24/I15 default-partition geometry was resumed for K24/I15 with the balanced
+`landmark_scalable_stable` partition. DABA Louvain was excluded because its
+sentinel residual max/mean load is `2.76--2.97x`; stable remains within the
+required ±1% balance while changing 5.0% of Roman and 19.2% of BAL3068
+landmark ownership after optimal relabeling.
+
+The alternate partition has real 1DSfM path signal versus a same-partition
+restart (`0.968615x` geometric, `0.983186x` summed, W/T/L `10/0/5`), but restart
+itself is `1.036495x` uninterrupted I30. The complete stable/direct result is
+`1.003965x` geometric and `1.016969x` summed, W/T/L `5/0/10`, at `2.019627x`
+time. BAL partition effect is negligible (`0.999554x` stable/restart); complete
+stable/direct is `0.999457x` at `1.954289x` time. Against direct I60, staged
+1DSfM/BAL SSE is `1.117241x/1.007659x`, with W/T/L `1/0/14` and `2/0/27`.
+
+Reject repartition continuation. Retain only as a path-diversity diagnostic;
+do not tune checkpoint time or route partitions by scene. See
+`benchmark_results/repartition_continuation_i15_i15_breadth/report.md`.
+
+### Phased Local Solver Portfolio (2026-08-14)
+
+The all-15 C4 trajectories show Schur-PCG ahead at I10 but Nesterov ahead
+geometrically at I30, motivating one homogeneous PCG-I1--I10 then
+Nesterov-I11--I30 path. A request-scoped global solver switch was added
+default-off without resetting trust or accepted state.
+
+The four-scene sentinel rejects the schedule. Phased/pure-Nesterov SSE is
+Roman `1.258234`, Trafalgar `1.438000`, NYC Library `1.119719`, and Piccadilly
+`1.060541`; geometric `1.210707x`. Phased/pure-PCG is geometric `1.066060x`,
+with only Piccadilly winning. Nesterov cannot undo the inherited PCG
+product-space trajectory, and Trafalgar stalls across the switch.
+
+Do not expand or tune the switch. Dual per-iteration racing would require
+complete worker trust/accepted-state snapshots, homogeneous global branch
+selection, and roughly doubled local work; the cheaper transfer gate gives no
+justification for that complexity. See
+`benchmark_results/phased_local_solver_pcg10_nesterov_i30_gate/report.md`.
+
+### Bounded Parameter Sensitivity (2026-08-14)
+
+The promoted K24/I30 C1+C5 stack was tested one factor at a time around its
+current control: block regularization `5e-5`, acceleration restart-after `3`,
+maximum acceleration-step ratio `10`, quartic relative-safeguard annealing,
+and DRE allowance `0.01`. The previously hardcoded annealing exponent and
+reference iteration are now request-scoped, default-preserving controls;
+acceleration step-cap hits are reported without changing proposals.
+
+The four-scene Roman/Trafalgar/BAL1490/BAL3068 safety gate tested block
+regularization `2.5e-5/1e-4`, restart-after `1/5`, cap `3`, annealing exponents
+`2/8`, and DRE allowances `0.005/0.02`. Only `1e-4` passed both families:
+`0.937564x` control on the 1DSfM pair and `0.991877x` on BAL, 4/4 wins.
+Restart `5`, exponent changes, and the lower DRE allowance were mostly
+trajectory-neutral; restart `1`, cap `3`, and `2.5e-5` were cross-family
+negative.
+
+Frozen `1e-4` then failed the established six-1DSfM plus five-BAL development
+gate. It is `0.988214x` control on 1DSfM but `1.005534x` on BAL, W/T/L `2/0/3`
+there, and costs `1.042784x` BAL optimization time. Retain `5e-5`; do not
+interpolate or expand to held-out/all-29. The tested safeguard constants are
+now sufficiently insensitive around the promoted stack to close scalar
+wiggling. See `benchmark_results/drs_parameter_sensitivity_k24_i30_gate/report.md`
+and `benchmark_results/drs_block_regularization_1em4_development_k24_i30/report.md`.
+
+### Dual-Preserving Mid-Schur Transport (2026-08-14)
+
+The accepted I10 global Schur tangent can now be left-composed onto every
+active resident local camera copy while preserving its exact scaled
+camera-center offset and worker trust radius. The worker installs transported
+centers and updates rollback/accepted landmark state; the existing
+consensus-collapse/trust-rebase behavior remains the default. The request-
+scoped transport path is tested and reports offset/trust invariants.
+
+The four-scene three-arm gate compares no correction, the existing reset, and
+transport. Transport partially repairs immediate continuation: I10--I14
+accepts/rejects improve reset `3/7 -> 6/4` on Roman/Trafalgar and `6/4 -> 9/1`
+on BAL1490/3068. Trafalgar accepts all five post-correction iterations and ends
+`0.942954x` reset. However, Roman still accepts only one of five and ends
+`1.103501x` reset; BAL3068 is `1.005310x` reset. Aggregate transport/reset is
+`1.020074x` on 1DSfM and `1.002651x` on BAL. BAL1490 rejects the correction
+before either commit policy and ties exactly.
+
+Reject transport as a quality mechanism without breadth or trigger tuning.
+Product-space collapse explains part of the stall but is not the common basin
+cause. Retain the mode default-off as state-transition diagnostic
+infrastructure. See `benchmark_results/mid_schur_transport_i10_gate/report.md`.
+
 Trust-rebase artifacts:
 
 - `benchmark_results/bootstrap_trust_rebase_bal49_off/`

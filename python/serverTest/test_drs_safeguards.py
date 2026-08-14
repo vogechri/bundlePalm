@@ -19,6 +19,36 @@ def test_relative_ratios_match_client_acc_schedule():
     assert primal_last == pytest.approx(1.001)
 
 
+def test_relative_ratios_support_alternate_annealing_exponents():
+    quadratic_at_zero, _ = relative_safeguard_ratios(
+        0, 30, annealing_exponent=2.0
+    )
+    quartic_at_zero, _ = relative_safeguard_ratios(
+        0, 30, annealing_exponent=4.0
+    )
+
+    assert quadratic_at_zero < quartic_at_zero
+    assert relative_safeguard_ratios(
+        5, 30, annealing_exponent=2.0
+    )[0] == pytest.approx(1.01)
+
+
+@pytest.mark.parametrize(
+    ("reference_iteration", "annealing_exponent"),
+    [(-1, 4.0), (5, 0.0), (5, float("nan"))],
+)
+def test_relative_ratios_reject_invalid_schedule(
+    reference_iteration, annealing_exponent
+):
+    with pytest.raises(ValueError, match="relative safeguard tolerances"):
+        relative_safeguard_ratios(
+            0,
+            30,
+            reference_iteration=reference_iteration,
+            annealing_exponent=annealing_exponent,
+        )
+
+
 def test_relative_rejection_requires_both_merit_and_primal_worsening():
     assert should_reject_trial(0, 1, 102.0, 101.0, 100.0, 100.0, 1.01, 1.005)
     assert not should_reject_trial(0, 1, 100.5, 101.0, 100.0, 100.0, 1.01, 1.005)

@@ -3110,16 +3110,39 @@ public:
       THROW_IF(request.cluster_id() != cluster_id ||
                request.landmark_refinement_steps() < 0 ||
                request.landmark_refinement_steps() > 20);
+      THROW_IF(request.transport_product_state() &&
+               (request.rebase_trust_state() ||
+                request.landmark_refinement_steps() != 0 ||
+                request.centers_f64().size()
+                    != cameras_s.size() * sizeof(double)));
       SetExternalState(request.cameras_f64(), request.landmarks_f64());
+        Eigen::VectorXd product_offsets;
+        if (request.transport_product_state()) {
+        const Eigen::Map<const Eigen::VectorXd> requested_centers(
+          reinterpret_cast<const double*>(request.centers_f64().data()),
+          cameras_s.size());
+        product_offsets = Eigen::Map<const Eigen::VectorXd>(
+          cameras.data(), cameras.size()) - requested_centers;
+        }
       THROW_IF(request.tangent_step_f64().size()
                != cameras.size() * sizeof(double));
       const Eigen::Map<const Eigen::VectorXd> tangent_step(
           reinterpret_cast<const double*>(request.tangent_step_f64().data()),
           cameras.size());
       ApplyCameraStep(tangent_step);
+      if (request.transport_product_state()) {
+        Eigen::Map<Eigen::VectorXd>(cameras_s.data(), cameras_s.size()) =
+            Eigen::Map<const Eigen::VectorXd>(cameras.data(), cameras.size())
+            - product_offsets;
+      }
       RefineLandmarksWithFixedCameras(request.landmark_refinement_steps());
       cost = 2. * GetCost();
-      if (request.rebase_trust_state()) {
+      if (request.transport_product_state()) {
+        last_cameras = cameras;
+        last_landmarks = landmarks;
+        accepted_landmarks = landmarks;
+        last_tr_radius = tr_radius;
+      } else if (request.rebase_trust_state()) {
         tr_radius = std::min(max_trust_region_radius, init_trust_region_radius);
         if (trust_region_policy == 1 && persistent_trust_region) {
           tr_radius = std::min(
@@ -3431,6 +3454,12 @@ public:
     void RestoreAcceptedLandmarkState() {
       THROW_IF(accepted_landmarks.size() != landmarks.size());
       landmarks = accepted_landmarks;
+    }
+
+    void MaterializeAcceptedLandmarkState(
+        landmark_state_reply_proto& return_proto) const {
+      THROW_IF(accepted_landmarks.size() != landmarks.size());
+      AddPhysicalLandmarks(accepted_landmarks, return_proto);
     }
 
     void RestoreBestOutputLandmarkState() {
@@ -6272,6 +6301,9 @@ int main() {
           break;
         case landmark_state_proto::RESTORE_BEST:
           program.RestoreBestOutputLandmarkState();
+          break;
+        case landmark_state_proto::MATERIALIZE_ACCEPTED:
+          program.MaterializeAcceptedLandmarkState(reply_proto);
           break;
         default:
           THROW_IF(true);

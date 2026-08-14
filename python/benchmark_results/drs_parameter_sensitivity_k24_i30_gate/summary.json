@@ -1,0 +1,502 @@
+{
+  "block_1em4": {
+    "1dsfm": {
+      "acceleratedAcceptances": 32,
+      "geometricSSEVsControl": 0.9375640379026373,
+      "losses": 0,
+      "nominalFallbacks": 5,
+      "optimizationSeconds": 39.297768043999895,
+      "optimizationVsControl": 0.9611894501712451,
+      "oracleCalls": 100,
+      "scenes": {
+        "roman_forum": {
+          "sse": 5335039.626908989,
+          "sseVsControl": 0.9949520039590389
+        },
+        "trafalgar": {
+          "sse": 17172350.03642402,
+          "sseVsControl": 0.8834861598052386
+        }
+      },
+      "stepLimitHits": 0,
+      "summedSSEVsControl": 0.9075874721204984,
+      "ties": 0,
+      "wins": 2,
+      "worst": 0.9949520039590389
+    },
+    "bal": {
+      "acceleratedAcceptances": 34,
+      "geometricSSEVsControl": 0.9918770775671069,
+      "losses": 0,
+      "nominalFallbacks": 2,
+      "optimizationSeconds": 87.67290141299964,
+      "optimizationVsControl": 1.1006719535837715,
+      "oracleCalls": 101,
+      "scenes": {
+        "bal1490": {
+          "sse": 3087636.4510333235,
+          "sseVsControl": 0.9996991581538089
+        },
+        "bal3068": {
+          "sse": 3637540.970818582,
+          "sseVsControl": 0.9841162003376406
+        }
+      },
+      "stepLimitHits": 5,
+      "summedSSEVsControl": 0.991209831161119,
+      "ties": 0,
+      "wins": 2,
+      "worst": 0.9996991581538089
+    }
+  },
+  "block_2p5em5": {
+    "1dsfm": {
+      "acceleratedAcceptances": 29,
+      "geometricSSEVsControl": 0.9768703369907159,
+      "losses": 1,
+      "nominalFallbacks": 7,
+      "optimizationSeconds": 41.17507805099922,
+      "optimizationVsControl": 1.0071068308074251,
+      "oracleCalls": 99,
+      "scenes": {
+        "roman_forum": {
+          "sse": 6112981.593885591,
+          "sseVsControl": 1.1400333853799405
+        },
+        "trafalgar": {
+          "sse": 16269951.446718179,
+          "sseVsControl": 0.8370593945144178
+        }
+      },
+      "stepLimitHits": 0,
+      "summedSSEVsControl": 0.9025688860782664,
+      "ties": 0,
+      "wins": 1,
+      "worst": 1.1400333853799405
+    },
+    "bal": {
+      "acceleratedAcceptances": 21,
+      "geometricSSEVsControl": 1.018592938746114,
+      "losses": 2,
+      "nominalFallbacks": 2,
+      "optimizationSeconds": 70.72213177599951,
+      "optimizationVsControl": 0.8878668971705361,
+      "oracleCalls": 89,
+      "scenes": {
+        "bal1490": {
+          "sse": 3092638.948439081,
+          "sseVsControl": 1.0013188412105785
+        },
+        "bal3068": {
+          "sse": 3829926.5634581554,
+          "sseVsControl": 1.036165037710751
+        }
+      },
+      "stepLimitHits": 1,
+      "summedSSEVsControl": 1.0203024488177654,
+      "ties": 0,
+      "wins": 0,
+      "worst": 1.036165037710751
+    }
+  },
+  "cap_3": {
+    "1dsfm": {
+      "acceleratedAcceptances": 34,
+      "geometricSSEVsControl": 1.0053350680787296,
+      "losses": 1,
+      "nominalFallbacks": 3,
+      "optimizationSeconds": 42.104434696999306,
+      "optimizationVsControl": 1.0298380913355458,
+      "oracleCalls": 99,
+      "scenes": {
+        "roman_forum": {
+          "sse": 5419474.563246548,
+          "sseVsControl": 1.0106985991088637
+        },
+        "trafalgar": {
+          "sse": 19437033.44510751,
+          "sseVsControl": 1.0
+        }
+      },
+      "stepLimitHits": 1,
+      "summedSSEVsControl": 1.0023132671753934,
+      "ties": 1,
+      "wins": 0,
+      "worst": 1.0106985991088637
+    },
+    "bal": {
+      "acceleratedAcceptances": 34,
+      "geometricSSEVsControl": 1.0002542806463728,
+      "losses": 1,
+      "nominalFallbacks": 2,
+      "optimizationSeconds": 89.11811104899971,
+      "optimizationVsControl": 1.1188155496979344,
+      "oracleCalls": 100,
+      "scenes": {
+        "bal1490": {
+          "sse": 3090136.5454440988,
+          "sseVsControl": 1.0005086259513927
+        },
+        "bal3068": {
+          "sse": 3696251.4889710965,
+          "sseVsControl": 1.0
+        }
+      },
+      "stepLimitHits": 25,
+      "summedSSEVsControl": 1.0002315352944533,
+      "ties": 1,
+      "wins": 0,
+      "worst": 1.0005086259513927
+    }
+  },
+  "control": {
+    "1dsfm": {
+      "acceleratedAcceptances": 33,
+      "geometricSSEVsControl": 1.0,
+      "losses": 0,
+      "nominalFallbacks": 4,
+      "optimizationSeconds": 40.88451869399796,
+      "optimizationVsControl": 1.0,
+      "oracleCalls": 99,
+      "scenes": {
+        "roman_forum": {
+          "sse": 5362107.524463689,
+          "sseVsControl": 1.0
+        },
+        "trafalgar": {
+          "sse": 19437033.44510751,
+          "sseVsControl": 1.0
+        }
+      },
+      "stepLimitHits": 0,
+      "summedSSEVsControl": 1.0,
+      "ties": 2,
+      "wins": 0,
+      "worst": 1.0
+    },
+    "bal": {
+      "acceleratedAcceptances": 26,
+      "geometricSSEVsControl": 1.0,
+      "losses": 0,
+      "nominalFallbacks": 3,
+      "optimizationSeconds": 79.65397966899945,
+      "optimizationVsControl": 1.0,
+      "oracleCalls": 94,
+      "scenes": {
+        "bal1490": {
+          "sse": 3088565.6208167723,
+          "sseVsControl": 1.0
+        },
+        "bal3068": {
+          "sse": 3696251.4889710965,
+          "sseVsControl": 1.0
+        }
+      },
+      "stepLimitHits": 3,
+      "summedSSEVsControl": 1.0,
+      "ties": 2,
+      "wins": 0,
+      "worst": 1.0
+    }
+  },
+  "dre_0p005": {
+    "1dsfm": {
+      "acceleratedAcceptances": 33,
+      "geometricSSEVsControl": 1.0,
+      "losses": 0,
+      "nominalFallbacks": 4,
+      "optimizationSeconds": 41.798146762001124,
+      "optimizationVsControl": 1.0223465531009734,
+      "oracleCalls": 99,
+      "scenes": {
+        "roman_forum": {
+          "sse": 5362107.524463689,
+          "sseVsControl": 1.0
+        },
+        "trafalgar": {
+          "sse": 19437033.44510751,
+          "sseVsControl": 1.0
+        }
+      },
+      "stepLimitHits": 0,
+      "summedSSEVsControl": 1.0,
+      "ties": 2,
+      "wins": 0,
+      "worst": 1.0
+    },
+    "bal": {
+      "acceleratedAcceptances": 26,
+      "geometricSSEVsControl": 1.0,
+      "losses": 0,
+      "nominalFallbacks": 3,
+      "optimizationSeconds": 80.0265940620011,
+      "optimizationVsControl": 1.0046779130754049,
+      "oracleCalls": 94,
+      "scenes": {
+        "bal1490": {
+          "sse": 3088565.6208167723,
+          "sseVsControl": 1.0
+        },
+        "bal3068": {
+          "sse": 3696251.4889710965,
+          "sseVsControl": 1.0
+        }
+      },
+      "stepLimitHits": 3,
+      "summedSSEVsControl": 1.0,
+      "ties": 2,
+      "wins": 0,
+      "worst": 1.0
+    }
+  },
+  "dre_0p02": {
+    "1dsfm": {
+      "acceleratedAcceptances": 33,
+      "geometricSSEVsControl": 1.0,
+      "losses": 0,
+      "nominalFallbacks": 4,
+      "optimizationSeconds": 41.682827823999105,
+      "optimizationVsControl": 1.0195259515215558,
+      "oracleCalls": 99,
+      "scenes": {
+        "roman_forum": {
+          "sse": 5362107.524463689,
+          "sseVsControl": 1.0
+        },
+        "trafalgar": {
+          "sse": 19437033.44510751,
+          "sseVsControl": 1.0
+        }
+      },
+      "stepLimitHits": 0,
+      "summedSSEVsControl": 1.0,
+      "ties": 2,
+      "wins": 0,
+      "worst": 1.0
+    },
+    "bal": {
+      "acceleratedAcceptances": 26,
+      "geometricSSEVsControl": 0.9969884861904499,
+      "losses": 0,
+      "nominalFallbacks": 3,
+      "optimizationSeconds": 79.85258867399898,
+      "optimizationVsControl": 1.002493397138785,
+      "oracleCalls": 94,
+      "scenes": {
+        "bal1490": {
+          "sse": 3088565.6208167723,
+          "sseVsControl": 1.0
+        },
+        "bal3068": {
+          "sse": 3674022.386266902,
+          "sseVsControl": 0.9939860415963249
+        }
+      },
+      "stepLimitHits": 3,
+      "summedSSEVsControl": 0.9967236990556274,
+      "ties": 1,
+      "wins": 1,
+      "worst": 1.0
+    }
+  },
+  "exponent_2": {
+    "1dsfm": {
+      "acceleratedAcceptances": 33,
+      "geometricSSEVsControl": 1.0,
+      "losses": 0,
+      "nominalFallbacks": 4,
+      "optimizationSeconds": 42.32990303000042,
+      "optimizationVsControl": 1.035352851939398,
+      "oracleCalls": 99,
+      "scenes": {
+        "roman_forum": {
+          "sse": 5362107.524463689,
+          "sseVsControl": 1.0
+        },
+        "trafalgar": {
+          "sse": 19437033.44510751,
+          "sseVsControl": 1.0
+        }
+      },
+      "stepLimitHits": 0,
+      "summedSSEVsControl": 1.0,
+      "ties": 2,
+      "wins": 0,
+      "worst": 1.0
+    },
+    "bal": {
+      "acceleratedAcceptances": 29,
+      "geometricSSEVsControl": 0.9972762868479916,
+      "losses": 0,
+      "nominalFallbacks": 2,
+      "optimizationSeconds": 81.07298845100013,
+      "optimizationVsControl": 1.0178146627186404,
+      "oracleCalls": 96,
+      "scenes": {
+        "bal1490": {
+          "sse": 3088565.6208167723,
+          "sseVsControl": 1.0
+        },
+        "bal3068": {
+          "sse": 3676143.852444398,
+          "sseVsControl": 0.9945599923093178
+        }
+      },
+      "stepLimitHits": 3,
+      "summedSSEVsControl": 0.9970363775174292,
+      "ties": 1,
+      "wins": 1,
+      "worst": 1.0
+    }
+  },
+  "exponent_8": {
+    "1dsfm": {
+      "acceleratedAcceptances": 33,
+      "geometricSSEVsControl": 1.0,
+      "losses": 0,
+      "nominalFallbacks": 4,
+      "optimizationSeconds": 42.162242245000016,
+      "optimizationVsControl": 1.0312520140096362,
+      "oracleCalls": 99,
+      "scenes": {
+        "roman_forum": {
+          "sse": 5362107.524463689,
+          "sseVsControl": 1.0
+        },
+        "trafalgar": {
+          "sse": 19437033.44510751,
+          "sseVsControl": 1.0
+        }
+      },
+      "stepLimitHits": 0,
+      "summedSSEVsControl": 1.0,
+      "ties": 2,
+      "wins": 0,
+      "worst": 1.0
+    },
+    "bal": {
+      "acceleratedAcceptances": 26,
+      "geometricSSEVsControl": 1.0,
+      "losses": 0,
+      "nominalFallbacks": 3,
+      "optimizationSeconds": 79.95125560800079,
+      "optimizationVsControl": 1.0037320914816392,
+      "oracleCalls": 94,
+      "scenes": {
+        "bal1490": {
+          "sse": 3088565.6208167723,
+          "sseVsControl": 1.0
+        },
+        "bal3068": {
+          "sse": 3696251.4889710965,
+          "sseVsControl": 1.0
+        }
+      },
+      "stepLimitHits": 3,
+      "summedSSEVsControl": 1.0,
+      "ties": 2,
+      "wins": 0,
+      "worst": 1.0
+    }
+  },
+  "restart_1": {
+    "1dsfm": {
+      "acceleratedAcceptances": 31,
+      "geometricSSEVsControl": 1.032178669097833,
+      "losses": 2,
+      "nominalFallbacks": 2,
+      "optimizationSeconds": 38.464640404999955,
+      "optimizationVsControl": 0.940811868005352,
+      "oracleCalls": 95,
+      "scenes": {
+        "roman_forum": {
+          "sse": 5429237.406250146,
+          "sseVsControl": 1.012519309148537
+        },
+        "trafalgar": {
+          "sse": 20452030.291867696,
+          "sseVsControl": 1.052219740714377
+        }
+      },
+      "stepLimitHits": 0,
+      "summedSSEVsControl": 1.0436356537460079,
+      "ties": 0,
+      "wins": 0,
+      "worst": 1.052219740714377
+    },
+    "bal": {
+      "acceleratedAcceptances": 28,
+      "geometricSSEVsControl": 0.9992721484079568,
+      "losses": 0,
+      "nominalFallbacks": 3,
+      "optimizationSeconds": 83.71399066000049,
+      "optimizationVsControl": 1.0509705981781743,
+      "oracleCalls": 94,
+      "scenes": {
+        "bal1490": {
+          "sse": 3086818.5153092695,
+          "sseVsControl": 0.9994343311031738
+        },
+        "bal3068": {
+          "sse": 3692961.795689943,
+          "sseVsControl": 0.9991099920308536
+        }
+      },
+      "stepLimitHits": 4,
+      "summedSSEVsControl": 0.999257636763504,
+      "ties": 0,
+      "wins": 2,
+      "worst": 0.9994343311031738
+    }
+  },
+  "restart_5": {
+    "1dsfm": {
+      "acceleratedAcceptances": 33,
+      "geometricSSEVsControl": 1.0,
+      "losses": 0,
+      "nominalFallbacks": 4,
+      "optimizationSeconds": 42.35049425100078,
+      "optimizationVsControl": 1.0358564954127254,
+      "oracleCalls": 99,
+      "scenes": {
+        "roman_forum": {
+          "sse": 5362107.524463689,
+          "sseVsControl": 1.0
+        },
+        "trafalgar": {
+          "sse": 19437033.44510751,
+          "sseVsControl": 1.0
+        }
+      },
+      "stepLimitHits": 0,
+      "summedSSEVsControl": 1.0,
+      "ties": 2,
+      "wins": 0,
+      "worst": 1.0
+    },
+    "bal": {
+      "acceleratedAcceptances": 26,
+      "geometricSSEVsControl": 1.0,
+      "losses": 0,
+      "nominalFallbacks": 3,
+      "optimizationSeconds": 81.32923473899973,
+      "optimizationVsControl": 1.021031655630538,
+      "oracleCalls": 94,
+      "scenes": {
+        "bal1490": {
+          "sse": 3088565.6208167723,
+          "sseVsControl": 1.0
+        },
+        "bal3068": {
+          "sse": 3696251.4889710965,
+          "sseVsControl": 1.0
+        }
+      },
+      "stepLimitHits": 3,
+      "summedSSEVsControl": 1.0,
+      "ties": 2,
+      "wins": 0,
+      "worst": 1.0
+    }
+  }
+}

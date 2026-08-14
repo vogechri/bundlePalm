@@ -95,6 +95,10 @@ _REQUIRED_PROTO_FIELDS = {
         "landmark_model_reduction",
         "reduced_gradient_f64",
     },
+    "camera_step_proto": {
+        "centers_f64",
+        "transport_product_state",
+    },
 }
 _missing_proto_fields = {
     message_name: sorted(
@@ -239,6 +243,7 @@ class AdmmWorkerClient:
             "updatePreconditioning": 0.0,
             "buildSchurSystems": 0.0,
             "applyCameraStep": 0.0,
+            "transportProductState": 0.0,
             "refineLandmarksAtConsensus": 0.0,
             "evaluateConsensusSSE": 0.0,
             "controlLandmarkState": 0.0,
@@ -1180,6 +1185,90 @@ class AdmmWorkerClient:
         self.last_trust_region_radii = trust_region_radii
         return costs, corrected_cameras, corrected_landmarks
 
+    @_timed_operation("transportProductState")
+    def transport_product_state(
+        self,
+        camera_indices_in_cluster,
+        point_indices_in_cluster,
+        local_cameras,
+        centers,
+        landmarks,
+        tangent_step,
+        cluster_count,
+    ):
+        local_cameras = np.asarray(local_cameras, dtype=np.float64)
+        centers = np.asarray(centers, dtype=np.float64)
+        tangent_step = np.asarray(tangent_step, dtype=np.float64)
+        if local_cameras.shape != centers.shape or local_cameras.ndim != 3:
+            raise ValueError("local cameras and centers must have equal 3D shapes")
+        if tangent_step.shape != local_cameras.shape[1:]:
+            raise ValueError("tangent step must match one global camera state")
+        if local_cameras.shape[0] != cluster_count:
+            raise ValueError("local camera cluster count mismatch")
+
+        self.phase_id += 1
+        phase_id = self.phase_id
+        for cluster_id in range(cluster_count):
+            unique_cameras = np.unique(camera_indices_in_cluster[cluster_id])
+            unique_points = np.unique(point_indices_in_cluster[cluster_id])
+            request = test_pb2.request_proto()
+            update = request.camera_step
+            update.cluster_id = cluster_id
+            update.run_id = self.run_id
+            update.phase_id = phase_id
+            update.cameras_f64 = np.ascontiguousarray(
+                local_cameras[cluster_id, unique_cameras], dtype="<f8"
+            ).tobytes()
+            update.centers_f64 = np.ascontiguousarray(
+                centers[cluster_id, unique_cameras], dtype="<f8"
+            ).tobytes()
+            update.landmarks_f64 = np.ascontiguousarray(
+                landmarks[unique_points], dtype="<f8"
+            ).tobytes()
+            update.tangent_step_f64 = np.ascontiguousarray(
+                tangent_step[unique_cameras], dtype="<f8"
+            ).tobytes()
+            update.transport_product_state = True
+            self._send(request)
+
+        transported_cameras = local_cameras.copy()
+        transported_landmarks = landmarks.copy()
+        costs = np.empty(cluster_count, dtype=np.float64)
+        trust_region_radii = np.empty(cluster_count, dtype=np.float64)
+        pending = set(range(cluster_count))
+        while pending:
+            payload = self.pull_socket.recv()
+            self.received_bytes += len(payload)
+            reply = test_pb2.return_cluster_proto()
+            reply.ParseFromString(payload)
+            if reply.run_id != self.run_id or reply.phase_id != phase_id:
+                continue
+            cluster_id = reply.cluster_id
+            if cluster_id not in pending:
+                raise RuntimeError(
+                    f"duplicate product-state reply for cluster {cluster_id}"
+                )
+            pending.remove(cluster_id)
+            unique_cameras = np.unique(camera_indices_in_cluster[cluster_id])
+            unique_points = np.unique(point_indices_in_cluster[cluster_id])
+            returned_cameras = np.frombuffer(
+                reply.cameras_f64, dtype="<f8"
+            ).reshape((-1, 9))
+            returned_landmarks = np.frombuffer(
+                reply.landmarks_f64, dtype="<f8"
+            ).reshape((-1, 3))
+            if returned_cameras.shape[0] != unique_cameras.size:
+                raise RuntimeError("worker returned invalid transported cameras")
+            if returned_landmarks.shape[0] != unique_points.size:
+                raise RuntimeError("worker returned invalid transported landmarks")
+            transported_cameras[cluster_id, unique_cameras] = returned_cameras
+            transported_landmarks[unique_points] = returned_landmarks
+            costs[cluster_id] = reply.cost
+            trust_region_radii[cluster_id] = reply.trust_region_radius
+
+        self.last_trust_region_radii = trust_region_radii
+        return costs, transported_cameras, transported_landmarks
+
     @_timed_operation("refineLandmarksAtConsensus")
     def refine_landmarks_at_consensus(
         self,
@@ -1373,6 +1462,7 @@ class AdmmWorkerClient:
             raise ValueError("landmark state ID must be positive")
         operations = {
             "current": test_pb2.landmark_state_proto.MATERIALIZE_CURRENT,
+            "accepted": test_pb2.landmark_state_proto.MATERIALIZE_ACCEPTED,
             "best": test_pb2.landmark_state_proto.MATERIALIZE_BEST,
         }
         if source not in operations:

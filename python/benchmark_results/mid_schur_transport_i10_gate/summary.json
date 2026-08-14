@@ -1,0 +1,206 @@
+{
+  "control": {
+    "1dsfm": {
+      "geometricSSEVsControl": 1.0,
+      "geometricSSEVsReset": 1.0475917484910873,
+      "optimizationSeconds": 20.735162324996054,
+      "postI10Accepts": 8,
+      "postI10Rejections": 2,
+      "scenes": {
+        "roman_forum": {
+          "correctionAccepted": false,
+          "offsetError": NaN,
+          "postI10Accepts": 3,
+          "postI10Rejections": 2,
+          "sse": 6997910.658245143,
+          "sseVsControl": 1.0,
+          "sseVsReset": 1.0311828788809174
+        },
+        "trafalgar": {
+          "correctionAccepted": false,
+          "offsetError": NaN,
+          "postI10Accepts": 5,
+          "postI10Rejections": 0,
+          "sse": 20123169.680652466,
+          "sseVsControl": 1.0,
+          "sseVsReset": 1.0642617269767027
+        }
+      },
+      "summedSSEVsControl": 1.0,
+      "winsTiesLossesVsControl": [
+        0,
+        2,
+        0
+      ]
+    },
+    "bal": {
+      "geometricSSEVsControl": 1.0,
+      "geometricSSEVsReset": 1.0031868438360894,
+      "optimizationSeconds": 46.57466353699783,
+      "postI10Accepts": 6,
+      "postI10Rejections": 4,
+      "scenes": {
+        "bal1490": {
+          "correctionAccepted": false,
+          "offsetError": NaN,
+          "postI10Accepts": 5,
+          "postI10Rejections": 0,
+          "sse": 3150737.63630563,
+          "sseVsControl": 1.0,
+          "sseVsReset": 0.999999999999995
+        },
+        "bal3068": {
+          "correctionAccepted": false,
+          "offsetError": NaN,
+          "postI10Accepts": 1,
+          "postI10Rejections": 4,
+          "sse": 3726738.8466443573,
+          "sseVsControl": 1.0,
+          "sseVsReset": 1.0063838436458192
+        }
+      },
+      "summedSSEVsControl": 1.0,
+      "winsTiesLossesVsControl": [
+        0,
+        2,
+        0
+      ]
+    }
+  },
+  "reset": {
+    "1dsfm": {
+      "geometricSSEVsControl": 0.9545703289858509,
+      "geometricSSEVsReset": 1.0,
+      "optimizationSeconds": 22.19781841400254,
+      "postI10Accepts": 3,
+      "postI10Rejections": 7,
+      "scenes": {
+        "roman_forum": {
+          "correctionAccepted": true,
+          "offsetError": NaN,
+          "postI10Accepts": 1,
+          "postI10Rejections": 4,
+          "sse": 6786294.460047248,
+          "sseVsControl": 0.9697600886132259,
+          "sseVsReset": 1.0
+        },
+        "trafalgar": {
+          "correctionAccepted": true,
+          "offsetError": NaN,
+          "postI10Accepts": 2,
+          "postI10Rejections": 3,
+          "sse": 18908102.36859431,
+          "sseVsControl": 0.9396184929441613,
+          "sseVsReset": 1.0
+        }
+      },
+      "summedSSEVsControl": 0.9473957713915301,
+      "winsTiesLossesVsControl": [
+        2,
+        0,
+        0
+      ]
+    },
+    "bal": {
+      "geometricSSEVsControl": 0.9968232798748605,
+      "geometricSSEVsReset": 1.0,
+      "optimizationSeconds": 82.44333187400116,
+      "postI10Accepts": 6,
+      "postI10Rejections": 4,
+      "scenes": {
+        "bal1490": {
+          "correctionAccepted": false,
+          "offsetError": NaN,
+          "postI10Accepts": 5,
+          "postI10Rejections": 0,
+          "sse": 3150737.636305646,
+          "sseVsControl": 1.000000000000005,
+          "sseVsReset": 1.0
+        },
+        "bal3068": {
+          "correctionAccepted": true,
+          "offsetError": NaN,
+          "postI10Accepts": 1,
+          "postI10Rejections": 4,
+          "sse": 3703098.8426280064,
+          "sseVsControl": 0.9936566513004695,
+          "sseVsReset": 1.0
+        }
+      },
+      "summedSSEVsControl": 0.996562692133526,
+      "winsTiesLossesVsControl": [
+        1,
+        1,
+        0
+      ]
+    }
+  },
+  "transport": {
+    "1dsfm": {
+      "geometricSSEVsControl": 0.9737319232868734,
+      "geometricSSEVsReset": 1.0200735280776847,
+      "optimizationSeconds": 23.355514527000196,
+      "postI10Accepts": 6,
+      "postI10Rejections": 4,
+      "scenes": {
+        "roman_forum": {
+          "correctionAccepted": true,
+          "offsetError": 4.656612873077393e-10,
+          "postI10Accepts": 1,
+          "postI10Rejections": 4,
+          "sse": 7488680.376907178,
+          "sseVsControl": 1.0701308922948018,
+          "sseVsReset": 1.1035006542959587
+        },
+        "trafalgar": {
+          "correctionAccepted": true,
+          "offsetError": 0.0,
+          "postI10Accepts": 5,
+          "postI10Rejections": 0,
+          "sse": 17829464.707439624,
+          "sseVsControl": 0.8860167155764662,
+          "sseVsReset": 0.942953679849636
+        }
+      },
+      "summedSSEVsControl": 0.9335227346395564,
+      "winsTiesLossesVsControl": [
+        1,
+        0,
+        1
+      ]
+    },
+    "bal": {
+      "geometricSSEVsControl": 0.9994663456751938,
+      "geometricSSEVsReset": 1.0026514888382874,
+      "optimizationSeconds": 78.39986586300438,
+      "postI10Accepts": 9,
+      "postI10Rejections": 1,
+      "scenes": {
+        "bal1490": {
+          "correctionAccepted": false,
+          "offsetError": NaN,
+          "postI10Accepts": 5,
+          "postI10Rejections": 0,
+          "sse": 3150737.636305646,
+          "sseVsControl": 1.000000000000005,
+          "sseVsReset": 1.0
+        },
+        "bal3068": {
+          "correctionAccepted": true,
+          "offsetError": 0.0,
+          "postI10Accepts": 4,
+          "postI10Rejections": 1,
+          "sse": 3722762.3273650142,
+          "sseVsControl": 0.9989329761373208,
+          "sseVsReset": 1.0053100080696342
+        }
+      },
+      "summedSSEVsControl": 0.9994218054704824,
+      "winsTiesLossesVsControl": [
+        1,
+        1,
+        0
+      ]
+    }
+  }
+}

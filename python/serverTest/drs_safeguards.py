@@ -8,18 +8,27 @@ def relative_safeguard_ratios(
     total_iterations,
     dre_increase_at_reference=0.01,
     reference_iteration=5,
+    annealing_exponent=4.0,
     minimum_primal_ratio=1.001,
 ):
     """Return the annealed DRE and primal ratios used by client_acc.py."""
     if total_iterations <= 0 or not 0 <= iteration < total_iterations:
         raise ValueError("iteration must be inside the run")
-    if dre_increase_at_reference < 0.0 or minimum_primal_ratio < 1.0:
+    if (
+        dre_increase_at_reference < 0.0
+        or minimum_primal_ratio < 1.0
+        or not np.isfinite(annealing_exponent)
+        or annealing_exponent <= 0.0
+        or reference_iteration < 0
+    ):
         raise ValueError("relative safeguard tolerances are invalid")
     reference_iteration = min(reference_iteration, total_iterations - 1)
-    iteration_factor = (1.0 - iteration / total_iterations) ** 4
+    iteration_factor = (
+        1.0 - iteration / total_iterations
+    ) ** annealing_exponent
     reference_factor = (
         1.0 - reference_iteration / total_iterations
-    ) ** 4
+    ) ** annealing_exponent
     dre_ratio = (
         1.0
         + dre_increase_at_reference * iteration_factor / reference_factor

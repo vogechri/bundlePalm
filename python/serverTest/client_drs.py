@@ -1514,6 +1514,12 @@ def parse_arguments():
         type=float,
         default=1.0 / 3.0,
     )
+    parser.add_argument(
+        "--mid-shared-schur-correction-iteration", type=int, default=0
+    )
+    parser.add_argument(
+        "--mid-shared-schur-transport-product-state", action="store_true"
+    )
     parser.add_argument("--final-shared-schur-correction", action="store_true")
     parser.add_argument(
         "--shared-schur-landmark-damping", type=float, default=3.0
@@ -1602,6 +1608,13 @@ def parse_arguments():
             "schur_pcg", "nesterov",
         ),
         default="nesterov",
+    )
+    parser.add_argument(
+        "--local-solver-switch-iteration", type=int, default=0
+    )
+    parser.add_argument(
+        "--local-solver-after-switch",
+        choices=("nesterov", "schur_pcg"),
     )
     parser.add_argument(
         "--trust-region-policy", choices=("ceres", "drs", "daba"), default="daba"
@@ -1735,6 +1748,8 @@ def parse_arguments():
     parser.add_argument("--dre-relative-increase", type=float, default=0.01)
     parser.add_argument("--minimum-primal-ratio", type=float, default=1.001)
     parser.add_argument("--safeguard-annealing-iterations", type=int, default=0)
+    parser.add_argument("--safeguard-reference-iteration", type=int, default=5)
+    parser.add_argument("--safeguard-annealing-exponent", type=float, default=4.0)
     parser.add_argument("--safeguard-relative-deadband", type=float, default=0.0)
     parser.add_argument("--catastrophic-ratio", type=float, default=1e6)
     parser.add_argument("--recovery-penalty-ratio", type=float, default=2.0)
@@ -2170,6 +2185,23 @@ def validate_arguments(arguments):
             raise ValueError("ceres_prox_se3 requires the se3_left camera update")
         if arguments.proximal_metric != "block":
             raise ValueError("ceres_prox_se3 requires the block proximal metric")
+    if not 0 <= arguments.local_solver_switch_iteration < arguments.iterations:
+        raise ValueError("local solver switch must be in [0, iterations)")
+    if arguments.local_solver_switch_iteration > 0:
+        if arguments.local_solver not in ("nesterov", "schur_pcg"):
+            raise ValueError(
+                "local solver switching supports Nesterov and Schur-PCG only"
+            )
+        if arguments.local_solver_after_switch is None:
+            raise ValueError(
+                "local solver switch requires --local-solver-after-switch"
+            )
+        if arguments.local_solver_after_switch == arguments.local_solver:
+            raise ValueError("local solver switch must change the solver")
+    elif arguments.local_solver_after_switch is not None:
+        raise ValueError(
+            "local solver after-switch requires a positive switch iteration"
+        )
     if arguments.adaptive_local_depth:
         if arguments.proximal_metric != "block":
             raise ValueError("adaptive local depth requires block proximal metric")
@@ -2189,6 +2221,7 @@ def validate_arguments(arguments):
             )
     if (
         arguments.initial_shared_schur_correction
+        or arguments.mid_shared_schur_correction_iteration > 0
         or arguments.final_shared_schur_correction
     ):
         if not arguments.shared_only_camera_proximal:
@@ -2207,6 +2240,24 @@ def validate_arguments(arguments):
             raise ValueError(
                 "shared Schur correction requires direct tangent assembly"
             )
+    if (
+        arguments.mid_shared_schur_correction_iteration < 0
+        or (
+            arguments.mid_shared_schur_correction_iteration > 0
+            and arguments.mid_shared_schur_correction_iteration
+            >= arguments.iterations
+        )
+    ):
+        raise ValueError(
+            "mid shared Schur correction must be in [0, iterations)"
+        )
+    if (
+        arguments.mid_shared_schur_transport_product_state
+        and arguments.mid_shared_schur_correction_iteration <= 0
+    ):
+        raise ValueError(
+            "mid shared Schur product transport requires a correction iteration"
+        )
     if (
         arguments.initial_shared_schur_basin_guard
         and not arguments.initial_shared_schur_correction
@@ -2507,6 +2558,13 @@ def validate_arguments(arguments):
         raise ValueError("Huber delta must be finite and nonnegative")
     if arguments.safeguard_annealing_iterations < 0:
         raise ValueError("safeguard annealing iterations must be nonnegative")
+    if arguments.safeguard_reference_iteration < 0:
+        raise ValueError("safeguard reference iteration must be nonnegative")
+    if (
+        not np.isfinite(arguments.safeguard_annealing_exponent)
+        or arguments.safeguard_annealing_exponent <= 0.0
+    ):
+        raise ValueError("safeguard annealing exponent must be positive and finite")
     if (
         not np.isfinite(arguments.safeguard_relative_deadband)
         or arguments.safeguard_relative_deadband < 0.0
@@ -2633,6 +2691,309 @@ def diagonal_trust_is_active(iteration, cutoff):
         os.environ.get("BUNDLE_PALM_DIAGONAL_TRUST_DAMPING", "0") == "1"
         or iteration < cutoff
     )
+
+
+def transport_product_camera_state(
+    local_cameras,
+    centers,
+    tangent_step,
+    camera_scaling,
+):
+    local_cameras = np.asarray(local_cameras, dtype=np.float64)
+    centers = np.asarray(centers, dtype=np.float64)
+    tangent_step = np.asarray(tangent_step, dtype=np.float64)
+    if local_cameras.shape != centers.shape or local_cameras.ndim != 3:
+        raise ValueError("local cameras and centers must have equal 3D shapes")
+    if tangent_step.shape != local_cameras.shape[1:]:
+        raise ValueError("tangent step must match one global camera state")
+
+    physical_cameras = to_physical_cameras(local_cameras, camera_scaling)
+    repeated_step = np.broadcast_to(tangent_step, local_cameras.shape)
+    transported_physical = left_se3_camera_plus(
+        physical_cameras,
+        repeated_step,
+    )
+    transported_cameras = to_scaled_cameras(
+        transported_physical,
+        camera_scaling,
+    )
+    transported_centers = transported_cameras - (local_cameras - centers)
+    return transported_cameras, transported_centers
+
+
+def run_mid_shared_schur_rebase(
+    worker,
+    arguments,
+    camera_indices_in_cluster,
+    point_indices_in_cluster,
+    accepted_consensus,
+    accepted_landmarks,
+    camera_scaling,
+    camera_count,
+    cluster_count,
+    evaluate_state,
+    camera_indices,
+    point_indices,
+    observations,
+    materialization_state_id,
+    local_cameras=None,
+    centers=None,
+):
+    started_at = time.perf_counter()
+    current_landmarks = accepted_landmarks.copy()
+    if arguments.worker_owned_landmarks:
+        current_landmarks = worker.materialize_current_landmarks(
+            point_indices_in_cluster,
+            current_landmarks,
+            cluster_count,
+            materialization_state_id,
+            source="accepted",
+        )
+    initial_metrics = evaluate_state(
+        to_physical_cameras(accepted_consensus, camera_scaling),
+        current_landmarks,
+        camera_indices,
+        point_indices,
+        observations,
+    )
+    systems = worker.build_schur_systems(
+        camera_indices_in_cluster,
+        point_indices_in_cluster,
+        accepted_consensus,
+        current_landmarks,
+        cluster_count,
+        arguments.shared_schur_landmark_damping,
+    )
+    tangent_step, diagnostics = solve_global_schur_system(
+        systems,
+        camera_count,
+        arguments.shared_schur_camera_damping,
+        arguments.shared_schur_step_scale,
+        arguments.shared_schur_linear_solver,
+        arguments.shared_schur_relative_tolerance,
+        arguments.shared_schur_maximum_iterations,
+        operator_mode=arguments.shared_schur_operator,
+        preconditioner_mode=arguments.shared_schur_preconditioner,
+        coarse_basis=(
+            similarity_gauge_tangent_basis(
+                to_physical_cameras(accepted_consensus, camera_scaling)
+            )
+            if arguments.shared_schur_preconditioner == "gauge_deflated"
+            else None
+        ),
+    )
+    corrected_costs, corrected_consensus, corrected_landmarks = (
+        worker.apply_camera_step(
+            camera_indices_in_cluster,
+            point_indices_in_cluster,
+            accepted_consensus,
+            current_landmarks,
+            tangent_step,
+            cluster_count,
+            arguments.shared_schur_landmark_refinement_steps,
+        )
+    )
+    candidate_metrics = evaluate_state(
+        to_physical_cameras(corrected_consensus, camera_scaling),
+        corrected_landmarks,
+        camera_indices,
+        point_indices,
+        observations,
+    )
+    initial_sse = initial_metrics["objectiveValue"]
+    candidate_sse = candidate_metrics["objectiveValue"]
+    accepted = (
+        diagnostics["linearTermination"] == 0
+        and np.isfinite(candidate_sse)
+        and candidate_sse < initial_sse
+    )
+    relative_decrease = (
+        (initial_sse - candidate_sse)
+        / max(initial_sse, np.finfo(np.float64).tiny)
+        if np.isfinite(candidate_sse)
+        else float("-inf")
+    )
+    diagnostics = {
+        **diagnostics,
+        "initialSSE": initial_sse,
+        "candidateSSE": candidate_sse,
+        "workerSSE": float(np.sum(corrected_costs)),
+        "relativeDecrease": relative_decrease,
+        "accepted": accepted,
+    }
+    pre_rebase_radii = worker.last_trust_region_radii.tolist()
+    post_rebase_radii = []
+    trust_rebased = False
+    product_state_transported = False
+    transported_local_cameras = None
+    transported_centers = None
+    transport_worker_sse = float("nan")
+    transport_offset_error = float("nan")
+    if accepted:
+        if getattr(
+            arguments,
+            "mid_shared_schur_transport_product_state",
+            False,
+        ):
+            if local_cameras is None or centers is None:
+                raise ValueError(
+                    "product-state transport requires local cameras and centers"
+                )
+            (
+                expected_local_cameras,
+                expected_centers,
+            ) = transport_product_camera_state(
+                local_cameras,
+                centers,
+                tangent_step,
+                camera_scaling,
+            )
+            active_cameras = np.zeros(
+                local_cameras.shape[:2], dtype=bool
+            )
+            for cluster_id, indices in enumerate(camera_indices_in_cluster):
+                active_cameras[cluster_id, np.unique(indices)] = True
+            expected_local_cameras = np.where(
+                active_cameras[..., None],
+                expected_local_cameras,
+                local_cameras,
+            )
+            expected_centers = np.where(
+                active_cameras[..., None],
+                expected_centers,
+                centers,
+            )
+            (
+                transport_costs,
+                transported_local_cameras,
+                transported_landmarks,
+            ) = worker.transport_product_state(
+                camera_indices_in_cluster,
+                point_indices_in_cluster,
+                local_cameras,
+                centers,
+                corrected_landmarks,
+                tangent_step,
+                cluster_count,
+            )
+            if not (
+                np.allclose(
+                    transported_landmarks,
+                    corrected_landmarks,
+                    rtol=1e-12,
+                    atol=1e-14,
+                )
+                and np.isfinite(np.sum(transport_costs))
+            ):
+                raise RuntimeError(
+                    "worker product-state transport changed landmarks or cost"
+                )
+            original_offsets = np.asarray(local_cameras) - np.asarray(centers)
+            transported_centers = transported_local_cameras - original_offsets
+            transported_centers = np.where(
+                active_cameras[..., None],
+                transported_centers,
+                centers,
+            )
+            transported_offsets = (
+                transported_local_cameras - transported_centers
+            )
+            transport_offset_error = float(
+                np.max(
+                    np.abs(transported_offsets - original_offsets)[
+                        active_cameras
+                    ]
+                )
+            )
+            transport_worker_sse = float(np.sum(transport_costs))
+            diagnostics["transportExpectedCameraCoordinateError"] = float(
+                np.max(
+                    np.abs(
+                        transported_local_cameras - expected_local_cameras
+                    )[active_cameras]
+                )
+            )
+            diagnostics["transportExpectedCenterCoordinateError"] = float(
+                np.max(
+                    np.abs(transported_centers - expected_centers)[
+                        active_cameras
+                    ]
+                )
+            )
+            post_rebase_radii = worker.last_trust_region_radii.tolist()
+            if not np.array_equal(
+                np.asarray(post_rebase_radii),
+                np.asarray(pre_rebase_radii),
+            ):
+                raise RuntimeError(
+                    "product-state transport changed worker trust radii"
+                )
+            product_state_transported = True
+        else:
+            rebase_costs, rebased_consensus, rebased_landmarks = (
+                worker.apply_camera_step(
+                    camera_indices_in_cluster,
+                    point_indices_in_cluster,
+                    corrected_consensus,
+                    corrected_landmarks,
+                    np.zeros_like(tangent_step),
+                    cluster_count,
+                    0,
+                    rebase_trust_state=True,
+                )
+            )
+            if not (
+                np.allclose(
+                    rebased_consensus,
+                    corrected_consensus,
+                    rtol=1e-12,
+                    atol=1e-14,
+                )
+                and np.allclose(
+                    rebased_landmarks,
+                    corrected_landmarks,
+                    rtol=1e-12,
+                    atol=1e-14,
+                )
+                and np.isfinite(np.sum(rebase_costs))
+            ):
+                raise RuntimeError(
+                    "mid-run trust rebase changed accepted correction geometry"
+                )
+            corrected_consensus = rebased_consensus
+            corrected_landmarks = rebased_landmarks
+            post_rebase_radii = worker.last_trust_region_radii.tolist()
+            trust_rebased = True
+    else:
+        worker.apply_camera_step(
+            camera_indices_in_cluster,
+            point_indices_in_cluster,
+            accepted_consensus,
+            current_landmarks,
+            np.zeros_like(tangent_step),
+            cluster_count,
+            0,
+        )
+        corrected_consensus = accepted_consensus.copy()
+        corrected_landmarks = current_landmarks
+    return {
+        "accepted": accepted,
+        "initialMetrics": initial_metrics,
+        "candidateMetrics": candidate_metrics,
+        "workerSSE": float(np.sum(corrected_costs)),
+        "consensus": corrected_consensus,
+        "landmarks": corrected_landmarks,
+        "diagnostics": diagnostics,
+        "trustRebased": trust_rebased,
+        "productStateTransported": product_state_transported,
+        "localCameras": transported_local_cameras,
+        "centers": transported_centers,
+        "transportWorkerSSE": transport_worker_sse,
+        "transportOffsetError": transport_offset_error,
+        "preRebaseTrustRadii": pre_rebase_radii,
+        "postRebaseTrustRadii": post_rebase_radii,
+        "seconds": time.perf_counter() - started_at,
+    }
 
 
 def main():
@@ -2933,6 +3294,19 @@ def main():
     initial_shared_schur_trust_rebased = False
     initial_shared_schur_pre_rebase_trust_radii = []
     initial_shared_schur_post_rebase_trust_radii = []
+    mid_shared_schur_attempted = False
+    mid_shared_schur_accepted = False
+    mid_shared_schur_initial_sse = float("nan")
+    mid_shared_schur_candidate_sse = float("nan")
+    mid_shared_schur_worker_sse = float("nan")
+    mid_shared_schur_seconds = 0.0
+    mid_shared_schur_diagnostics = {}
+    mid_shared_schur_trust_rebased = False
+    mid_shared_schur_product_state_transported = False
+    mid_shared_schur_transport_worker_sse = float("nan")
+    mid_shared_schur_transport_offset_error = float("nan")
+    mid_shared_schur_pre_rebase_trust_radii = []
+    mid_shared_schur_post_rebase_trust_radii = []
     bootstrap_basin_guard_active = False
     bootstrap_basin_guard_ceiling = float("nan")
     bootstrap_basin_guard_rejections = 0
@@ -3511,6 +3885,12 @@ def main():
             arguments.safeguard_annealing_iterations or arguments.iterations
         )
         for iteration in range(arguments.iterations):
+            mid_shared_schur_triggered = (
+                arguments.mid_shared_schur_correction_iteration > 0
+                and iteration
+                == arguments.mid_shared_schur_correction_iteration
+            )
+            mid_shared_schur_accepted_this_iteration = False
             outer_acceleration_restart_applied = (
                 outer_acceleration_restart_is_active(
                     arguments.outer_acceleration_restart_iteration,
@@ -3530,6 +3910,120 @@ def main():
                 accepted_since_curvature_increase = 0
                 accelerator.reset()
                 acceleration_failures = 0
+            if mid_shared_schur_triggered:
+                mid_shared_schur_attempted = True
+                mid_result = run_mid_shared_schur_rebase(
+                    worker,
+                    arguments,
+                    camera_indices_in_cluster,
+                    point_indices_in_cluster,
+                    accepted_consensus,
+                    accepted_landmarks,
+                    camera_scaling,
+                    camera_count,
+                    cluster_count,
+                    evaluate_state,
+                    camera_indices,
+                    point_indices,
+                    observations,
+                    3 * arguments.iterations + iteration + 2,
+                    local_cameras=local_cameras,
+                    centers=centers,
+                )
+                mid_shared_schur_accepted = mid_result["accepted"]
+                mid_shared_schur_accepted_this_iteration = mid_result[
+                    "accepted"
+                ]
+                mid_shared_schur_initial_sse = mid_result[
+                    "initialMetrics"
+                ]["objectiveValue"]
+                mid_shared_schur_candidate_sse = mid_result[
+                    "candidateMetrics"
+                ]["objectiveValue"]
+                mid_shared_schur_worker_sse = mid_result["workerSSE"]
+                mid_shared_schur_seconds = mid_result["seconds"]
+                mid_shared_schur_diagnostics = mid_result["diagnostics"]
+                mid_shared_schur_trust_rebased = mid_result[
+                    "trustRebased"
+                ]
+                mid_shared_schur_product_state_transported = mid_result[
+                    "productStateTransported"
+                ]
+                mid_shared_schur_transport_worker_sse = mid_result[
+                    "transportWorkerSSE"
+                ]
+                mid_shared_schur_transport_offset_error = mid_result[
+                    "transportOffsetError"
+                ]
+                mid_shared_schur_pre_rebase_trust_radii = mid_result[
+                    "preRebaseTrustRadii"
+                ]
+                mid_shared_schur_post_rebase_trust_radii = mid_result[
+                    "postRebaseTrustRadii"
+                ]
+                if mid_shared_schur_accepted:
+                    consensus = mid_result["consensus"].copy()
+                    landmarks = mid_result["landmarks"].copy()
+                    if mid_shared_schur_product_state_transported:
+                        local_cameras = mid_result["localCameras"].copy()
+                        centers = mid_result["centers"].copy()
+                    else:
+                        local_cameras = np.repeat(
+                            consensus[None, :, :], cluster_count, axis=0
+                        )
+                        centers = local_cameras.copy()
+                    accepted_metrics = mid_result["candidateMetrics"].copy()
+                    if mid_shared_schur_product_state_transported:
+                        objective_change = (
+                            mid_shared_schur_candidate_sse
+                            - mid_shared_schur_initial_sse
+                        )
+                        accepted_dre += objective_change
+                        accepted_model_dre += objective_change
+                    else:
+                        accepted_dre = mid_shared_schur_candidate_sse
+                        accepted_model_dre = mid_shared_schur_candidate_sse
+                        accepted_fixed_point_squared = 0.0
+                    accepted_consensus = consensus.copy()
+                    accepted_landmarks = landmarks.copy()
+                    mid_state_id = 3 * arguments.iterations + iteration + 3
+                    if arguments.worker_owned_landmarks:
+                        worker.control_nominal_landmark_state(
+                            cluster_count,
+                            mid_state_id,
+                            "save_accepted",
+                        )
+                    if mid_shared_schur_candidate_sse < best_sse:
+                        best_sse = mid_shared_schur_candidate_sse
+                        best_metrics = mid_result["candidateMetrics"].copy()
+                        best_iteration = iteration
+                        best_cameras = to_physical_cameras(
+                            consensus, camera_scaling
+                        ).copy()
+                        best_points = landmarks.copy()
+                        if arguments.worker_owned_landmarks:
+                            worker.control_nominal_landmark_state(
+                                cluster_count,
+                                mid_state_id,
+                                "save_best",
+                            )
+                    if not mid_shared_schur_product_state_transported:
+                        block_curvature_multiplier = (
+                            arguments.block_curvature_multiplier
+                        )
+                        block_regularization = arguments.block_regularization
+                        accepted_since_curvature_increase = 0
+                        revert_landmark_mode = 0
+                        trust_region_recovery_ratio = 1.0
+                        shared_trust_region_radius = (
+                            arguments.shared_trust_region_initial_radius
+                        )
+                        collective_trust_region_radii = None
+                        adaptive_local_steps.fill(arguments.local_steps)
+                        adaptive_defect_history.clear()
+                        adaptive_depth_dwell_remaining.fill(0)
+                        accelerator.reset()
+                        acceleration_failures = 0
             schur_alignment_tangent = None
             schur_alignment_base_cameras = None
             schur_alignment_diagnostics = None
@@ -3631,6 +4125,12 @@ def main():
                 if arguments.adaptive_local_depth
                 else arguments.local_steps
             )
+            iteration_local_solver = (
+                arguments.local_solver_after_switch
+                if arguments.local_solver_switch_iteration > 0
+                and iteration >= arguments.local_solver_switch_iteration
+                else arguments.local_solver
+            )
             reference_sse = accepted_metrics["objectiveValue"]
             reference_dre = accepted_dre
             proximal_penalty = penalty
@@ -3710,7 +4210,7 @@ def main():
                 initialize=False,
                 cluster_count=cluster_count,
                 local_steps=iteration_local_steps,
-                local_solver=arguments.local_solver,
+                local_solver=iteration_local_solver,
                 trust_region_policy=arguments.trust_region_policy,
                 camera_scaling=camera_scaling,
                 revert_landmarks=revert_landmark_mode,
@@ -4475,6 +4975,8 @@ def main():
                 min(iteration, safeguard_annealing_iterations - 1),
                 safeguard_annealing_iterations,
                 dre_increase_at_reference=arguments.dre_relative_increase,
+                reference_iteration=arguments.safeguard_reference_iteration,
+                annealing_exponent=arguments.safeguard_annealing_exponent,
                 minimum_primal_ratio=arguments.minimum_primal_ratio,
             )
             dre_threshold_exceeded = (
@@ -4690,7 +5192,7 @@ def main():
                         initialize=False,
                         cluster_count=cluster_count,
                         local_steps=iteration_local_steps,
-                        local_solver=arguments.local_solver,
+                        local_solver=iteration_local_solver,
                         trust_region_policy=arguments.trust_region_policy,
                         camera_scaling=camera_scaling,
                         revert_landmarks=(
@@ -5821,6 +6323,14 @@ def main():
                     outer_acceleration_restart_applied
                 ),
                 "localStateRebaseApplied": local_state_rebase_applied,
+                "midSharedSchurTriggered": mid_shared_schur_triggered,
+                "midSharedSchurAccepted": (
+                    mid_shared_schur_accepted_this_iteration
+                ),
+                "midSharedSchurProductStateTransported": (
+                    mid_shared_schur_product_state_transported
+                    and mid_shared_schur_accepted_this_iteration
+                ),
                 "forcedLocalTrustRegionRadius": (
                     float(np.exp(np.mean(np.log(
                         np.asarray(
@@ -5872,6 +6382,7 @@ def main():
                 "proximalOracleCalls": proximal_oracle_calls,
                 "acceleratedAcceptances": accelerated_acceptances,
                 "nominalFallbacks": nominal_fallbacks,
+                "accelerationStepLimitHits": accelerator.step_limit_hits,
                 "localProximalObjectiveSum": float(np.sum(prox_costs)),
                 "proximalPenalty": proximal_penalty,
                 "nextPenalty": penalty,
@@ -5979,6 +6490,7 @@ def main():
                     if arguments.adaptive_local_depth
                     else iteration_local_steps
                 ),
+                "localSolverUsed": iteration_local_solver,
                 "nextLocalSteps": (
                     next_local_steps.tolist()
                     if arguments.adaptive_local_depth
@@ -6453,6 +6965,10 @@ def main():
         "relativeResidualUntil": arguments.relative_residual_until,
         "threadsPerCluster": arguments.threads_per_cluster,
         "localSolver": arguments.local_solver,
+        "localSolverSwitchIteration": (
+            arguments.local_solver_switch_iteration
+        ),
+        "localSolverAfterSwitch": arguments.local_solver_after_switch,
         "cameraUpdate": os.environ.get(
             "BUNDLE_PALM_CAMERA_UPDATE", "additive"
         ),
@@ -6652,6 +7168,8 @@ def main():
         "accelerationRestartAfter": arguments.acceleration_restart_after,
         "acceleratedAcceptances": accelerated_acceptances,
         "nominalFallbacks": nominal_fallbacks,
+        "accelerationMaximumStepRatio": accelerator.max_step_ratio,
+        "accelerationStepLimitHits": accelerator.step_limit_hits,
         "proximalOracleCalls": proximal_oracle_calls,
         "proximalMetric": arguments.proximal_metric,
         "consensusMetric": arguments.consensus_metric,
@@ -6798,6 +7316,35 @@ def main():
         "initialSharedSchurPostRebaseTrustRadii": (
             initial_shared_schur_post_rebase_trust_radii
         ),
+        "midSharedSchurCorrectionIteration": (
+            arguments.mid_shared_schur_correction_iteration
+        ),
+        "midSharedSchurAttempted": mid_shared_schur_attempted,
+        "midSharedSchurAccepted": mid_shared_schur_accepted,
+        "midSharedSchurInitialSSE": mid_shared_schur_initial_sse,
+        "midSharedSchurCandidateSSE": mid_shared_schur_candidate_sse,
+        "midSharedSchurWorkerSSE": mid_shared_schur_worker_sse,
+        "midSharedSchurSeconds": mid_shared_schur_seconds,
+        "midSharedSchurDiagnostics": mid_shared_schur_diagnostics,
+        "midSharedSchurTrustRebased": mid_shared_schur_trust_rebased,
+        "midSharedSchurTransportProductState": (
+            arguments.mid_shared_schur_transport_product_state
+        ),
+        "midSharedSchurProductStateTransported": (
+            mid_shared_schur_product_state_transported
+        ),
+        "midSharedSchurTransportWorkerSSE": (
+            mid_shared_schur_transport_worker_sse
+        ),
+        "midSharedSchurTransportOffsetError": (
+            mid_shared_schur_transport_offset_error
+        ),
+        "midSharedSchurPreRebaseTrustRadii": (
+            mid_shared_schur_pre_rebase_trust_radii
+        ),
+        "midSharedSchurPostRebaseTrustRadii": (
+            mid_shared_schur_post_rebase_trust_radii
+        ),
         "initialSharedSchurBasinGuard": (
             arguments.initial_shared_schur_basin_guard
         ),
@@ -6883,6 +7430,8 @@ def main():
         "dreRelativeIncrease": arguments.dre_relative_increase,
         "minimumPrimalRatio": arguments.minimum_primal_ratio,
         "safeguardAnnealingIterations": safeguard_annealing_iterations,
+        "safeguardReferenceIteration": arguments.safeguard_reference_iteration,
+        "safeguardAnnealingExponent": arguments.safeguard_annealing_exponent,
         "safeguardRelativeDeadband": arguments.safeguard_relative_deadband,
         "catastrophicRatio": arguments.catastrophic_ratio,
         "recoveryPenaltyRatio": arguments.recovery_penalty_ratio,
