@@ -173,8 +173,10 @@ def snapshot_metric_blocks(metric_blocks):
     return metric_blocks.copy()
 
 
-def model_ratio_damping_factor(gain_ratio):
-    return max(1.0 / 3.0, 1.0 - (2.0 * gain_ratio - 1.0) ** 3)
+def model_ratio_damping_factor(gain_ratio, minimum_factor=1.0 / 3.0):
+    if not 0.0 < minimum_factor < 1.0:
+        raise ValueError("model-ratio minimum factor must be in (0, 1)")
+    return max(minimum_factor, 1.0 - (2.0 * gain_ratio - 1.0) ** 3)
 
 
 def rejected_schur_damping(
@@ -198,6 +200,41 @@ def rejected_schur_damping(
         camera_damping * damping_factor,
         landmark_damping * damping_factor,
     )
+
+
+def assess_schur_trial(
+    initial_sse,
+    candidate_sse,
+    diagnostics,
+    damping_policy,
+    minimum_gain_ratio,
+):
+    actual_reduction = 0.5 * (initial_sse - candidate_sse)
+    damped_predicted_reduction = diagnostics["dampedPredictedReduction"]
+    undamped_predicted_reduction = diagnostics["undampedPredictedReduction"]
+    damped_gain_ratio = (
+        actual_reduction / damped_predicted_reduction
+        if damped_predicted_reduction > 0.0 else float("-inf")
+    )
+    undamped_gain_ratio = (
+        actual_reduction / undamped_predicted_reduction
+        if undamped_predicted_reduction > 0.0 else float("-inf")
+    )
+    accepted = (
+        np.isfinite(candidate_sse)
+        and candidate_sse < initial_sse
+        and diagnostics["linearTermination"] == 0
+        and (
+            damping_policy != "model_ratio"
+            or damped_gain_ratio > minimum_gain_ratio
+        )
+    )
+    return {
+        "actualReduction": actual_reduction,
+        "dampedGainRatio": damped_gain_ratio,
+        "undampedGainRatio": undamped_gain_ratio,
+        "accepted": accepted,
+    }
 
 
 def evaluate_global_schur_direction(
@@ -779,6 +816,34 @@ def select_global_schur_majorizer(observability_fractions, threshold):
     cluster_means = np.mean(fractions[valid], axis=1)
     statistic = float(np.median(cluster_means))
     return statistic > threshold, statistic, int(np.sum(valid))
+
+
+def schur_system_observability_fractions(schur_systems):
+    fractions = np.full((len(schur_systems), 3), np.nan, dtype=np.float64)
+    for cluster, system in enumerate(schur_systems):
+        diagonal_mask = system.block_rows == system.block_columns
+        diagonal_rows = system.block_rows[diagonal_mask]
+        diagonal_blocks = system.blocks[diagonal_mask]
+        schur_by_camera = {
+            int(camera): block
+            for camera, block in zip(diagonal_rows, diagonal_blocks)
+        }
+        schur_blocks = np.asarray([
+            schur_by_camera[int(camera)] for camera in system.camera_ids
+        ])
+        for group in range(3):
+            parameters = np.arange(3 * group, 3 * group + 3)
+            raw_trace = float(np.sum(
+                system.camera_diagonal[:, parameters, parameters]
+            ))
+            schur_trace = float(np.sum(
+                schur_blocks[:, parameters, parameters]
+            ))
+            if raw_trace > 0.0 and np.isfinite(raw_trace + schur_trace):
+                fractions[cluster, group] = np.clip(
+                    (raw_trace - schur_trace) / raw_trace, 0.0, 1.0
+                )
+    return fractions
 
 
 def damp_shared_camera_disagreement(
@@ -1439,6 +1504,16 @@ def parse_arguments():
     parser.add_argument(
         "--initial-shared-schur-maximum-corrections", type=int, default=1
     )
+    parser.add_argument(
+        "--initial-shared-schur-damping-policy",
+        choices=("geometric", "model_ratio"),
+        default="geometric",
+    )
+    parser.add_argument(
+        "--initial-shared-schur-model-ratio-minimum-factor",
+        type=float,
+        default=1.0 / 3.0,
+    )
     parser.add_argument("--final-shared-schur-correction", action="store_true")
     parser.add_argument(
         "--shared-schur-landmark-damping", type=float, default=3.0
@@ -1669,6 +1744,12 @@ def parse_arguments():
     parser.add_argument(
         "--initial-state",
         help="NPZ cameras/points in the raw dataset BAL coordinate frame",
+    )
+    parser.add_argument(
+        "--initial-state-frame",
+        choices=("raw", "canonical"),
+        default="raw",
+        help="coordinate frame of --initial-state cameras/points",
     )
     parser.add_argument("--variant-name", default="plain_drs")
     parser.add_argument("--residual-balance-slack", type=float, default=0.01)
@@ -1963,6 +2044,21 @@ def validate_arguments(arguments):
                 "global Schur majorizer selection forbids a pre-enabled "
                 "Schur proximal metric"
             )
+    if arguments.factorized_coupled_schur_proximal_metric:
+        if arguments.global_schur_majorizer_observability_threshold < 0.0:
+            raise ValueError(
+                "factorized Schur metrics require the global observability selector"
+            )
+        if arguments.local_solver != "schur_pcg":
+            raise ValueError("factorized Schur metrics require Schur PCG")
+        if arguments.proximal_metric != "block":
+            raise ValueError("factorized Schur metrics require block metrics")
+        if arguments.consensus_metric != "full":
+            raise ValueError("factorized Schur metrics require full consensus")
+        if not arguments.shared_only_camera_proximal:
+            raise ValueError(
+                "factorized Schur metrics require shared-only camera proximal"
+            )
     if not np.isfinite(arguments.unique_camera_metric_scale) or not (
         0.0 < arguments.unique_camera_metric_scale <= 1.0
     ):
@@ -2128,6 +2224,14 @@ def validate_arguments(arguments):
     if arguments.initial_shared_schur_maximum_corrections <= 0:
         raise ValueError(
             "initial shared Schur maximum corrections must be positive"
+        )
+    if not (
+        0.0
+        < arguments.initial_shared_schur_model_ratio_minimum_factor
+        < 1.0
+    ):
+        raise ValueError(
+            "initial shared Schur model-ratio minimum factor must be in (0, 1)"
         )
     if (
         arguments.initial_shared_schur_correction
@@ -2612,16 +2716,25 @@ def main():
     raw_cameras, raw_points, camera_indices, point_indices, raw_observations = (
         read_bal_problem(arguments.dataset)
     )
+    initial_state_cameras = None
+    initial_state_points = None
     if arguments.initial_state:
         expected_camera_shape = raw_cameras.shape
         expected_point_shape = raw_points.shape
         with np.load(arguments.initial_state) as initial_state:
-            raw_cameras = np.asarray(initial_state["cameras"], dtype=np.float64)
-            raw_points = np.asarray(initial_state["points"], dtype=np.float64)
-        if raw_cameras.shape != expected_camera_shape:
+            initial_state_cameras = np.asarray(
+                initial_state["cameras"], dtype=np.float64
+            )
+            initial_state_points = np.asarray(
+                initial_state["points"], dtype=np.float64
+            )
+        if initial_state_cameras.shape != expected_camera_shape:
             raise ValueError("initial-state camera shape does not match dataset")
-        if raw_points.shape != expected_point_shape:
+        if initial_state_points.shape != expected_point_shape:
             raise ValueError("initial-state point shape does not match dataset")
+        if arguments.initial_state_frame == "raw":
+            raw_cameras = initial_state_cameras
+            raw_points = initial_state_points
     cameras, points, observations = canonicalize_bal_problem(
         raw_cameras,
         raw_points,
@@ -2629,6 +2742,11 @@ def main():
         raw_observations,
         normalize_scene=arguments.scene_normalization == "points_p95",
     )
+    if initial_state_cameras is not None and (
+        arguments.initial_state_frame == "canonical"
+    ):
+        cameras = initial_state_cameras.copy()
+        points = initial_state_points.copy()
     camera_count = len(cameras)
     point_count = len(points)
     huber_delta = arguments.huber_delta if arguments.huber_delta > 0.0 else None
@@ -2952,6 +3070,27 @@ def main():
                 else None
             ),
         )
+        if arguments.factorized_coupled_schur_proximal_metric:
+            startup_schur_systems = worker.build_schur_systems(
+                camera_indices_in_cluster,
+                point_indices_in_cluster,
+                consensus,
+                landmarks,
+                cluster_count,
+                0.0,
+            )
+            startup_observability = schur_system_observability_fractions(
+                startup_schur_systems
+            )
+            (
+                global_schur_majorizer_selected,
+                global_schur_observability_statistic,
+                global_schur_observability_valid_clusters,
+            ) = select_global_schur_majorizer(
+                startup_observability,
+                arguments.global_schur_majorizer_observability_threshold,
+            )
+            global_schur_majorizer_decided = True
         if arguments.initial_shared_schur_correction:
             initial_shared_schur_attempted = True
             initial_shared_schur_initial_sse = best_sse
@@ -3027,6 +3166,13 @@ def main():
                 and np.isfinite(initial_shared_schur_candidate_sse)
                 and initial_shared_schur_candidate_sse < best_sse
             )
+            initial_assessment = assess_schur_trial(
+                best_sse,
+                initial_shared_schur_candidate_sse,
+                initial_shared_schur_diagnostics,
+                "geometric",
+                arguments.shared_schur_minimum_gain_ratio,
+            )
             initial_relative_decrease = (
                 (best_sse - initial_shared_schur_candidate_sse)
                 / max(best_sse, np.finfo(np.float64).tiny)
@@ -3035,6 +3181,7 @@ def main():
             )
             initial_shared_schur_attempts.append({
                 "correction": 0,
+                "attempt": 0,
                 "cameraDamping": arguments.shared_schur_camera_damping,
                 "landmarkDamping": arguments.shared_schur_landmark_damping,
                 "initialSSE": best_sse,
@@ -3042,6 +3189,11 @@ def main():
                 "workerSSE": initial_shared_schur_worker_sse,
                 "relativeDecrease": initial_relative_decrease,
                 "accepted": initial_shared_schur_accepted,
+                "actualReduction": initial_assessment["actualReduction"],
+                "dampedGainRatio": initial_assessment["dampedGainRatio"],
+                "undampedGainRatio": initial_assessment[
+                    "undampedGainRatio"
+                ],
                 "diagnostics": initial_shared_schur_diagnostics,
             })
             if initial_shared_schur_accepted:
@@ -3063,13 +3215,23 @@ def main():
                 accepted_fixed_point_squared = 0.0
                 accepted_consensus = consensus.copy()
                 accepted_landmarks = landmarks.copy()
+                initial_damping_factor = (
+                    model_ratio_damping_factor(
+                        initial_assessment["dampedGainRatio"],
+                        arguments.
+                        initial_shared_schur_model_ratio_minimum_factor,
+                    )
+                    if arguments.initial_shared_schur_damping_policy
+                    == "model_ratio"
+                    else arguments.shared_schur_damping_decrease
+                )
                 camera_damping = (
                     arguments.shared_schur_camera_damping
-                    * arguments.shared_schur_damping_decrease
+                    * initial_damping_factor
                 )
                 landmark_damping = (
                     arguments.shared_schur_landmark_damping
-                    * arguments.shared_schur_damping_decrease
+                    * initial_damping_factor
                 )
                 if initial_relative_decrease < (
                     arguments.shared_schur_minimum_relative_decrease
@@ -3078,9 +3240,11 @@ def main():
                         "minimum_relative_decrease"
                     )
                 else:
-                    for correction in range(
-                        1,
-                        arguments.initial_shared_schur_maximum_corrections,
+                    correction = 1
+                    attempt = 0
+                    rejection_damping_factor = 2.0
+                    while correction < (
+                        arguments.initial_shared_schur_maximum_corrections
                     ):
                         correction_initial_sse = best_sse
                         schur_systems = worker.build_schur_systems(
@@ -3166,26 +3330,26 @@ def main():
                             if np.isfinite(initial_shared_schur_candidate_sse)
                             else float("-inf")
                         )
-                        accepted = (
-                            initial_shared_schur_diagnostics[
-                                "linearTermination"
-                            ] == 0
-                            and np.isfinite(initial_shared_schur_candidate_sse)
-                            and initial_shared_schur_candidate_sse
-                            < correction_initial_sse
+                        assessment = assess_schur_trial(
+                            correction_initial_sse,
+                            initial_shared_schur_candidate_sse,
+                            initial_shared_schur_diagnostics,
+                            arguments.initial_shared_schur_damping_policy,
+                            arguments.shared_schur_minimum_gain_ratio,
                         )
                         initial_shared_schur_attempts.append({
                             "correction": correction,
+                            "attempt": attempt,
                             "cameraDamping": camera_damping,
                             "landmarkDamping": landmark_damping,
                             "initialSSE": correction_initial_sse,
                             "candidateSSE": initial_shared_schur_candidate_sse,
                             "workerSSE": initial_shared_schur_worker_sse,
                             "relativeDecrease": relative_decrease,
-                            "accepted": accepted,
+                            **assessment,
                             "diagnostics": initial_shared_schur_diagnostics,
                         })
-                        if not accepted:
+                        if not assessment["accepted"]:
                             worker.apply_camera_step(
                                 camera_indices_in_cluster,
                                 point_indices_in_cluster,
@@ -3195,7 +3359,33 @@ def main():
                                 cluster_count,
                                 0,
                             )
-                            initial_shared_schur_termination = "rejected"
+                            if (
+                                arguments.initial_shared_schur_damping_policy
+                                == "model_ratio"
+                                and attempt + 1
+                                < arguments.shared_schur_maximum_attempts
+                            ):
+                                camera_damping, landmark_damping = (
+                                    rejected_schur_damping(
+                                        camera_damping,
+                                        landmark_damping,
+                                        attempt,
+                                        rejection_damping_factor,
+                                        arguments.
+                                        shared_schur_fallback_camera_damping,
+                                        arguments.
+                                        shared_schur_fallback_landmark_damping,
+                                    )
+                                )
+                                rejection_damping_factor *= 2.0
+                                attempt += 1
+                                continue
+                            initial_shared_schur_termination = (
+                                "attempts_exhausted"
+                                if arguments.initial_shared_schur_damping_policy
+                                == "model_ratio"
+                                else "rejected"
+                            )
                             break
                         initial_shared_schur_accepted_corrections += 1
                         scaled_cameras = corrected_scaled_cameras.copy()
@@ -3217,12 +3407,21 @@ def main():
                         accepted_fixed_point_squared = 0.0
                         accepted_consensus = consensus.copy()
                         accepted_landmarks = landmarks.copy()
-                        camera_damping *= (
-                            arguments.shared_schur_damping_decrease
+                        damping_factor = (
+                            model_ratio_damping_factor(
+                                assessment["dampedGainRatio"],
+                                arguments.
+                                initial_shared_schur_model_ratio_minimum_factor,
+                            )
+                            if arguments.initial_shared_schur_damping_policy
+                            == "model_ratio"
+                            else arguments.shared_schur_damping_decrease
                         )
-                        landmark_damping *= (
-                            arguments.shared_schur_damping_decrease
-                        )
+                        camera_damping *= damping_factor
+                        landmark_damping *= damping_factor
+                        correction += 1
+                        attempt = 0
+                        rejection_damping_factor = 2.0
                         if relative_decrease < (
                             arguments.shared_schur_minimum_relative_decrease
                         ):
@@ -3473,12 +3672,19 @@ def main():
                 and not global_schur_majorizer_decided
             )
             iteration_schur_majorizer_active = (
+                not arguments.factorized_coupled_schur_proximal_metric
+                and
                 global_schur_majorizer_decided
                 and global_schur_majorizer_selected
                 and (
                     arguments.global_schur_majorizer_until == 0
                     or iteration < arguments.global_schur_majorizer_until
                 )
+            )
+            iteration_factorized_schur_active = (
+                arguments.factorized_coupled_schur_proximal_metric
+                and global_schur_majorizer_decided
+                and global_schur_majorizer_selected
             )
 
             camera_proximal_multipliers = camera_metric_multipliers(
@@ -3555,6 +3761,9 @@ def main():
                 ),
                 schur_offdiagonal_majorizer=(
                     iteration_schur_majorizer_active
+                ),
+                factorized_coupled_schur_metric=(
+                    iteration_factorized_schur_active
                 ),
             )
             local_linear_iterations = worker.last_linear_iterations.astype(
@@ -4533,6 +4742,9 @@ def main():
                         ),
                         schur_offdiagonal_majorizer=(
                             iteration_schur_majorizer_active
+                        ),
+                        factorized_coupled_schur_metric=(
+                            iteration_factorized_schur_active
                         ),
                     )
                     trial_trust_region_radii = (
@@ -6378,6 +6590,7 @@ def main():
             str(Path(arguments.initial_state).resolve())
             if arguments.initial_state else None
         ),
+        "initialStateFrame": arguments.initial_state_frame,
         "cameraScaling": arguments.camera_scaling,
         "cameraScalingMaximumRatio": arguments.camera_scaling_maximum_ratio,
         "cameraScalingClippingPercentile": (
@@ -6556,6 +6769,12 @@ def main():
         ),
         "initialSharedSchurMaximumCorrections": (
             arguments.initial_shared_schur_maximum_corrections
+        ),
+        "initialSharedSchurDampingPolicy": (
+            arguments.initial_shared_schur_damping_policy
+        ),
+        "initialSharedSchurModelRatioMinimumFactor": (
+            arguments.initial_shared_schur_model_ratio_minimum_factor
         ),
         "initialSharedSchurAttempted": initial_shared_schur_attempted,
         "initialSharedSchurAccepted": initial_shared_schur_accepted,

@@ -224,12 +224,15 @@ def test_bootstrap_trust_rebase_cli_flag(monkeypatch):
             "--initial-shared-schur-correction",
             "--initial-shared-schur-maximum-corrections",
             "3",
+            "--initial-shared-schur-damping-policy",
+            "model_ratio",
             "--initial-shared-schur-rebase-trust-state",
         ],
     )
     arguments = client_drs.parse_arguments()
     assert arguments.initial_shared_schur_correction
     assert arguments.initial_shared_schur_maximum_corrections == 3
+    assert arguments.initial_shared_schur_damping_policy == "model_ratio"
     assert arguments.initial_shared_schur_rebase_trust_state
 
 
@@ -249,6 +252,69 @@ def test_initial_shared_schur_rejects_nonpositive_correction_cap(monkeypatch):
         match="initial shared Schur maximum corrections must be positive",
     ):
         client_drs.validate_arguments(client_drs.parse_arguments())
+
+
+def test_schur_trial_model_ratio_requires_model_agreement():
+    diagnostics = {
+        "linearTermination": 0,
+        "dampedPredictedReduction": 100.0,
+        "undampedPredictedReduction": 80.0,
+    }
+
+    geometric = client_drs.assess_schur_trial(
+        1000.0, 990.0, diagnostics, "geometric", 0.1
+    )
+    model_ratio = client_drs.assess_schur_trial(
+        1000.0, 990.0, diagnostics, "model_ratio", 0.1
+    )
+
+    assert geometric["accepted"]
+    assert not model_ratio["accepted"]
+    assert model_ratio["actualReduction"] == 5.0
+    assert model_ratio["dampedGainRatio"] == 0.05
+
+
+def test_schur_trial_model_ratio_accepts_converged_predictive_step():
+    assessment = client_drs.assess_schur_trial(
+        1000.0,
+        900.0,
+        {
+            "linearTermination": 0,
+            "dampedPredictedReduction": 100.0,
+            "undampedPredictedReduction": 125.0,
+        },
+        "model_ratio",
+        0.1,
+    )
+
+    assert assessment["accepted"]
+    assert assessment["dampedGainRatio"] == 0.5
+    assert assessment["undampedGainRatio"] == 0.4
+
+
+def test_model_ratio_damping_respects_startup_floor():
+    assert client_drs.model_ratio_damping_factor(2.0) == pytest.approx(1.0 / 3.0)
+    assert client_drs.model_ratio_damping_factor(2.0, 0.5) == 0.5
+
+
+def test_canonical_initial_state_cli_choice(monkeypatch):
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "client_drs.py",
+            "unused.bal",
+            "--initial-state",
+            "stage.npz",
+            "--initial-state-frame",
+            "canonical",
+        ],
+    )
+
+    arguments = client_drs.parse_arguments()
+
+    assert arguments.initial_state == "stage.npz"
+    assert arguments.initial_state_frame == "canonical"
 
 
 def test_ruiz_camera_scaling_cli_choice(monkeypatch):

@@ -416,6 +416,38 @@ bool DirectTangentNormalEquationsEnabled() {
       "BUNDLE_PALM_DIRECT_TANGENT_NORMAL_EQUATIONS", 0, 0, 1) == 1;
   return enabled;
 }
+bool SchurProximalMetricEnabled() {
+  static const bool enabled = EnvironmentInteger(
+      "BUNDLE_PALM_SCHUR_PROXIMAL_METRIC", 0, 0, 1) == 1;
+  return enabled;
+}
+
+bool CoupledSchurProximalMetricEnabled() {
+  static const bool enabled = EnvironmentInteger(
+      "BUNDLE_PALM_COUPLED_SCHUR_PROXIMAL_METRIC", 0, 0, 1) == 1;
+  return enabled;
+}
+
+bool FactorizedCoupledSchurProximalMetricEnabled() {
+  static const bool enabled = EnvironmentInteger(
+      "BUNDLE_PALM_FACTORIZED_COUPLED_SCHUR_PROXIMAL_METRIC",
+      0, 0, 1) == 1;
+  return enabled;
+}
+
+double CoupledSchurProximalMetricStabilization() {
+  static const double value = EnvironmentDouble(
+      "BUNDLE_PALM_COUPLED_SCHUR_PROXIMAL_METRIC_STABILIZATION",
+      1., 0., 16.);
+  return value;
+}
+
+int FactorizedSchurProximalMetricStabilizationBuckets() {
+  static const int value = EnvironmentInteger(
+      "BUNDLE_PALM_FACTORIZED_SCHUR_PROXIMAL_METRIC_STABILIZATION_BUCKETS",
+      32, 1, 4096);
+  return value;
+}
 
 bool DisableLocalProximalTermEnabled() {
   static const bool enabled = EnvironmentInteger(
@@ -1225,6 +1257,8 @@ class BlockEdgeMatrix {
   int rows() const { return 9 * num_cameras_; }
   int cols() const { return 3 * num_landmarks_; }
   size_t EdgeCount() const { return edges_.size(); }
+  int LandmarkCount() const { return num_landmarks_; }
+  const std::vector<CameraLandmarkEdge>& Edges() const { return edges_; }
 
   double SquaredNorm() const {
     double result = 0.;
@@ -1304,6 +1338,117 @@ class BlockEdgeMatrix {
           camera_blocks.coeffRef(9 * edge.camera + row,
               9 * edge.camera + column) -= contribution(row, column);
         }
+      }
+    }
+  }
+
+  void AddBucketedSchurOffDiagonalFrobeniusBounds(
+      const SparseMatrix<double, RowMajor>& landmark_inverse,
+      const std::vector<double>& camera_multipliers,
+      double scale,
+      int bucket_count,
+      SparseMatrix<double, RowMajor>& camera_blocks) const {
+    THROW_IF(landmark_inverse.rows() != cols() ||
+             camera_blocks.rows() != rows() ||
+             camera_multipliers.size() !=
+                 static_cast<size_t>(num_cameras_) ||
+             scale < 0. || !std::isfinite(scale) || bucket_count <= 0);
+    if (scale == 0.) {
+      return;
+    }
+    for (int bucket = 0; bucket < bucket_count; ++bucket) {
+      std::map<std::pair<int, int>, Eigen::Matrix<double, 9, 9>> pair_blocks;
+      for (int landmark = 0; landmark < num_landmarks_; ++landmark) {
+        Eigen::Matrix3d inverse_block;
+        for (int row = 0; row < 3; ++row) {
+          for (int column = 0; column < 3; ++column) {
+            inverse_block(row, column) = landmark_inverse.coeff(
+                3 * landmark + row, 3 * landmark + column);
+          }
+        }
+        const std::vector<int>& landmark_edges = landmark_edges_[landmark];
+        for (int left_index = 0; left_index < landmark_edges.size();
+             ++left_index) {
+          const CameraLandmarkEdge& left = edges_[landmark_edges[left_index]];
+          if (!(camera_multipliers[left.camera] > 0.)) {
+            continue;
+          }
+          const Eigen::Map<
+              const Eigen::Matrix<double, 9, 3, Eigen::RowMajor>> left_cross(
+                  left.values.data());
+          for (int right_index = left_index + 1;
+               right_index < landmark_edges.size(); ++right_index) {
+            const CameraLandmarkEdge& right =
+                edges_[landmark_edges[right_index]];
+            if (!(camera_multipliers[right.camera] > 0.)) {
+              continue;
+            }
+            const int row_camera = std::min(left.camera, right.camera);
+            const int column_camera = std::max(left.camera, right.camera);
+            const std::uint64_t key =
+                static_cast<std::uint64_t>(row_camera) * num_cameras_
+                + column_camera;
+            if (key % bucket_count !=
+                static_cast<std::uint64_t>(bucket)) {
+              continue;
+            }
+            const Eigen::Map<
+                const Eigen::Matrix<double, 9, 3, Eigen::RowMajor>> right_cross(
+                    right.values.data());
+            Eigen::Matrix<double, 9, 9> contribution =
+                left_cross * inverse_block * right_cross.transpose();
+            if (left.camera > right.camera) {
+              contribution.transposeInPlace();
+            }
+            const std::pair<int, int> camera_pair{
+                row_camera, column_camera};
+            auto block = pair_blocks.find(camera_pair);
+            if (block == pair_blocks.end()) {
+              block = pair_blocks.emplace(
+                  camera_pair, Eigen::Matrix<double, 9, 9>::Zero()).first;
+            }
+            block->second -= contribution;
+          }
+        }
+      }
+      for (const auto& [camera_pair, block] : pair_blocks) {
+        const double bound = scale * block.norm();
+        for (const int camera : {camera_pair.first, camera_pair.second}) {
+          for (int parameter = 0; parameter < 9; ++parameter) {
+            camera_blocks.coeffRef(
+                9 * camera + parameter,
+                9 * camera + parameter) += bound;
+          }
+        }
+      }
+    }
+  }
+
+  void ScaleCameraRows(const std::vector<double>& scales) {
+    THROW_IF(scales.size() != static_cast<size_t>(num_cameras_));
+    for (CameraLandmarkEdge& edge : edges_) {
+      THROW_IF(scales[edge.camera] < 0. ||
+               !std::isfinite(scales[edge.camera]));
+      for (double& value : edge.values) {
+        value *= scales[edge.camera];
+      }
+    }
+  }
+
+  void ZeroLandmarksWithFewerThanTwoActiveEdges() {
+    for (const std::vector<int>& landmark_edges : landmark_edges_) {
+      int active_edges = 0;
+      for (const int edge_index : landmark_edges) {
+        const CameraLandmarkEdge& edge = edges_[edge_index];
+        active_edges += std::any_of(
+            edge.values.begin(), edge.values.end(),
+            [](double value) { return value != 0.; });
+      }
+      if (active_edges >= 2) {
+        continue;
+      }
+      for (const int edge_index : landmark_edges) {
+        edges_[edge_index].values.fill(0.);
       }
     }
   }
@@ -1624,6 +1769,10 @@ public:
           != static_cast<size_t>(numCameras));
       local_iterations = std::max(1, std::min(20, pro.iterations()));
       frozen_block_metric_initialized = false;
+      camera_proximal_metric.resize(0, 0);
+      factorized_proximal_active = false;
+      factorized_proximal_diagonal.resize(0, 0);
+      factorized_proximal_landmark_inverse.resize(0, 0);
       scalar_proximal_prior = pro.scalar_proximal_prior();
       block_curvature_multiplier = pro.block_curvature_multiplier();
       metric_diagnostic_iterations = pro.metric_diagnostic_iterations();
@@ -1631,6 +1780,8 @@ public:
       oracle_kind = pro.oracle_kind();
       collect_camera_diagonal_metrics =
         pro.collect_camera_diagonal_metrics();
+      factorized_coupled_schur_metric =
+        pro.factorized_coupled_schur_metric();
       proximal_defect_diagnostic = pro.proximal_defect_diagnostic();
         diagonal_trust_damping = pro.diagonal_trust_damping()
           || DiagonalTrustDampingEnabled();
@@ -2097,6 +2248,136 @@ public:
     }
     result.makeCompressed();
     return result;
+  }
+
+  static SparseMatrix<double, RowMajor> CameraPairBlocksToSparse(
+      int camera_count,
+      const std::map<std::pair<int, int>,
+          Eigen::Matrix<double, 9, 9>>& blocks) {
+    std::vector<Eigen::Triplet<double>> entries;
+    entries.reserve(81 * (2 * blocks.size() - camera_count));
+    for (const auto& [camera_pair, block] : blocks) {
+      const int row_camera = camera_pair.first;
+      const int column_camera = camera_pair.second;
+      THROW_IF(row_camera < 0 || row_camera >= camera_count ||
+               column_camera < row_camera || column_camera >= camera_count);
+      for (int row = 0; row < 9; ++row) {
+        for (int column = 0; column < 9; ++column) {
+          entries.emplace_back(
+              9 * row_camera + row,
+              9 * column_camera + column,
+              block(row, column));
+          if (row_camera != column_camera) {
+            entries.emplace_back(
+                9 * column_camera + column,
+                9 * row_camera + row,
+                block(row, column));
+          }
+        }
+      }
+    }
+    SparseMatrix<double, RowMajor> result(
+        9 * camera_count, 9 * camera_count);
+    result.setFromTriplets(entries.begin(), entries.end());
+    result.makeCompressed();
+    return result;
+  }
+
+  void SetCameraProximalMetric(
+      const SparseMatrix<double, RowMajor>& metric) {
+    THROW_IF(metric.rows() != 9 * numCameras ||
+             metric.cols() != 9 * numCameras);
+    camera_proximal_metric = metric;
+    camera_proximal_metric.makeCompressed();
+    full_stepSize.assign(81 * numCameras, 0.);
+    for (int camera = 0; camera < numCameras; ++camera) {
+      for (int row = 0; row < 9; ++row) {
+        for (int column = 0; column < 9; ++column) {
+          full_stepSize[81 * camera + 9 * row + column] =
+              camera_proximal_metric.coeff(
+                  9 * camera + row, 9 * camera + column);
+        }
+      }
+    }
+  }
+
+  void SetFactorizedCameraProximalMetric(
+      const SparseMatrix<double, RowMajor>& diagonal,
+      const BlockEdgeMatrix& cross,
+      const SparseMatrix<double, RowMajor>& landmark_inverse) {
+    THROW_IF(diagonal.rows() != 9 * numCameras ||
+             diagonal.cols() != 9 * numCameras ||
+             cross.rows() != 9 * numCameras ||
+             cross.cols() != 3 * numLandmarks ||
+             landmark_inverse.rows() != 3 * numLandmarks ||
+             landmark_inverse.cols() != 3 * numLandmarks);
+    factorized_proximal_diagonal = diagonal;
+    factorized_proximal_cross = cross;
+    factorized_proximal_landmark_inverse = landmark_inverse;
+    for (int camera = 0; camera < numCameras; ++camera) {
+      for (int row = 0; row < 9; ++row) {
+        for (int column = row; column < 9; ++column) {
+          const int global_row = 9 * camera + row;
+          const int global_column = 9 * camera + column;
+          const double value = 0.5 * (
+              factorized_proximal_diagonal.coeff(global_row, global_column)
+              + factorized_proximal_diagonal.coeff(
+                  global_column, global_row));
+          factorized_proximal_diagonal.coeffRef(
+              global_row, global_column) = value;
+          factorized_proximal_diagonal.coeffRef(
+              global_column, global_row) = value;
+        }
+      }
+    }
+    factorized_proximal_active = true;
+    SparseMatrix<double, RowMajor> block_diagonal =
+        factorized_proximal_diagonal;
+    factorized_proximal_cross.SubtractSchurDiagonal(
+        factorized_proximal_landmark_inverse, block_diagonal);
+    SetCameraProximalMetric(block_diagonal);
+  }
+
+  Eigen::VectorXd ApplyFactorizedCameraProximalMetric(
+      const Eigen::VectorXd& vector) const {
+    THROW_IF(!factorized_proximal_active ||
+             vector.size() != factorized_proximal_diagonal.rows());
+    Eigen::VectorXd factor_workspace(factorized_proximal_cross.cols());
+    factorized_proximal_cross.TransposeMultiply(vector, factor_workspace);
+    factor_workspace =
+        factorized_proximal_landmark_inverse * factor_workspace;
+    Eigen::VectorXd camera_workspace(factorized_proximal_cross.rows());
+    factorized_proximal_cross.Multiply(
+        factor_workspace, camera_workspace);
+    return factorized_proximal_diagonal * vector - camera_workspace;
+  }
+
+  Eigen::VectorXd ApplyCameraProximalMetric(
+      const Eigen::VectorXd& vector) const {
+    if (factorized_proximal_active) {
+      return ApplyFactorizedCameraProximalMetric(vector);
+    }
+    THROW_IF(camera_proximal_metric.rows() != vector.size());
+    return camera_proximal_metric * vector;
+  }
+
+  Eigen::VectorXd ApplyCameraProximalMetricInTangent(
+      const Eigen::VectorXd& vector,
+      const std::vector<Eigen::Matrix<double, 9, 9>>& tangent_to_scaled) const {
+    Eigen::VectorXd scaled(vector.size());
+    for (int camera = 0; camera < numCameras; ++camera) {
+      scaled.segment<9>(9 * camera) =
+          tangent_to_scaled[camera] * vector.segment<9>(9 * camera);
+    }
+    return TransformCameraVector(
+        ApplyCameraProximalMetric(scaled), tangent_to_scaled);
+  }
+
+  SparseMatrix<double, RowMajor> FactorizedProximalBlockDiagonalInTangent(
+      const std::vector<Eigen::Matrix<double, 9, 9>>& tangent_to_scaled) const {
+    THROW_IF(!factorized_proximal_active);
+    return TransformCameraBlockMatrix(
+        camera_proximal_metric, tangent_to_scaled);
   }
   static Eigen::VectorXd TransformCameraVector(
       const Eigen::VectorXd& input,
@@ -2895,6 +3176,86 @@ public:
         return_proto.set_step_size_upper_f64(
             reinterpret_cast<const char*>(metric_upper_blocks.data()),
             metric_upper_blocks.size() * sizeof(double));
+        if (factorized_proximal_active) {
+          return_proto.set_has_factorized_metric(true);
+          std::vector<std::uint32_t> camera_ids;
+          std::vector<double> diagonal_values;
+          for (int camera = 0; camera < numCameras; ++camera) {
+            if (!(camera_proximal_multipliers[camera] > 0.)) {
+              continue;
+            }
+            camera_ids.push_back(global_camera_ids[camera]);
+            for (int row = 0; row < 9; ++row) {
+              for (int column = 0; column < 9; ++column) {
+                diagonal_values.push_back(
+                    factorized_proximal_diagonal.coeff(
+                        9 * camera + row, 9 * camera + column));
+              }
+            }
+          }
+          std::vector<int> factor_map(
+              factorized_proximal_cross.LandmarkCount(), -1);
+          const auto& factor_edges = factorized_proximal_cross.Edges();
+          for (const CameraLandmarkEdge& edge : factor_edges) {
+            const Eigen::Map<
+                const Eigen::Matrix<double, 9, 3, Eigen::RowMajor>> block(
+                    edge.values.data());
+            if (block.squaredNorm() > 0. && factor_map[edge.landmark] < 0) {
+              factor_map[edge.landmark] = 0;
+            }
+          }
+          std::vector<double> inverse_values;
+          int factor_count = 0;
+          for (int landmark = 0; landmark < factor_map.size(); ++landmark) {
+            if (factor_map[landmark] < 0) {
+              continue;
+            }
+            factor_map[landmark] = factor_count++;
+            for (int row = 0; row < 3; ++row) {
+              for (int column = 0; column < 3; ++column) {
+                inverse_values.push_back(
+                    factorized_proximal_landmark_inverse.coeff(
+                        3 * landmark + row, 3 * landmark + column));
+              }
+            }
+          }
+          std::vector<std::uint32_t> edge_factors;
+          std::vector<std::uint32_t> edge_cameras;
+          std::vector<double> edge_values;
+          for (const CameraLandmarkEdge& edge : factor_edges) {
+            if (factor_map[edge.landmark] < 0) {
+              continue;
+            }
+            const Eigen::Map<
+                const Eigen::Matrix<double, 9, 3, Eigen::RowMajor>> block(
+                    edge.values.data());
+            if (block.squaredNorm() == 0.) {
+              continue;
+            }
+            edge_factors.push_back(factor_map[edge.landmark]);
+            edge_cameras.push_back(global_camera_ids[edge.camera]);
+            edge_values.insert(
+                edge_values.end(), edge.values.begin(), edge.values.end());
+          }
+          return_proto.set_factorized_metric_camera_ids_u32(
+              reinterpret_cast<const char*>(camera_ids.data()),
+              camera_ids.size() * sizeof(std::uint32_t));
+          return_proto.set_factorized_metric_diagonal_blocks_f64(
+              reinterpret_cast<const char*>(diagonal_values.data()),
+              diagonal_values.size() * sizeof(double));
+          return_proto.set_factorized_metric_inverse_blocks_f64(
+              reinterpret_cast<const char*>(inverse_values.data()),
+              inverse_values.size() * sizeof(double));
+          return_proto.set_factorized_metric_edge_factors_u32(
+              reinterpret_cast<const char*>(edge_factors.data()),
+              edge_factors.size() * sizeof(std::uint32_t));
+          return_proto.set_factorized_metric_edge_cameras_u32(
+              reinterpret_cast<const char*>(edge_cameras.data()),
+              edge_cameras.size() * sizeof(std::uint32_t));
+          return_proto.set_factorized_metric_edge_blocks_f64(
+              reinterpret_cast<const char*>(edge_values.data()),
+              edge_values.size() * sizeof(double));
+        }
         if (ConsensusUnflooredCameraDiagonalEnabled()) {
           const std::vector<double>& consensusMetric = ConsensusMetricBlocks();
           metric_upper_blocks.clear();
@@ -3138,6 +3499,8 @@ public:
       oracle_kind = update.oracle_kind();
       collect_camera_diagonal_metrics =
         update.collect_camera_diagonal_metrics();
+      factorized_coupled_schur_metric =
+        update.factorized_coupled_schur_metric();
       if (collect_camera_diagonal_metrics) {
         std::ostringstream metric;
         metric << "CAMERA_DIAGONAL_REQUEST cluster=" << cluster_id
@@ -3696,11 +4059,16 @@ SolveBySchurPCG(
     const Matrix<double, Eigen::Dynamic, 1>& bp,
     const Matrix<double, Eigen::Dynamic, 1>& bl,
     const Matrix<double, Eigen::Dynamic, 1>& proximalGradient,
+    const std::vector<Eigen::Matrix<double, 9, 9>>* factorized_tangent,
     int* iterations_out, int* termination_out,
     double* relative_residual_out) {
   SparseMatrix<double, RowMajor> Vinv = Vli;
   SparseMatrix<double, RowMajor> Uinv = Uli;
   BlockInverse<3>(Vinv);
+  if (factorized_tangent != nullptr) {
+    Uinv += FactorizedProximalBlockDiagonalInTangent(
+        *factorized_tangent);
+  }
   if (SchurPcgJacobiPreconditionerEnabled()) {
     const double landmark_trace = Vli.diagonal().sum();
     const double landmark_inverse_trace = Vinv.diagonal().sum();
@@ -3792,6 +4160,10 @@ SolveBySchurPCG(
     vinvWtDirection.noalias() = Vinv * wtDirection;
     W.Multiply(vinvWtDirection, wVinvWtDirection);
     schurDirection.noalias() = Uli * direction;
+    if (factorized_tangent != nullptr) {
+      schurDirection += ApplyCameraProximalMetricInTangent(
+          direction, *factorized_tangent);
+    }
     schurDirection -= wVinvWtDirection;
     const double denominator = direction.dot(schurDirection);
     if (!(denominator > 0.) || !std::isfinite(denominator)) {
@@ -4005,9 +4377,22 @@ void UpdateStepSizeAndSolve() {//bool keep_cameras_fixed = false) { // Recompute
     return; // 1st step only preconditioning as it can go very wrong?
   }
   Eigen::DiagonalMatrix<double, Eigen::Dynamic> diagVL = Diagonal<3>(Vl); // Vl = VL + L * diagVL
+  SparseMatrix<double, RowMajor> metricCameraHessian = Ul;
+  const bool factorized_coupled_schur_metric_active =
+      factorized_coupled_schur_metric;
+  SparseMatrix<double, RowMajor> metricLandmarkInverse;
+  if (SchurProximalMetricEnabled() ||
+      factorized_coupled_schur_metric_active) {
+    metricLandmarkInverse = Vl;
+    BlockInverse<3>(metricLandmarkInverse);
+    camera_landmark_hessian.SubtractSchurDiagonal(
+        metricLandmarkInverse, metricCameraHessian);
+    FloorSymmetricBlocks<9>(metricCameraHessian,
+      std::max(PobaBlockRelativeFloor(), 1e-16));
+  }
   const Eigen::DiagonalMatrix<double, Eigen::Dynamic> consensusDiagUP =
     CameraDiagonalMetricScale() * Diagonal<9>(
-      Ul, cluster_id, collect_camera_diagonal_metrics,
+      metricCameraHessian, cluster_id, collect_camera_diagonal_metrics,
       outer_iteration, oracle_kind, "consensus",
       &global_camera_ids); // Vp = Vp + L * diagVp
   const SparseMatrix<double, RowMajor>& landmarkHessian = normalEquations.landmark_hessian;
@@ -4020,6 +4405,48 @@ void UpdateStepSizeAndSolve() {//bool keep_cameras_fixed = false) { // Recompute
       ? block_curvature_multiplier
       : legacy_scale;
 
+    const bool freeze_current_metric = FreezeBlockMetricEnabled() &&
+      frozen_block_metric_initialized &&
+      (!factorized_coupled_schur_metric_active ||
+       factorized_proximal_active);
+    const bool factorized_metric_refresh =
+      factorized_coupled_schur_metric_active && !freeze_current_metric;
+    if (factorized_metric_refresh && !firstIteration) {
+    SparseMatrix<double, RowMajor> factorized_base_diagonal = Ul;
+    camera_landmark_hessian.AddBucketedSchurOffDiagonalFrobeniusBounds(
+      metricLandmarkInverse,
+      camera_proximal_multipliers,
+      CoupledSchurProximalMetricStabilization(),
+      FactorizedSchurProximalMetricStabilizationBuckets(),
+      factorized_base_diagonal);
+    SparseMatrix<double, RowMajor> factorized_base_block_diagonal =
+      factorized_base_diagonal;
+    camera_landmark_hessian.SubtractSchurDiagonal(
+      metricLandmarkInverse, factorized_base_block_diagonal);
+    SparseMatrix<double, RowMajor> factorized_floored_block_diagonal =
+      factorized_base_block_diagonal;
+    FloorSymmetricBlocks<9>(factorized_floored_block_diagonal,
+      std::max(PobaBlockRelativeFloor(), 1e-16));
+    factorized_base_diagonal +=
+      factorized_floored_block_diagonal
+      - factorized_base_block_diagonal;
+    SparseMatrix<double, RowMajor> factorized_diagonal =
+      scale * factorized_base_diagonal;
+    factorized_diagonal += consensusDiagUP * current_be;
+    ScaleCameraProximalMetric(factorized_diagonal);
+    BlockEdgeMatrix factorized_cross = camera_landmark_hessian;
+    std::vector<double> factor_scales(numCameras);
+    for (int camera = 0; camera < numCameras; ++camera) {
+      factor_scales[camera] = std::sqrt(
+        scale * camera_proximal_multipliers[camera]);
+    }
+    factorized_cross.ScaleCameraRows(factor_scales);
+    SetFactorizedCameraProximalMetric(
+      factorized_diagonal,
+      factorized_cross,
+      metricLandmarkInverse);
+    }
+
   if (!firstIteration) { // also handled setting be = 0 in 1st step.
     SparseMatrix<double, RowMajor> stepSize;
     if (scalar_proximal_prior) {
@@ -4030,10 +4457,11 @@ void UpdateStepSizeAndSolve() {//bool keep_cameras_fixed = false) { // Recompute
       }
       stepSize.makeCompressed();
     } else {
-      if (FreezeBlockMetricEnabled() && frozen_block_metric_initialized) {
-        stepSize = CameraBlocksToSparse(full_stepSize);
+      if (freeze_current_metric ||
+          factorized_coupled_schur_metric_active) {
+        stepSize = camera_proximal_metric;
       } else {
-        stepSize = scale * Ul;
+        stepSize = scale * metricCameraHessian;
         stepSize += consensusDiagUP * current_be;
         ScaleCameraProximalMetric(stepSize);
       }
@@ -4048,21 +4476,28 @@ void UpdateStepSizeAndSolve() {//bool keep_cameras_fixed = false) { // Recompute
         }
       }
     } else {
-      std::copy(values, values + full_stepSize.size(), full_stepSize.data());
+      if (!factorized_coupled_schur_metric_active) {
+        SetCameraProximalMetric(stepSize);
+      }
       frozen_block_metric_initialized = true;
     }
     consensus_stepSize = full_stepSize;
     if (!scalar_proximal_prior &&
         ConsensusUnflooredCameraDiagonalEnabled()) {
       SparseMatrix<double, RowMajor> voteMetric = scale * Ul;
+      if (SchurProximalMetricEnabled()) {
+        voteMetric = scale * metricCameraHessian;
+      }
       voteMetric += current_be * CameraDiagonalMetricScale()
-          * Ul.diagonal().asDiagonal();
+          * metricCameraHessian.diagonal().asDiagonal();
       ScaleCameraProximalMetric(voteMetric);
       const double* voteValues = voteMetric.valuePtr();
       std::copy(voteValues, voteValues + consensus_stepSize.size(),
           consensus_stepSize.data());
     }
-    Ul += stepSize;
+    if (!factorized_coupled_schur_metric_active) {
+      Ul += stepSize;
+    }
   } else {
     if (scalar_proximal_prior) {
       full_stepSize.assign(81 * numCameras, 0.);
@@ -4075,7 +4510,7 @@ void UpdateStepSizeAndSolve() {//bool keep_cameras_fixed = false) { // Recompute
         }
       }
     } else {
-      Ul += scale * Ul;
+      Ul += scale * metricCameraHessian;
       Ul += consensusDiagUP * current_be;
     }
     // let full_Stepsize define setpsize always. else confusing to debug: cost optimized differs from cost evaluated.
@@ -4121,22 +4556,11 @@ void UpdateStepSizeAndSolve() {//bool keep_cameras_fixed = false) { // Recompute
       Ul = cameraHessian;
       if (DisableLocalProximalTermEnabled()) {
         // K1 BA reference: LM damping supplies SPD regularization.
-      } else if (FreezeBlockMetricEnabled() && frozen_block_metric_initialized) {
-        Ul += TransformCameraBlockMatrix(
-            CameraBlocksToSparse(full_stepSize), tangentToScaled);
       } else {
-        Ul += scale * cameraHessian;
-        SparseMatrix<double, RowMajor> consensus_diagonal(
-          9 * numCameras, 9 * numCameras);
-        consensus_diagonal.reserve(
-          Eigen::VectorXi::Constant(9 * numCameras, 1));
-        for (int parameter = 0; parameter < 9 * numCameras; ++parameter) {
-          consensus_diagonal.insert(parameter, parameter) =
-            consensusDiagUP.diagonal()[parameter];
+        if (!factorized_proximal_active) {
+          Ul += TransformCameraBlockMatrix(
+              camera_proximal_metric, tangentToScaled);
         }
-        consensus_diagonal.makeCompressed();
-        Ul += current_be * TransformCameraBlockMatrix(
-            consensus_diagonal, tangentToScaled);
       }
     } else {
       cameraHessian = TransformCameraBlockMatrix(
@@ -4275,7 +4699,11 @@ void UpdateStepSizeAndSolve() {//bool keep_cameras_fixed = false) { // Recompute
     proximalOffset[id] = cameras[id] - cameras_s[id];
   }
   Matrix<double, Eigen::Dynamic, 1> proximalGradient(9 * numCameras);
-  blockMult<9>(full_stepSize, proximalOffset, proximalGradient);
+  if (scalar_proximal_prior) {
+    blockMult<9>(full_stepSize, proximalOffset, proximalGradient);
+  } else {
+    proximalGradient = ApplyCameraProximalMetric(proximalOffset);
+  }
   double penaltyStart = proximalOffset.dot(proximalGradient);
   if (DisableLocalProximalTermEnabled()) {
     proximalGradient.setZero();
@@ -4412,7 +4840,9 @@ void UpdateStepSizeAndSolve() {//bool keep_cameras_fixed = false) { // Recompute
     std::pair<Eigen::VectorXd, Eigen::VectorXd> step;
     if (local_linear_solver == 1) {
       step = SolveBySchurPCG(
-          Ul, Vl, W, bp, bl, proximalGradient, &linear_iterations,
+          Ul, Vl, W, bp, bl, proximalGradient,
+          factorized_proximal_active ? &tangentToScaled : nullptr,
+          &linear_iterations,
           &linear_termination, &linear_relative_residual);
     } else if (local_linear_solver == 5) {
       step = SolveByPobaPowerSeries(
@@ -4483,7 +4913,11 @@ void UpdateStepSizeAndSolve() {//bool keep_cameras_fixed = false) { // Recompute
     // std::cout << "res/dl/dp :" << residual.squaredNorm() << " " << delta_p.squaredNorm() << " " << delta_l.squaredNorm() << "\n";
     // Map<Matrix<double, Eigen::Dynamic, 1> >(blockMult<9>(full_stepSize, cameras).data());
 
-    if (ManifoldCameraUpdatesEnabled()) {
+    if (!scalar_proximal_prior) {
+      proximalStep = ManifoldCameraUpdatesEnabled()
+        ? ApplyCameraProximalMetricInTangent(delta_p, tangentToScaled)
+          : ApplyCameraProximalMetric(delta_p);
+    } else if (ManifoldCameraUpdatesEnabled()) {
       for (int camera = 0; camera < numCameras; ++camera) {
         const Eigen::Map<const Eigen::Matrix<double, 9, 9, Eigen::RowMajor>>
             scaledProximal(&full_stepSize[81 * camera]);
@@ -4519,8 +4953,13 @@ void UpdateStepSizeAndSolve() {//bool keep_cameras_fixed = false) { // Recompute
       actualProximalOffset[id] = cameras[id] - cameras_s[id];
     }
     Matrix<double, Eigen::Dynamic, 1> actualProximalGradient(9 * numCameras);
-    blockMult<9>(full_stepSize, actualProximalOffset,
-           actualProximalGradient);
+    if (scalar_proximal_prior) {
+      blockMult<9>(full_stepSize, actualProximalOffset,
+          actualProximalGradient);
+    } else {
+      actualProximalGradient =
+          ApplyCameraProximalMetric(actualProximalOffset);
+    }
     const double penaltyEnd = DisableLocalProximalTermEnabled()
       ? 0. : actualProximalOffset.dot(actualProximalGradient);
     const auto costEvaluationStart = collectTiming ? TimingClock::now() : TimingClock::time_point{};
@@ -5204,6 +5643,7 @@ private:
   double nesterov_stop_tolerance = 1e-2;
   MetricDiagnostic metric_diagnostic;
   bool scalar_proximal_prior = false;
+  bool factorized_coupled_schur_metric = false;
   double proximal_rho = 1.;
   bool split_camera_penalty = false;
   double proximal_rho_intrinsics = 1.;
@@ -5247,6 +5687,11 @@ private:
   std::vector<double> stepSize; // internally modelling prox term. 'sqrt' of full_stepSize 
   std::vector<double> full_stepSize; // returned to compute s update in DRS.
   std::vector<double> consensus_stepSize; // optional unfloored projection metric.
+  SparseMatrix<double, RowMajor> camera_proximal_metric;
+  bool factorized_proximal_active = false;
+  SparseMatrix<double, RowMajor> factorized_proximal_diagonal;
+  SparseMatrix<double, RowMajor> factorized_proximal_landmark_inverse;
+  BlockEdgeMatrix factorized_proximal_cross;
   std::vector<double> unorm;
   std::vector<double> vnorm;
   std::vector<double> cameraTransform;

@@ -44,6 +44,7 @@ from bal_evaluator import (
 from clustering import cluster_by_landmark_scalable_stable
 from drs_consensus import ActiveCameraMetricBlocks
 from drs_consensus_metrics import unpack_symmetric_camera_metric_blocks
+from drs_factorized_metrics import FactorizedCameraMetric
 
 
 SCRIPT_DIRECTORY = Path(__file__).resolve().parent
@@ -75,6 +76,13 @@ _REQUIRED_PROTO_FIELDS = {
         "landmark_interior_defect_squared",
         "linear_iterations",
         "linear_relative_residual",
+        "has_factorized_metric",
+        "factorized_metric_camera_ids_u32",
+        "factorized_metric_diagonal_blocks_f64",
+        "factorized_metric_inverse_blocks_f64",
+        "factorized_metric_edge_factors_u32",
+        "factorized_metric_edge_cameras_u32",
+        "factorized_metric_edge_blocks_f64",
         "step_size_upper_f32",
         "unique_camera_interior_defect_squared",
     },
@@ -323,6 +331,7 @@ class AdmmWorkerClient:
         collect_camera_diagonal_metrics=False,
         schur_observability_diagnostic=False,
         schur_offdiagonal_majorizer=False,
+        factorized_coupled_schur_metric=False,
         huber_delta=0.0,
     ):
         batch_setup_started_at = time.perf_counter()
@@ -429,6 +438,9 @@ class AdmmWorkerClient:
                 program.collect_camera_diagonal_metrics = (
                     collect_camera_diagonal_metrics
                 )
+                program.factorized_coupled_schur_metric = (
+                    factorized_coupled_schur_metric
+                )
                 program.huber_delta = huber_delta
                 program.cluster_id = cluster_id
                 program.num_clusters = cluster_count
@@ -499,6 +511,9 @@ class AdmmWorkerClient:
                 update.collect_camera_diagonal_metrics = (
                     collect_camera_diagonal_metrics
                 )
+                update.factorized_coupled_schur_metric = (
+                    factorized_coupled_schur_metric
+                )
                 if collect_camera_diagonal_metrics and cluster_id == 0:
                     print(
                         "CAMERA_DIAGONAL_REQUEST_SENT "
@@ -552,6 +567,16 @@ class AdmmWorkerClient:
         costs = np.zeros(cluster_count)
         metric_blocks = None
         consensus_metric_blocks = None
+        factorized_diagonal_clusters = []
+        factorized_diagonal_cameras = []
+        factorized_diagonal_blocks = []
+        factorized_factor_clusters = []
+        factorized_inverse_blocks = []
+        factorized_edge_factors = []
+        factorized_edge_cameras = []
+        factorized_edge_blocks = []
+        factorized_metric_reply_count = 0
+        factorized_factor_offset = 0
         metric_offsets = None
         collect_metric_blocks = return_metric_blocks and not single_node_consensus
         if return_metric_blocks:
@@ -700,6 +725,63 @@ class AdmmWorkerClient:
                     self.maximum_metric_asymmetry = max(
                         self.maximum_metric_asymmetry, asymmetry
                     )
+                if reply.has_factorized_metric:
+                    reply_camera_ids = np.frombuffer(
+                        reply.factorized_metric_camera_ids_u32, dtype="<u4"
+                    ).astype(np.int64)
+                    reply_diagonal_blocks = np.frombuffer(
+                        reply.factorized_metric_diagonal_blocks_f64,
+                        dtype="<f8",
+                    )
+                    reply_inverse_blocks = np.frombuffer(
+                        reply.factorized_metric_inverse_blocks_f64,
+                        dtype="<f8",
+                    )
+                    reply_edge_factors = np.frombuffer(
+                        reply.factorized_metric_edge_factors_u32, dtype="<u4"
+                    ).astype(np.int64)
+                    reply_edge_cameras = np.frombuffer(
+                        reply.factorized_metric_edge_cameras_u32, dtype="<u4"
+                    ).astype(np.int64)
+                    reply_edge_blocks = np.frombuffer(
+                        reply.factorized_metric_edge_blocks_f64, dtype="<f8"
+                    )
+                    if not (
+                        reply_diagonal_blocks.size == 81 * reply_camera_ids.size
+                        and reply_inverse_blocks.size % 9 == 0
+                        and reply_edge_factors.size == reply_edge_cameras.size
+                        and reply_edge_blocks.size == 27 * reply_edge_factors.size
+                    ):
+                        raise RuntimeError(
+                            "worker returned an invalid factorized camera metric"
+                        )
+                    factor_count = reply_inverse_blocks.size // 9
+                    if np.any(reply_edge_factors >= factor_count):
+                        raise RuntimeError(
+                            "worker returned an invalid factorized edge index"
+                        )
+                    factorized_diagonal_clusters.append(np.full(
+                        reply_camera_ids.size, cluster_id, dtype=np.int64
+                    ))
+                    factorized_diagonal_cameras.append(reply_camera_ids)
+                    factorized_diagonal_blocks.append(
+                        reply_diagonal_blocks.reshape((-1, 9, 9))
+                    )
+                    factorized_factor_clusters.append(np.full(
+                        factor_count, cluster_id, dtype=np.int64
+                    ))
+                    factorized_inverse_blocks.append(
+                        reply_inverse_blocks.reshape((-1, 3, 3))
+                    )
+                    factorized_edge_factors.append(
+                        reply_edge_factors + factorized_factor_offset
+                    )
+                    factorized_edge_cameras.append(reply_edge_cameras)
+                    factorized_edge_blocks.append(
+                        reply_edge_blocks.reshape((-1, 9, 3))
+                    )
+                    factorized_factor_offset += factor_count
+                    factorized_metric_reply_count += 1
             local_cameras[cluster_id][unique_cameras] = reply_cameras.reshape(
                 -1, 9
             )
@@ -795,6 +877,24 @@ class AdmmWorkerClient:
                 time.perf_counter() - decode_started_at
             )
         batch_finalize_started_at = time.perf_counter()
+        if factorized_metric_reply_count:
+            if factorized_metric_reply_count != cluster_count:
+                raise RuntimeError(
+                    "workers returned a partial factorized camera metric"
+                )
+            metric_blocks = FactorizedCameraMetric(
+                np.concatenate(factorized_diagonal_clusters),
+                np.concatenate(factorized_diagonal_cameras),
+                np.concatenate(factorized_diagonal_blocks),
+                np.concatenate(factorized_factor_clusters),
+                np.concatenate(factorized_inverse_blocks),
+                np.concatenate(factorized_edge_factors),
+                np.concatenate(factorized_edge_cameras),
+                np.concatenate(factorized_edge_blocks),
+                cluster_count,
+                local_cameras.shape[1],
+            )
+            consensus_metric_blocks = metric_blocks
         self.last_trust_region_radii = trust_region_radii
         self.last_linear_iterations = linear_iterations
         self.last_linear_relative_residuals = linear_relative_residuals

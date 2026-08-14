@@ -45,6 +45,7 @@ message program_proto {
   int32 oracle_kind = 40; // 0=bootstrap/other, 1=nominal, 2=accelerated trial
   bool collect_camera_diagonal_metrics = 41;
   double huber_delta = 42; // 0=L2, >0=Huber scale in pixel units
+  bool factorized_coupled_schur_metric = 43;
 }
 
 // sent once
@@ -109,6 +110,7 @@ message prox_cluster_proto {
   int32 outer_iteration = 38;
   int32 oracle_kind = 39; // 0=bootstrap/other, 1=nominal, 2=accelerated trial
   bool collect_camera_diagonal_metrics = 40;
+  bool factorized_coupled_schur_metric = 41;
   // clustering: lms by cam. # lms that can fill up cam in cl.
 }
 
@@ -151,6 +153,13 @@ message return_cluster_proto {
   double interior_defect_squared = 32;
   int32 linear_iterations = 33;
   double linear_relative_residual = 34;
+  bool has_factorized_metric = 35;
+  bytes factorized_metric_camera_ids_u32 = 36;
+  bytes factorized_metric_diagonal_blocks_f64 = 37; // row-major 9x9 A blocks
+  bytes factorized_metric_inverse_blocks_f64 = 38; // row-major 3x3 V^-1 blocks
+  bytes factorized_metric_edge_factors_u32 = 39;
+  bytes factorized_metric_edge_cameras_u32 = 40; // global camera IDs
+  bytes factorized_metric_edge_blocks_f64 = 41; // row-major 9x3 W blocks
 }
 
 // send to get cost

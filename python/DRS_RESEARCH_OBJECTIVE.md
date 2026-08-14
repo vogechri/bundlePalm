@@ -733,9 +733,14 @@ Test these mechanisms one at a time with one global policy and freeze each
 result before advancing. The numbering preserves the original proposal list;
 testing began with item 2 at the user's request.
 
-1. **Refreshed cross-camera C3:** rebuild the coupled factorized metric after
-   accepted startup iterations instead of freezing stale I1 factors. Gate
-   Roman and BAL1490 at K24/I3; do not retune the observability threshold.
+1. **Refreshed cross-camera C3:** tested and rejected. The historical
+   matrix-free `A - B V^-1 B^T` path was restored with threshold `0.55`,
+   stabilization `1`, and 32 buckets, then refreshed on each solve. A fixed
+   BAL1490 I1 sentinel reproduces historical SSE to `5.18e-8` relative.
+   Refreshed Roman I3 is `1.013905x` fixed C3; refreshed BAL1490 I3 is
+   `0.997970x` fixed but still `1.526003x` raw. Stale factors do not explain
+   the post-I1 BAL crossing. Keep C3 default-off and do not retune. See
+   `benchmark_results/refreshed_c3_gate/report.md`.
 2. **C2 block-coordinate Ruiz equilibration:** diagonal symmetric Ruiz from
    full initial `9x9` camera Hessian blocks is now tested and rejected: Roman,
    Trafalgar, and BAL1778 reproduce Jacobi SSE trajectories to about `1e-9`
@@ -762,17 +767,85 @@ testing began with item 2 at the user's request.
    `benchmark_results/c2_worker_metric_block_gate/report.md`, and
    `benchmark_results/c2_worker_diagonal_gate/report.md`, and
    `benchmark_results/c2_z_focal_block_gate/report.md`.
-3. **Model-ratio nonlinear startup LM:** replace fixed damping halving in the
-   repeated initial Schur diagnostic with globally safeguarded gain-ratio
-   damping/retries. Keep the correction cap frozen while testing the policy.
-4. **Transient external pose-factor continuation:** add independently justified
-   relative rotation/translation information only during basin acquisition,
-   anneal it completely away, and evaluate the unchanged pixel objective.
+3. **Model-ratio nonlinear startup LM:** tested and rejected as a quality
+   addition. With cap three, gain-ratio damping and bounded retries improve
+   K24/I1 versus geometric damping on Roman/Trafalgar/BAL1490 by
+   `0.830477x/0.865090x/0.467159x` (geomean `0.694946x`). BAL1490 recovers its
+   nonconverged third correction by retrying damping `0.333333` at `0.666667`.
+   The advantage does not persist: BAL1490 I30 is `1.007092x` at `1.366498x`
+   time; Roman/Trafalgar I60+16 are `1.043756x/0.935121x`, geomean `0.987946x`,
+   at `1.393951x` time. Keep the isolated startup policy default-off. See
+   `benchmark_results/startup_model_ratio_gate/report.md`.
+   Two follow-ups are also closed. A conservative `1/2` damping floor exactly
+   reproduces geometric Roman/Trafalgar startup and is `1.680291x` the
+   one-third BAL1490 SSE after two failed retries. Fixed-horizon dual-branch
+   commit cannot predict the final winner: BAL1490 crosses at I9, Trafalgar
+   changes ordering twice, and Roman geometric wins only after correction 12
+   of final polishing. Full-workflow branch racing is possible but too costly
+   for a production policy.
+4. **Transient external pose-factor continuation:** closed under the current
+   cross-family data contract. Roman/Trafalgar retain 94,250/861,509 mapped
+   epipolar pose edges, and the existing eight-mode weight-`0.1` removable
+   prior already implements and gates this proposal on all 15 1DSfM scenes.
+   Fixed use is unsafe (`0.989513x` geometric but `1.001376x` summed SSE,
+   Trafalgar `1.050620x`), while the first loss-free selector costs about
+   `1.900388x`. BAL1490 contains no independent relative-pose measurements or
+   sidecar. Deriving factors from its initial cameras would be an initialization
+   anchor, not external evidence; reconstructing them from pixels would reuse
+   the evaluated observations. Do not implement a family-dependent policy.
+   Reopen only with a common persisted pose-graph contract. See
+   `benchmark_results/external_pose_factor_audit/report.md`.
 
-After the completed C2 gate, refreshed C3 has the strongest existing quality
-evidence but larger systems cost; model-ratio startup is narrower; external
-pose factors add a new information contract and carry the largest validation
-burden.
+The four-item queue is complete. Numerical equilibration, refreshed C3, and
+model-ratio startup fail persistence or cross-family safety; external pose
+continuation lacks a common independent-information contract and its existing
+1DSfM implementation is not safe as a fixed policy.
+
+### Cluster-Count Continuation (2026-08-13)
+
+K4/I3 to K24 continuation is now supported through explicit canonical-frame
+state transfer. Existing raw-frame `--initial-state` behavior remains the
+default; staged states must declare `--initial-state-frame canonical`. The
+K4 endpoint and K24 initial SSE match exactly in every gate scene. Dynamic DRS,
+trust, scaling, acceleration, and partition state intentionally restart.
+
+The maintained Nesterov local solver overflows a Roman K4 tangent step before
+trust rejection, under both DRS and DABA trust. A globally matched Schur-PCG,
+block-Jacobi, DABA policy is finite and accepted. With the frozen K4/I3 split,
+equal-budget K24/I30 ratios are Roman `0.744715`, Trafalgar `0.945498`, and
+BAL1490 `0.997938`; geometric SSE is `0.889034x` at `1.345145x` time. This is a
+strong fast-horizon frontier.
+
+The same schedule at I60+16 is not quality-safe. Pre-Schur ratios are
+`0.725244/1.009605/1.002656`; final Roman/Trafalgar/BAL1490 ratios are
+`0.953985/1.038197/1.002877`, geometric `0.997753x`, at `1.012516x` time.
+Retain continuation default-off for I30 diagnostics; do not promote it to the
+named quality workflow or tune K/split on these scenes. See
+`benchmark_results/cluster_continuation_gate/report.md`.
+
+Frozen breadth transfer confirms a strong but unsafe I30 frontier. On all 15
+1DSfM scenes, K4/I3 to K24/I27 reaches geometric/summed SSE
+`0.943771x/0.950010x`, W/T/L `11/0/4`, at `1.297602x` geometric time; Montreal
+is the worst loss at `1.058938x`. On BAL1490/1778/3068 the ratios are
+`0.997938/0.998288/1.011140`, geometric `1.002437x`, so the large-BAL aggregate
+is slightly negative. Combined 18-scene SSE is `0.953305x` geometric and
+`0.955586x` summed, W/T/L `13/0/5`, at `1.313318x` time. Every canonical
+handoff is exact and every arm completes its budget. Retain the resumable
+breadth runner and fixed schedule default-off; do not promote or tune from
+these outcomes. See
+`benchmark_results/cluster_continuation_breadth_i30/report.md`.
+
+Time-matched and BAL29 tails resolve the continuation interpretation. On the
+18-scene breadth cohort, staged I30 versus direct K24/I40 is `0.997143x`
+geometric but `1.003723x` summed SSE at `1.025159x` time; all three large BAL
+scenes lose. On the complete BAL29 corpus, staged/direct ratios evolve from
+`0.999377x` at equal I30 (`1.334163x` time), to `1.003477x` versus direct I40
+(`1.070811x` time), to `0.998902x` at equal I90, and finally `0.999876x` after
+equal I200+16 (`1.070250x` time). The separation contracts toward one and both
+arms usually still improve at their final outer iteration. This is finite-time
+path dependence, not evidence of a materially better converged minimum. Retain
+continuation only as a default-off basin diagnostic; do not promote it for BAL
+or globally. See `benchmark_results/cluster_continuation_bal29_i30_i40/report.md`.
 
 Trust-rebase artifacts:
 
