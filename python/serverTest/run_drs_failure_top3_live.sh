@@ -360,8 +360,8 @@ if [[ "$CONSENSUS_EXECUTION" != "coordinator" && "$CONSENSUS_EXECUTION" != "sing
   echo "CONSENSUS_EXECUTION must be coordinator or single-node" >&2
   exit 2
 fi
-if [[ "$CAMERA_UPDATE" != "additive" && "$CAMERA_UPDATE" != "angle_axis_left" && "$CAMERA_UPDATE" != "so3_left" && "$CAMERA_UPDATE" != "se3_left" && "$CAMERA_UPDATE" != "se3_right" ]]; then
-  echo "CAMERA_UPDATE must be additive, angle_axis_left, so3_left, se3_left, or se3_right" >&2
+if [[ "$CAMERA_UPDATE" != "additive" && "$CAMERA_UPDATE" != "angle_axis_left" && "$CAMERA_UPDATE" != "so3_left" && "$CAMERA_UPDATE" != "so3_center_left" && "$CAMERA_UPDATE" != "se3_left" && "$CAMERA_UPDATE" != "se3_right" ]]; then
+  echo "CAMERA_UPDATE must be additive, angle_axis_left, so3_left, so3_center_left, se3_left, or se3_right" >&2
   exit 2
 fi
 

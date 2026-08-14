@@ -118,3 +118,48 @@ the robust product-SO3 component; C5 timing, scalar camera metric strength, and
 translation/rotation metric ratio are now bounded and closed. Next prioritize
 product-aware trust-envelope diagnostics or the structurally different
 camera-center product manifold, not further C5/metric grids.
+
+The product-aware trust envelope is now also closed. Behavior-neutral telemetry
+shows the default DABA trajectory is genuinely cap-limited: Roman reaches the
+`1e6` maximum by I14 and many workers remain capped. A frozen maximum-radius
+grid `{1e3,1e4,1e5,1e6}` with initial DABA cap 100 finds `1e5` as a strong
+development candidate: versus product control it is `0.976718x` on six 1DSfM
+and `0.997610x` on BAL5, with 10/11 wins. Frozen confirmation reverses on
+1DSfM: all-15 is `1.010903x` product control and `1.007201x` left-SE3, with
+Piazza `1.238627x` and Madrid `1.190756x`. BAL29 remains favorable at
+`0.999542x` product control and `0.996190x` left-SE3. Do not promote or
+interpolate trust caps from held-out outcomes.
+
+All scalar/product-specific tuning directions attempted so far now fail the
+common held-out criterion. The next justified mechanism is the camera-center
+product manifold `SO(3) x R3`, representing `C = -R^T t` so rotation and camera
+position are independent geometric state variables. This is structural rather
+than another scene-dependent parameter grid.
+
+## Camera-Center Product Manifold
+
+A new `so3_center_left` mode keeps physical BAL storage `[R,t]` but defines the
+product state using camera center `C = -R^T t`:
+
+```
+R+ = Exp(theta) R
+C+ = C + delta_C
+t+ = -R+ C+
+```
+
+Its direct stored-camera Jacobian uses `dt/d(delta_C) = -R` and
+`dt/dtheta = -[t]x`. State, point-action, and exact center-displacement finite
+differences pass. No parameter was tuned before evaluation.
+
+The four-scene sentinel is promising: camera-center/left-SE3 is `0.964637x` on
+Roman/Trafalgar and `0.953493x` on BAL1490/3068, with Roman `1.032978x` and
+BAL1490 `1.000074x` the bounded losses. Frozen development rejects broad
+transfer. On six 1DSfM it is `1.011018x` geometric, W/T/L `2/0/4`, worst
+Gendarmenmarkt `1.103175x`; on BAL5 it is `1.005759x`, `1/0/4`, worst BAL245
+`1.025866x`. It helps Trafalgar `9.92%` and Union `7.56%`, but hurts Vienna
+`7.95%` and other sentinels.
+
+Reject camera-center product without parameter tuning or held-out expansion.
+The strong two-scene signal is cohort-specific, and scalar trust/metric tuning
+has already shown poor transfer for the independent-translation product mode.
+Keep the implementation default-off as a mathematically coherent ablation.

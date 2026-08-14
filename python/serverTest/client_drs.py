@@ -6356,6 +6356,15 @@ def main():
                 "sharedTrustRegionLogSpread": (
                     shared_trust_region_log_spread
                 ),
+                "localTrustRegionRadiusMinimum": float(np.nanmin(
+                    nominal_trust_region_radii
+                )),
+                "localTrustRegionRadiusGeometricMean": float(np.exp(
+                    np.nanmean(np.log(nominal_trust_region_radii))
+                )),
+                "localTrustRegionRadiusMaximum": float(np.nanmax(
+                    nominal_trust_region_radii
+                )),
                 "nesterovMaximumUsed": iteration_nesterov_maximum,
                 "localLinearIterationsMinimum": float(np.nanmin(
                     local_linear_iterations

@@ -1,0 +1,102 @@
+{
+  "se3_left": {
+    "1dsfm": {
+      "geometricSSEVsLeftSE3": 1.0,
+      "losses": 0,
+      "optimizationSeconds": 44.123673463998784,
+      "optimizationVsLeftSE3": 1.0,
+      "oracleCalls": 99,
+      "rejections": 12,
+      "scenes": {
+        "roman_forum": {
+          "optimizationSeconds": 10.9987941950003,
+          "sse": 5362107.524463689,
+          "sseVsLeftSE3": 1.0
+        },
+        "trafalgar": {
+          "optimizationSeconds": 33.124879268998484,
+          "sse": 19437033.44510751,
+          "sseVsLeftSE3": 1.0
+        }
+      },
+      "summedSSEVsLeftSE3": 1.0,
+      "ties": 2,
+      "wins": 0,
+      "worst": 1.0
+    },
+    "bal": {
+      "geometricSSEVsLeftSE3": 1.0,
+      "losses": 0,
+      "optimizationSeconds": 85.9723257600017,
+      "optimizationVsLeftSE3": 1.0,
+      "oracleCalls": 94,
+      "rejections": 19,
+      "scenes": {
+        "bal1490": {
+          "optimizationSeconds": 61.308966866001356,
+          "sse": 3088565.6208167723,
+          "sseVsLeftSE3": 1.0
+        },
+        "bal3068": {
+          "optimizationSeconds": 24.66335889400034,
+          "sse": 3696251.4889710965,
+          "sseVsLeftSE3": 1.0
+        }
+      },
+      "summedSSEVsLeftSE3": 1.0,
+      "ties": 2,
+      "wins": 0,
+      "worst": 1.0
+    }
+  },
+  "so3_center_left": {
+    "1dsfm": {
+      "geometricSSEVsLeftSE3": 0.9646372766513029,
+      "losses": 1,
+      "optimizationSeconds": 44.808858177999355,
+      "optimizationVsLeftSE3": 1.0155287323155364,
+      "oracleCalls": 101,
+      "rejections": 11,
+      "scenes": {
+        "roman_forum": {
+          "optimizationSeconds": 12.325574198999675,
+          "sse": 5538941.12372941,
+          "sseVsLeftSE3": 1.0329783762184828
+        },
+        "trafalgar": {
+          "optimizationSeconds": 32.48328397899968,
+          "sse": 17509221.325927466,
+          "sseVsLeftSE3": 0.9008175746250366
+        }
+      },
+      "summedSSEVsLeftSE3": 0.9293935817348354,
+      "ties": 0,
+      "wins": 1,
+      "worst": 1.0329783762184828
+    },
+    "bal": {
+      "geometricSSEVsLeftSE3": 0.9534930742927975,
+      "losses": 1,
+      "optimizationSeconds": 99.63792420600112,
+      "optimizationVsLeftSE3": 1.15895345769926,
+      "oracleCalls": 106,
+      "rejections": 10,
+      "scenes": {
+        "bal1490": {
+          "optimizationSeconds": 68.25953641800152,
+          "sse": 3088793.0311694057,
+          "sseVsLeftSE3": 1.0000736297623403
+        },
+        "bal3068": {
+          "optimizationSeconds": 31.3783877879996,
+          "sse": 3360196.0924267503,
+          "sseVsLeftSE3": 0.9090821072248274
+        }
+      },
+      "summedSSEVsLeftSE3": 0.9505030156660756,
+      "ties": 0,
+      "wins": 1,
+      "worst": 1.0000736297623403
+    }
+  }
+}

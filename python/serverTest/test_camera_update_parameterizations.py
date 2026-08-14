@@ -41,6 +41,12 @@ def camera_plus(camera, tangent, mode):
             updated[3:6] = rotation_increment.apply(camera[3:6]) + (
                 so3_left_jacobian(tangent[3:6]) @ tangent[:3]
             )
+        elif mode == "so3_center_left":
+            camera_center = -current_rotation.inv().apply(camera[3:6])
+            updated_center = camera_center + tangent[:3]
+            updated[3:6] = -(
+                rotation_increment * current_rotation
+            ).apply(updated_center)
         else:
             updated[3:6] += tangent[:3]
     updated[6:9] += tangent[6:9]
@@ -55,14 +61,20 @@ def analytic_camera_jacobian(camera, mode):
         result[3:6, :3] = Rotation.from_rotvec(rotation).as_matrix()
     else:
         result[:3, 3:6] = np.linalg.inv(so3_left_jacobian(rotation))
-        result[3:6, :3] = np.eye(3)
+        if mode == "so3_center_left":
+            result[3:6, :3] = -Rotation.from_rotvec(rotation).as_matrix()
+            result[3:6, 3:6] = -skew(camera[3:6])
+        else:
+            result[3:6, :3] = np.eye(3)
         if mode == "se3_left":
             result[3:6, 3:6] = -skew(camera[3:6])
     result[6:9, 6:9] = np.eye(3)
     return result
 
 
-@pytest.mark.parametrize("mode", ["so3_left", "se3_left", "se3_right"])
+@pytest.mark.parametrize(
+    "mode", ["so3_left", "so3_center_left", "se3_left", "se3_right"]
+)
 def test_camera_tangent_jacobian_matches_finite_difference(mode):
     camera = np.array(
         [0.31, -0.22, 0.17, 1.2, -0.7, 2.1, 800.0, 0.01, -0.001]
@@ -85,7 +97,9 @@ def test_camera_tangent_jacobian_matches_finite_difference(mode):
     )
 
 
-@pytest.mark.parametrize("mode", ["so3_left", "se3_left", "se3_right"])
+@pytest.mark.parametrize(
+    "mode", ["so3_left", "so3_center_left", "se3_left", "se3_right"]
+)
 def test_point_action_tangent_jacobian_matches_finite_difference(mode):
     camera = np.array(
         [0.31, -0.22, 0.17, 1.2, -0.7, 2.1, 800.0, 0.01, -0.001]
@@ -97,6 +111,8 @@ def test_point_action_tangent_jacobian_matches_finite_difference(mode):
         analytic = np.column_stack((np.eye(3), -skew(camera_point)))
     elif mode == "se3_right":
         analytic = np.column_stack((rotation, -rotation @ skew(point)))
+    elif mode == "so3_center_left":
+        analytic = np.column_stack((-rotation, -skew(camera_point)))
     else:
         analytic = np.column_stack((np.eye(3), -skew(rotation @ point)))
 
@@ -119,6 +135,23 @@ def test_point_action_tangent_jacobian_matches_finite_difference(mode):
         numerical[:, column] = (positive - negative) / (2.0 * epsilon)
 
     np.testing.assert_allclose(numerical, analytic, rtol=2e-7, atol=5e-7)
+
+
+def test_camera_center_product_updates_center_independently():
+    camera = np.array(
+        [0.31, -0.22, 0.17, 1.2, -0.7, 2.1, 800.0, 0.01, -0.001]
+    )
+    tangent = np.array(
+        [0.4, -0.3, 0.2, 0.08, -0.04, 0.03, 0.0, 0.0, 0.0]
+    )
+    original_rotation = Rotation.from_rotvec(camera[:3])
+    original_center = -original_rotation.inv().apply(camera[3:6])
+
+    updated = camera_plus(camera, tangent, "so3_center_left")
+    updated_rotation = Rotation.from_rotvec(updated[:3])
+    updated_center = -updated_rotation.inv().apply(updated[3:6])
+
+    np.testing.assert_allclose(updated_center, original_center + tangent[:3])
 
 
 def test_product_subspace_metric_congruence_is_coherent():

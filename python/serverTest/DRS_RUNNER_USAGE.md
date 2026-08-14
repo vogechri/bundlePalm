@@ -1,5 +1,7 @@
-| `CAMERA_UPDATE` | `additive` | Camera update mode: `additive`, legacy `angle_axis_left`, translation-first product `so3_left`, `se3_left`, or `se3_right`. |
+| `CAMERA_UPDATE` | `additive` | Camera update mode: `additive`, legacy `angle_axis_left`, independent-translation `so3_left`, camera-center `so3_center_left`, `se3_left`, or `se3_right`. |
 | `BUNDLE_PALM_SO3_TRANSLATION_METRIC_RATIO` | `1` | Product-`SO(3)` translation-to-rotation tangent metric ratio; ignored by other camera modes. |
+| `BUNDLE_PALM_DABA_INITIAL_TRUST_REGION_CAP` | `100` | Initial persistent DABA trust radius cap. |
+| `BUNDLE_PALM_MAXIMUM_TRUST_REGION_RADIUS` | `1e6` | Upper bound for persistent worker trust radii. |
 # DRS benchmark runner usage
 
 This guide covers `run_drs_failure_top3_live.sh`, the recommended wrapper for

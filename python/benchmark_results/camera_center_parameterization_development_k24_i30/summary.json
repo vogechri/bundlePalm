@@ -1,0 +1,172 @@
+{
+  "se3_left": {
+    "1dsfm": {
+      "geometricSSEVsLeftSE3": 1.0,
+      "losses": 0,
+      "optimizationSeconds": 80.24052309400395,
+      "optimizationVsLeftSE3": 1.0,
+      "oracleCalls": 302,
+      "rejections": 32,
+      "scenes": {
+        "gendarmenmarkt": {
+          "optimizationSeconds": 3.281001247001768,
+          "sse": 1022315.4464515732,
+          "sseVsLeftSE3": 1.0
+        },
+        "piccadilly": {
+          "optimizationSeconds": 11.934412307000457,
+          "sse": 7257097.980697671,
+          "sseVsLeftSE3": 1.0
+        },
+        "roman_forum": {
+          "optimizationSeconds": 11.7997810880006,
+          "sse": 5362107.524463689,
+          "sseVsLeftSE3": 1.0
+        },
+        "trafalgar": {
+          "optimizationSeconds": 35.11953804600125,
+          "sse": 19437033.44510751,
+          "sseVsLeftSE3": 1.0
+        },
+        "union_square": {
+          "optimizationSeconds": 5.935873497999637,
+          "sse": 4604886.847703319,
+          "sseVsLeftSE3": 1.0
+        },
+        "vienna_cathedral": {
+          "optimizationSeconds": 12.169916908000232,
+          "sse": 6337736.823493632,
+          "sseVsLeftSE3": 1.0
+        }
+      },
+      "summedSSEVsLeftSE3": 1.0,
+      "ties": 6,
+      "wins": 0,
+      "worst": 1.0
+    },
+    "bal": {
+      "geometricSSEVsLeftSE3": 1.0,
+      "losses": 0,
+      "optimizationSeconds": 76.59478578299968,
+      "optimizationVsLeftSE3": 1.0,
+      "oracleCalls": 261,
+      "rejections": 26,
+      "scenes": {
+        "bal1723": {
+          "optimizationSeconds": 9.74578380300045,
+          "sse": 769875.3926450897,
+          "sseVsLeftSE3": 1.0
+        },
+        "bal245": {
+          "optimizationSeconds": 13.518661768999664,
+          "sse": 1807507.4942744395,
+          "sseVsLeftSE3": 1.0
+        },
+        "bal394": {
+          "optimizationSeconds": 7.841008067000075,
+          "sse": 606237.4687605215,
+          "sseVsLeftSE3": 1.0
+        },
+        "bal52": {
+          "optimizationSeconds": 4.669687048999549,
+          "sse": 477621.1424148866,
+          "sseVsLeftSE3": 1.0
+        },
+        "bal871": {
+          "optimizationSeconds": 40.81964509499994,
+          "sse": 3476137.2587691797,
+          "sseVsLeftSE3": 1.0
+        }
+      },
+      "summedSSEVsLeftSE3": 1.0,
+      "ties": 5,
+      "wins": 0,
+      "worst": 1.0
+    }
+  },
+  "so3_center_left": {
+    "1dsfm": {
+      "geometricSSEVsLeftSE3": 1.0110179852142978,
+      "losses": 4,
+      "optimizationSeconds": 78.79596603900063,
+      "optimizationVsLeftSE3": 0.9819971630380453,
+      "oracleCalls": 302,
+      "rejections": 31,
+      "scenes": {
+        "gendarmenmarkt": {
+          "optimizationSeconds": 3.0644881179996446,
+          "sse": 1127793.2256760146,
+          "sseVsLeftSE3": 1.1031753746757438
+        },
+        "piccadilly": {
+          "optimizationSeconds": 12.042920746000163,
+          "sse": 7565989.932083776,
+          "sseVsLeftSE3": 1.0425641147753126
+        },
+        "roman_forum": {
+          "optimizationSeconds": 12.085522229001072,
+          "sse": 5538941.12372941,
+          "sseVsLeftSE3": 1.0329783762184828
+        },
+        "trafalgar": {
+          "optimizationSeconds": 32.98007331400004,
+          "sse": 17509221.325927466,
+          "sseVsLeftSE3": 0.9008175746250366
+        },
+        "union_square": {
+          "optimizationSeconds": 6.565183139999135,
+          "sse": 4256589.543599175,
+          "sseVsLeftSE3": 0.9243635477649453
+        },
+        "vienna_cathedral": {
+          "optimizationSeconds": 12.05777849200058,
+          "sse": 6841782.544260065,
+          "sseVsLeftSE3": 1.0795308695839128
+        }
+      },
+      "summedSSEVsLeftSE3": 0.973175175575274,
+      "ties": 0,
+      "wins": 2,
+      "worst": 1.1031753746757438
+    },
+    "bal": {
+      "geometricSSEVsLeftSE3": 1.0057590807859398,
+      "losses": 4,
+      "optimizationSeconds": 72.36176950999834,
+      "optimizationVsLeftSE3": 0.9447349290199221,
+      "oracleCalls": 259,
+      "rejections": 26,
+      "scenes": {
+        "bal1723": {
+          "optimizationSeconds": 10.164074029999028,
+          "sse": 770015.8890771405,
+          "sseVsLeftSE3": 1.0001824924311038
+        },
+        "bal245": {
+          "optimizationSeconds": 13.151637238001058,
+          "sse": 1854259.6061571098,
+          "sseVsLeftSE3": 1.0258655148212468
+        },
+        "bal394": {
+          "optimizationSeconds": 8.006731493000188,
+          "sse": 604219.406832341,
+          "sseVsLeftSE3": 0.9966711692493925
+        },
+        "bal52": {
+          "optimizationSeconds": 4.822357547998763,
+          "sse": 480064.81086944987,
+          "sseVsLeftSE3": 1.0051163322507204
+        },
+        "bal871": {
+          "optimizationSeconds": 36.2169692009993,
+          "sse": 3480397.3076818734,
+          "sseVsLeftSE3": 1.0012255122843459
+        }
+      },
+      "summedSSEVsLeftSE3": 1.0072264994630127,
+      "ties": 0,
+      "wins": 1,
+      "worst": 1.0258655148212468
+    }
+  }
+}

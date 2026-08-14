@@ -117,6 +117,7 @@ enum class CameraUpdateMode {
   kAdditive,
   kAngleAxisLeft,
   kSo3Left,
+  kSo3CenterLeft,
   kSe3Left,
   kSe3Right,
 };
@@ -133,6 +134,9 @@ CameraUpdateMode GetCameraUpdateMode() {
     if (std::strcmp(value, "so3_left") == 0) {
       return CameraUpdateMode::kSo3Left;
     }
+    if (std::strcmp(value, "so3_center_left") == 0) {
+      return CameraUpdateMode::kSo3CenterLeft;
+    }
     if (std::strcmp(value, "se3_left") == 0) {
       return CameraUpdateMode::kSe3Left;
     }
@@ -141,7 +145,7 @@ CameraUpdateMode GetCameraUpdateMode() {
     }
     throw std::runtime_error(
       "BUNDLE_PALM_CAMERA_UPDATE must be additive, angle_axis_left, "
-      "so3_left, se3_left, or se3_right");
+      "so3_left, so3_center_left, se3_left, or se3_right");
   }();
   return mode;
 }
@@ -2188,6 +2192,11 @@ public:
       if (update_mode == CameraUpdateMode::kSe3Right) {
         result.block<3, 3>(3, 0) =
             RotationMatrix(physical_camera.head<3>());
+      } else if (update_mode == CameraUpdateMode::kSo3CenterLeft) {
+        result.block<3, 3>(3, 0) =
+            -RotationMatrix(physical_camera.head<3>());
+        result.block<3, 3>(3, 3) =
+            -Skew(physical_camera.segment<3>(3));
       } else {
         result.block<3, 3>(3, 0).setIdentity();
         if (update_mode == CameraUpdateMode::kSe3Left) {
@@ -2232,7 +2241,9 @@ public:
   void ApplySo3SubspaceMetricRatio(
       SparseMatrix<double, RowMajor>& metric) const {
     const double ratio = So3TranslationMetricRatio();
-    if (GetCameraUpdateMode() != CameraUpdateMode::kSo3Left || ratio == 1.0) {
+    if ((GetCameraUpdateMode() != CameraUpdateMode::kSo3Left &&
+       GetCameraUpdateMode() != CameraUpdateMode::kSo3CenterLeft) ||
+      ratio == 1.0) {
       return;
     }
     THROW_IF(metric.rows() != 9 * numCameras ||
@@ -2484,8 +2495,10 @@ public:
       const bool se3_left = update_mode == CameraUpdateMode::kSe3Left;
       const bool se3_right = update_mode == CameraUpdateMode::kSe3Right;
         const bool so3_left = update_mode == CameraUpdateMode::kSo3Left;
+        const bool so3_center_left =
+          update_mode == CameraUpdateMode::kSo3CenterLeft;
         const Eigen::Vector3d left_rotation =
-          (se3_left || se3_right || so3_left)
+          (se3_left || se3_right || so3_left || so3_center_left)
             ? step.segment<3>(camera_offset + 3)
             : step.segment<3>(camera_offset);
       const Eigen::Matrix3d rotation_increment = RotationMatrix(left_rotation);
@@ -2510,6 +2523,13 @@ public:
         } else if (so3_left) {
         updated_physical.segment<3>(3) +=
           step.segment<3>(camera_offset);
+        } else if (so3_center_left) {
+        const Eigen::Vector3d camera_center =
+          -RotationMatrix(rotation).transpose() * translation;
+        const Eigen::Vector3d updated_center =
+          camera_center + step.segment<3>(camera_offset);
+        updated_physical.segment<3>(3) =
+          -rotation_increment * RotationMatrix(rotation) * updated_center;
         } else {
         updated_physical.segment<3>(3) +=
           step.segment<3>(camera_offset + 3);

@@ -1009,6 +1009,27 @@ parameter direction is a bounded product-aware trust envelope; the next
 structural direction is camera-center `SO(3) x R3`. Full details remain in
 `benchmark_results/camera_parameterization_direct_tangent_report.md`.
 
+The product-aware trust envelope is complete and rejected for common promotion.
+Trust telemetry confirms the default `1e6` maximum is active. Maximum-radius
+grid `{1e3,1e4,1e5,1e6}` selects `1e5` on development (`0.976718x` product
+control on six 1DSfM, `0.997610x` on BAL5, 10/11 wins). Frozen confirmation
+reverses on 1DSfM: all-15 is `1.010903x` product control and `1.007201x`
+left-SE3, with Piazza `1.238627x`; BAL29 stays favorable at `0.999542x`
+product control. Do not interpolate or tune the DABA initial cap from held-out
+results. Scalar SO3 tuning is closed. Next implement the structurally distinct
+camera-center product manifold, keeping physical BAL storage and evaluation
+unchanged.
+
+Camera-center product result (2026-08-14): `so3_center_left` keeps physical
+`[R,t]` storage while defining `C=-R^T t`, with `R+=Exp(theta)R`,
+`C+=C+delta_C`, and `t+=-R+C+`. Direct state and point-action Jacobians pass
+finite differences. The four-scene sentinel is strong (`0.964637x` left-SE3 on
+Roman/Trafalgar, `0.953493x` on BAL1490/3068), but frozen development rejects
+transfer: six 1DSfM `1.011018x`, W/T/L `2/0/4`, worst Gendarmenmarkt
+`1.103175x`; BAL5 `1.005759x`, `1/0/4`, worst BAL245 `1.025866x`. Do not tune
+or expand. Retain the coherent camera-center mode default-off as an ablation;
+left-SE3 remains the common default.
+
 Trust-rebase artifacts:
 
 - `benchmark_results/bootstrap_trust_rebase_bal49_off/`
