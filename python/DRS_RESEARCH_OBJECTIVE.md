@@ -1030,6 +1030,20 @@ transfer: six 1DSfM `1.011018x`, W/T/L `2/0/4`, worst Gendarmenmarkt
 or expand. Retain the coherent camera-center mode default-off as an ablation;
 left-SE3 remains the common default.
 
+Final product-SO3 C1-only breadth (2026-08-14): disabling C5 does not repair
+1DSfM generalization. Frozen SO3+C1/left-SE3-C1+C5 is `1.067747x` on the nine
+held-out scenes and `1.039726x` over all 15, with summed `1.027391x`, W/T/L
+`7/0/8`, and Piazza `1.496952x`. It is also `1.043547x` the SO3+C1+C5 all-15
+endpoint, despite `0.851369x` optimization time. All 29 BAL remain strong and
+bounded at `0.996776x` left-SE3, 23/29 wins, worst `1.001555x`; C5 is nearly
+inactive there (`1.000131x` C1/C1+C5).
+
+Close product-SO3 for common-policy promotion. Keep left-SE3 as the global
+default and retain product-SO3 default-off only for reproducibility and a
+BAL-oriented publication ablation. Do not continue product-SO3 C5, metric,
+trust, or coordinate sweeps. See
+`benchmark_results/so3_c1_confirmation_k24_i30/report.md`.
+
 Trust-rebase artifacts:
 
 - `benchmark_results/bootstrap_trust_rebase_bal49_off/`
