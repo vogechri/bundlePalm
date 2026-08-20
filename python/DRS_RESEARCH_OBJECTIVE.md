@@ -211,6 +211,17 @@ crash-resume rules are frozen in `K1_CARRYOVER_TEST_PLAN.md`. Its immediate
 Phase 0 is to port and commit the detached zero-iteration validation and runner
 damping controls before implementing coherent correction rebuild behavior.
 
+Late-correction restart gate (2026-08-21): a fresh same-executable I90 control
+and an I90-horizon run stopped after 60 ordinary iterations have identical
+first-60 trajectory rows. Applying the frozen correction at that point and
+canonically restarting DRS for I30 gives `0.933819x` the terminal correction on
+Roman/Trafalgar but `1.010695x` on BAL52/3068. Although all four restart arms
+descend from the corrected I60 state, the common cross-family gate fails. Close
+late scheduling without timing/trigger tuning; retain the terminal one-step
+correction. The active next test is only the rollback-safe shared-fixed
+interior trial. See
+`benchmark_results/k1_carryover_late_correction/phase2_restart_oracle_i90_stop60/report.md`.
+
 Do not implement an adaptive forcing policy from these eight outcomes. The only
 remaining targeted experiment in this direction is a default-off true
 interior-only trial that holds shared cameras fixed, rolls back unless the local

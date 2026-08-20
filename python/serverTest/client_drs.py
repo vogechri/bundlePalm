@@ -1521,6 +1521,7 @@ def parse_arguments():
         "--mid-shared-schur-transport-product-state", action="store_true"
     )
     parser.add_argument("--final-shared-schur-correction", action="store_true")
+    parser.add_argument("--stop-after-iteration", type=int, default=0)
     parser.add_argument(
         "--shared-schur-landmark-damping", type=float, default=3.0
     )
@@ -2372,6 +2373,8 @@ def validate_arguments(arguments):
         raise ValueError("diagonal trust cutoff must be in [0, iterations]")
     if not 0 <= arguments.relative_residual_until <= arguments.iterations:
         raise ValueError("relative residual cutoff must be in [0, iterations]")
+    if not 0 <= arguments.stop_after_iteration <= arguments.iterations:
+        raise ValueError("iteration stop must be in [0, iterations]")
     if not 0 <= arguments.collective_trust_trial_until <= arguments.iterations:
         raise ValueError(
             "collective trust trial cutoff must be in [0, iterations]"
@@ -6553,6 +6556,12 @@ def main():
             if recovery_exhausted:
                 termination_reason = "recovery_exhausted"
                 break
+            if (
+                arguments.stop_after_iteration > 0
+                and iteration + 1 >= arguments.stop_after_iteration
+            ):
+                termination_reason = "configured_iteration_stop"
+                break
         optimization_seconds = time.perf_counter() - optimization_started_at
         optimization_worker_operation_seconds = {
             name: seconds - optimization_operation_start[name]
@@ -6981,6 +6990,7 @@ def main():
         "enhancedInnerUntil": arguments.enhanced_inner_until,
         "diagonalTrustUntil": arguments.diagonal_trust_until,
         "relativeResidualUntil": arguments.relative_residual_until,
+        "stopAfterIteration": arguments.stop_after_iteration,
         "threadsPerCluster": arguments.threads_per_cluster,
         "localSolver": arguments.local_solver,
         "localSolverSwitchIteration": (

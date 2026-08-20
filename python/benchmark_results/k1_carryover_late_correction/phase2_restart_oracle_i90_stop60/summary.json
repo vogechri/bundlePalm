@@ -1,0 +1,109 @@
+{
+  "families": {
+    "1dsfm": {
+      "restart_over_endpoint": {
+        "geometric": 0.9338193166660267,
+        "losses": 0,
+        "summed": 0.9479071233796047,
+        "wins": 2,
+        "worst": 0.9559026179363505
+      },
+      "restart_over_i60_corrected": {
+        "geometric": 0.8932174762151277,
+        "losses": 0,
+        "summed": 0.9192872019906171,
+        "wins": 2,
+        "worst": 0.9346782939125691
+      },
+      "restart_over_mature": {
+        "geometric": 0.7337801027437804,
+        "losses": 0,
+        "summed": 0.8108569830696092,
+        "wins": 2,
+        "worst": 0.867856716829448
+      }
+    },
+    "bal": {
+      "restart_over_endpoint": {
+        "geometric": 1.0106949394651545,
+        "losses": 2,
+        "summed": 1.01233445019924,
+        "wins": 0,
+        "worst": 1.0129203758170635
+      },
+      "restart_over_i60_corrected": {
+        "geometric": 0.9883241434636106,
+        "losses": 0,
+        "summed": 0.9844017861448822,
+        "wins": 2,
+        "worst": 0.9936591945462881
+      },
+      "restart_over_mature": {
+        "geometric": 1.0098232249868488,
+        "losses": 2,
+        "summed": 1.0112367468613985,
+        "wins": 0,
+        "worst": 1.011741653300965
+      }
+    }
+  },
+  "scenes": {
+    "bal3068": {
+      "accepted_damping": 0.005859375,
+      "committed_mature_i90": 3173930.8096501427,
+      "endpoint_one": 3166545.987393982,
+      "i60_corrected": 3262869.8665204616,
+      "i60_pre": 3268478.257984927,
+      "i60_pre_over_mature_prefix": 1.0,
+      "mature_i60": 3268478.257984927,
+      "mature_i90": 3170235.1495841756,
+      "restart_i30": 3207458.951593126,
+      "restart_over_endpoint": 1.0129203758170635,
+      "restart_over_i60_corrected": 0.9830177367795468,
+      "restart_over_mature": 1.011741653300965
+    },
+    "bal52": {
+      "accepted_damping": 0.005859375,
+      "committed_mature_i90": 480926.0325847256,
+      "endpoint_one": 480656.13577448856,
+      "i60_corrected": 487822.5926862769,
+      "i60_pre": 488101.26104538597,
+      "i60_pre_over_mature_prefix": 1.0,
+      "mature_i60": 488101.26104538597,
+      "mature_i90": 480926.0325848799,
+      "restart_i30": 484729.4045301279,
+      "restart_over_endpoint": 1.008474392507392,
+      "restart_over_i60_corrected": 0.9936591945462881,
+      "restart_over_mature": 1.0079084343278437
+    },
+    "roman_forum": {
+      "accepted_damping": 0.005859375,
+      "committed_mature_i90": 3858793.8800043925,
+      "endpoint_one": 2578278.9039699947,
+      "i60_corrected": 2755431.917108754,
+      "i60_pre": 4059362.870196342,
+      "i60_pre_over_mature_prefix": 1.0,
+      "mature_i60": 4059362.870196342,
+      "mature_i90": 3791037.8238677448,
+      "restart_i30": 2352025.09329692,
+      "restart_over_endpoint": 0.9122461847224159,
+      "restart_over_i60_corrected": 0.8535957933465745,
+      "restart_over_mature": 0.6204172056762295
+    },
+    "trafalgar": {
+      "accepted_damping": 0.005859375,
+      "committed_mature_i90": 14026464.367680823,
+      "endpoint_one": 11499456.99831982,
+      "i60_corrected": 11760582.353449455,
+      "i60_pre": 13028961.079282887,
+      "i60_pre_over_mature_prefix": 1.0,
+      "mature_i60": 13028961.079282887,
+      "mature_i90": 12666101.254247285,
+      "restart_i30": 10992361.049540402,
+      "restart_over_endpoint": 0.9559026179363505,
+      "restart_over_i60_corrected": 0.9346782939125691,
+      "restart_over_mature": 0.867856716829448
+    }
+  },
+  "status": "completed"
+}

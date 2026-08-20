@@ -111,6 +111,14 @@ log directory. Phase 0 must first port and commit the detached zero-iteration
 validation and Schur-damping runner controls; do not combine that protocol
 commit with the coherent rebuild implementation.
 
+Phase 2 is now closed. A same-executable I90 control and I90-horizon stop at
+I60 match exactly through the first 60 trajectory rows. One frozen correction
+plus canonical I30 restart improves the terminal-correction endpoint to
+`0.933819x` on Roman/Trafalgar but regresses BAL52/3068 to `1.010695x`.
+Therefore do not tune correction timing or implement the global stagnation
+trigger. Keep the terminal correction and continue only with the independent
+shared-fixed interior trial documented in the plan.
+
 Only `all15_corrected/` is authoritative. The sibling `all15/` directory is a
 quarantined setup error with the wrong trust cap and recovery controls.
 

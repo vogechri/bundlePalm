@@ -101,6 +101,7 @@ INITIAL_SHARED_SCHUR_MODEL_RATIO_MINIMUM_FACTOR=${INITIAL_SHARED_SCHUR_MODEL_RAT
 MID_SHARED_SCHUR_CORRECTION_ITERATION=${MID_SHARED_SCHUR_CORRECTION_ITERATION:-0}
 MID_SHARED_SCHUR_TRANSPORT_PRODUCT_STATE=${MID_SHARED_SCHUR_TRANSPORT_PRODUCT_STATE:-0}
 FINAL_SHARED_SCHUR_CORRECTION=${FINAL_SHARED_SCHUR_CORRECTION:-0}
+STOP_AFTER_ITERATION=${STOP_AFTER_ITERATION:-0}
 SHARED_SCHUR_MAXIMUM_CORRECTIONS=${SHARED_SCHUR_MAXIMUM_CORRECTIONS:-1}
 SHARED_SCHUR_CAMERA_DAMPING=${SHARED_SCHUR_CAMERA_DAMPING:-3}
 SHARED_SCHUR_LANDMARK_DAMPING=${SHARED_SCHUR_LANDMARK_DAMPING:-3}
@@ -331,6 +332,9 @@ if [[ "$FINAL_SHARED_SCHUR_CORRECTION" == "1" ]]; then
   if [[ "$SHARED_SCHUR_RELATIVE_TOLERANCE" != "1e-6" ]]; then
     VARIANT_NAME="${VARIANT_NAME}_rtol${SHARED_SCHUR_RELATIVE_TOLERANCE}"
   fi
+fi
+if [[ "$STOP_AFTER_ITERATION" != "0" ]]; then
+  VARIANT_NAME="${VARIANT_NAME}_stop${STOP_AFTER_ITERATION}"
 fi
 if [[ -n "$VARIANT_TAG" ]]; then
   if [[ ! "$VARIANT_TAG" =~ ^[a-zA-Z0-9._-]+$ ]]; then
@@ -705,6 +709,7 @@ for problem in "${PROBLEMS[@]}"; do
             --enhanced-inner-until "$ENHANCED_INNER_UNTIL" \
             --diagonal-trust-until "$DIAGONAL_TRUST_UNTIL" \
             --relative-residual-until "$RELATIVE_RESIDUAL_UNTIL" \
+            --stop-after-iteration "$STOP_AFTER_ITERATION" \
             --partition-cache "$PARTITION_CACHE" \
             --partition-cache-directory "$PARTITION_CACHE_DIRECTORY" \
             --local-solver "$LOCAL_SOLVER" \
@@ -795,6 +800,7 @@ for problem in "${PROBLEMS[@]}"; do
             --enhanced-inner-until "$ENHANCED_INNER_UNTIL" \
             --diagonal-trust-until "$DIAGONAL_TRUST_UNTIL" \
             --relative-residual-until "$RELATIVE_RESIDUAL_UNTIL" \
+            --stop-after-iteration "$STOP_AFTER_ITERATION" \
             --partition-cache "$PARTITION_CACHE" \
             --partition-cache-directory "$PARTITION_CACHE_DIRECTORY" \
             --local-solver "$LOCAL_SOLVER" \

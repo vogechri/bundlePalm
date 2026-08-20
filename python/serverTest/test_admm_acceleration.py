@@ -344,6 +344,23 @@ def test_mid_shared_schur_rejects_iteration_at_budget(monkeypatch):
         client_drs.validate_arguments(client_drs.parse_arguments())
 
 
+def test_stop_after_iteration_rejects_value_above_budget(monkeypatch):
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "client_drs.py",
+            "unused.bal",
+            "--iterations",
+            "10",
+            "--stop-after-iteration",
+            "11",
+        ],
+    )
+    with pytest.raises(ValueError, match="iteration stop must be in"):
+        client_drs.validate_arguments(client_drs.parse_arguments())
+
+
 @pytest.mark.parametrize("accept_candidate", [False, True])
 def test_mid_shared_schur_rebase_restores_or_commits(
     monkeypatch, accept_candidate

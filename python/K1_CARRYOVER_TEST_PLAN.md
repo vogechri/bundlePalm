@@ -350,15 +350,18 @@ or quarantine it under an explicit `_invalid_<reason>` name.
 | Phase | Status | Commit | Authoritative artifact | Decision |
 |---|---|---|---|---|
 | 0 protocol durability | complete | `3e1cf1f` | focused tests and syntax checks | proceed |
-| 1 matched controls | complete | pending commit | `benchmark_results/k1_carryover_late_correction/phase1_controls/report.md` | proceed |
-| 2 coherent rebuild | active | -- | -- | -- |
-| 3 global late trigger | blocked by Phase 2 | -- | -- | -- |
-| 4 interior-only trial | blocked by Phase 2 primitive | -- | -- | -- |
+| 1 matched controls | complete | `f4d5e8b` | `benchmark_results/k1_carryover_late_correction/phase1_controls/report.md` | proceed |
+| 2 canonical rebuild oracle | complete, cross-family negative | pending commit | `benchmark_results/k1_carryover_late_correction/phase2_restart_oracle_i90_stop60/report.md` | stop scheduling |
+| 3 global late trigger | closed | -- | Phase 2 result | do not tune |
+| 4 interior-only trial | active | -- | -- | -- |
 | 5 frozen confirmation | blocked by development | -- | -- | -- |
 
 ## Immediate Next Action
 
-Implement the default-off coherent rebuild and its state-neutrality tests. The
-Phase 1 control gate passed: mature reload geomean is `0.999999999998x`, the
-one-correction/prestate geomean is `0.896939117x`, and all four accepted solves
-meet convergence, residual, physical-SSE, and model-gain gates.
+Implement only the rollback-safe shared-fixed interior trial and its
+state-neutrality tests. The matched Phase 2 process-restart oracle requested an
+I90 horizon, matched all first 60 trajectory rows exactly, applied one frozen
+correction, and restarted fresh DRS for I30. Restart/terminal-correction is
+`0.933819x` on Roman/Trafalgar but `1.010695x` on BAL52/3068. This fails the
+cross-family gate, so do not tune correction timing or implement the Phase 3
+trigger. The common late-correction policy remains terminal-only.
