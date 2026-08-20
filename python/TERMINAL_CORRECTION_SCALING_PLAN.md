@@ -99,11 +99,12 @@ absolute paths, symlinked states, and NPZ outputs remain untracked.
 | Phase | Status | Artifact |
 |---|---|---|
 | Sentinel K4/K16 | passed | `terminal_correction_scaling_sentinels/report.md` |
-| Full reload inventory | pending | -- |
+| Full reload inventory | ready to run | `serverTest/run_terminal_correction_scaling_all.sh` |
 | Invalid-state in-process recovery | blocked by inventory | -- |
 | Merged all-15/all-29 decision | blocked by recovery | -- |
 
 ## Immediate Next Action
 
-Implement and commit the resumable full-transfer runner/analyzer, then launch
-the all-88 reload inventory unchanged.
+Launch the committed all-88 reload inventory unchanged. The runner will write
+physical-SSE recovery manifests, rerun invalid rows in-process, and then merge
+the final all-15/all-29 decision.
