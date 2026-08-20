@@ -353,15 +353,16 @@ or quarantine it under an explicit `_invalid_<reason>` name.
 | 1 matched controls | complete | `f4d5e8b` | `benchmark_results/k1_carryover_late_correction/phase1_controls/report.md` | proceed |
 | 2 canonical rebuild oracle | complete, cross-family negative | pending commit | `benchmark_results/k1_carryover_late_correction/phase2_restart_oracle_i90_stop60/report.md` | stop scheduling |
 | 3 global late trigger | closed | -- | Phase 2 result | do not tune |
-| 4 interior-only trial | active | -- | -- | -- |
-| 5 frozen confirmation | blocked by development | -- | -- | -- |
+| 4 interior-only trial | complete, rejected | pending commit | `benchmark_results/k1_carryover_late_correction/phase4_interior_development/report.md` | close carryover |
+| 5 frozen confirmation | closed | -- | Phase 4 result | no candidate passed |
 
 ## Immediate Next Action
 
-Implement only the rollback-safe shared-fixed interior trial and its
-state-neutrality tests. The matched Phase 2 process-restart oracle requested an
-I90 horizon, matched all first 60 trajectory rows exactly, applied one frozen
-correction, and restarted fresh DRS for I30. Restart/terminal-correction is
-`0.933819x` on Roman/Trafalgar but `1.010695x` on BAL52/3068. This fails the
-cross-family gate, so do not tune correction timing or implement the Phase 3
-trigger. The common late-correction policy remains terminal-only.
+No further K1 carryover experiment is active. The shared-fixed interior trial
+passes its mutation contract: 48 forced rejections are bitwise neutral in
+trajectory/cameras/points, and accepted trials move shared cameras by exactly
+zero. It improves six-scene 1DSfM to `0.921785x`, but BAL is `1.071668x`, BAL52
+is `1.043313x`, and BAL3068 recovery-exhausts at I15 with `1.353560x` SSE.
+Do not tune the trial or expand breadth. Retain direct tangent, exact metric,
+shared-only semantics, and the single terminal distributed Schur correction as
+the completed K1-derived carryovers.

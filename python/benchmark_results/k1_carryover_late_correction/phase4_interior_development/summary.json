@@ -1,0 +1,119 @@
+{
+  "1dsfm": {
+    "geometric_optimization_time": 1.1334251002854145,
+    "geometric_sse": 0.9217850567494211,
+    "losses": 1,
+    "summed_sse": 0.9429593088279152,
+    "wins": 5,
+    "worst": 1.0009009783354637
+  },
+  "bal": {
+    "geometric_optimization_time": 0.9308539109354155,
+    "geometric_sse": 1.0716683672409637,
+    "losses": 3,
+    "summed_sse": 1.102603988117081,
+    "wins": 2,
+    "worst": 1.3535599108566374
+  },
+  "completion_failures": [
+    "bal3068"
+  ],
+  "scenes": {
+    "bal1490": {
+      "completed_iterations": 30,
+      "control_sse": 3101046.167797854,
+      "optimization_ratio": 1.1791779927860044,
+      "ratio": 1.0011468987354515,
+      "termination_reason": "iteration_limit",
+      "trial_sse": 3104602.753726278
+    },
+    "bal1778": {
+      "completed_iterations": 30,
+      "control_sse": 3378290.6977003636,
+      "optimization_ratio": 1.2079045344221166,
+      "ratio": 0.9999392465196637,
+      "termination_reason": "iteration_limit",
+      "trial_sse": 3378085.4547828906
+    },
+    "bal245": {
+      "completed_iterations": 30,
+      "control_sse": 1803877.5575950865,
+      "optimization_ratio": 1.1968139359136527,
+      "ratio": 0.9998585447881446,
+      "termination_reason": "iteration_limit",
+      "trial_sse": 1803622.3897130156
+    },
+    "bal3068": {
+      "completed_iterations": 15,
+      "control_sse": 3493172.3798949057,
+      "optimization_ratio": 0.36267663803090355,
+      "ratio": 1.3535599108566374,
+      "termination_reason": "recovery_exhausted",
+      "trial_sse": 4728218.095137416
+    },
+    "bal52": {
+      "completed_iterations": 30,
+      "control_sse": 503240.1643094277,
+      "optimization_ratio": 1.130445015234362,
+      "ratio": 1.0433129360676425,
+      "termination_reason": "iteration_limit",
+      "trial_sse": 525036.9733728319
+    },
+    "gendarmenmarkt": {
+      "completed_iterations": 30,
+      "control_sse": 971588.0798145293,
+      "optimization_ratio": 1.1323475402042371,
+      "ratio": 0.8729759998096082,
+      "termination_reason": "iteration_limit",
+      "trial_sse": 848173.0753791861
+    },
+    "piccadilly": {
+      "completed_iterations": 30,
+      "control_sse": 7396842.92262152,
+      "optimization_ratio": 1.1243895019990642,
+      "ratio": 0.8582054592740704,
+      "termination_reason": "iteration_limit",
+      "trial_sse": 6348010.977586559
+    },
+    "roman_forum": {
+      "completed_iterations": 30,
+      "control_sse": 4673162.885092747,
+      "optimization_ratio": 1.0590546667534129,
+      "ratio": 0.9402239090223902,
+      "termination_reason": "iteration_limit",
+      "trial_sse": 4393819.4753202535
+    },
+    "trafalgar": {
+      "completed_iterations": 30,
+      "control_sse": 15101857.03495186,
+      "optimization_ratio": 1.1459171452107895,
+      "ratio": 1.0009009783354637,
+      "termination_reason": "iteration_limit",
+      "trial_sse": 15115463.480965622
+    },
+    "union_square": {
+      "completed_iterations": 30,
+      "control_sse": 4363626.9294354515,
+      "optimization_ratio": 1.104336546973118,
+      "ratio": 0.9670580713168315,
+      "termination_reason": "iteration_limit",
+      "trial_sse": 4219880.642326036
+    },
+    "vienna_cathedral": {
+      "completed_iterations": 30,
+      "control_sse": 6302668.332153288,
+      "optimization_ratio": 1.2424742383125849,
+      "ratio": 0.8997242893157091,
+      "termination_reason": "iteration_limit",
+      "trial_sse": 5670663.785939243
+    }
+  },
+  "status": "failed",
+  "telemetry": {
+    "accepted": 13782,
+    "accepted_fraction": 0.9935121107266436,
+    "maximum_shared_camera_change": 0.0,
+    "rejected": 90,
+    "summed_local_cost_ratio": 0.9711870501113761
+  }
+}

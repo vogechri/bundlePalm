@@ -6971,6 +6971,13 @@ def main():
         "adaptiveLocalDepth": arguments.adaptive_local_depth,
         "adaptiveLocalDepthStart": arguments.adaptive_local_depth_start,
         "interiorDefectDiagnostic": arguments.interior_defect_diagnostic,
+        "sharedFixedInteriorTrial": (
+            os.environ.get("BUNDLE_PALM_SHARED_FIXED_INTERIOR_TRIAL", "0")
+            == "1"
+        ),
+        "sharedFixedInteriorTrialMaximumBacktracks": int(os.environ.get(
+            "BUNDLE_PALM_SHARED_FIXED_INTERIOR_TRIAL_MAX_BACKTRACKS", "8"
+        )),
         "adaptiveLocalDepthMaximum": (
             arguments.adaptive_local_depth_maximum
         ),

@@ -222,6 +222,18 @@ correction. The active next test is only the rollback-safe shared-fixed
 interior trial. See
 `benchmark_results/k1_carryover_late_correction/phase2_restart_oracle_i90_stop60/report.md`.
 
+Shared-fixed interior gate (2026-08-21): one default-off worker trial zeros all
+shared-camera directions, jointly updates only unique cameras and landmarks,
+and backtracks on exact local data cost. Forced rejection reproduces Roman I2
+trajectory, cameras, points, and endpoint bitwise; accepted and rejected trials
+move shared cameras by exactly zero. On the frozen 6+5 development cohort it
+improves 1DSfM to `0.921785x` control at `1.133425x` optimization time, but BAL
+regresses to `1.071668x`; BAL52 is `1.043313x`, and BAL3068 recovery-exhausts at
+I15 with `1.353560x` delivered SSE. Reject without tuning or breadth expansion.
+This closes further K1 carryover: retain the already integrated algebra,
+shared-only semantics, and one terminal distributed Schur correction. See
+`benchmark_results/k1_carryover_late_correction/phase4_interior_development/report.md`.
+
 Do not implement an adaptive forcing policy from these eight outcomes. The only
 remaining targeted experiment in this direction is a default-off true
 interior-only trial that holds shared cameras fixed, rolls back unless the local

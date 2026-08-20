@@ -119,6 +119,14 @@ Therefore do not tune correction timing or implement the global stagnation
 trigger. Keep the terminal correction and continue only with the independent
 shared-fixed interior trial documented in the plan.
 
+Phase 4 is also closed. The shared-fixed unique-camera/landmark trial has exact
+rollback and shared-camera invariance, and improves the six-scene 1DSfM cohort
+to `0.921785x`. It fails cross-family transfer: BAL is `1.071668x`, BAL52 is
+`1.043313x`, and BAL3068 recovery-exhausts at I15 with `1.353560x` SSE. Do not
+tune or broaden it. No additional K1 carryover phase remains; the retained
+package is direct tangent, exact metric consistency, shared-only product-space
+semantics, and one terminal safeguarded distributed Schur correction.
+
 Only `all15_corrected/` is authoritative. The sibling `all15/` directory is a
 quarantined setup error with the wrong trust cap and recovery controls.
 

@@ -113,6 +113,16 @@ int EnvironmentInteger(const char* name, int default_value,
   return static_cast<int>(value);
 }
 
+bool SharedFixedInteriorTrialEnabled() {
+  return EnvironmentInteger(
+      "BUNDLE_PALM_SHARED_FIXED_INTERIOR_TRIAL", 0, 0, 1) == 1;
+}
+
+int SharedFixedInteriorTrialMaximumBacktracks() {
+  return EnvironmentInteger(
+      "BUNDLE_PALM_SHARED_FIXED_INTERIOR_TRIAL_MAX_BACKTRACKS", 8, 0, 8);
+}
+
 enum class CameraUpdateMode {
   kAdditive,
   kAngleAxisLeft,
@@ -5246,6 +5256,9 @@ void UpdateStepSizeAndSolve() {//bool keep_cameras_fixed = false) { // Recompute
   if (landmark_refinement_steps > 0) {
     RefineLandmarksWithFixedCameras(landmark_refinement_steps);
   }
+  if (SharedFixedInteriorTrialEnabled()) {
+    RunSharedFixedInteriorTrial();
+  }
   if (!scalar_proximal_prior &&
       (metric_diagnostic_iterations > 0 || proximal_defect_diagnostic)) {
     const NormalEquations final_normal_equations = GetNormalEquations();
@@ -5271,6 +5284,107 @@ void UpdateStepSizeAndSolve() {//bool keep_cameras_fixed = false) { // Recompute
       EmitLocalSolveMetric(metric.str());
     }
   }
+}
+
+bool RunSharedFixedInteriorTrial() {
+#ifdef __unweighted_system__
+  return false;
+#else
+  THROW_IF(!DirectTangentNormalEquationsEnabled());
+  const std::vector<double> cameras_before = cameras;
+  const std::vector<double> landmarks_before = landmarks;
+  const double cost_before = 2. * GetCost();
+  const NormalEquations normal_equations = GetBatchedNormalEquations(true);
+
+  SparseMatrix<double, RowMajor> camera_inverse =
+      normal_equations.camera_hessian;
+  SparseMatrix<double, RowMajor> landmark_inverse =
+      normal_equations.landmark_hessian;
+  FloorSymmetricBlocks<9>(camera_inverse, 1e-16);
+  FloorSymmetricBlocks<3>(landmark_inverse, 1e-16);
+  BlockInverse<9>(camera_inverse);
+  BlockInverse<3>(landmark_inverse);
+  Eigen::VectorXd camera_direction =
+      -camera_inverse * normal_equations.camera_gradient;
+  const Eigen::VectorXd landmark_direction =
+      -landmark_inverse * normal_equations.landmark_gradient;
+  int unique_cameras = 0;
+  int shared_cameras = 0;
+  for (int camera = 0; camera < numCameras; ++camera) {
+    if (camera_proximal_multipliers[camera] > 0.) {
+      camera_direction.segment<9>(9 * camera).setZero();
+      ++shared_cameras;
+    } else {
+      ++unique_cameras;
+    }
+  }
+
+  bool accepted = false;
+  int accepted_backtrack = -1;
+  double accepted_cost = cost_before;
+  double step_length = 1.;
+  if (camera_direction.allFinite() && landmark_direction.allFinite() &&
+      camera_direction.squaredNorm() + landmark_direction.squaredNorm() > 0.) {
+        for (int backtrack = 0;
+          backtrack < SharedFixedInteriorTrialMaximumBacktracks();
+          ++backtrack) {
+      cameras = cameras_before;
+      landmarks = landmarks_before;
+      ApplyCameraStep(step_length * camera_direction);
+      for (int camera = 0; camera < numCameras; ++camera) {
+        if (camera_proximal_multipliers[camera] > 0.) {
+          std::copy_n(
+              cameras_before.begin() + 9 * camera, 9,
+              cameras.begin() + 9 * camera);
+        }
+      }
+      for (int index = 0; index < landmark_direction.size(); ++index) {
+        landmarks[index] += step_length * landmark_direction[index];
+      }
+      const double cost_after = 2. * GetCost();
+      if (std::isfinite(cost_after) && cost_after < cost_before) {
+        accepted = true;
+        accepted_backtrack = backtrack;
+        accepted_cost = cost_after;
+        cost = cost_after;
+        break;
+      }
+      step_length *= 0.5;
+    }
+  }
+  if (!accepted) {
+    cameras = cameras_before;
+    landmarks = landmarks_before;
+    cost = cost_before;
+  }
+  double shared_camera_maximum_change = 0.;
+  for (int camera = 0; camera < numCameras; ++camera) {
+    if (camera_proximal_multipliers[camera] > 0.) {
+      for (int parameter = 0; parameter < 9; ++parameter) {
+        shared_camera_maximum_change = std::max(
+            shared_camera_maximum_change,
+            std::abs(cameras[9 * camera + parameter]
+                     - cameras_before[9 * camera + parameter]));
+      }
+    }
+  }
+  THROW_IF(shared_camera_maximum_change != 0.);
+  if (LocalSolveMetricsEnabled()) {
+    std::ostringstream metric;
+    metric << "SHARED_FIXED_INTERIOR_TRIAL cluster=" << cluster_id
+           << " accepted=" << accepted
+           << " unique_cameras=" << unique_cameras
+           << " shared_cameras=" << shared_cameras
+           << " shared_camera_maximum_change="
+           << shared_camera_maximum_change
+           << " backtracks=" << accepted_backtrack
+           << " step_length=" << (accepted ? step_length : 0.)
+           << " before=" << cost_before
+           << " after=" << accepted_cost << "\n";
+    EmitLocalSolveMetric(metric.str());
+  }
+  return accepted;
+#endif
 }
 
 void RefineLandmarksWithFixedCameras(int refinement_steps) {

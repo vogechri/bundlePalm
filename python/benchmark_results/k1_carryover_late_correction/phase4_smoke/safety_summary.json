@@ -1,0 +1,20 @@
+{
+  "control_scene": "roman_forum",
+  "iterations": 2,
+  "forced_rejection": {
+    "accepted_trials": 0,
+    "rejected_trials": 48,
+    "endpoint_sse_bitwise_equal": true,
+    "trajectory_fields_bitwise_equal": true,
+    "saved_cameras_bitwise_equal": true,
+    "saved_points_bitwise_equal": true,
+    "maximum_shared_camera_change": 0.0
+  },
+  "accepted_trial_smoke": {
+    "control_sse": 41542901.02332562,
+    "trial_sse": 34294264.515460014,
+    "trial_over_control": 0.8255149218523224,
+    "accepted_trials": 48,
+    "summed_local_cost_ratio": 0.922837
+  }
+}
