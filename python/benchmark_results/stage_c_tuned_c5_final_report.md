@@ -24,6 +24,33 @@ Promote the tuned C1+C5 stack as the final Stage-C configuration. It improves th
 This promotion is within the matched K24/I30 Stage-C ablation. It does not
 supersede the longer-horizon best base DRS in endpoint quality.
 
+## Ratio Denominators
+
+The reports use different denominators that must not be conflated:
+
+- `C1+C5/plain = 0.847890x` on 1DSfM and `0.983275x` on BAL compares two fresh
+	K24/I30 Stage-C rows with the same Schur-PCG/DABA-trust configuration. Only
+	C1 and C5 differ.
+- `C1+C5/Ceres = 2.141229x` and `1.009698x` compares the tuned endpoint directly
+	with authoritative Ceres left-SE3.
+- `C1+C5/base-I30 = 1.129336x` and `0.995443x`, used in the later backbone
+	analysis, has a different denominator. For each scene it extracts the best
+	SSE within the first 30 iterations of the preserved legacy K24/I200 1DSfM or
+	K24/I90 BAL trajectory, then takes the geometric mean of candidate/base.
+
+Those preserved base-I30 checkpoints are `1.896006x` Ceres on 1DSfM and
+`1.014321x` on BAL. Therefore:
+
+```text
+1DSfM: 2.141229 / 1.896006 = 1.129336
+BAL:   1.009698 / 1.014321 = 0.995443
+```
+
+Thus tuned C1+C5 improves its own fresh Stage-C plain control, while the whole
+Stage-C configuration remains worse than the legacy backbone on 1DSfM at the
+same I30 horizon. This motivated restoring Nesterov, DRS trust, curvature
+`0.4`, and camera metric 75 before testing the structural factors.
+
 ## Deterministic repeats
 
 After one excluded warm-up, three measured repeats on Roman, Trafalgar, BAL52,

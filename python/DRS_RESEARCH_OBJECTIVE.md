@@ -1,6 +1,6 @@
 # DRS Research Objective and Restart Contract
 
-Updated: 2026-08-10
+Updated: 2026-08-19
 
 > Recovery note (2026-08-11): an unclean WSL/VS Code restart rolled open source
 > files back to an earlier coherent editor snapshot after the completed C5
@@ -66,10 +66,162 @@ Mandatory K1 carryovers already integrated into the core method are:
 4. points-p95 normalization, Jacobi camera scaling, and landmark
    preconditioning, which are compatible with the portable K1 package.
 
+Supplementary plain-resolvent horizon ablation (2026-08-19): a clean `4db26e4`
+checkpoint ran all 15 1DSfM scenes at K24 with direct left-SE3 tangent
+equations, exact tangent metrics, shared-only proximal semantics,
+points-p95/Jacobi/preconditioning, one finite Nesterov local step, and no C1,
+C5, bootstrap, or Schur polishing. Twelve scenes reached I1000. Piccadilly
+exhausted recovery at I992, Tower at I77, and Trafalgar at I135; all three hit
+the curvature ceiling 64. Best-state restoration is correct.
+
+The failure-inclusive delivered endpoint is `1.950010x` Ceres geometrically,
+`1.847092x` summed, W/L `0/15`, worst Tower `5.709418x`. On the 12 scenes that
+reach I1000, the common-prefix ratio is `1.907980x` Ceres. The corrected method
+is `1.367264x` the old legacy I1000 endpoint and loses all 15 direct
+comparisons. The old I1000 artifact is not method-equivalent because it lacks
+direct tangent assembly and shared-only semantics.
+
+Keep the K1 carryovers as mathematical and implementation correctness
+requirements, but close horizon extension of this early fixed plain resolvent.
+Do not mistake this row for the best current architecture. Existing all-15
+direct-tangent/shared-only I90 campaigns already cover the later base backbone
+with C1: `1.591438x` Ceres with a diagnostic trust/curvature rebase,
+`1.596631x` without proposal damping, and `1.609367x` with transient proposal
+damping. The preserved K24/I200 pure-DRS reference remains `1.457017x` Ceres,
+and separately labeled polished workflows reach `1.063839x`. Continue from the
+later backbone and publication presets. See
+`benchmark_results/k1_compatible_pure_drs_k24_i1000/report.md`.
+
+Do not attribute the `1.950010x` row to bringing K1 corrections into the good
+base. It also disables C1 and replaces the mature DRS-trust/curvature-0.4/
+metric-75 package with the K1-local DABA-trust/curvature-0.00625/metric-25
+package. Matched all-15 structural factorials keep direct tangent and the
+mature backbone fixed: shared-only/all-camera is `1.033321x` without proposal
+damping and `1.048656x` with it at I30. The matched transient-proposal I90 pair
+is `1.035714x`, with both arms complete. Thus shared-only has a modest 3--5%
+cost under this backbone; the large cross-artifact regression is confounding,
+not evidence that direct tangent or product-space semantics catastrophically
+hurt the method.
+
+### K1-to-Backbone Lineage Map (2026-08-19)
+
+Two result lineages must remain separate:
+
+1. The preserved mature `client_drs.py` quality backbone predates the K1
+   algebra/product-space integration. Its K24/I200 all-15 1DSfM endpoint is
+   `1.457017x` Ceres and its established K24/I90 all-29 BAL endpoint is
+   `0.998404x`. The raw 1DSfM row has
+   `directTangentNormalEquations=false` and no shared-only field; the BAL row
+   also predates those controls. These are strong historical quality
+   references, not evidence for the integrated K1 formulation.
+2. The K1 bridge introduced direct tangent assembly, exact tangent metric
+   consistency, and shared-only product-space semantics step by step, then
+   recomposed them with the mature Nesterov/DRS-trust/curvature-0.4/metric-75/C1
+   backbone. The complete no-final-Schur K24/I90 successor is
+   `1.596631x` Ceres on all-15 1DSfM and `1.000822x` on all-29 BAL with no
+   proposal damping. Transient proposal damping gives `1.609367x` and
+   `0.999879x`; a diagnostic I30 trust/curvature rebase gives `1.591438x` and
+   `1.001609x`. All three use one global policy and complete both cohorts,
+   except the permanent-proposal arm, which is not the named successor.
+
+The remembered approximately `1.4x` 1DSfM number refers either to the legacy
+K24/I200 pure-DRS reference (`1.457017x`) or to the later integrated I30 plus
+ten distributed Schur corrections (`1.411625x`). The latter is polishing and
+has no matched all-29 ten-correction BAL row. The common all-family bounded
+three-correction workflow is `1.626944x` Ceres on 1DSfM and `1.011023x` on BAL.
+All of these authoritative runs use `client_drs.py`; `client_acc.py` is the
+historical predecessor, not a separate final result source.
+
+Therefore the actual missing apples-to-apples quality gate is not another K1
+bridge or the early plain I1000 run. It is an all-15/all-29 longer-horizon
+evaluation of the integrated mature backbone, with direct tangent and
+shared-only semantics retained, against the preserved legacy quality
+references. Do not claim that gate has already been completed at I200.
+
+Fresh isolated bridge gate (2026-08-19):
+`serverTest/client_drs_k1_bridge.py` preserves `client_drs.py` and pins the
+mature legacy backbone while exposing ordered `legacy`, `direct`, and
+`direct_shared` arms. On fresh matched Roman/Trafalgar K24/I30, direct tangent
+alone is `1.000000140x` legacy and reproduces rejection counts. It is therefore
+algebraically required but behavior-neutral on this mature sentinel. Adding
+shared-only semantics is material: Roman is `1.058889x`, Trafalgar is
+`0.620650x`, and the pair is `0.810679x` legacy. This confirms that the worker
+already uses the same Nesterov kernel as K1; copying that linear solver is not
+the missing mechanism. The relevant inner-optimization surface is accurate,
+safe minimization of unique cameras and landmarks under shared-only proximal
+coupling. See `benchmark_results/k1_inner_on_mature_base_k24_i30/report.md`.
+
+A fixed two-local-step arm rejects the simplest interior-accuracy repair. It is
+`1.063412x` shared-only L1 geometrically at `1.584348x` time: Trafalgar changes
+only to `0.991819x` L1 while Roman regresses to `1.140172x`. Do not extract a
+fixed-depth C++ interior solver or broadly sweep local-step count. A future
+inner policy requires a checkable relative forcing or stationarity diagnostic,
+not unconditional extra local solves.
+
+The existing normalized interior-defect diagnostic is behavior-neutral on the
+fresh bridge: all SSE rows and saved cameras/points are bitwise equal with it
+enabled. It is not predictive enough by itself. Roman and Trafalgar have
+similar median defect histories, each activates six clusters under the old C5
+window-three threshold, and both decay to about `0.0127` median by I30 despite
+opposite L2 effects. Do not revive that defect-threshold controller as the new
+solver policy.
+
+Broader forcing reliability (2026-08-19): behavior-neutral L1 diagnostics and
+fixed-L2 controls completed on six development 1DSfM scenes plus BAL1490/3068.
+For `q=sqrt(interior defect/proximal displacement)>1`, TP/FP/FN/TN is
+`3/4/1/0`, precision `0.429`, recall `0.750`, sign accuracy `0.375`, and
+maximum-q Spearman correlation with L2 benefit `-0.071`. Reject q as a
+standalone adaptive-depth trigger. Full L2 is not a clean interior-only
+intervention because it also re-updates shared cameras, so this does not reject
+relative inexact-prox theory; it rejects wiring the current q directly to the
+existing `local_steps=2` path. See
+`benchmark_results/k1_inner_on_mature_base_k24_i30/forcing_reliability.md`.
+
+Mature endpoint oracle: one exact K1/no-proximal step from the integrated
+K24/I90 endpoint reaches `0.699920x` on Roman and `0.982342x` on Trafalgar,
+`0.829193x` geometrically. The saved-state initialization agrees within
+`9e-12` relative SSE. Since fixed L2 hurts Roman while the coordinated K1 step
+finds 30% descent, Roman is not blocked by insufficient interior-only work; it
+needs coordinated camera descent. Trafalgar is nearly stationary after its
+large shared-only gain.
+
+The matched distributed endpoint correction is now complete. One frozen
+safeguarded shared-camera Schur correction, starting camera/landmark damping at
+`0.005859375` and doubling only after rejection, improves all 15 1DSfM mature
+endpoints to `0.793908x` geometrically and `0.770181x` by summed SSE. The
+corrected 1DSfM endpoint is `1.267579x` Ceres geometrically. Unchanged BAL29
+transfer is safe but small: corrected/actual-prestate is `0.999518x`
+geometrically and `0.999652x` by summed SSE, with W/T/L `26/3/0`; three
+nonconverged cases safely no-op. Of 26 accepted BAL solves, 24 use the initial
+damping and two accept fallback damping `0.09375`; every accepted solve has
+positive model gain and relative residual below `1e-6`. No scene-specific
+routing is used. Six large BAL checkpoint files are corrupt and were recovered
+by exact I90 reruns with the correction applied in-process. See
+`benchmark_results/k1_mature_i90_endpoint_oracle_i1/report.md`.
+
+This passes the cross-family safety gate and identifies coordinated global
+camera descent, not interior local depth, as the useful mechanism. The next
+mechanism question is how to invoke the same safeguarded distributed move
+during late DRS without turning it into a repeated centralized polishing tail.
+
+Do not implement an adaptive forcing policy from these eight outcomes. The only
+remaining targeted experiment in this direction is a default-off true
+interior-only trial that holds shared cameras fixed, rolls back unless the local
+proximal objective decreases, and proves rejected trials are state-neutral.
+That worker change is higher risk and requires an explicit snapshot/rollback
+test before a solver gate.
+
+Do not broaden this two-scene gate as another shared-only breadth campaign;
+all-15 structural factorials already exist. Any new solver code should be
+implemented behind the isolated bridge front end and change only interior
+forcing/accuracy, with the fresh `legacy` and `direct` arms retained as
+controls.
+
 Do not reopen broad K1 parameter, trust-radius, tolerance, or basin sweeps.
 Do not replace `main.cpp`/`client_drs.py` with Ceres or BAE. The active task is
-step 2: carry a justified finite inner algorithm into the normal K>1 DRS path
-while preserving the existing consensus framework and C1--C5 switches.
+to consolidate the later base-backbone and publication evidence before any new
+solver behavior. Do not extend this early fixed one-step preset beyond I1000
+or tune its scalar trust/curvature limits.
 
 The K2 reset/preserve/checkpoint portfolio campaign is closed historical
 evidence, not the active implementation direction. It showed that the BAE
@@ -208,7 +360,13 @@ six-scene RTX 5090 inset; no cross-hardware speedup is claimed. See
 `benchmark_results/stage_c_publication_comparison/report.md`.
 
 Base-backbone hybrid gate (2026-08-12): matched base-I30 analysis showed tuned
-C1+C5 was `1.129336x` base on all-15 1DSfM but `0.995443x` on all-29 BAL. A
+C1+C5 was `1.129336x` base on all-15 1DSfM but `0.995443x` on all-29 BAL. The
+numerator is the tuned Stage-C K24/I30 C1+C5 endpoint. The denominator is the
+per-scene best SSE within the first 30 iterations of the preserved legacy
+K24/I200 1DSfM or K24/I90 BAL trajectory, not Ceres and not the fresh Stage-C
+plain arm. Base-I30 is `1.896006x`/`1.014321x` Ceres and tuned C1+C5 is
+`2.141229x`/`1.009698x`; hence `2.141229/1.896006=1.129336` and
+`1.009698/1.014321=0.995443`. A
 K24/I30 factorial restored local Nesterov, persistent DRS trust, curvature
 `0.4` recovery/decay, and camera metric `75`. C1 was the transferable component;
 C5 alone was neutral. The structural 2x2 then isolated proposal damping and

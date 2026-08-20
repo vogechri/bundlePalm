@@ -1,6 +1,109 @@
 # BundlePalm DRS Paper Handoff
 
-Updated: 2026-08-14
+Updated: 2026-08-19
+
+## 2026-08-19 Plain-Resolvent Horizon Addendum
+
+An additional all-15 long-horizon ablation is complete. It was run from a
+clean detached `4db26e4` worktree because the main worktree contains unrelated
+in-progress protocol/evaluator changes. Sixty-nine focused tests passed and a
+Roman smoke reproduced the historical I90 event counts before breadth.
+
+The frozen K24 pure-DRS tuple includes direct left-SE3 tangent equations,
+exact tangent metric consistency, shared-only camera proximal semantics,
+points-p95/Jacobi/preconditioning, and one finite Nesterov local step. C1, C5,
+bootstrap, product-SO3, and final Schur correction are disabled.
+
+Twelve of 15 scenes reach I1000. Piccadilly stops at I992, Tower at I77, and
+Trafalgar at I135 when curvature recovery reaches its ceiling. Delivered
+all-15 quality is `1.950010x` Ceres geometrically and `1.847092x` summed, with
+0/15 wins and worst Tower `5.709418x`. The 12-scene common I1000 prefix is
+`1.907980x` Ceres. Best-state restoration works correctly.
+
+This is not the missing evaluation of the complete method. Existing all-15
+direct-tangent/shared-only campaigns already evaluated the later
+base-backbone/C1 architecture at I90 and reach `1.591438x--1.609367x` Ceres
+without final Schur polishing. The preserved legacy K24/I200 pure-DRS
+reference is `1.457017x`, and separately labeled polishing reaches
+`1.063839x`. This addendum only closes further horizon extension of the early
+fixed one-step plain resolvent. Full report:
+`benchmark_results/k1_compatible_pure_drs_k24_i1000/report.md`.
+
+The `1.950010x` result must never be described as the effect of adding the K1
+corrections to the good base: it simultaneously removes C1 and swaps the mature
+DRS-trust/curvature-0.4/metric-75 backbone for K1-local tuning. In matched
+factorials with direct tangent and the mature backbone held fixed, shared-only
+costs only `1.033321x--1.048656x` at I30 and `1.035714x` in the complete I90
+transient-proposal pair.
+
+The exact integrated successor already exists at I90. With direct tangent,
+exact metric consistency, shared-only proximal semantics, local Nesterov, DRS
+trust, curvature `0.4`, metric 75, and C1, the no-proposal version reaches
+`1.596631x` Ceres on all-15 1DSfM and `1.000822x` on all-29 BAL. Transient
+proposal damping reaches `1.609367x`/`0.999879x`; the diagnostic rebase reaches
+`1.591438x`/`1.001609x`. These are `client_drs.py` results on the mature
+`client_acc`-like backbone.
+
+Do not merge them with the preserved pre-integration quality references:
+legacy K24/I200 is `1.457017x` on 1DSfM and legacy K24/I90 is `0.998404x` on
+BAL, but those raw artifacts predate direct tangent and shared-only controls.
+The other remembered `1.4x` row is integrated I30 plus ten distributed Schur
+corrections at `1.411625x`, which is explicitly polishing and lacks a matched
+all-29 ten-correction BAL evaluation. The missing clean comparison is a longer
+horizon of the integrated mature backbone, not another early K1-local preset.
+
+An isolated bridge front end now preserves the baseline implementation:
+`serverTest/client_drs_k1_bridge.py`, with a resumable two-scene runner and
+focused tests. Fresh Roman/Trafalgar K24/I30 shows direct tangent alone is
+`1.000000140x` the fresh legacy control. Direct tangent plus shared-only is
+`0.810679x` geometrically, composed of Roman `1.058889x` and Trafalgar
+`0.620650x`. The experiment confirms that the K1 and mature baseline already
+share the Nesterov kernel. Future isolated solver work should target interior
+solve forcing/accuracy under shared-only semantics, not duplicate or retune
+the Nesterov loop. Report:
+`benchmark_results/k1_inner_on_mature_base_k24_i30/report.md`.
+
+The isolated fixed-L2 follow-up is negative: it is `1.063412x` shared-only L1
+at `1.584348x` time, with Roman `1.140172x` and Trafalgar `0.991819x`. Do not
+fork the C++ worker for unconditional extra interior steps. Keep the isolated
+front end and require a measurable relative forcing or stationarity rule before
+new inner-solver implementation.
+
+The existing interior-defect diagnostic is bitwise trajectory-neutral but does
+not separate these outcomes: Roman and Trafalgar have similar defect histories,
+each activates six clusters under the old C5 threshold, and both decay to about
+`0.0127` median by I30. It cannot by itself select additional local work.
+
+The frozen eight-scene reliability cohort rejects the alternative normalization
+`q=sqrt(interior defect/proximal displacement)>1` as a direct trigger for fixed
+L2: precision is `0.429`, recall `0.750`, sign accuracy `0.375`, and maximum-q
+rank correlation with benefit is `-0.071`. Fixed L2 also updates shared cameras,
+so it is not a clean ground truth for an interior-only diagnostic. Do not wire q
+to `local_steps=2`. A future true interior-only trial must hold shared cameras
+fixed and provide atomic rollback on local proximal-objective failure. Report:
+`benchmark_results/k1_inner_on_mature_base_k24_i30/forcing_reliability.md`.
+
+The mature I90 endpoint oracle redirects that future work. One exact K1 step
+gives Roman `0.699920x` and Trafalgar `0.982342x` endpoint SSE (`0.829193x`
+geometric). Roman therefore has large coordinated camera descent available even
+though fixed L2 hurts it; interior forcing is not the missing move. The next
+clean diagnostic, one distributed global shared-camera Schur correction from
+the same states, is complete. The frozen start damping `0.005859375` plus
+geometric fallback improves all 15 1DSfM endpoints to `0.793908x` mature SSE
+geometrically and `1.267579x` Ceres. On BAL29 it is safe but modest:
+corrected/actual-prestate is `0.999518x`, W/T/L `26/3/0`; three nonconverged
+cases no-op, and no nonconverged solve is accepted. Six large BAL checkpoints
+were corrupt, so those endpoints were exactly rerun and corrected in-process;
+the reloadable 23 were corrected directly. The common policy therefore passes
+the cross-family safety gate without scene routing. Full report:
+`benchmark_results/k1_mature_i90_endpoint_oracle_i1/report.md`.
+
+The next mechanism question is late-iteration scheduling of this same
+safeguarded distributed correction, not adaptive fixed L2 and not a repeated
+Schur polishing tail.
+
+Only `all15_corrected/` is authoritative. The sibling `all15/` directory is a
+quarantined setup error with the wrong trust cap and recovery controls.
 
 ## 2026-08-14 Offline Freeze Boundary
 
@@ -334,6 +437,13 @@ continuations all regress both families; permanent damping also exhausts Tower.
 Next work must address late continuation, not retune scalar thresholds. Reports:
 `benchmark_results/stage_c_base_structure_factorial_k24_i30/report.md` and
 `benchmark_results/stage_c_transient_shared_proposal_c1_k24_i90/report.md`.
+
+Denominator clarification: tuned C1+C5 at `1.129336x` base on 1DSfM and
+`0.995443x` on BAL compares against best-I30 checkpoints extracted from the
+preserved legacy long trajectories. Those checkpoints are `1.896006x` and
+`1.014321x` Ceres; tuned C1+C5 is `2.141229x` and `1.009698x` Ceres. This is
+different from `C1+C5/plain = 0.847890x/0.983275x`, whose denominator is the
+fresh Stage-C plain I30 arm with the same Schur-PCG/DABA-trust configuration.
 
 The machine-readable reproduction index is
 `benchmark_results/stage_c_reproducibility_manifest.json`, generated by

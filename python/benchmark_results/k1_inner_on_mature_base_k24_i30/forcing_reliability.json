@@ -1,0 +1,155 @@
+{
+  "confusion": {
+    "accuracy": 0.375,
+    "falseNegative": 1,
+    "falsePositive": 4,
+    "precision": 0.42857142857142855,
+    "recall": 0.75,
+    "trueNegative": 0,
+    "truePositive": 3
+  },
+  "criterion": "q = sqrt(interiorDefectSquared / proximalDisplacementSquared)",
+  "decision": "reject as standalone forcing selector",
+  "limitation": "fixed L2 repeats the full local solve and updates shared cameras; it is not an interior-only ground-truth intervention",
+  "rankCorrelationWithL2Benefit": {
+    "areaAboveOne": {
+      "pvalue": 0.9108491685195836,
+      "rho": -0.04761904761904763
+    },
+    "earlyAreaAboveOne": {
+      "pvalue": 0.203876682008432,
+      "rho": 0.5030030300035688
+    },
+    "earlyIterationsAboveOne": {
+      "pvalue": 0.3357199740812855,
+      "rho": 0.39282289291218914
+    },
+    "iterationsAboveOne": {
+      "pvalue": 0.8866229447346792,
+      "rho": -0.06061608062110899
+    },
+    "maximumQ": {
+      "pvalue": 0.8665262706759088,
+      "rho": -0.07142857142857144
+    },
+    "medianQ": {
+      "pvalue": 0.49272624501695717,
+      "rho": -0.28571428571428575
+    }
+  },
+  "records": [
+    {
+      "areaAboveOne": 0.0,
+      "earlyAreaAboveOne": 0.0,
+      "earlyIterationsAboveOne": 0,
+      "family": "bal",
+      "iterationsAboveOne": 0,
+      "l2Completed": true,
+      "l2Improves": true,
+      "l2OverL1": 0.999018489940863,
+      "l2TimeOverL1": 1.3150063039554611,
+      "maximumQ": 0.41343029182288704,
+      "medianQ": 0.03472724498412373,
+      "scene": "bal1490"
+    },
+    {
+      "areaAboveOne": 0.2665553734688366,
+      "earlyAreaAboveOne": 0.2665553734688366,
+      "earlyIterationsAboveOne": 1,
+      "family": "bal",
+      "iterationsAboveOne": 1,
+      "l2Completed": true,
+      "l2Improves": true,
+      "l2OverL1": 0.9871661408767161,
+      "l2TimeOverL1": 1.3743871159233405,
+      "maximumQ": 1.2665553734688366,
+      "medianQ": 0.2794524514326985,
+      "scene": "bal3068"
+    },
+    {
+      "areaAboveOne": 1.8030556492396328,
+      "earlyAreaAboveOne": 1.2817658025640202,
+      "earlyIterationsAboveOne": 3,
+      "family": "1dsfm",
+      "iterationsAboveOne": 5,
+      "l2Completed": true,
+      "l2Improves": false,
+      "l2OverL1": 1.0312023687762073,
+      "l2TimeOverL1": 1.1917268124694653,
+      "maximumQ": 2.0991679793692155,
+      "medianQ": 0.36717367006293583,
+      "scene": "gendarmenmarkt"
+    },
+    {
+      "areaAboveOne": 0.0585515289823173,
+      "earlyAreaAboveOne": 0.0585515289823173,
+      "earlyIterationsAboveOne": 1,
+      "family": "1dsfm",
+      "iterationsAboveOne": 1,
+      "l2Completed": true,
+      "l2Improves": false,
+      "l2OverL1": 1.0648622884846106,
+      "l2TimeOverL1": 1.2654440272037446,
+      "maximumQ": 1.0585515289823173,
+      "medianQ": 0.323178905714077,
+      "scene": "piccadilly"
+    },
+    {
+      "areaAboveOne": 0.5328607640477738,
+      "earlyAreaAboveOne": 0.0,
+      "earlyIterationsAboveOne": 0,
+      "family": "1dsfm",
+      "iterationsAboveOne": 2,
+      "l2Completed": true,
+      "l2Improves": false,
+      "l2OverL1": 1.1401724494211092,
+      "l2TimeOverL1": 1.27910350177471,
+      "maximumQ": 1.2766775286489473,
+      "medianQ": 0.36384075908142477,
+      "scene": "roman_forum"
+    },
+    {
+      "areaAboveOne": 1.847904298382615,
+      "earlyAreaAboveOne": 1.847904298382615,
+      "earlyIterationsAboveOne": 5,
+      "family": "1dsfm",
+      "iterationsAboveOne": 5,
+      "l2Completed": true,
+      "l2Improves": true,
+      "l2OverL1": 0.9918190247172125,
+      "l2TimeOverL1": 1.5042771959480068,
+      "maximumQ": 2.1609771187369406,
+      "medianQ": 0.511814089653676,
+      "scene": "trafalgar"
+    },
+    {
+      "areaAboveOne": 0.8332422182141015,
+      "earlyAreaAboveOne": 0.13212017897731565,
+      "earlyIterationsAboveOne": 1,
+      "family": "1dsfm",
+      "iterationsAboveOne": 4,
+      "l2Completed": true,
+      "l2Improves": false,
+      "l2OverL1": 1.008528153063717,
+      "l2TimeOverL1": 1.4365876581955968,
+      "maximumQ": 1.4970218249944898,
+      "medianQ": 0.4147640901054974,
+      "scene": "union_square"
+    },
+    {
+      "areaAboveOne": 0.2864783347390274,
+      "earlyAreaAboveOne": 0.2864783347390274,
+      "earlyIterationsAboveOne": 2,
+      "family": "1dsfm",
+      "iterationsAboveOne": 2,
+      "l2Completed": true,
+      "l2Improves": true,
+      "l2OverL1": 0.9580918973440269,
+      "l2TimeOverL1": 1.489838288299546,
+      "maximumQ": 1.1639307055347574,
+      "medianQ": 0.3132485139864867,
+      "scene": "vienna_cathedral"
+    }
+  ],
+  "threshold": 1.0
+}
