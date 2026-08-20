@@ -14,11 +14,12 @@ MODES=${MODES:-"reload prepare recovery analyze"}
 mkdir -p "$OUTPUT_ROOT"
 all_manifest="$OUTPUT_ROOT/all_datasets.txt"
 one_d_sfm_manifest="$DETACHED_ROOT/serverTest/1dsfm_all_fifteen_datasets.txt"
-cat "$one_d_sfm_manifest" > "$all_manifest"
+awk 'NF { print }' "$one_d_sfm_manifest" > "$all_manifest"
 for dataset in $(find "$WORKSPACE" -maxdepth 1 -type f -name 'problem-*-pre.txt' -printf '%p\n' | sort -V); do
   problem_id=$(basename "$dataset" | sed -E 's/^problem-([0-9]+)-.*/\1/')
   printf '%s|%s\n' "$problem_id" "$dataset" >> "$all_manifest"
 done
+all_filter=$(cut -d'|' -f1 "$all_manifest" | tr '\n' ' ')
 
 common_environment=(
   LOCAL_STEPS=1 THREADS_PER_CLUSTER=1 CAMERA_UPDATE=se3_left
@@ -62,7 +63,7 @@ for clusters in 4 16; do
     done < "$all_manifest"
     env "${common_environment[@]}" \
       OUTPUT_DIR="$OUTPUT_ROOT/reload_k${clusters}" \
-      DATASET_LIST_FILE="$all_manifest" PROBLEM_FILTER= \
+      DATASET_LIST_FILE="$all_manifest" PROBLEM_FILTER="$all_filter" \
       INITIAL_STATE_DIRECTORY="$state_dir" INITIAL_STATE_FRAME=raw \
       CLUSTERS_LIST="$clusters" ITERATIONS=0 LOCAL_SOLVER=nesterov \
       TRUST_REGION_POLICY=drs PERSISTENT_TRUST_REGION=1 \
