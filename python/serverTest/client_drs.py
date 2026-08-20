@@ -2185,7 +2185,10 @@ def validate_arguments(arguments):
             raise ValueError("ceres_prox_se3 requires the se3_left camera update")
         if arguments.proximal_metric != "block":
             raise ValueError("ceres_prox_se3 requires the block proximal metric")
-    if not 0 <= arguments.local_solver_switch_iteration < arguments.iterations:
+    if not (
+        arguments.local_solver_switch_iteration == 0
+        or 0 < arguments.local_solver_switch_iteration < arguments.iterations
+    ):
         raise ValueError("local solver switch must be in [0, iterations)")
     if arguments.local_solver_switch_iteration > 0:
         if arguments.local_solver not in ("nesterov", "schur_pcg"):
@@ -2385,7 +2388,10 @@ def validate_arguments(arguments):
         raise ValueError(
             "collective trust trials require coordinator-owned cameras"
         )
-    if not 0 <= arguments.local_state_rebase_iteration < arguments.iterations:
+    if not (
+        arguments.local_state_rebase_iteration == 0
+        or 0 < arguments.local_state_rebase_iteration < arguments.iterations
+    ):
         raise ValueError("local state rebase must be in [0, iterations)")
     if not 0.0 < arguments.relaxation < 2.0:
         raise ValueError("relaxation must be in (0, 2)")
@@ -2393,7 +2399,10 @@ def validate_arguments(arguments):
         raise ValueError("acceleration restart count must be positive")
     if not 0 <= arguments.outer_acceleration_until <= arguments.iterations:
         raise ValueError("outer acceleration cutoff must be in [0, iterations]")
-    if not 0 <= arguments.outer_acceleration_restart_iteration < arguments.iterations:
+    if not (
+        arguments.outer_acceleration_restart_iteration == 0
+        or 0 < arguments.outer_acceleration_restart_iteration < arguments.iterations
+    ):
         raise ValueError(
             "outer acceleration restart iteration must be in [0, iterations)"
         )

@@ -685,6 +685,55 @@ def test_local_solver_switch_requires_second_solver(monkeypatch):
         client_drs.validate_arguments(client_drs.parse_arguments())
 
 
+def test_zero_iteration_final_schur_allows_disabled_solver_switch(monkeypatch):
+    monkeypatch.setenv("BUNDLE_PALM_CAMERA_UPDATE", "se3_left")
+    monkeypatch.setenv("BUNDLE_PALM_DIRECT_TANGENT_NORMAL_EQUATIONS", "1")
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "client_drs.py",
+            "unused.bal",
+            "--iterations",
+            "0",
+            "--final-shared-schur-correction",
+            "--shared-only-camera-proximal",
+            "--proximal-metric",
+            "block",
+            "--consensus-metric",
+            "full",
+        ],
+    )
+
+    arguments = client_drs.parse_arguments()
+    client_drs.validate_arguments(arguments)
+
+    assert arguments.local_solver_switch_iteration == 0
+    assert arguments.local_state_rebase_iteration == 0
+    assert arguments.outer_acceleration_restart_iteration == 0
+
+
+def test_zero_iteration_final_schur_rejects_solver_switch(monkeypatch):
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "client_drs.py",
+            "unused.bal",
+            "--iterations",
+            "0",
+            "--final-shared-schur-correction",
+            "--local-solver-switch-iteration",
+            "1",
+            "--local-solver-after-switch",
+            "schur_pcg",
+        ],
+    )
+
+    with pytest.raises(ValueError, match="switch must be in"):
+        client_drs.validate_arguments(client_drs.parse_arguments())
+
+
 def test_ruiz_camera_scaling_cli_choice(monkeypatch):
     monkeypatch.setattr(
         sys,
