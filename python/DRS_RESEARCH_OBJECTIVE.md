@@ -1,6 +1,6 @@
 # DRS Research Objective and Restart Contract
 
-Updated: 2026-08-19
+Updated: 2026-08-20
 
 > Recovery note (2026-08-11): an unclean WSL/VS Code restart rolled open source
 > files back to an earlier coherent editor snapshot after the completed C5
@@ -33,6 +33,9 @@ C1 all-15 and large-BAL breadth report:
 
 WSL incident diagnosis and safe-run contract:
 `WSL_CRASH_ANALYSIS_2026-08-10.md`.
+
+Active K1 carryover and crash-resume test protocol:
+`K1_CARRYOVER_TEST_PLAN.md`.
 
 ## 1. North Star
 
@@ -203,6 +206,10 @@ This passes the cross-family safety gate and identifies coordinated global
 camera descent, not interior local depth, as the useful mechanism. The next
 mechanism question is how to invoke the same safeguarded distributed move
 during late DRS without turning it into a repeated centralized polishing tail.
+The phased implementation, development/held-out gates, artifact layout, and
+crash-resume rules are frozen in `K1_CARRYOVER_TEST_PLAN.md`. Its immediate
+Phase 0 is to port and commit the detached zero-iteration validation and runner
+damping controls before implementing coherent correction rebuild behavior.
 
 Do not implement an adaptive forcing policy from these eight outcomes. The only
 remaining targeted experiment in this direction is a default-off true

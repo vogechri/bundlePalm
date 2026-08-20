@@ -102,6 +102,15 @@ The next mechanism question is late-iteration scheduling of this same
 safeguarded distributed correction, not adaptive fixed L2 and not a repeated
 Schur polishing tail.
 
+The authoritative continuation protocol is now `K1_CARRYOVER_TEST_PLAN.md`.
+It freezes the source checkpoint, cohorts, controls, one-correction safeguards,
+coherent rebuild hypothesis, non-threshold late trigger, independent
+shared-fixed interior trial, promotion gates, artifact layout, and per-phase
+commit/update rules. Resume from its phase-status table, not from the newest
+log directory. Phase 0 must first port and commit the detached zero-iteration
+validation and Schur-damping runner controls; do not combine that protocol
+commit with the coherent rebuild implementation.
+
 Only `all15_corrected/` is authoritative. The sibling `all15/` directory is a
 quarantined setup error with the wrong trust cap and recovery controls.
 
