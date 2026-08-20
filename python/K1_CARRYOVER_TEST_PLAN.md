@@ -350,15 +350,15 @@ or quarantine it under an explicit `_invalid_<reason>` name.
 | Phase | Status | Commit | Authoritative artifact | Decision |
 |---|---|---|---|---|
 | 0 protocol durability | complete | `3e1cf1f` | focused tests and syntax checks | proceed |
-| 1 matched controls | active | -- | -- | -- |
-| 2 coherent rebuild | blocked by Phase 1 | -- | -- | -- |
+| 1 matched controls | complete | pending commit | `benchmark_results/k1_carryover_late_correction/phase1_controls/report.md` | proceed |
+| 2 coherent rebuild | active | -- | -- | -- |
 | 3 global late trigger | blocked by Phase 2 | -- | -- | -- |
 | 4 interior-only trial | blocked by Phase 2 primitive | -- | -- | -- |
 | 5 frozen confirmation | blocked by development | -- | -- | -- |
 
 ## Immediate Next Action
 
-Implement the dedicated Phase 1 runner/analyzer and reproduce the matched
-`mature` and `final_one` controls on Roman, Trafalgar, BAL52, and BAL3068 using
-the coherent detached worker/client. Do not implement the coherent rebuild in
-the Phase 1 controls commit.
+Implement the default-off coherent rebuild and its state-neutrality tests. The
+Phase 1 control gate passed: mature reload geomean is `0.999999999998x`, the
+one-correction/prestate geomean is `0.896939117x`, and all four accepted solves
+meet convergence, residual, physical-SSE, and model-gain gates.

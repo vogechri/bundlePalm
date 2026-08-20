@@ -1,0 +1,56 @@
+{
+  "corrected_over_pre_geomean": 0.8969391171194881,
+  "pre_over_mature_geomean": 0.9999999999981316,
+  "scenes": {
+    "bal3068": {
+      "accepted_damping": 0.005859375,
+      "attempts": 1,
+      "corrected_over_pre": 0.999106449910261,
+      "corrected_sse": 3171094.743490573,
+      "damped_gain_ratio": 1.2629566286205853,
+      "linear_iterations": 424,
+      "mature_sse": 3173930.8096501427,
+      "pre_over_mature": 1.000000000000069,
+      "pre_sse": 3173930.8096503615,
+      "relative_residual": 9.464757644644673e-07
+    },
+    "bal52": {
+      "accepted_damping": 0.005859375,
+      "attempts": 1,
+      "corrected_over_pre": 0.9994387976639206,
+      "corrected_sse": 480656.13577175746,
+      "damped_gain_ratio": 17.19519787008296,
+      "linear_iterations": 38,
+      "mature_sse": 480926.0325847256,
+      "pre_over_mature": 0.9999999999999997,
+      "pre_sse": 480926.0325847254,
+      "relative_residual": 5.4143369875216e-07
+    },
+    "roman_forum": {
+      "accepted_damping": 0.005859375,
+      "attempts": 1,
+      "corrected_over_pre": 0.6915020687200114,
+      "corrected_sse": 2668363.9507889664,
+      "damped_gain_ratio": 1.153204983837867,
+      "linear_iterations": 137,
+      "mature_sse": 3858793.8800043925,
+      "pre_over_mature": 1.0000000000006781,
+      "pre_sse": 3858793.880007009,
+      "relative_residual": 8.50784270539402e-07
+    },
+    "trafalgar": {
+      "accepted_damping": 0.046875,
+      "attempts": 4,
+      "corrected_over_pre": 0.9373254484247436,
+      "corrected_sse": 13147362.003142042,
+      "damped_gain_ratio": 0.8728967076692231,
+      "linear_iterations": 52,
+      "mature_sse": 14026464.367680823,
+      "pre_over_mature": 0.9999999999917798,
+      "pre_sse": 14026464.367565524,
+      "relative_residual": 9.976312268001539e-07
+    }
+  },
+  "source_commit": "3e1cf1f",
+  "status": "passed"
+}
