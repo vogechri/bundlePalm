@@ -127,6 +127,14 @@ tune or broaden it. No additional K1 carryover phase remains; the retained
 package is direct tangent, exact metric consistency, shared-only product-space
 semantics, and one terminal safeguarded distributed Schur correction.
 
+The active follow-up is no longer another K1 mechanism. It is the unchanged
+terminal-correction transfer to the frozen K4 resource and K16 latency
+endpoints. The sentinel gate passes on Roman/Trafalgar and BAL52/3068:
+corrected/prestate is `0.822336x`/`0.775883x` on 1DSfM and
+`0.976151x`/`0.973048x` on BAL at K4/K16. Resume from
+`TERMINAL_CORRECTION_SCALING_PLAN.md`; many BAL NPZ states are corrupt, so
+validate physical SSE and rerun invalid rows in-process.
+
 Only `all15_corrected/` is authoritative. The sibling `all15/` directory is a
 quarantined setup error with the wrong trust cap and recovery controls.
 

@@ -37,6 +37,9 @@ WSL incident diagnosis and safe-run contract:
 Active K1 carryover and crash-resume test protocol:
 `K1_CARRYOVER_TEST_PLAN.md`.
 
+Active terminal-correction K4/K16 transfer protocol:
+`TERMINAL_CORRECTION_SCALING_PLAN.md`.
+
 ## 1. North Star
 
 Develop one genuinely distributed product-space DRS method for bundle
@@ -233,6 +236,15 @@ I15 with `1.353560x` delivered SSE. Reject without tuning or breadth expansion.
 This closes further K1 carryover: retain the already integrated algebra,
 shared-only semantics, and one terminal distributed Schur correction. See
 `benchmark_results/k1_carryover_late_correction/phase4_interior_development/report.md`.
+
+Terminal-correction scaling sentinel (2026-08-21): the frozen K24 correction
+policy transfers unchanged to the K4/K16 Stage-C endpoints. On
+Roman/Trafalgar, corrected/prestate is `0.822336x` at K4 and `0.775883x` at
+K16. On BAL52/3068 it is `0.976151x` and `0.973048x`; all eight corrections
+accept at initial damping and converge below `1e-6`. BAL3068 required exact
+in-process I30 reruns because its saved K4/K16 states are corrupt. The active
+gate is full all-15/all-29 transfer with physical-SSE state validation and
+in-process recovery, frozen in `TERMINAL_CORRECTION_SCALING_PLAN.md`.
 
 Do not implement an adaptive forcing policy from these eight outcomes. The only
 remaining targeted experiment in this direction is a default-off true

@@ -1,0 +1,127 @@
+{
+  "families": {
+    "16": {
+      "1dsfm": {
+        "corrected_over_original": 0.7758832488193392,
+        "corrected_over_pre": 0.7758832488173725,
+        "noops": 0,
+        "pre_over_original": 1.0000000000025349,
+        "wins": 2
+      },
+      "bal": {
+        "corrected_over_original": 0.9674113440336355,
+        "corrected_over_pre": 0.9730481965129046,
+        "noops": 0,
+        "pre_over_original": 0.9942070161586345,
+        "wins": 2
+      }
+    },
+    "4": {
+      "1dsfm": {
+        "corrected_over_original": 0.8223358208279384,
+        "corrected_over_pre": 0.8223358208288858,
+        "noops": 0,
+        "pre_over_original": 0.9999999999988479,
+        "wins": 2
+      },
+      "bal": {
+        "corrected_over_original": 0.9721616825729417,
+        "corrected_over_pre": 0.9761513749616526,
+        "noops": 0,
+        "pre_over_original": 0.9959128343297496,
+        "wins": 2
+      }
+    }
+  },
+  "scenes": {
+    "bal3068_k16": {
+      "accepted": true,
+      "accepted_damping": 0.005859375,
+      "corrected_over_original": 0.9362771210456802,
+      "corrected_over_pre": 0.9472197915099362,
+      "corrected_sse": 3516271.7614729125,
+      "original_sse": 3755588.6846255176,
+      "pre_over_original": 0.9884475909790561,
+      "pre_sse": 3712202.588026295,
+      "source": "inprocess"
+    },
+    "bal3068_k4": {
+      "accepted": true,
+      "accepted_damping": 0.005859375,
+      "corrected_over_original": 0.9456915611865772,
+      "corrected_over_pre": 0.9534696100657271,
+      "corrected_sse": 3390380.3466536473,
+      "original_sse": 3585080.4699998302,
+      "pre_over_original": 0.9918423735827158,
+      "pre_sse": 3555834.72284967,
+      "source": "inprocess"
+    },
+    "bal52_k16": {
+      "accepted": true,
+      "accepted_damping": 0.005859375,
+      "corrected_over_original": 0.9995808799853222,
+      "corrected_over_pre": 0.9995808799853231,
+      "corrected_sse": 477310.76034537493,
+      "original_sse": 477510.8947185782,
+      "pre_over_original": 0.9999999999999991,
+      "pre_sse": 477510.8947185778,
+      "source": "reload"
+    },
+    "bal52_k4": {
+      "accepted": true,
+      "accepted_damping": 0.005859375,
+      "corrected_over_original": 0.9993727086632984,
+      "corrected_over_pre": 0.9993727086632989,
+      "corrected_sse": 477269.86987207487,
+      "original_sse": 477569.4450476266,
+      "pre_over_original": 0.9999999999999996,
+      "pre_sse": 477569.4450476264,
+      "source": "reload"
+    },
+    "roman_forum_k16": {
+      "accepted": true,
+      "accepted_damping": 0.005859375,
+      "corrected_over_original": 0.7209936475735838,
+      "corrected_over_pre": 0.7209936475691356,
+      "corrected_sse": 3185375.9357431047,
+      "original_sse": 4418036.062402352,
+      "pre_over_original": 1.0000000000061693,
+      "pre_sse": 4418036.062429608,
+      "source": "reload"
+    },
+    "roman_forum_k4": {
+      "accepted": true,
+      "accepted_damping": 0.005859375,
+      "corrected_over_original": 0.7343453727195178,
+      "corrected_over_pre": 0.7343453727179601,
+      "corrected_sse": 3923234.493352163,
+      "original_sse": 5342492.291907771,
+      "pre_over_original": 1.0000000000021214,
+      "pre_sse": 5342492.291919104,
+      "source": "reload"
+    },
+    "trafalgar_k16": {
+      "accepted": true,
+      "accepted_damping": 0.005859375,
+      "corrected_over_original": 0.8349516224232943,
+      "corrected_over_pre": 0.8349516224242124,
+      "corrected_sse": 15789269.71458336,
+      "original_sse": 18910400.663403578,
+      "pre_over_original": 0.9999999999989005,
+      "pre_sse": 18910400.663382787,
+      "source": "reload"
+    },
+    "trafalgar_k4": {
+      "accepted": true,
+      "accepted_damping": 0.005859375,
+      "corrected_over_original": 0.9208694264831252,
+      "corrected_over_pre": 0.9208694264872004,
+      "corrected_sse": 16517570.24483109,
+      "original_sse": 17936929.7859231,
+      "pre_over_original": 0.9999999999955745,
+      "pre_sse": 17936929.785843723,
+      "source": "reload"
+    }
+  },
+  "status": "completed"
+}

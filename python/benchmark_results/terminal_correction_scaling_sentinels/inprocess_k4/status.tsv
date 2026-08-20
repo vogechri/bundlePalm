@@ -1,0 +1,2 @@
+variant	dataset	clusters	iterations	local_steps	threads_per_cluster	status	exit_code	elapsed_seconds	coordinator_max_rss_kb	worker_max_rss_kb
+themelis_nesterov_ls01_block_full_se3_left_persistent_tr_adaptl1-2_h0.35_l0.20_w3_start5_final_schur1_damping0.005859375_0.005859375_bsr_low_memory_stop1e-3_scale_inproc_k4	/home/chvogel/bundlePalm/python/problem-3068-310854-pre.txt	4	30	1	1	completed	0	117	5455140	4183480
