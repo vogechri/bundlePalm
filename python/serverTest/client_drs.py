@@ -5308,6 +5308,8 @@ def main():
                 )
                 two_step_schur_tangent = None
                 two_step_schur_diagnostics = None
+                model_optimal_two_step_tangent = None
+                model_optimal_two_step_diagnostics = None
                 if arguments.two_step_schur_residual_oracle:
                     (
                         two_step_schur_tangent,
@@ -5319,6 +5321,18 @@ def main():
                         shared_consensus_tangent,
                         shared_cameras,
                         refinement_steps=2,
+                    )
+                    (
+                        model_optimal_two_step_tangent,
+                        model_optimal_two_step_diagnostics,
+                    ) = jacobi_refine_schur_tangent(
+                        schur_alignment_systems,
+                        camera_count,
+                        arguments.schur_alignment_camera_damping,
+                        shared_consensus_tangent,
+                        shared_cameras,
+                        refinement_steps=2,
+                        model_optimal_after_first=True,
                     )
                 schur_alignment_diagnostics = {
                     "cameraDamping": arguments.schur_alignment_camera_damping,
@@ -5389,19 +5403,21 @@ def main():
                     "attempts": one_step_attempts,
                     "productStateRestarted": False,
                 }
-                if two_step_schur_tangent is not None:
-                    two_step_correction = (
-                        two_step_schur_tangent - shared_consensus_tangent
+                def evaluate_residual_oracle(
+                    oracle_tangent, oracle_diagnostics
+                ):
+                    oracle_correction = (
+                        oracle_tangent - shared_consensus_tangent
                     )
-                    two_step_attempts = []
-                    two_step_selected_scale = 0.0
-                    two_step_worker_sse = ordinary_worker_sse
+                    oracle_attempts = []
+                    oracle_selected_scale = 0.0
+                    oracle_worker_sse = ordinary_worker_sse
                     for attempt in range(8):
                         scale = 0.5 ** attempt
                         trial_physical_candidate = left_se3_camera_plus(
                             schur_alignment_base_cameras,
                             consensus_tangent
-                            + scale * two_step_correction,
+                            + scale * oracle_correction,
                         )
                         trial_consensus = to_scaled_cameras(
                             trial_physical_candidate, camera_scaling
@@ -5415,31 +5431,43 @@ def main():
                                 arguments.packed_request_buffers
                             ),
                         )
-                        two_step_attempts.append({
+                        oracle_attempts.append({
                             "scale": scale,
                             "workerSSE": trial_worker_sse,
                         })
                         if (
                             np.isfinite(trial_worker_sse)
-                            and trial_worker_sse < two_step_worker_sse
+                            and trial_worker_sse < oracle_worker_sse
                             and trial_worker_sse < required_worker_sse
                         ):
-                            two_step_selected_scale = scale
-                            two_step_worker_sse = trial_worker_sse
-                    schur_alignment_diagnostics[
-                        "twoStepSchurResidualOracle"
-                    ] = {
-                        **two_step_schur_diagnostics,
+                            oracle_selected_scale = scale
+                            oracle_worker_sse = trial_worker_sse
+                    return {
+                        **oracle_diagnostics,
                         "ordinaryWorkerSSE": ordinary_worker_sse,
-                        "candidateWorkerSSE": two_step_worker_sse,
+                        "candidateWorkerSSE": oracle_worker_sse,
                         "minimumRelativeDecrease": (
                             arguments.shared_schur_minimum_relative_decrease
                         ),
-                        "selectedScale": two_step_selected_scale,
-                        "selected": two_step_selected_scale > 0.0,
-                        "attempts": two_step_attempts,
+                        "selectedScale": oracle_selected_scale,
+                        "selected": oracle_selected_scale > 0.0,
+                        "attempts": oracle_attempts,
                         "applied": False,
                     }
+
+                if two_step_schur_tangent is not None:
+                    schur_alignment_diagnostics[
+                        "twoStepSchurResidualOracle"
+                    ] = evaluate_residual_oracle(
+                        two_step_schur_tangent,
+                        two_step_schur_diagnostics,
+                    )
+                    schur_alignment_diagnostics[
+                        "modelOptimalTwoStepSchurResidualOracle"
+                    ] = evaluate_residual_oracle(
+                        model_optimal_two_step_tangent,
+                        model_optimal_two_step_diagnostics,
+                    )
                 if one_step_selected:
                     one_step_proposal_selected_this_iteration = True
                     candidate_consensus = selected_consensus

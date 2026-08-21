@@ -112,6 +112,7 @@ def jacobi_refine_schur_tangent(
     tangent,
     active_cameras,
     refinement_steps=1,
+    model_optimal_after_first=False,
 ):
     """Apply fixed block-Jacobi corrections to a restricted Schur tangent."""
     tangent = np.asarray(tangent, dtype=np.float64)
@@ -167,15 +168,14 @@ def jacobi_refine_schur_tangent(
         1.0 / np.maximum(eigenvalues, eigenvalue_floor),
         eigenvectors,
     )
-    refined = tangent.copy()
-    step_diagnostics = []
-    for _ in range(refinement_steps):
-        action = np.zeros_like(refined)
+
+    def schur_action(vector):
+        action = np.zeros_like(vector)
         for system in systems:
             block_action = np.einsum(
                 "bij,bj->bi",
                 system.blocks,
-                refined[system.block_columns],
+                vector[system.block_columns],
             )
             np.add.at(action, system.block_rows, block_action)
             offdiagonal = system.block_rows != system.block_columns
@@ -186,28 +186,61 @@ def jacobi_refine_schur_tangent(
                     transpose_action = np.einsum(
                         "bji,bj->bi",
                         system.blocks[chunk],
-                        refined[system.block_rows[chunk]],
+                        vector[system.block_rows[chunk]],
                     )
                     np.add.at(
                         action,
                         system.block_columns[chunk],
                         transpose_action,
                     )
-        action += camera_damping * damping_diagonal * refined
+        action += camera_damping * damping_diagonal * vector
+        return action
+
+    refined = tangent.copy()
+    step_diagnostics = []
+    for step in range(refinement_steps):
+        action = schur_action(refined)
         residual = -(gradient + action)
         residual[~active_cameras] = 0.0
         correction = np.einsum("bij,bj->bi", inverse, residual)
         correction[~active_cameras] = 0.0
-        refined += correction
+        correction_action = schur_action(correction)
+        numerator = float(np.sum(
+            correction[active_cameras] * residual[active_cameras]
+        ))
+        denominator = float(np.sum(
+            correction[active_cameras]
+            * correction_action[active_cameras]
+        ))
+        step_scale = 1.0
+        if model_optimal_after_first and step > 0:
+            step_scale = (
+                numerator / denominator
+                if numerator > 0.0 and denominator > 0.0
+                else 0.0
+            )
+        scaled_correction = step_scale * correction
+        refined += scaled_correction
         step_diagnostics.append({
             "residualNorm": float(np.linalg.norm(residual[active_cameras])),
-            "correctionNorm": float(
+            "rawCorrectionNorm": float(
                 np.linalg.norm(correction[active_cameras])
+            ),
+            "correctionNorm": float(np.linalg.norm(
+                scaled_correction[active_cameras]
+            )),
+            "stepScale": step_scale,
+            "directionalNumerator": numerator,
+            "directionalDenominator": denominator,
+            "modelDecrease": (
+                step_scale * numerator
+                - 0.5 * step_scale * step_scale * denominator
             ),
         })
     return refined, {
         "activeCameraCount": int(np.count_nonzero(active_cameras)),
         "refinementSteps": refinement_steps,
+        "modelOptimalAfterFirst": model_optimal_after_first,
         "residualNorm": step_diagnostics[-1]["residualNorm"],
         "correctionNorm": step_diagnostics[-1]["correctionNorm"],
         "steps": step_diagnostics,

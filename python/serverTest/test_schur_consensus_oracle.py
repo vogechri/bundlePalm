@@ -129,3 +129,44 @@ def test_second_jacobi_refinement_contracts_coupled_residual():
         diagnostics["steps"][0]["residualNorm"]
     )
     assert np.all(np.isfinite(refined))
+
+
+def test_model_optimal_second_step_maximizes_directional_model_decrease():
+    identity = np.eye(9)
+    system = SimpleNamespace(
+        camera_ids=np.array([0, 1]),
+        block_rows=np.array([0, 0, 1]),
+        block_columns=np.array([0, 1, 1]),
+        blocks=np.array([
+            2.0 * identity,
+            -0.5 * identity,
+            2.0 * identity,
+        ]),
+        reduced_gradient=np.array([
+            np.full(9, -1.0),
+            np.full(9, -2.0),
+        ]),
+        camera_diagonal=np.array([identity, identity]),
+    )
+    arguments = (
+        [system],
+        2,
+        0.5,
+        np.zeros((2, 9)),
+        np.array([True, True]),
+    )
+
+    _, unit = jacobi_refine_schur_tangent(
+        *arguments, refinement_steps=2
+    )
+    refined, optimal = jacobi_refine_schur_tangent(
+        *arguments,
+        refinement_steps=2,
+        model_optimal_after_first=True,
+    )
+
+    assert optimal["steps"][1]["stepScale"] > 0.0
+    assert optimal["steps"][1]["modelDecrease"] >= (
+        unit["steps"][1]["modelDecrease"]
+    )
+    assert np.all(np.isfinite(refined))
