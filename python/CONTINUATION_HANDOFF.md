@@ -326,6 +326,15 @@ Madrid decline. Candidate/Ceres is `1.177568x`; all scenes complete below
 BAL29 under the 14 GiB cap. See
 `benchmark_results/k24_schur_proposal_landmark_response_breadth/report.md`.
 
+BAL29 is complete and exact: all 29 proposals decline, W/T/L `0/29/0`, with
+maximum coordinator/worker RSS `6.873/9.689 GiB`. The combined all-15/all-29
+no-loss gate therefore passes. Promote the K24 I90 landmark-response proposal
+component unchanged: one shared-camera residual action, eight scales, three
+rollback-safe landmark steps, exact refined-SSE selection, atomic camera plus
+landmark commit, canonical restart, and selected-only I91 trust rebase. This is
+our distributed DRS acceleration, not Ceres or a full Schur solve. See
+`benchmark_results/k24_schur_proposal_landmark_response_breadth/report.md`.
+
 Only `all15_corrected/` is authoritative. The sibling `all15/` directory is a
 quarantined setup error with the wrong trust cap and recovery controls.
 

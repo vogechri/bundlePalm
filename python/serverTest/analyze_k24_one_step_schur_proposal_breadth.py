@@ -298,7 +298,7 @@ def analyze(
             family_rows.append(row)
         summaries[family] = summarize(family_rows, ceres)
     passed = all(
-        row["geometric_delivered_ratio"] <= 1.0
+        row["geometric_delivered_ratio"] <= 1.0 + 1e-9
         and row["losses"] == 0
         for row in summaries.values()
     )

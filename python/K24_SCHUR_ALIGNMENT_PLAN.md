@@ -275,3 +275,11 @@ delivered/control `0.790889x/0.760039x`, W/T/L `14/1/0`; 14 scenes select scale
 scenes complete. Proceed unchanged to serialized BAL29 under the existing
 memory ceiling. See
 `benchmark_results/k24_schur_proposal_landmark_response_breadth/report.md`.
+
+The serial BAL29 gate passes unchanged: all 29 proposals decline exactly,
+W/T/L `0/29/0`, with `6.873/9.689 GiB` maximum coordinator/worker RSS. Together
+with all-15 `0.790889x`, W/T/L `14/1/0`, this promotes the common no-loss
+landmark-response proposal component. Keep the frozen I90 timing, one shared
+residual action, eight scales, three landmark steps, `1e-3` floor, atomic
+camera/landmark commit, canonical restart, and I91 trust rebase. See
+`benchmark_results/k24_schur_proposal_landmark_response_breadth/report.md`.

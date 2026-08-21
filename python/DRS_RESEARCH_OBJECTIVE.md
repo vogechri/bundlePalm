@@ -370,6 +370,18 @@ is now `1.177568x`. All scenes complete with maximum coordinator/worker RSS
 scale, depth, timing, floor, or restart changes. Report:
 `benchmark_results/k24_schur_proposal_landmark_response_breadth/report.md`.
 
+The unchanged serial BAL29 transfer is complete and exact. All 29 landmark-
+response proposals decline under the fixed `1e-3` floor, giving W/T/L
+`0/29/0`, geometric/summed delivered ratios equal to `1.0` within tie
+tolerance, and maximum coordinator/worker RSS `6.873/9.689 GiB`. Combined with
+the all-15 `0.790889x`, W/T/L `14/1/0` result, this passes the common
+cross-family no-loss gate. Promote the three-step landmark-response proposal
+as the retained K24 I90 DRS acceleration component: shared-camera residual
+action, eight fixed scales, exact refined-landmark SSE selection, atomic camera
+and landmark commit, canonical restart, and selected-only I91 trust rebase.
+It remains our distributed DRS, not Ceres and not a full Schur solve. Report:
+`benchmark_results/k24_schur_proposal_landmark_response_breadth/report.md`.
+
 Fresh isolated bridge gate (2026-08-19):
 `serverTest/client_drs_k1_bridge.py` preserves `client_drs.py` and pins the
 mature legacy backbone while exposing ordered `legacy`, `direct`, and
