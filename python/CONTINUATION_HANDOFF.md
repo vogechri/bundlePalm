@@ -236,6 +236,16 @@ rejections; BAL52 uses `0.0625` and remains `0.9999995x`. See
 the exact policy on the frozen seven-scene direction cohort through I120. No
 timing, damping, or scale changes before that transfer.
 
+The seven-scene transfer passes. Five 1DSfM scenes reach `0.876147x` control
+geometrically at I120, W/L `5/0`; BAL52 is neutral and BAL3068 declines. All
+seven complete. Two abrupt WSL exits occurred because the rejected coupled
+consensus oracle remained enabled as proposal telemetry on BAL3068. It is now
+explicit opt-in. The recovered case completed alone with a 14 GiB process
+ceiling and `8,358,544/4,603,516 KiB` coordinator/worker RSS. See
+`benchmark_results/k24_one_step_schur_proposal_i90_cohort/report.md`. Next create
+a low-memory resumable all-15/all-29 runner; serialize large BAL and keep the
+coupled oracle disabled.
+
 Only `all15_corrected/` is authoritative. The sibling `all15/` directory is a
 quarantined setup error with the wrong trust cap and recovery controls.
 

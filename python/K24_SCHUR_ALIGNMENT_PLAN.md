@@ -180,3 +180,15 @@ Next run the unchanged I90 proposal through I120 on the frozen seven-scene
 direction cohort. Report every selection scale, immediate and delivered ratio,
 completion, and loss. Do not tune the eight geometric scales, damping, or
 proposal time before this transfer.
+
+That transfer passes. All five 1DSfM scenes improve at I120, with geometric
+ratio `0.876147` and W/L `5/0`. BAL52 is effectively neutral; BAL3068 declines
+the proposal. All seven complete. See
+`benchmark_results/k24_one_step_schur_proposal_i90_cohort/report.md`.
+
+Crash boundary: the first BAL3068 attempt exited WSL while the rejected coupled
+consensus oracle was still enabled inside alignment telemetry. That oracle is
+now explicit opt-in. Recovered BAL3068 completed alone under a 14 GiB process
+ceiling at `8,358,544 KiB` coordinator RSS. Never enable the coupled oracle in
+proposal breadth. Before all-15/all-29 transfer, add a resumable low-memory
+runner/analyzer that serializes large BAL cases with an explicit ceiling.

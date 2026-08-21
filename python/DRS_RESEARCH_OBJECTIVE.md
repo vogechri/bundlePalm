@@ -258,6 +258,16 @@ product-state rebuild; it is not a full global solve. Next transfer unchanged
 to the frozen seven-scene cohort before breadth. Report:
 `benchmark_results/k24_one_step_schur_proposal_i90_sentinel/report.md`.
 
+The frozen seven-scene transfer passes: all five 1DSfM scenes improve at I120,
+geometric ratio `0.876147`, W/L `5/0`; BAL52 is effectively neutral and BAL3068
+declines the proposal. All seven complete. The initial BAL3068 attempt crashed
+WSL while a rejected high-memory coupled-consensus oracle was still enabled as
+telemetry. That oracle is now explicit opt-in; recovered BAL3068 completed alone
+under a 14 GiB process ceiling. See
+`benchmark_results/k24_one_step_schur_proposal_i90_cohort/report.md`. Next build
+a resumable low-memory all-15/all-29 runner that serializes large BAL cases and
+never enables the coupled oracle.
+
 Fresh isolated bridge gate (2026-08-19):
 `serverTest/client_drs_k1_bridge.py` preserves `client_drs.py` and pins the
 mature legacy backbone while exposing ordered `legacy`, `direct`, and
