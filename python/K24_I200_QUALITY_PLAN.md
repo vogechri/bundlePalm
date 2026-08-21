@@ -1,7 +1,7 @@
 # Integrated K24/I200 Quality Gate
 
 Date: 2026-08-21
-Status: sentinel passed; breadth active
+Status: complete; breadth aggregate-positive but not promoted
 Source checkpoint: `0b5b401`
 
 This is the restart contract for the remaining apples-to-apples longer-horizon
@@ -80,12 +80,13 @@ logs, memory traces, NPZ states, and absolute-path manifests untracked.
 | Phase | Status | Artifact |
 |---|---|---|
 | Four-scene sentinel | passed | `k24_i200_terminal_correction_sentinel/report.md` |
-| All-15/all-29 breadth | ready | `serverTest/run_k24_i200_quality_breadth.sh` |
-| Publication decision | blocked by breadth | -- |
+| All-15/all-29 breadth | complete, failure-inclusive | `k24_i200_terminal_correction_breadth/report.md` |
+| Publication decision | diagnostic ceiling only | Piazza incomplete at I188 |
 
 ## Immediate Next Action
 
-Run the unchanged I200 + one-correction policy on all 15 1DSfM and all 29 BAL
-scenes. The horizon-matched sentinel passes: corrected-I200/corrected-I90 is
-`0.948260x` on Roman/Trafalgar and `0.989516x` on BAL52/3068, with all four
-scenes improving.
+Do not run another duration, curvature-ceiling, or correction-damping sweep.
+The breadth result reaches corrected-I200/corrected-I90 `0.959795x` on 1DSfM
+and `0.996820x` on BAL, but Piazza recovery-exhausts at I188. Retain this as a
+failure-inclusive quality ceiling. The next justified gate is behavior-neutral
+DRS-versus-Schur direction alignment telemetry at I90/I120/I160/I200.

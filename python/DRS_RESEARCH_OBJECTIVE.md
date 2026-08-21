@@ -163,6 +163,19 @@ families. Corrected I200 reaches `1.072873x` Ceres on the 1DSfM pair and
 breadth; do not tune duration or correction policy. See
 `benchmark_results/k24_i200_terminal_correction_sentinel/report.md`.
 
+Integrated K24/I200 breadth result (2026-08-21): failure-inclusive corrected
+I200 improves corrected I90 to `0.959795x` on all-15 1DSfM and `0.996820x` on
+all-29 BAL, reaching `1.160916x` and `0.996933x` Ceres. BAL improves on all 29
+scenes; 1DSfM W/L is `13/2`, with Montreal `1.025943x` and Yorkminster
+`1.066442x`. Piazza recovery-exhausts at I188 with curvature ceiling 64, so the
+frozen completion gate fails despite its delivered endpoint improving
+`0.997056x` corrected I90. No accepted correction is nonconverged; maximum
+residual is `9.967e-7`. Do not tune duration, curvature ceiling, or damping.
+Retain I200+one correction as a diagnostic quality ceiling, not the promoted
+common method. Next use behavior-neutral DRS/Schur direction-alignment
+telemetry at fixed I90/I120/I160/I200 checkpoints. See
+`benchmark_results/k24_i200_terminal_correction_breadth/report.md`.
+
 Fresh isolated bridge gate (2026-08-19):
 `serverTest/client_drs_k1_bridge.py` preserves `client_drs.py` and pins the
 mature legacy backbone while exposing ordered `legacy`, `direct`, and

@@ -156,6 +156,14 @@ scenes improving; corrected I200 is `1.072873x`/`0.976646x` Ceres on the two
 pairs. Continue unchanged to all-15/all-29 breadth from
 `K24_I200_QUALITY_PLAN.md`.
 
+Full K24/I200 breadth is complete but not promoted. Failure-inclusive
+corrected-I200/corrected-I90 is `0.959795x` on 1DSfM and `0.996820x` on BAL;
+corrected/Ceres is `1.160916x` and `0.996933x`. Piazza recovery-exhausts at
+I188, violating the completion gate. Montreal/Yorkminster are the only
+corrected-I200 1DSfM losses. Do not tune the horizon or safeguards. Retain this
+as a diagnostic quality ceiling and next collect behavior-neutral nominal-DRS
+versus global-Schur direction alignment at I90/I120/I160/I200.
+
 Only `all15_corrected/` is authoritative. The sibling `all15/` directory is a
 quarantined setup error with the wrong trust cap and recovery controls.
 

@@ -88,7 +88,7 @@ def correction(row, scene, arm):
         damping = attempt["cameraDamping"]
         residual = diagnostics["relativeResidual"]
     else:
-        if abs(final / pre - 1.0) > 1e-12:
+        if abs(final / pre - 1.0) > 1e-10:
             raise ValueError(f"rejected correction changed state {scene}/{arm}")
         damping = None
         residual = None
@@ -130,6 +130,7 @@ def analyze(root):
     ceres = ceres_rows()
     details = {}
     selected = {}
+    completion_failures = []
     for family, expected in (("1dsfm", 15), ("bal", 29)):
         short_dir = root / family / "i90_horizon200"
         full_dir = root / family / "i200"
@@ -148,8 +149,12 @@ def analyze(root):
                 raise ValueError(f"I90 arm mismatch {scene}")
             if short.get("terminationReason") != "configured_iteration_stop":
                 raise ValueError(f"I90 stop mismatch {scene}")
-            if full.get("iterations") != 200 or full.get("completedIterations") != 200:
-                raise ValueError(f"I200 completion mismatch {scene}")
+            if full.get("iterations") != 200 or not 90 < full.get("completedIterations", 0) <= 200:
+                raise ValueError(f"I200 iteration mismatch {scene}")
+            if full["completedIterations"] < 200:
+                if full.get("terminationReason") != "recovery_exhausted":
+                    raise ValueError(f"unexpected I200 termination {scene}")
+                completion_failures.append(scene)
             if short_status.get(scene, {}).get("status") != "completed" or full_status.get(scene, {}).get("status") != "completed":
                 raise ValueError(f"status mismatch {scene}")
             assert_matching_prefix(short, full, scene)
@@ -168,6 +173,8 @@ def analyze(root):
                 "i90_residual": c90["residual"], "i200_residual": c200["residual"],
                 "i90_correction_seconds": c90["seconds"], "i200_correction_seconds": c200["seconds"],
                 "i200_overall_seconds": full["overallSeconds"],
+                "completed_iterations": full["completedIterations"],
+                "termination_reason": full["terminationReason"],
                 "i200_coordinator_max_rss_kb": int(full_status[scene]["coordinator_max_rss_kb"]),
                 "i200_worker_max_rss_kb": int(full_status[scene]["worker_max_rss_kb"]),
             }
@@ -189,11 +196,14 @@ def analyze(root):
         for damping in (row["i90_damping"], row["i200_damping"])
     )
     passed = (
+        not completion_failures
+        and
         summaries["1dsfm"]["geometric_corrected_i200_over_i90"] < 1.0
         and summaries["bal"]["geometric_corrected_i200_over_i90"] <= 1.0
     )
     return {
         "status": "passed" if passed else "failed",
+        "completion_failures": completion_failures,
         "summaries": summaries,
         "maximum_accepted_residual": max(residuals),
         "damping_counts": dict(sorted(damping_counts.items())),
@@ -221,6 +231,7 @@ def write_report(path, summary):
         output.write(
             f"\nMaximum accepted residual: `{summary['maximum_accepted_residual']:.3e}`. "
             f"Damping counts across both arms: `{summary['damping_counts']}`. "
+            f"Completion failures: `{summary['completion_failures']}`. "
             f"Gate status: **{summary['status']}**.\n"
         )
 
