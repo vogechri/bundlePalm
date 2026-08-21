@@ -1,8 +1,8 @@
 # K24 DRS/Schur Direction-Alignment Diagnostic
 
 Date: 2026-08-21
-Status: direction split complete; gauge-projection follow-up active
-Source checkpoint: `d9bd8d7`
+Status: gauge mechanism falsified; copy-vote coherence follow-up active
+Source checkpoint: `afb622d`
 
 This is the restart contract for the behavior-neutral diagnostic following the
 integrated K24/I200 quality ceiling. It does not alter DRS proposals or apply
@@ -57,6 +57,9 @@ At every available checkpoint report:
 - gradient-action ratio;
 - camera-only damped model reduction split into shared and unique camera
   components, with a shared-DRS/shared-Schur ratio;
+- similarity-gauge fraction and quotient-space alignment/model action;
+- metric-invariant coherence of the reflected copy votes entering each shared
+  camera consensus projection;
 - Schur PCG termination, iterations, residual, and solve time.
 
 Piazza is expected to have no I200 checkpoint because its ordinary trajectory
@@ -98,9 +101,17 @@ only `0.000007--0.000645x` the shared Schur gain. Unique-camera motion has a
 nonpositive camera model in every row. BAL3068 additionally has
 `1e17--1e18` shared DRS/Schur norm ratios and effectively zero cosine.
 
-Next test one mechanism without changing behavior: project both camera
-tangents orthogonally to the existing seven-dimensional similarity-gauge basis.
-Gauge dominance predicts a sharp drop in the extreme DRS norm ratios and a
-material improvement in quotient-space alignment/model action. Failure of
-those changes falsifies gauge drift as the explanation. Do not enable clipping
-or apply the projected tangent.
+Similarity-gauge drift is falsified. Median DRS gauge fraction is
+`1.58e-9` at I90 and falls to `1.93e-13` at I200. Quotient projection leaves
+the median shared cosine (`0.0503 -> 0.0505` at I90,
+`0.0486 -> 0.0488` at I200) and norm ratio unchanged. BAL3068 also has gauge
+fractions below `1.1e-15`, so its `1e17--1e18` norm anomaly is not similarity
+gauge motion.
+
+Next test one mechanism without changing behavior: measure cancellation among
+the exact block-metric reflected copy votes entering shared-camera consensus.
+The metric-invariant coherence ratio is the norm of their aggregate divided by
+the sum of their individual contribution norms. Copy cancellation predicts low
+coherence where DRS/Schur alignment and shared model gain are low. High
+coherence falsifies cancellation and means the local copies agree on the wrong
+direction. Do not change the projection or apply a Schur tangent.

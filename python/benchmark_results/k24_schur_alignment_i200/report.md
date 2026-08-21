@@ -9,6 +9,15 @@ Schur is the reference tangent; DRS is the candidate tangent.
 | 160 | 7 | 0.022419 | 0.000000 | 0.009127 | 0.000132 | 2/7 |
 | 200 | 6 | 0.048628 | 0.000000 | 0.030475 | 0.000007 | 3/6 |
 
+## Similarity-gauge quotient
+
+| I | Median DRS gauge fraction | Median quotient shared cosine | Median quotient DRS/Schur norm | Median quotient-model ratio | Nonpositive quotient models |
+|---:|---:|---:|---:|---:|---:|
+| 90 | 0.000000 | 0.050454 | 0.053456 | -110217191365.444397 | 6 |
+| 120 | 0.000000 | 0.030863 | 0.031977 | -42889881410180.906250 | 6 |
+| 160 | 0.000000 | 0.023518 | 0.009127 | -2871993701402099.000000 | 6 |
+| 200 | 0.000000 | 0.048797 | 0.030495 | -9375523867495114752.000000 | 6 |
+
 | Scene | I | Shared weighted cosine | DRS/Schur norm | Shared-model ratio | Shared/unique reduction | T/R/I cosine | PCG iters |
 |---|---:|---:|---:|---:|---:|---|---:|
 | montreal_notre_dame | 90 | 0.003446 | 0.015275 | 0.000001 | 2.85/-6.72e+07 | -0.001/0.004/0.023 | 125 |

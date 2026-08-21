@@ -173,9 +173,11 @@ The split result passes neutrality and linear convergence. Late shared DRS
 motion has median weighted cosine `0.022--0.050` with Schur and only
 `0.000007--0.000645x` its shared model gain. Every unique-camera component has
 a nonpositive frozen Schur camera model; BAL3068 has `1e17--1e18` shared norm
-ratios. The next diagnostic projects both tangents off the existing 7-DOF
-similarity-gauge basis. It remains telemetry-only and is the sole active
-mechanism test.
+ratios. Similarity-gauge projection does not change these quantities: median
+DRS gauge fraction is `1.58e-9` at I90 and `1.93e-13` at I200, including tiny
+fractions on BAL3068. Gauge drift is closed. The sole active mechanism test is
+behavior-neutral coherence of the exact metric-weighted reflected copy votes
+entering shared-camera consensus.
 
 Only `all15_corrected/` is authoritative. The sibling `all15/` directory is a
 quarantined setup error with the wrong trust cap and recovery controls.
