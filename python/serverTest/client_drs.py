@@ -1467,6 +1467,9 @@ def parse_arguments():
         "--schur-alignment-landmark-damping", type=float, default=3.0
     )
     parser.add_argument(
+        "--schur-alignment-maximum-iterations", type=int, default=500
+    )
+    parser.add_argument(
         "--schur-model-consensus-clipping", action="store_true"
     )
     parser.add_argument(
@@ -3046,10 +3049,11 @@ def main():
     if schur_alignment_diagnostic_iterations and not (
         arguments.schur_alignment_camera_damping > 0.0
         and arguments.schur_alignment_landmark_damping >= 0.0
+        and arguments.schur_alignment_maximum_iterations > 0
     ):
         raise ValueError(
             "Schur alignment camera damping must be positive and landmark "
-            "damping nonnegative"
+            "damping nonnegative, with positive maximum iterations"
         )
     if (
         arguments.schur_model_consensus_clipping
@@ -4070,7 +4074,7 @@ def main():
                     1.0,
                     arguments.shared_schur_linear_solver,
                     arguments.shared_schur_relative_tolerance,
-                    arguments.shared_schur_maximum_iterations,
+                    arguments.schur_alignment_maximum_iterations,
                     operator_mode=arguments.shared_schur_operator,
                     preconditioner_mode=(
                         arguments.shared_schur_preconditioner
@@ -6952,6 +6956,9 @@ def main():
         ),
         "schurAlignmentLandmarkDamping": (
             arguments.schur_alignment_landmark_damping
+        ),
+        "schurAlignmentMaximumIterations": (
+            arguments.schur_alignment_maximum_iterations
         ),
         "schurModelConsensusClipping": (
             arguments.schur_model_consensus_clipping

@@ -29,6 +29,11 @@ from `K24_I200_QUALITY_PLAN.md`. Alignment uses the actual correction settings:
 - `bsr_low_memory`, Jacobi PCG, tolerance `1e-6`, maximum 500 iterations;
 - no Schur-model clipping or any other behavior-changing option.
 
+The first breadth pass showed that BAL3068 reaches tolerance at I90 but hits
+the 500-iteration diagnostic ceiling at I120/I160/I200. Recover only that scene
+with a diagnostic-only 5000-iteration ceiling. The terminal correction remains
+capped at 500, so this recovery cannot alter solver behavior.
+
 The diagnostic must reproduce the reference I200 trajectory, correction
 acceptance, endpoint cameras, and endpoint points exactly.
 

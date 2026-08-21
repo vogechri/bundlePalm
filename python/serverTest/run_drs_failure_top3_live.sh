@@ -111,6 +111,7 @@ SHARED_SCHUR_LANDMARK_DAMPING=${SHARED_SCHUR_LANDMARK_DAMPING:-3}
 SHARED_SCHUR_MINIMUM_RELATIVE_DECREASE=${SHARED_SCHUR_MINIMUM_RELATIVE_DECREASE:-1e-4}
 SHARED_SCHUR_RELATIVE_TOLERANCE=${SHARED_SCHUR_RELATIVE_TOLERANCE:-1e-6}
 SHARED_SCHUR_MAXIMUM_ITERATIONS=${SHARED_SCHUR_MAXIMUM_ITERATIONS:-500}
+SCHUR_ALIGNMENT_MAXIMUM_ITERATIONS=${SCHUR_ALIGNMENT_MAXIMUM_ITERATIONS:-$SHARED_SCHUR_MAXIMUM_ITERATIONS}
 SHARED_SCHUR_OPERATOR=${SHARED_SCHUR_OPERATOR:-python}
 SHARED_SCHUR_PRECONDITIONER=${SHARED_SCHUR_PRECONDITIONER:-jacobi}
 VARIANT_TAG=${VARIANT_TAG:-}
@@ -659,7 +660,6 @@ for problem in "${PROBLEMS[@]}"; do
     if [[ -n "$SCHUR_ALIGNMENT_DIAGNOSTIC_ITERATIONS" ]]; then
       alignment_schur_args+=(
         --shared-schur-relative-tolerance "$SHARED_SCHUR_RELATIVE_TOLERANCE"
-        --shared-schur-maximum-iterations "$SHARED_SCHUR_MAXIMUM_ITERATIONS"
         --shared-schur-operator "$SHARED_SCHUR_OPERATOR"
         --shared-schur-preconditioner "$SHARED_SCHUR_PRECONDITIONER"
       )
@@ -719,6 +719,7 @@ for problem in "${PROBLEMS[@]}"; do
             --schur-alignment-diagnostic-iterations "$SCHUR_ALIGNMENT_DIAGNOSTIC_ITERATIONS" \
             --schur-alignment-camera-damping "$SCHUR_ALIGNMENT_CAMERA_DAMPING" \
             --schur-alignment-landmark-damping "$SCHUR_ALIGNMENT_LANDMARK_DAMPING" \
+            --schur-alignment-maximum-iterations "$SCHUR_ALIGNMENT_MAXIMUM_ITERATIONS" \
             --shared-camera-metric-beta "$SHARED_CAMERA_METRIC_BETA" \
             --threads-per-cluster "$THREADS_PER_CLUSTER" \
             --nesterov-max-iterations "$NESTEROV_MAX_ITERATIONS" \
@@ -813,6 +814,7 @@ for problem in "${PROBLEMS[@]}"; do
             --schur-alignment-diagnostic-iterations "$SCHUR_ALIGNMENT_DIAGNOSTIC_ITERATIONS" \
             --schur-alignment-camera-damping "$SCHUR_ALIGNMENT_CAMERA_DAMPING" \
             --schur-alignment-landmark-damping "$SCHUR_ALIGNMENT_LANDMARK_DAMPING" \
+            --schur-alignment-maximum-iterations "$SCHUR_ALIGNMENT_MAXIMUM_ITERATIONS" \
             --shared-camera-metric-beta "$SHARED_CAMERA_METRIC_BETA" \
             --threads-per-cluster "$THREADS_PER_CLUSTER" \
             --nesterov-max-iterations "$NESTEROV_MAX_ITERATIONS" \
