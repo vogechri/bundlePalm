@@ -290,6 +290,20 @@ the quadratic model, but physical candidate SSE is still
 error and further fixed local Schur iteration; retain one action only. See
 `benchmark_results/k24_model_optimal_two_step_schur_oracle_sentinel/report.md`.
 
+A fresh Schur rebuild at the selected depth-one state also fails. Gendarmenmarkt
+improves only `0.0455%`, below the frozen `0.1%` floor; Roman has no descent at
+any scale, and full fresh steps regress `2.62%/19.42%`. BAL52 skips the rebuild.
+All trajectories/states are exact. Close stale linearization and do not lower
+the floor. See
+`benchmark_results/k24_relinearized_second_schur_oracle_sentinel/report.md`.
+
+Offline continuation-policy oracles are also closed. Best-state-only proposal
+delivery is safe but only `0.934688x` control. An exact ordinary/proposal
+endpoint race would reach `0.884026x`, just `0.071%` beyond the retained result,
+by falling back only on Gendarmenmarkt; it costs at least `1.25x` outer work and
+requires absent full DRS snapshots. Do not rebuild a shadow race. See
+`benchmark_results/k24_schur_proposal_continuation_policy_oracles/report.md`.
+
 Only `all15_corrected/` is authoritative. The sibling `all15/` directory is a
 quarantined setup error with the wrong trust cap and recovery controls.
 

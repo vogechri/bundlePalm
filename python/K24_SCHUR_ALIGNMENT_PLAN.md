@@ -239,3 +239,17 @@ second direction, not a materially wrong unit coefficient, fails transfer.
 Close further fixed local Schur iteration and keep the one-action proposal.
 See
 `benchmark_results/k24_model_optimal_two_step_schur_oracle_sentinel/report.md`.
+
+Relinearization at the selected depth-one state is also closed. The best fresh
+Gendarmenmarkt action improves only `0.0455%`, below the fixed `0.1%` floor;
+Roman has no descent through scale `1/128`. Full fresh steps regress
+`2.62%/19.42%`, and BAL52 skips the rebuild after declining depth one. Exact
+trajectory/state neutrality holds. Do not broaden or lower the floor. See
+`benchmark_results/k24_relinearized_second_schur_oracle_sentinel/report.md`.
+
+Continuation policy is frozen as well. Best-state-only delivery gives a safe
+but weaker `0.934688x`. The exact ordinary/proposal endpoint race ceiling is
+`0.884026x`, only `0.071%` beyond retained continuation, and removes only the
+Gendarmenmarkt loss at the cost of duplicated I91--I120 and missing full DRS
+snapshot infrastructure. Do not implement a shadow branch. See
+`benchmark_results/k24_schur_proposal_continuation_policy_oracles/report.md`.

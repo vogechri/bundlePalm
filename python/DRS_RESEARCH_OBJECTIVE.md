@@ -322,6 +322,25 @@ physical SSE. Close further fixed local Schur iteration and retain one action.
 Report:
 `benchmark_results/k24_model_optimal_two_step_schur_oracle_sentinel/report.md`.
 
+Relinearizing after the selected depth-one candidate does not rescue a second
+action. A fresh Schur build gives Gendarmenmarkt only `0.0455%` incremental
+worker-SSE decrease at scale `0.125`, below the frozen `0.1%` floor; Roman has
+no descent even at `1/128`. Full fresh steps regress `2.62%/19.42%`. BAL52
+skips the rebuild because depth one declines. Trajectories and endpoint states
+are exact. Close stale linearization as the cause of depth-two failure; do not
+broaden or lower the floor. Report:
+`benchmark_results/k24_relinearized_second_schur_oracle_sentinel/report.md`.
+
+Continuation-policy oracles do not justify another implementation branch.
+Keeping proposals as best-state checkpoints while ordinary DRS continues is
+no-loss but weak (`0.934688x`, W/T/L `8/7/0`). An exact ordinary/proposal
+endpoint race reaches `0.884026x`, W/T/L `13/2/0`, only `0.071%` better than
+the retained `0.884652x` component, by falling back on Gendarmenmarkt alone.
+It requires duplicating I91--I120 (`1.25x` outer work) and full DRS snapshots,
+which current maintained source does not have. Do not reconstruct a shadow
+race or replace continuation with best-only delivery for this ceiling. Report:
+`benchmark_results/k24_schur_proposal_continuation_policy_oracles/report.md`.
+
 Fresh isolated bridge gate (2026-08-19):
 `serverTest/client_drs_k1_bridge.py` preserves `client_drs.py` and pins the
 mature legacy backbone while exposing ordered `legacy`, `direct`, and
