@@ -50,6 +50,28 @@ def original_rows():
     return result
 
 
+def ceres_rows():
+    result = {}
+    paths = (
+        WORKSPACE / "benchmark_results/1dsfm_drs_ceres_se3_all15/ceres/results.jsonl",
+        WORKSPACE / "benchmark_results/bal_ceres_se3_all29/results.jsonl",
+    )
+    for path in paths:
+        for line in path.read_text().splitlines():
+            if not line.strip():
+                continue
+            row = json.loads(line)
+            scene = row.get("scene") or f"bal{row['balId']}"
+            result[scene] = (
+                row["qualityMetrics"]["sumSquaredError"]
+                if "qualityMetrics" in row
+                else 2.0 * row["native"]["finalCeresCost"]
+            )
+    if len(result) != 44:
+        raise ValueError(f"expected 44 Ceres rows, found {len(result)}")
+    return result
+
+
 def valid_reload(row, reference):
     if row is None or not math.isfinite(row.get("finalSharedSchurInitialSSE", math.nan)):
         return False
@@ -122,7 +144,7 @@ def geometric_mean(values):
     return math.exp(math.fsum(math.log(value) for value in values) / len(values))
 
 
-def summarize(rows):
+def summarize(rows, ceres):
     ratios = [row["final_over_pre"] for row in rows]
     return {
         "count": len(rows),
@@ -134,6 +156,12 @@ def summarize(rows):
         ),
         "summed_corrected_over_historical": math.fsum(row["final"] for row in rows)
         / math.fsum(row["reference"] for row in rows),
+        "geometric_corrected_over_ceres": geometric_mean(
+            [row["final"] / ceres[row["scene"]] for row in rows]
+        ),
+        "summed_corrected_over_ceres": math.fsum(row["final"] for row in rows)
+        / math.fsum(ceres[row["scene"]] for row in rows),
+        "ceres_wins": sum(row["final"] < ceres[row["scene"]] for row in rows),
         "wins": sum(value < 1.0 for value in ratios),
         "noops": sum(value == 1.0 for value in ratios),
         "worst": max(ratios),
@@ -143,6 +171,7 @@ def summarize(rows):
 
 def analyze(root):
     original = original_rows()
+    ceres = ceres_rows()
     details = {}
     recovery_counts = {}
     for clusters in (4, 16):
@@ -165,6 +194,7 @@ def analyze(root):
                 raise ValueError(f"missing selected row for {scene}/K{clusters}")
             result = correction_result(selected, reference)
             result["source"] = source
+            result["scene"] = scene
             details[(scene, clusters)] = result
         recovery_counts[str(clusters)] = recovered
     summaries = {}
@@ -176,7 +206,25 @@ def analyze(root):
                 if row_clusters == clusters and scene.startswith(prefix)
                 and ((family == "bal") == scene.startswith("bal"))
             ]
-            summaries[str(clusters)][family] = summarize(rows)
+            summaries[str(clusters)][family] = summarize(rows, ceres)
+    corrected_k16_over_k4 = {}
+    for family, prefix in (("1dsfm", ""), ("bal", "bal")):
+        scenes = [
+            scene for scene, clusters in details
+            if clusters == 4 and scene.startswith(prefix)
+            and ((family == "bal") == scene.startswith("bal"))
+        ]
+        ratios = [
+            details[(scene, 16)]["final"] / details[(scene, 4)]["final"]
+            for scene in scenes
+        ]
+        corrected_k16_over_k4[family] = {
+            "geometric": geometric_mean(ratios),
+            "summed": math.fsum(details[(scene, 16)]["final"] for scene in scenes)
+            / math.fsum(details[(scene, 4)]["final"] for scene in scenes),
+            "wins": sum(value < 1.0 for value in ratios),
+            "losses": sum(value > 1.0 for value in ratios),
+        }
     damping_counts = Counter(
         str(row["damping"]) if row["damping"] is not None else "noop"
         for row in details.values()
@@ -186,6 +234,7 @@ def analyze(root):
         "status": "passed",
         "recovery_counts": recovery_counts,
         "summaries": summaries,
+        "corrected_k16_over_k4": corrected_k16_over_k4,
         "accepted_damping_counts": dict(sorted(damping_counts.items())),
         "maximum_accepted_residual": max(residuals),
         "scenes": {
@@ -198,16 +247,25 @@ def analyze(root):
 def write_report(path, summary):
     with path.open("w", encoding="utf-8") as output:
         output.write("# Terminal Correction K4/K16 Full Transfer\n\n")
-        output.write("| K | Family | Correction/pre | Summed | W/no-op | Worst | Corrected/historical | Time s |\n")
-        output.write("|---:|---|---:|---:|---:|---:|---:|---:|\n")
+        output.write("| K | Family | Correction/pre | Summed | W/no-op | Worst | Corrected/historical | Corrected/Ceres | Ceres wins | Time s |\n")
+        output.write("|---:|---|---:|---:|---:|---:|---:|---:|---:|---:|\n")
         for clusters, families in summary["summaries"].items():
             for family, row in families.items():
                 output.write(
                     f"| {clusters} | {family} | {row['geometric_correction_over_pre']:.9f} | "
                     f"{row['summed_correction_over_pre']:.9f} | {row['wins']}/{row['noops']} | "
                     f"{row['worst']:.9f} | {row['geometric_corrected_over_historical']:.9f} | "
+                    f"{row['geometric_corrected_over_ceres']:.9f} | "
+                    f"{row['ceres_wins']}/{row['count']} | "
                     f"{row['total_correction_seconds']:.3f} |\n"
                 )
+        output.write("\n| Family | Corrected K16/K4 | Summed | W/L |\n")
+        output.write("|---|---:|---:|---:|\n")
+        for family, row in summary["corrected_k16_over_k4"].items():
+            output.write(
+                f"| {family} | {row['geometric']:.9f} | {row['summed']:.9f} | "
+                f"{row['wins']}/{row['losses']} |\n"
+            )
         output.write(
             f"\nIn-process recoveries: K4 `{summary['recovery_counts']['4']}`, "
             f"K16 `{summary['recovery_counts']['16']}`. Maximum accepted residual: "
