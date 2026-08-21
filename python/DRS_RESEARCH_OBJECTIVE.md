@@ -382,6 +382,14 @@ and landmark commit, canonical restart, and selected-only I91 trust rebase.
 It remains our distributed DRS, not Ceres and not a full Schur solve. Report:
 `benchmark_results/k24_schur_proposal_landmark_response_breadth/report.md`.
 
+One frozen terminal distributed Schur correction composes safely with the
+promoted I120 state. Correction/raw is `0.963498x` on Roman/Trafalgar and
+`0.999059x` on BAL52/3068; corrected/Ceres is
+`1.122559/0.926137/0.970115/0.989642x`. All four solves converge and accept.
+Expand the exact one-correction policy unchanged to all-15/all-29 as a
+separately labeled polished endpoint, not another DRS mechanism. Report:
+`benchmark_results/k24_landmark_response_terminal_correction_sentinel/report.md`.
+
 Fresh isolated bridge gate (2026-08-19):
 `serverTest/client_drs_k1_bridge.py` preserves `client_drs.py` and pins the
 mature legacy backbone while exposing ordered `legacy`, `direct`, and

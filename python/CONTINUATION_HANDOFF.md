@@ -335,6 +335,12 @@ landmark commit, canonical restart, and selected-only I91 trust rebase. This is
 our distributed DRS acceleration, not Ceres or a full Schur solve. See
 `benchmark_results/k24_schur_proposal_landmark_response_breadth/report.md`.
 
+The frozen one-correction polish passes Roman/Trafalgar/BAL52/BAL3068 after the
+promoted I120 state. Incremental correction/raw is `0.963498x` on 1DSfM and
+`0.999059x` on BAL; all four converge and accept. Expand unchanged to
+all-15/all-29 as a separately labeled polished endpoint. See
+`benchmark_results/k24_landmark_response_terminal_correction_sentinel/report.md`.
+
 Only `all15_corrected/` is authoritative. The sibling `all15/` directory is a
 quarantined setup error with the wrong trust cap and recovery controls.
 

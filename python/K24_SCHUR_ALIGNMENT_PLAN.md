@@ -276,6 +276,12 @@ scenes complete. Proceed unchanged to serialized BAL29 under the existing
 memory ceiling. See
 `benchmark_results/k24_schur_proposal_landmark_response_breadth/report.md`.
 
+The frozen one-terminal-correction composition passes the four-scene sentinel:
+incremental correction/raw `0.963498x` on Roman/Trafalgar and `0.999059x` on
+BAL52/3068, with all solves converged and accepted. Expand unchanged to breadth
+as a separately labeled polish, not a DRS mechanism. See
+`benchmark_results/k24_landmark_response_terminal_correction_sentinel/report.md`.
+
 The serial BAL29 gate passes unchanged: all 29 proposals decline exactly,
 W/T/L `0/29/0`, with `6.873/9.689 GiB` maximum coordinator/worker RSS. Together
 with all-15 `0.790889x`, W/T/L `14/1/0`, this promotes the common no-loss
