@@ -169,6 +169,14 @@ low-damping correction direction and must remain bitwise trajectory/state
 neutral. The fixed cohort is Roman, Trafalgar, Montreal, Yorkminster, Piazza,
 BAL52, and BAL3068; do not tune checkpoints or damping from its outcome.
 
+The split result passes neutrality and linear convergence. Late shared DRS
+motion has median weighted cosine `0.022--0.050` with Schur and only
+`0.000007--0.000645x` its shared model gain. Every unique-camera component has
+a nonpositive frozen Schur camera model; BAL3068 has `1e17--1e18` shared norm
+ratios. The next diagnostic projects both tangents off the existing 7-DOF
+similarity-gauge basis. It remains telemetry-only and is the sole active
+mechanism test.
+
 Only `all15_corrected/` is authoritative. The sibling `all15/` directory is a
 quarantined setup error with the wrong trust cap and recovery controls.
 

@@ -186,6 +186,15 @@ Piazza, BAL52, and BAL3068. Clipping is disabled, and the run must reproduce
 the I200 reference trajectories and endpoint states exactly before any
 mechanism is inferred.
 
+The split diagnostic now passes those gates. Shared DRS camera motion is not a
+useful scaled Schur direction: median diagonal-weighted cosine is
+`0.022--0.050`, and median shared model gain is only
+`0.000007--0.000645x` the shared Schur gain. Unique-camera motion has a
+nonpositive frozen Schur camera model in every row, while BAL3068 also shows an
+astronomical shared norm mismatch. The active falsifiable mechanism is
+similarity-gauge drift; test it with behavior-neutral quotient projection, not
+with another scalar sweep or correction.
+
 Fresh isolated bridge gate (2026-08-19):
 `serverTest/client_drs_k1_bridge.py` preserves `client_drs.py` and pins the
 mature legacy backbone while exposing ordered `legacy`, `direct`, and

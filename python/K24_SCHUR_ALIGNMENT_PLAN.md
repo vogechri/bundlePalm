@@ -1,8 +1,8 @@
 # K24 DRS/Schur Direction-Alignment Diagnostic
 
 Date: 2026-08-21
-Status: ready to run
-Source checkpoint: `23718d1`
+Status: direction split complete; gauge-projection follow-up active
+Source checkpoint: `d9bd8d7`
 
 This is the restart contract for the behavior-neutral diagnostic following the
 integrated K24/I200 quality ceiling. It does not alter DRS proposals or apply
@@ -91,5 +91,16 @@ untracked. Commit the runner/analyzer/plan before launch.
 
 ## Immediate Next Action
 
-Run the committed seven-scene diagnostic and compare it exactly with the
-existing I200 breadth artifacts.
+The seven-scene diagnostic passes exact trajectory/state neutrality and all
+available Schur solves converge below `1e-6`. Its late shared-camera weighted
+cosine is only `0.022--0.050` in median, and median shared DRS model gain is
+only `0.000007--0.000645x` the shared Schur gain. Unique-camera motion has a
+nonpositive camera model in every row. BAL3068 additionally has
+`1e17--1e18` shared DRS/Schur norm ratios and effectively zero cosine.
+
+Next test one mechanism without changing behavior: project both camera
+tangents orthogonally to the existing seven-dimensional similarity-gauge basis.
+Gauge dominance predicts a sharp drop in the extreme DRS norm ratios and a
+material improvement in quotient-space alignment/model action. Failure of
+those changes falsifies gauge drift as the explanation. Do not enable clipping
+or apply the projected tangent.
