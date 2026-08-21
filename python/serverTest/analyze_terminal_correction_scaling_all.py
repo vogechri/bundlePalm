@@ -2,6 +2,7 @@
 """Prepare recovery and analyze all K4/K16 terminal corrections."""
 
 import argparse
+import csv
 import json
 import math
 import re
@@ -14,7 +15,11 @@ STATE_TOLERANCE = 1e-6
 
 
 def scene_key(row):
-    dataset = Path(row["dataset"])
+    return dataset_scene(row["dataset"])
+
+
+def dataset_scene(dataset_text):
+    dataset = Path(dataset_text)
     match = re.search(r"problem-(\d+)-", dataset.name)
     return f"bal{match.group(1)}" if match else dataset.parent.name
 
@@ -31,6 +36,15 @@ def load_rows(directory):
                 row = json.loads(line)
                 result[scene_key(row)] = row
     return result
+
+
+def load_status(directory):
+    path = directory / "status.tsv"
+    if not path.is_file():
+        return {}
+    with path.open(newline="") as source:
+        rows = csv.DictReader(source, delimiter="\t")
+        return {dataset_scene(row["dataset"]): row for row in rows}
 
 
 def original_rows():
@@ -166,6 +180,12 @@ def summarize(rows, ceres):
         "noops": sum(value == 1.0 for value in ratios),
         "worst": max(ratios),
         "total_correction_seconds": math.fsum(row["seconds"] for row in rows),
+        "maximum_coordinator_rss_gib": max(
+            row["coordinator_max_rss_kb"] for row in rows
+        ) / 1048576.0,
+        "maximum_worker_rss_gib": max(
+            row["worker_max_rss_kb"] for row in rows
+        ) / 1048576.0,
     }
 
 
@@ -177,6 +197,8 @@ def analyze(root):
     for clusters in (4, 16):
         reload_rows = load_rows(root / f"reload_k{clusters}")
         recovery_rows = load_rows(root / f"recovery_k{clusters}")
+        reload_status = load_status(root / f"reload_k{clusters}")
+        recovery_status = load_status(root / f"recovery_k{clusters}")
         recovered = 0
         for (scene, row_clusters), reference_row in original.items():
             if row_clusters != clusters:
@@ -185,16 +207,26 @@ def analyze(root):
             reload_row = reload_rows.get(scene)
             if valid_reload(reload_row, reference):
                 selected = reload_row
+                selected_status = reload_status.get(scene)
                 source = "reload"
             else:
                 selected = recovery_rows.get(scene)
+                selected_status = recovery_status.get(scene)
                 source = "inprocess"
                 recovered += 1
             if selected is None:
                 raise ValueError(f"missing selected row for {scene}/K{clusters}")
+            if selected_status is None or selected_status["status"] != "completed":
+                raise ValueError(f"missing completed status for {scene}/K{clusters}")
             result = correction_result(selected, reference)
             result["source"] = source
             result["scene"] = scene
+            result["coordinator_max_rss_kb"] = int(
+                selected_status["coordinator_max_rss_kb"]
+            )
+            result["worker_max_rss_kb"] = int(
+                selected_status["worker_max_rss_kb"]
+            )
             details[(scene, clusters)] = result
         recovery_counts[str(clusters)] = recovered
     summaries = {}
@@ -247,8 +279,8 @@ def analyze(root):
 def write_report(path, summary):
     with path.open("w", encoding="utf-8") as output:
         output.write("# Terminal Correction K4/K16 Full Transfer\n\n")
-        output.write("| K | Family | Correction/pre | Summed | W/no-op | Worst | Corrected/historical | Corrected/Ceres | Ceres wins | Time s |\n")
-        output.write("|---:|---|---:|---:|---:|---:|---:|---:|---:|---:|\n")
+        output.write("| K | Family | Correction/pre | Summed | W/no-op | Worst | Corrected/historical | Corrected/Ceres | Ceres wins | Time s | Max RSS GiB C/W |\n")
+        output.write("|---:|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|\n")
         for clusters, families in summary["summaries"].items():
             for family, row in families.items():
                 output.write(
@@ -257,7 +289,9 @@ def write_report(path, summary):
                     f"{row['worst']:.9f} | {row['geometric_corrected_over_historical']:.9f} | "
                     f"{row['geometric_corrected_over_ceres']:.9f} | "
                     f"{row['ceres_wins']}/{row['count']} | "
-                    f"{row['total_correction_seconds']:.3f} |\n"
+                    f"{row['total_correction_seconds']:.3f} | "
+                    f"{row['maximum_coordinator_rss_gib']:.3f}/"
+                    f"{row['maximum_worker_rss_gib']:.3f} |\n"
                 )
         output.write("\n| Family | Corrected K16/K4 | Summed | W/L |\n")
         output.write("|---|---:|---:|---:|\n")
