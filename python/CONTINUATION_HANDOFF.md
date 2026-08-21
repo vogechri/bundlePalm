@@ -319,6 +319,13 @@ landmarks, canonically restarts, and rebases trust at I91. Next run unchanged
 all-15 breadth, then BAL29. See
 `benchmark_results/k24_schur_proposal_landmark_response_cohort/report.md`.
 
+All-15 breadth passes unchanged: `0.790889x` geometric and `0.760039x` summed
+delivered/control, W/T/L `14/1/0`, with 14 scale-`1.0` selections and exact
+Madrid decline. Candidate/Ceres is `1.177568x`; all scenes complete below
+`1.82 GiB` coordinator/worker RSS. The only active gate is unchanged serial
+BAL29 under the 14 GiB cap. See
+`benchmark_results/k24_schur_proposal_landmark_response_breadth/report.md`.
+
 Only `all15_corrected/` is authoritative. The sibling `all15/` directory is a
 quarantined setup error with the wrong trust cap and recovery controls.
 

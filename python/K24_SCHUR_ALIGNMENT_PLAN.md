@@ -268,3 +268,10 @@ existing three fixed-camera landmark steps select scale `1.0` on all five
 missing Schur contract: camera trial evaluation and committed state must include
 the marginalized landmark response. Proceed unchanged to all-15, then BAL29.
 See `benchmark_results/k24_schur_proposal_landmark_response_cohort/report.md`.
+
+All-15 transfer passes the strict gate unchanged: geometric/summed
+delivered/control `0.790889x/0.760039x`, W/T/L `14/1/0`; 14 scenes select scale
+`1.0` and Madrid declines exactly. Candidate/Ceres is `1.177568x`, with all
+scenes complete. Proceed unchanged to serialized BAL29 under the existing
+memory ceiling. See
+`benchmark_results/k24_schur_proposal_landmark_response_breadth/report.md`.

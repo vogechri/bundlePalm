@@ -1,0 +1,27 @@
+# K24 I90 One-Step Schur Proposal Breadth
+
+One global I90 proposal, eight fixed geometric scales, precise worker-SSE selection, atomic DRS state rebuild, and I120 delivery. The rejected coupled-consensus oracle is disabled. Selected proposals rebase worker trust and coordinator curvature/acceleration state at I91. Proposal scales include three rollback-safe fixed-camera landmark response steps and atomically commit selected cameras plus refined landmarks.
+
+| Family | Completed | Selected/declined | Immediate I90 | Trajectory I120 | Delivered/control | Summed | W/T/L | Candidate/Ceres | Max RSS GiB C/W |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 1dsfm | 15/15 | 14/1 | 0.820429186 | 0.790924980 | 0.790889111 | 0.760039171 | 14/1/0 | 1.177567561 | 1.815/1.727 |
+
+| Scene | Scale | Worker SSE | I90 | I120 trajectory | Delivered | Rejections C/P |
+|---|---:|---:|---:|---:|---:|---:|
+| alamo | 1 | 0.912619637 | 0.911633131 | 0.899833311 | 0.899833311 | 12/7 |
+| ellis_island | 1 | 0.967546492 | 0.961121230 | 0.964970385 | 0.964168329 | 17/20 |
+| gendarmenmarkt | 1 | 0.975479139 | 0.970093592 | 0.976024011 | 0.976024011 | 2/2 |
+| madrid_metropolis | declined | 1.000000000 | 1.000000000 | 1.000000000 | 1.000000000 | 4/4 |
+| montreal_notre_dame | 1 | 0.615379306 | 0.615117760 | 0.571810112 | 0.571810112 | 13/8 |
+| notre_dame | 1 | 0.645142491 | 0.645340903 | 0.632396540 | 0.632396539 | 7/4 |
+| nyc_library | 1 | 0.948098392 | 0.981097394 | 0.874378592 | 0.874378592 | 3/3 |
+| piazza_del_popolo | 1 | 0.619981160 | 0.619729386 | 0.580405726 | 0.580405726 | 15/15 |
+| piccadilly | 1 | 0.937607215 | 0.932748801 | 0.930163432 | 0.930163432 | 8/12 |
+| roman_forum | 1 | 0.710124434 | 0.707920023 | 0.649632297 | 0.649632297 | 11/7 |
+| tower_of_london | 1 | 0.911620826 | 0.911502374 | 0.891843680 | 0.891843680 | 3/3 |
+| trafalgar | 1 | 0.936580645 | 0.926798464 | 0.895394379 | 0.895394379 | 16/17 |
+| union_square | 1 | 0.801063126 | 0.799397285 | 0.782289464 | 0.782407791 | 3/4 |
+| vienna_cathedral | 1 | 0.646370092 | 0.644938008 | 0.615460394 | 0.615460394 | 2/2 |
+| yorkminster | 1 | 0.873075710 | 0.870503060 | 0.820583428 | 0.820583428 | 14/10 |
+
+Gate status: **passed**.

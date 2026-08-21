@@ -84,7 +84,12 @@ def assert_prefix(control, candidate, scene):
                 raise ValueError(f"prefix mismatch {scene}/I{iteration}/{field}")
 
 
-def validate_configuration(row, scene, proposal_trust_rebase):
+def validate_configuration(
+    row,
+    scene,
+    proposal_trust_rebase,
+    proposal_landmark_response,
+):
     expected = {
         "clusters": 24,
         "iterations": 120,
@@ -112,6 +117,16 @@ def validate_configuration(row, scene, proposal_trust_rebase):
             f"configuration mismatch {scene}: "
             "oneStepSchurResidualProposalRebaseTrustState="
             f"{actual_trust_rebase!r}, expected={proposal_trust_rebase!r}"
+        )
+    actual_landmark_response = bool(
+        row.get("applySchurProposalLandmarkResponse", False)
+    )
+    if actual_landmark_response != proposal_landmark_response:
+        raise ValueError(
+            f"configuration mismatch {scene}: "
+            "applySchurProposalLandmarkResponse="
+            f"{actual_landmark_response!r}, "
+            f"expected={proposal_landmark_response!r}"
         )
     if row.get("schurAlignmentDiagnosticIterations") not in ([], [90]):
         raise ValueError(
@@ -159,7 +174,13 @@ def summarize(rows, ceres):
     }
 
 
-def analyze(root, control_root, families, proposal_trust_rebase=False):
+def analyze(
+    root,
+    control_root,
+    families,
+    proposal_trust_rebase=False,
+    proposal_landmark_response=False,
+):
     ceres = ceres_rows()
     details = {}
     summaries = {}
@@ -181,7 +202,12 @@ def analyze(root, control_root, families, proposal_trust_rebase=False):
             candidate = candidates[scene]
             control = controls[scene]
             status = statuses[scene]
-            validate_configuration(candidate, scene, proposal_trust_rebase)
+            validate_configuration(
+                candidate,
+                scene,
+                proposal_trust_rebase,
+                proposal_landmark_response,
+            )
             assert_prefix(control, candidate, scene)
             if status["status"] != "completed" or int(status["exit_code"]) != 0:
                 raise ValueError(f"failed case status for {scene}")
@@ -197,6 +223,32 @@ def analyze(root, control_root, families, proposal_trust_rebase=False):
                 raise ValueError(f"selection mismatch for {scene}")
             if proposal["candidateWorkerSSE"] > proposal["ordinaryWorkerSSE"]:
                 raise ValueError(f"proposal selected an inferior worker SSE for {scene}")
+            effective_proposal = proposal
+            worker_sse_ratio = (
+                proposal["candidateWorkerSSE"]
+                / proposal["ordinaryWorkerSSE"]
+            )
+            if proposal_landmark_response:
+                landmark_proposal = diagnostic.get(
+                    "schurProposalLandmarkResponseOracle"
+                )
+                if landmark_proposal is None:
+                    raise ValueError(
+                        f"landmark proposal telemetry missing for {scene}"
+                    )
+                effective_proposal = landmark_proposal
+                selected_scale = float(effective_proposal["selectedScale"])
+                selected = bool(effective_proposal["selected"])
+                worker_sse_ratio = (
+                    effective_proposal["candidateRefinedWorkerSSE"]
+                    / effective_proposal["ordinaryRefinedWorkerSSE"]
+                )
+                if bool(effective_proposal["applied"]) != selected:
+                    raise ValueError(
+                        f"landmark proposal application mismatch for {scene}"
+                    )
+            if selected != (selected_scale > 0.0):
+                raise ValueError(f"effective selection mismatch for {scene}")
             trust_rebase_iterations = [
                 iteration + 1
                 for iteration, trajectory_row in enumerate(
@@ -221,9 +273,7 @@ def analyze(root, control_root, families, proposal_trust_rebase=False):
                 "family": family,
                 "selected": selected,
                 "selected_scale": selected_scale,
-                "worker_sse_ratio": (
-                    proposal["candidateWorkerSSE"] / proposal["ordinaryWorkerSSE"]
-                ),
+                "worker_sse_ratio": worker_sse_ratio,
                 "immediate_i90_ratio": (
                     candidate["trajectory"][89]["sumSquaredError"]
                     / control["trajectory"][89]["sumSquaredError"]
@@ -256,6 +306,7 @@ def analyze(root, control_root, families, proposal_trust_rebase=False):
         "status": "passed" if passed else "failed",
         "families": list(families),
         "proposal_trust_rebase": proposal_trust_rebase,
+        "proposal_landmark_response": proposal_landmark_response,
         "summaries": summaries,
         "scenes": details,
     }
@@ -273,6 +324,12 @@ def write_report(path, summary):
             output.write(
                 " Selected proposals rebase worker trust and coordinator "
                 "curvature/acceleration state at I91."
+            )
+        if summary["proposal_landmark_response"]:
+            output.write(
+                " Proposal scales include three rollback-safe fixed-camera "
+                "landmark response steps and atomically commit selected "
+                "cameras plus refined landmarks."
             )
         output.write("\n\n")
         output.write("| Family | Completed | Selected/declined | Immediate I90 | Trajectory I120 | Delivered/control | Summed | W/T/L | Candidate/Ceres | Max RSS GiB C/W |\n")
@@ -313,12 +370,14 @@ def main():
         "--families", nargs="+", choices=tuple(EXPECTED), default=tuple(EXPECTED)
     )
     parser.add_argument("--proposal-trust-rebase", action="store_true")
+    parser.add_argument("--proposal-landmark-response", action="store_true")
     arguments = parser.parse_args()
     summary = analyze(
         arguments.root,
         arguments.control_root,
         arguments.families,
         proposal_trust_rebase=arguments.proposal_trust_rebase,
+        proposal_landmark_response=arguments.proposal_landmark_response,
     )
     arguments.root.mkdir(parents=True, exist_ok=True)
     (arguments.root / "summary.json").write_text(

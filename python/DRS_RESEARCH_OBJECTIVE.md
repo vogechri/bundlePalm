@@ -361,6 +361,15 @@ commit atomically, then use canonical restart and the retained I91 trust
 rebase. Proceed unchanged to all-15 breadth before BAL29. Report:
 `benchmark_results/k24_schur_proposal_landmark_response_cohort/report.md`.
 
+Unchanged all-15 breadth passes the strict no-loss gate. Delivered/control is
+`0.790889x` geometrically and `0.760039x` summed, W/T/L `14/1/0`; all 14
+accepted scenes select scale `1.0`, while Madrid declines exactly. The previous
+camera-only rebase component was `0.884652x`, W/T/L `13/1/1`. Candidate/Ceres
+is now `1.177568x`. All scenes complete with maximum coordinator/worker RSS
+`1.815/1.727 GiB`. Proceed unchanged to serial BAL29 under the 14 GiB cap; no
+scale, depth, timing, floor, or restart changes. Report:
+`benchmark_results/k24_schur_proposal_landmark_response_breadth/report.md`.
+
 Fresh isolated bridge gate (2026-08-19):
 `serverTest/client_drs_k1_bridge.py` preserves `client_drs.py` and pins the
 mature legacy backbone while exposing ordered `legacy`, `direct`, and
