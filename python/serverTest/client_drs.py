@@ -5037,34 +5037,60 @@ def main():
                         preserve_cameras=True,
                         packed_request_buffers=arguments.packed_request_buffers,
                     )
-                    one_step_physical_candidate = left_se3_camera_plus(
-                        schur_alignment_base_cameras,
-                        one_step_schur_tangent,
+                    correction = (
+                        one_step_schur_tangent - shared_consensus_tangent
                     )
-                    one_step_consensus = to_scaled_cameras(
-                        one_step_physical_candidate, camera_scaling
-                    )
-                    one_step_worker_sse = worker.evaluate_consensus_sse(
-                        camera_indices_in_cluster,
-                        one_step_consensus,
-                        cluster_count,
-                        preserve_cameras=True,
-                        packed_request_buffers=arguments.packed_request_buffers,
-                    )
-                    one_step_selected = (
-                        np.isfinite(one_step_worker_sse)
-                        and one_step_worker_sse < ordinary_worker_sse
-                    )
+                    one_step_attempts = []
+                    selected_scale = 0.0
+                    selected_worker_sse = ordinary_worker_sse
+                    selected_consensus = candidate_consensus
+                    selected_physical_candidate = physical_candidate
+                    for attempt in range(8):
+                        scale = 0.5 ** attempt
+                        trial_tangent = consensus_tangent + scale * correction
+                        trial_physical_candidate = left_se3_camera_plus(
+                            schur_alignment_base_cameras,
+                            trial_tangent,
+                        )
+                        trial_consensus = to_scaled_cameras(
+                            trial_physical_candidate, camera_scaling
+                        )
+                        trial_worker_sse = worker.evaluate_consensus_sse(
+                            camera_indices_in_cluster,
+                            trial_consensus,
+                            cluster_count,
+                            preserve_cameras=True,
+                            packed_request_buffers=(
+                                arguments.packed_request_buffers
+                            ),
+                        )
+                        one_step_attempts.append({
+                            "scale": scale,
+                            "workerSSE": trial_worker_sse,
+                        })
+                        if (
+                            np.isfinite(trial_worker_sse)
+                            and trial_worker_sse < selected_worker_sse
+                        ):
+                            selected_scale = scale
+                            selected_worker_sse = trial_worker_sse
+                            selected_consensus = trial_consensus
+                            selected_physical_candidate = (
+                                trial_physical_candidate
+                            )
+                    one_step_selected = selected_scale > 0.0
                     schur_alignment_diagnostics[
                         "oneStepSchurResidualProposal"
                     ] = {
                         "ordinaryWorkerSSE": ordinary_worker_sse,
-                        "candidateWorkerSSE": one_step_worker_sse,
+                        "candidateWorkerSSE": selected_worker_sse,
+                        "selectedScale": selected_scale,
                         "selected": one_step_selected,
+                        "attempts": one_step_attempts,
                     }
                     if one_step_selected:
-                        candidate_consensus = one_step_consensus
-                        physical_candidate = one_step_physical_candidate
+                        candidate_consensus = selected_consensus
+                        physical_candidate = selected_physical_candidate
                         candidate_centers, residuals = drs_state_for_consensus(
                             local_cameras,
                             centers,
