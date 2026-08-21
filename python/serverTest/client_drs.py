@@ -1499,6 +1499,14 @@ def parse_arguments():
         action="store_true",
     )
     parser.add_argument(
+        "--schur-proposal-landmark-response-oracle",
+        action="store_true",
+    )
+    parser.add_argument(
+        "--apply-schur-proposal-landmark-response",
+        action="store_true",
+    )
+    parser.add_argument(
         "--schur-model-consensus-clipping", action="store_true"
     )
     parser.add_argument(
@@ -3137,6 +3145,27 @@ def main():
     ):
         raise ValueError(
             "all-camera Schur residual oracle requires proposal-only diagnostics"
+        )
+    if (
+        arguments.schur_proposal_landmark_response_oracle
+        and not one_step_schur_residual_proposal_iterations
+    ):
+        raise ValueError(
+            "Schur proposal landmark oracle requires a proposal iteration"
+        )
+    if (
+        arguments.schur_proposal_landmark_response_oracle
+        and arguments.shared_schur_landmark_refinement_steps <= 0
+    ):
+        raise ValueError(
+            "Schur proposal landmark oracle requires positive refinement steps"
+        )
+    if (
+        arguments.apply_schur_proposal_landmark_response
+        and not arguments.schur_proposal_landmark_response_oracle
+    ):
+        raise ValueError(
+            "applying Schur proposal landmark response requires its oracle"
         )
     if (
         one_step_schur_residual_proposal_iterations
@@ -5452,6 +5481,156 @@ def main():
                     "attempts": one_step_attempts,
                     "productStateRestarted": False,
                 }
+                landmark_response_selected_scale = 0.0
+                if arguments.schur_proposal_landmark_response_oracle:
+                    landmark_response_selected_consensus = candidate_consensus
+                    landmark_response_selected_physical = physical_candidate
+                    landmark_response_selected_landmarks = diagnostic_landmarks
+                    landmark_oracle_state_id = (
+                        7 * arguments.iterations + iteration + 1
+                    )
+                    worker.control_nominal_landmark_state(
+                        cluster_count,
+                        landmark_oracle_state_id,
+                        "save",
+                    )
+                    ordinary_refined_costs, _ = (
+                        worker.refine_landmarks_at_consensus(
+                            camera_indices_in_cluster,
+                            point_indices_in_cluster,
+                            candidate_consensus,
+                            diagnostic_landmarks,
+                            cluster_count,
+                            arguments.shared_schur_landmark_refinement_steps,
+                            use_landmark_state=True,
+                            preserve_cameras=True,
+                            packed_request_buffers=(
+                                arguments.packed_request_buffers
+                            ),
+                        )
+                    )
+                    ordinary_refined_worker_sse = float(np.sum(
+                        ordinary_refined_costs
+                    ))
+                    landmark_response_attempts = []
+                    landmark_response_selected_scale = 0.0
+                    landmark_response_worker_sse = (
+                        ordinary_refined_worker_sse
+                    )
+                    landmark_response_required_sse = (
+                        ordinary_refined_worker_sse
+                        * (
+                            1.0
+                            - arguments.shared_schur_minimum_relative_decrease
+                        )
+                    )
+                    for attempt in range(8):
+                        scale = 0.5 ** attempt
+                        trial_physical_candidate = left_se3_camera_plus(
+                            schur_alignment_base_cameras,
+                            consensus_tangent + scale * correction,
+                        )
+                        trial_consensus = to_scaled_cameras(
+                            trial_physical_candidate, camera_scaling
+                        )
+                        refined_costs, refined_landmarks = (
+                            worker.refine_landmarks_at_consensus(
+                                camera_indices_in_cluster,
+                                point_indices_in_cluster,
+                                trial_consensus,
+                                diagnostic_landmarks,
+                                cluster_count,
+                                arguments.
+                                shared_schur_landmark_refinement_steps,
+                                use_landmark_state=True,
+                                preserve_cameras=True,
+                                packed_request_buffers=(
+                                    arguments.packed_request_buffers
+                                ),
+                            )
+                        )
+                        trial_worker_sse = float(np.sum(refined_costs))
+                        landmark_response_attempts.append({
+                            "scale": scale,
+                            "workerSSE": trial_worker_sse,
+                        })
+                        if (
+                            np.isfinite(trial_worker_sse)
+                            and trial_worker_sse
+                            < landmark_response_worker_sse
+                            and trial_worker_sse
+                            < landmark_response_required_sse
+                        ):
+                            landmark_response_selected_scale = scale
+                            landmark_response_worker_sse = trial_worker_sse
+                            landmark_response_selected_consensus = (
+                                trial_consensus
+                            )
+                            landmark_response_selected_physical = (
+                                trial_physical_candidate
+                            )
+                            landmark_response_selected_landmarks = (
+                                refined_landmarks
+                            )
+                    worker.control_nominal_landmark_state(
+                        cluster_count,
+                        landmark_oracle_state_id,
+                        (
+                            "restore_roundtrip"
+                            if arguments.worker_owned_landmarks
+                            else "restore"
+                        ),
+                    )
+                    roundtrip_worker_sse = worker.evaluate_consensus_sse(
+                        camera_indices_in_cluster,
+                        candidate_consensus,
+                        cluster_count,
+                        preserve_cameras=True,
+                        packed_request_buffers=(
+                            arguments.packed_request_buffers
+                        ),
+                    )
+                    roundtrip_relative_error = abs(
+                        roundtrip_worker_sse - ordinary_worker_sse
+                    ) / max(
+                        abs(ordinary_worker_sse),
+                        np.finfo(np.float64).tiny,
+                    )
+                    if roundtrip_relative_error > WORKER_SSE_RELATIVE_TOLERANCE:
+                        raise RuntimeError(
+                            "landmark-response oracle changed worker state: "
+                            f"relative_error={roundtrip_relative_error:.3g}"
+                        )
+                    worker.control_nominal_landmark_state(
+                        cluster_count,
+                        landmark_oracle_state_id,
+                        "discard",
+                    )
+                    schur_alignment_diagnostics[
+                        "schurProposalLandmarkResponseOracle"
+                    ] = {
+                        "refinementSteps": (
+                            arguments.shared_schur_landmark_refinement_steps
+                        ),
+                        "fixedOrdinaryWorkerSSE": ordinary_worker_sse,
+                        "ordinaryRefinedWorkerSSE": (
+                            ordinary_refined_worker_sse
+                        ),
+                        "candidateRefinedWorkerSSE": (
+                            landmark_response_worker_sse
+                        ),
+                        "minimumRelativeDecrease": (
+                            arguments.shared_schur_minimum_relative_decrease
+                        ),
+                        "selectedScale": landmark_response_selected_scale,
+                        "selected": landmark_response_selected_scale > 0.0,
+                        "attempts": landmark_response_attempts,
+                        "workerStateRoundtripSSE": roundtrip_worker_sse,
+                        "workerStateRoundtripRelativeError": (
+                            roundtrip_relative_error
+                        ),
+                        "applied": False,
+                    }
                 if all_camera_schur_tangent is not None:
                     all_camera_correction = (
                         all_camera_schur_tangent - consensus_tangent
@@ -5651,6 +5830,53 @@ def main():
                         model_optimal_two_step_tangent,
                         model_optimal_two_step_diagnostics,
                     )
+                landmark_response_applied = (
+                    arguments.apply_schur_proposal_landmark_response
+                    and landmark_response_selected_scale > 0.0
+                )
+                if landmark_response_applied:
+                    selected_scale = landmark_response_selected_scale
+                    selected_worker_sse = landmark_response_worker_sse
+                    selected_consensus = landmark_response_selected_consensus
+                    selected_physical_candidate = (
+                        landmark_response_selected_physical
+                    )
+                    landmarks = landmark_response_selected_landmarks.copy()
+                    commit_costs, committed_consensus, committed_landmarks = (
+                        worker.apply_camera_step(
+                            camera_indices_in_cluster,
+                            point_indices_in_cluster,
+                            selected_consensus,
+                            landmarks,
+                            np.zeros_like(selected_consensus),
+                            cluster_count,
+                            0,
+                        )
+                    )
+                    if not (
+                        np.allclose(
+                            committed_consensus,
+                            selected_consensus,
+                            rtol=1e-12,
+                            atol=1e-14,
+                        )
+                        and np.allclose(
+                            committed_landmarks,
+                            landmarks,
+                            rtol=1e-12,
+                            atol=1e-14,
+                        )
+                        and np.isfinite(np.sum(commit_costs))
+                    ):
+                        raise RuntimeError(
+                            "landmark-response commit changed selected geometry"
+                        )
+                    selected_consensus = committed_consensus
+                    landmarks = committed_landmarks
+                    one_step_selected = True
+                    schur_alignment_diagnostics[
+                        "schurProposalLandmarkResponseOracle"
+                    ]["applied"] = True
                 if one_step_selected:
                     one_step_proposal_selected_this_iteration = True
                     candidate_consensus = selected_consensus
@@ -7823,6 +8049,12 @@ def main():
         ),
         "allCameraSchurResidualOracle": (
             arguments.all_camera_schur_residual_oracle
+        ),
+        "schurProposalLandmarkResponseOracle": (
+            arguments.schur_proposal_landmark_response_oracle
+        ),
+        "applySchurProposalLandmarkResponse": (
+            arguments.apply_schur_proposal_landmark_response
         ),
         "schurAlignmentCameraDamping": (
             arguments.schur_alignment_camera_damping
