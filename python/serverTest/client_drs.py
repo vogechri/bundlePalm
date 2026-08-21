@@ -1495,6 +1495,10 @@ def parse_arguments():
         action="store_true",
     )
     parser.add_argument(
+        "--all-camera-schur-residual-oracle",
+        action="store_true",
+    )
+    parser.add_argument(
         "--schur-model-consensus-clipping", action="store_true"
     )
     parser.add_argument(
@@ -3119,6 +3123,20 @@ def main():
     ):
         raise ValueError(
             "relinearized Schur residual oracle requires proposal-only diagnostics"
+        )
+    if (
+        arguments.all_camera_schur_residual_oracle
+        and not one_step_schur_residual_proposal_iterations
+    ):
+        raise ValueError(
+            "all-camera Schur residual oracle requires a proposal iteration"
+        )
+    if (
+        arguments.all_camera_schur_residual_oracle
+        and schur_alignment_diagnostic_iterations
+    ):
+        raise ValueError(
+            "all-camera Schur residual oracle requires proposal-only diagnostics"
         )
     if (
         one_step_schur_residual_proposal_iterations
@@ -5324,6 +5342,19 @@ def main():
                     shared_consensus_tangent,
                     shared_cameras,
                 )
+                all_camera_schur_tangent = None
+                all_camera_schur_diagnostics = None
+                if arguments.all_camera_schur_residual_oracle:
+                    (
+                        all_camera_schur_tangent,
+                        all_camera_schur_diagnostics,
+                    ) = jacobi_refine_schur_tangent(
+                        schur_alignment_systems,
+                        camera_count,
+                        arguments.schur_alignment_camera_damping,
+                        consensus_tangent,
+                        np.ones(camera_count, dtype=bool),
+                    )
                 two_step_schur_tangent = None
                 two_step_schur_diagnostics = None
                 model_optimal_two_step_tangent = None
@@ -5421,6 +5452,57 @@ def main():
                     "attempts": one_step_attempts,
                     "productStateRestarted": False,
                 }
+                if all_camera_schur_tangent is not None:
+                    all_camera_correction = (
+                        all_camera_schur_tangent - consensus_tangent
+                    )
+                    all_camera_attempts = []
+                    all_camera_selected_scale = 0.0
+                    all_camera_worker_sse = ordinary_worker_sse
+                    for attempt in range(8):
+                        scale = 0.5 ** attempt
+                        trial_physical_candidate = left_se3_camera_plus(
+                            schur_alignment_base_cameras,
+                            consensus_tangent
+                            + scale * all_camera_correction,
+                        )
+                        trial_consensus = to_scaled_cameras(
+                            trial_physical_candidate, camera_scaling
+                        )
+                        trial_worker_sse = worker.evaluate_consensus_sse(
+                            camera_indices_in_cluster,
+                            trial_consensus,
+                            cluster_count,
+                            preserve_cameras=True,
+                            packed_request_buffers=(
+                                arguments.packed_request_buffers
+                            ),
+                        )
+                        all_camera_attempts.append({
+                            "scale": scale,
+                            "workerSSE": trial_worker_sse,
+                        })
+                        if (
+                            np.isfinite(trial_worker_sse)
+                            and trial_worker_sse < all_camera_worker_sse
+                            and trial_worker_sse < required_worker_sse
+                        ):
+                            all_camera_selected_scale = scale
+                            all_camera_worker_sse = trial_worker_sse
+                    schur_alignment_diagnostics[
+                        "allCameraSchurResidualOracle"
+                    ] = {
+                        **all_camera_schur_diagnostics,
+                        "ordinaryWorkerSSE": ordinary_worker_sse,
+                        "candidateWorkerSSE": all_camera_worker_sse,
+                        "minimumRelativeDecrease": (
+                            arguments.shared_schur_minimum_relative_decrease
+                        ),
+                        "selectedScale": all_camera_selected_scale,
+                        "selected": all_camera_selected_scale > 0.0,
+                        "attempts": all_camera_attempts,
+                        "applied": False,
+                    }
                 if arguments.relinearized_second_schur_residual_oracle:
                     relinearized_diagnostics = {
                         "eligible": one_step_selected,
@@ -7738,6 +7820,9 @@ def main():
         ),
         "relinearizedSecondSchurResidualOracle": (
             arguments.relinearized_second_schur_residual_oracle
+        ),
+        "allCameraSchurResidualOracle": (
+            arguments.all_camera_schur_residual_oracle
         ),
         "schurAlignmentCameraDamping": (
             arguments.schur_alignment_camera_damping
