@@ -311,6 +311,14 @@ telemetry neutrality. Unique cameras remain locally owned; do not tune this
 route. See
 `benchmark_results/k24_all_camera_schur_residual_oracle_sentinel/report.md`.
 
+Three-step eliminated-landmark response passes the frozen seven-scene gate.
+Five 1DSfM scenes improve from `0.822388x` camera-only to `0.691764x` control,
+W/T/L `5/0/0`, with scale `1.0` selected throughout. BAL52/3068 decline and
+remain exact. The applied path atomically commits selected cameras plus refined
+landmarks, canonically restarts, and rebases trust at I91. Next run unchanged
+all-15 breadth, then BAL29. See
+`benchmark_results/k24_schur_proposal_landmark_response_cohort/report.md`.
+
 Only `all15_corrected/` is authoritative. The sibling `all15/` directory is a
 quarantined setup error with the wrong trust cap and recovery controls.
 

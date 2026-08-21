@@ -260,3 +260,11 @@ unique-inclusive correction norms `6.14e13/2.16e11`; BAL52 still declines.
 Exact trajectory/state neutrality holds. Keep unique cameras locally owned and
 restrict residual repair to shared cameras. See
 `benchmark_results/k24_all_camera_schur_residual_oracle_sentinel/report.md`.
+
+Consistent eliminated-landmark response passes the frozen transfer. The
+existing three fixed-camera landmark steps select scale `1.0` on all five
+1DSfM scenes and improve geometric delivered/control from `0.822388x` to
+`0.691764x`, W/T/L `5/0/0`. BAL52/3068 decline exactly. This identifies the
+missing Schur contract: camera trial evaluation and committed state must include
+the marginalized landmark response. Proceed unchanged to all-15, then BAL29.
+See `benchmark_results/k24_schur_proposal_landmark_response_cohort/report.md`.

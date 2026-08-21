@@ -350,6 +350,17 @@ locally owned and restrict the proposal correction to duplicated cameras; do
 not scale-tune this route. Report:
 `benchmark_results/k24_all_camera_schur_residual_oracle_sentinel/report.md`.
 
+The eliminated-landmark response is the first strong successor mechanism.
+Using the existing three rollback-safe fixed-camera landmark steps changes the
+preferred I90 scale to `1.0` and passes the frozen seven-scene transfer. Five
+1DSfM scenes improve from `0.822388x` camera-only to `0.691764x` control
+geometrically, W/T/L `5/0/0`; Montreal/Piazza/Roman/Trafalgar/Yorkminster are
+`0.571810/0.580406/0.649632/0.895394/0.820583x`. BAL52 and BAL3068 both decline
+and remain trajectory/endpoint exact. Selected cameras and refined landmarks
+commit atomically, then use canonical restart and the retained I91 trust
+rebase. Proceed unchanged to all-15 breadth before BAL29. Report:
+`benchmark_results/k24_schur_proposal_landmark_response_cohort/report.md`.
+
 Fresh isolated bridge gate (2026-08-19):
 `serverTest/client_drs_k1_bridge.py` preserves `client_drs.py` and pins the
 mature legacy backbone while exposing ordered `legacy`, `direct`, and
