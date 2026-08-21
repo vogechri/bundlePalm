@@ -1483,6 +1483,10 @@ def parse_arguments():
         help="at most one comma-separated one-based alignment iteration",
     )
     parser.add_argument(
+        "--one-step-schur-residual-proposal-rebase-trust-state",
+        action="store_true",
+    )
+    parser.add_argument(
         "--schur-model-consensus-clipping", action="store_true"
     )
     parser.add_argument(
@@ -3074,6 +3078,13 @@ def main():
     if len(one_step_schur_residual_proposal_iterations) > 1:
         raise ValueError("at most one one-step Schur proposal is permitted")
     if (
+        arguments.one_step_schur_residual_proposal_rebase_trust_state
+        and not one_step_schur_residual_proposal_iterations
+    ):
+        raise ValueError(
+            "one-step Schur proposal trust rebase requires a proposal iteration"
+        )
+    if (
         one_step_schur_residual_proposal_iterations
         and arguments.schur_model_consensus_clipping
     ):
@@ -3364,6 +3375,7 @@ def main():
     bootstrap_basin_guard_ceiling = float("nan")
     bootstrap_basin_guard_rejections = 0
     bootstrap_basin_guard_release_iteration = -1
+    one_step_proposal_trust_rebase_pending = False
     initialization_seconds = float("nan")
     optimization_seconds = float("nan")
     accelerator = create_accelerator(arguments.outer_acceleration)
@@ -3938,6 +3950,54 @@ def main():
             arguments.safeguard_annealing_iterations or arguments.iterations
         )
         for iteration in range(arguments.iterations):
+            proposal_trust_state_rebase_applied = (
+                one_step_proposal_trust_rebase_pending
+                and arguments.
+                one_step_schur_residual_proposal_rebase_trust_state
+            )
+            one_step_proposal_trust_rebase_pending = False
+            if proposal_trust_state_rebase_applied:
+                rebase_landmarks = accepted_landmarks.copy()
+                if arguments.worker_owned_landmarks:
+                    rebase_landmarks = worker.materialize_current_landmarks(
+                        point_indices_in_cluster,
+                        rebase_landmarks,
+                        cluster_count,
+                        5 * arguments.iterations + iteration + 1,
+                        source="accepted",
+                    )
+                rebase_costs, rebased_consensus, rebased_landmarks = (
+                    worker.apply_camera_step(
+                        camera_indices_in_cluster,
+                        point_indices_in_cluster,
+                        accepted_consensus,
+                        rebase_landmarks,
+                        np.zeros_like(accepted_consensus),
+                        cluster_count,
+                        0,
+                        rebase_trust_state=True,
+                    )
+                )
+                if not (
+                    np.allclose(
+                        rebased_consensus,
+                        accepted_consensus,
+                        rtol=1e-12,
+                        atol=1e-14,
+                    )
+                    and np.allclose(
+                        rebased_landmarks,
+                        rebase_landmarks,
+                        rtol=1e-12,
+                        atol=1e-14,
+                    )
+                    and np.isfinite(np.sum(rebase_costs))
+                ):
+                    raise RuntimeError(
+                        "proposal trust rebase changed accepted geometry"
+                    )
+                accepted_landmarks = rebased_landmarks
+                landmarks = rebased_landmarks.copy()
             mid_shared_schur_triggered = (
                 arguments.mid_shared_schur_correction_iteration > 0
                 and iteration
@@ -3956,7 +4016,7 @@ def main():
             local_state_rebase_applied = local_state_rebase_is_active(
                 arguments.local_state_rebase_iteration,
                 iteration,
-            )
+            ) or proposal_trust_state_rebase_applied
             if local_state_rebase_applied:
                 block_curvature_multiplier = arguments.block_curvature_multiplier
                 block_regularization = arguments.block_regularization
@@ -4081,6 +4141,7 @@ def main():
             schur_alignment_base_cameras = None
             schur_alignment_systems = None
             schur_alignment_diagnostics = None
+            one_step_proposal_selected_this_iteration = False
             if iteration in (
                 schur_alignment_diagnostic_iterations
                 | one_step_schur_residual_proposal_iterations
@@ -5107,6 +5168,7 @@ def main():
                         "productStateRestarted": False,
                     }
                     if one_step_selected:
+                        one_step_proposal_selected_this_iteration = True
                         candidate_consensus = selected_consensus
                         physical_candidate = selected_physical_candidate
                         local_cameras = np.repeat(
@@ -5296,6 +5358,7 @@ def main():
                     "productStateRestarted": False,
                 }
                 if one_step_selected:
+                    one_step_proposal_selected_this_iteration = True
                     candidate_consensus = selected_consensus
                     physical_candidate = selected_physical_candidate
                     local_cameras = np.repeat(
@@ -6579,6 +6642,8 @@ def main():
                         iteration + 1,
                         "save_accepted",
                     )
+                if one_step_proposal_selected_this_iteration:
+                    one_step_proposal_trust_rebase_pending = True
                 metrics = candidate_metrics
                 recovery_action = "none"
                 if proposal_hysteresis is not None:
@@ -6834,6 +6899,9 @@ def main():
                     outer_acceleration_restart_applied
                 ),
                 "localStateRebaseApplied": local_state_rebase_applied,
+                "proposalTrustStateRebaseApplied": (
+                    proposal_trust_state_rebase_applied
+                ),
                 "midSharedSchurTriggered": mid_shared_schur_triggered,
                 "midSharedSchurAccepted": (
                     mid_shared_schur_accepted_this_iteration
@@ -7449,6 +7517,9 @@ def main():
         "oneStepSchurResidualProposalIterations": sorted(
             iteration + 1
             for iteration in one_step_schur_residual_proposal_iterations
+        ),
+        "oneStepSchurResidualProposalRebaseTrustState": (
+            arguments.one_step_schur_residual_proposal_rebase_trust_state
         ),
         "schurAlignmentCameraDamping": (
             arguments.schur_alignment_camera_damping

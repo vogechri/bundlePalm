@@ -115,6 +115,7 @@ SHARED_SCHUR_RELATIVE_TOLERANCE=${SHARED_SCHUR_RELATIVE_TOLERANCE:-1e-6}
 SHARED_SCHUR_MAXIMUM_ITERATIONS=${SHARED_SCHUR_MAXIMUM_ITERATIONS:-500}
 SCHUR_ALIGNMENT_MAXIMUM_ITERATIONS=${SCHUR_ALIGNMENT_MAXIMUM_ITERATIONS:-$SHARED_SCHUR_MAXIMUM_ITERATIONS}
 ONE_STEP_SCHUR_RESIDUAL_PROPOSAL_ITERATIONS=${ONE_STEP_SCHUR_RESIDUAL_PROPOSAL_ITERATIONS:-}
+ONE_STEP_SCHUR_RESIDUAL_PROPOSAL_REBASE_TRUST_STATE=${ONE_STEP_SCHUR_RESIDUAL_PROPOSAL_REBASE_TRUST_STATE:-0}
 SHARED_SCHUR_OPERATOR=${SHARED_SCHUR_OPERATOR:-python}
 SHARED_SCHUR_PRECONDITIONER=${SHARED_SCHUR_PRECONDITIONER:-jacobi}
 VARIANT_TAG=${VARIANT_TAG:-}
@@ -331,6 +332,9 @@ if [[ -n "$SCHUR_ALIGNMENT_DIAGNOSTIC_ITERATIONS" ]]; then
 fi
 if [[ -n "$ONE_STEP_SCHUR_RESIDUAL_PROPOSAL_ITERATIONS" ]]; then
   VARIANT_NAME="${VARIANT_NAME}_one_step_schur${ONE_STEP_SCHUR_RESIDUAL_PROPOSAL_ITERATIONS}"
+  if [[ "$ONE_STEP_SCHUR_RESIDUAL_PROPOSAL_REBASE_TRUST_STATE" == "1" ]]; then
+    VARIANT_NAME="${VARIANT_NAME}_trust_rebase"
+  fi
 fi
 if [[ "$FINAL_SHARED_SCHUR_CORRECTION" == "1" ]]; then
   VARIANT_NAME="${VARIANT_NAME}_final_schur${SHARED_SCHUR_MAXIMUM_CORRECTIONS}"
@@ -675,6 +679,12 @@ for problem in "${PROBLEMS[@]}"; do
         --shared-schur-preconditioner "$SHARED_SCHUR_PRECONDITIONER"
       )
     fi
+    proposal_trust_rebase_args=()
+    if [[ "$ONE_STEP_SCHUR_RESIDUAL_PROPOSAL_REBASE_TRUST_STATE" == "1" ]]; then
+      proposal_trust_rebase_args+=(
+        --one-step-schur-residual-proposal-rebase-trust-state
+      )
+    fi
     final_shared_schur_args=()
     if [[ "$FINAL_SHARED_SCHUR_CORRECTION" == "1" ]]; then
       final_shared_schur_args+=(
@@ -798,7 +808,7 @@ for problem in "${PROBLEMS[@]}"; do
             --catastrophic-ratio "$CATASTROPHIC_RATIO" \
             --recovery-penalty-ratio "$RECOVERY_PENALTY_RATIO" \
             --results "$RESULT_FILE" --state "$state_file" \
-            "${debug_args[@]}" "${trust_args[@]}" "${scaling_args[@]}" "${worker_sse_args[@]}" "${adaptive_depth_args[@]}" "${single_cluster_args[@]}" "${shared_only_args[@]}" "${initial_shared_schur_args[@]}" "${mid_shared_schur_args[@]}" "${alignment_schur_args[@]}" "${final_shared_schur_args[@]}" "${initial_state_args[@]}") 2>&1 | tee "$log_file"
+            "${debug_args[@]}" "${trust_args[@]}" "${scaling_args[@]}" "${worker_sse_args[@]}" "${adaptive_depth_args[@]}" "${single_cluster_args[@]}" "${shared_only_args[@]}" "${initial_shared_schur_args[@]}" "${mid_shared_schur_args[@]}" "${alignment_schur_args[@]}" "${proposal_trust_rebase_args[@]}" "${final_shared_schur_args[@]}" "${initial_state_args[@]}") 2>&1 | tee "$log_file"
       exit_code=${PIPESTATUS[0]}
     else
       (cd "$SCRIPT_DIR" && /usr/bin/time -v -o "$coordinator_time" \
@@ -896,7 +906,7 @@ for problem in "${PROBLEMS[@]}"; do
             --catastrophic-ratio "$CATASTROPHIC_RATIO" \
             --recovery-penalty-ratio "$RECOVERY_PENALTY_RATIO" \
             --results "$RESULT_FILE" --state "$state_file" \
-            "${debug_args[@]}" "${trust_args[@]}" "${scaling_args[@]}" "${worker_sse_args[@]}" "${adaptive_depth_args[@]}" "${single_cluster_args[@]}" "${shared_only_args[@]}" "${initial_shared_schur_args[@]}" "${mid_shared_schur_args[@]}" "${alignment_schur_args[@]}" "${final_shared_schur_args[@]}" "${initial_state_args[@]}") > "$log_file" 2>&1
+            "${debug_args[@]}" "${trust_args[@]}" "${scaling_args[@]}" "${worker_sse_args[@]}" "${adaptive_depth_args[@]}" "${single_cluster_args[@]}" "${shared_only_args[@]}" "${initial_shared_schur_args[@]}" "${mid_shared_schur_args[@]}" "${alignment_schur_args[@]}" "${proposal_trust_rebase_args[@]}" "${final_shared_schur_args[@]}" "${initial_state_args[@]}") > "$log_file" 2>&1
       exit_code=$?
     fi
     set -e
