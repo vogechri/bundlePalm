@@ -1,8 +1,8 @@
 # K24 DRS/Schur Direction-Alignment Diagnostic
 
 Date: 2026-08-21
-Status: projection-only coupling rejected; consistent metric restoration next
-Source checkpoint: `8180a7f`
+Status: one-step oracle passed; safeguarded I90 proposal next
+Source checkpoint: `504b427`
 
 This is the restart contract for the behavior-neutral diagnostic following the
 integrated K24/I200 quality ceiling. It does not alter DRS proposals or apply
@@ -143,3 +143,29 @@ transient Frobenius-majorizer worker dispatch currently blocked by the recovered
 backend's explicit `NotImplementedError`, then compose its frozen threshold
 `0.55`, scale `0.5`, I2--I10 policy with the mature C1/Nesterov Roman/BAL52
 backbone. Do not replace DRS with Ceres or a global Schur step.
+
+That restoration is complete and default-off neutral. The frozen majorizer is
+`0.993173x` Roman at I30 but reverses to `1.007679x` at I90 with 10 versus 7
+rejections. BAL52 declines the selector and is bitwise exact. Close this metric
+proxy without tuning. See
+`benchmark_results/schur_majorizer_mature_i90/report.md`.
+
+Next compute, but do not apply, one Jacobi-preconditioned residual correction
+of the nominal shared DRS tangent under the same global Schur system used by the
+terminal correction. If one operator action materially improves Roman cosine
+and model gain while preserving BAL52, implement it later as a safeguarded DRS
+acceleration proposal. Failure closes one-step curvature transport and rules
+out another approximate metric.
+
+The one-step oracle passes. At I90/I120 Roman cosine improves from
+`0.063/0.134` to `0.763/0.775` and captures `0.881/0.888` of Schur camera-model
+gain. BAL52 improves from `0.555/0.412` to `0.929/0.950` and captures
+`0.875/0.969`. Trajectory prefixes remain exact. See
+`benchmark_results/k24_one_step_schur_oracle_sentinel/report.md`.
+
+Next add one default-off I90 proposal. Evaluate precise worker SSE for ordinary
+and one-step consensus candidates; select one-step only when lower, then rebuild
+centers and residuals atomically with `drs_state_for_consensus`. Permit one
+proposal maximum. Keep the full Schur solve diagnostic-only; the applied
+proposal itself uses one matvec and block-Jacobi correction. Roman and BAL52 are
+the first gate, with no scene routing.

@@ -231,6 +231,24 @@ that path with an explicit `NotImplementedError`; restore the verified
 historical dispatch before running Roman/BAL52. See
 `benchmark_results/k24_coupled_consensus_oracle_sentinel/report.md`.
 
+The consistent transient Frobenius-majorizer path is restored and tested with
+its frozen `0.55`/`0.5`/I10 policy. Roman reaches `0.993173x` control at I30 but
+reverses to `1.007679x` at I90 with more rejections. BAL52 declines the selector
+and remains bitwise exact. Close this proxy without retuning; report:
+`benchmark_results/schur_majorizer_mature_i90/report.md`. The active mechanism
+test is now one behavior-neutral Jacobi-preconditioned global Schur residual
+correction of the nominal shared DRS tangent, not a full solve or replacement
+method.
+
+That oracle passes on Roman/BAL52 at I90/I120. Roman cosine becomes
+`0.763/0.775` with `0.881/0.888` of Schur camera-model gain; BAL52 becomes
+`0.929/0.950` with `0.875/0.969`. Prefix behavior remains exact. Promote only
+the next gate, not the mechanism yet: one default-off I90 proposal, selected by
+precise worker SSE against ordinary consensus and committed via atomic DRS
+state rebuild. The proposal is one distributed matvec plus block-Jacobi
+correction, not Ceres or a full Schur solve. Report:
+`benchmark_results/k24_one_step_schur_oracle_sentinel/report.md`.
+
 Fresh isolated bridge gate (2026-08-19):
 `serverTest/client_drs_k1_bridge.py` preserves `client_drs.py` and pins the
 mature legacy backbone while exposing ordered `legacy`, `direct`, and

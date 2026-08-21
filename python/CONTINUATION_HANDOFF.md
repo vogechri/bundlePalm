@@ -213,6 +213,22 @@ dispatch currently guarded by `NotImplementedError`, then run the frozen
 threshold `0.55`, scale `0.5`, I2--I10 majorizer consistently in local prox and
 consensus on the mature C1/Nesterov Roman/BAL52 pair.
 
+The restored consistent majorizer is neutral when disabled and safe on BAL52,
+but Roman changes from `0.993173x` control at I30 to `1.007679x` at I90, with
+10 versus 7 rejections. Close it without tuning; see
+`benchmark_results/schur_majorizer_mature_i90/report.md`. Next add read-only
+telemetry for one Jacobi-preconditioned Schur residual correction of the shared
+DRS tangent. It must improve Roman while preserving BAL52 before any proposal
+is applied.
+
+The one-step oracle passes: Roman I90/I120 cosine reaches `0.763/0.775` and
+BAL52 `0.929/0.950`, with `0.875--0.969` of full Schur camera-model gain and
+exact trajectory prefixes. See
+`benchmark_results/k24_one_step_schur_oracle_sentinel/report.md`. Next implement
+one default-off I90 proposal selected only by lower precise worker SSE, with
+atomic `drs_state_for_consensus` rebuild and one proposal maximum. Keep the full
+Schur direction diagnostic-only.
+
 Only `all15_corrected/` is authoritative. The sibling `all15/` directory is a
 quarantined setup error with the wrong trust cap and recovery controls.
 
