@@ -341,6 +341,15 @@ which current maintained source does not have. Do not reconstruct a shadow
 race or replace continuation with best-only delivery for this ceiling. Report:
 `benchmark_results/k24_schur_proposal_continuation_policy_oracles/report.md`.
 
+An all-camera residual oracle rejects globally correcting unique-camera motion.
+Relative to shared-only depth one, candidate SSE is `1.001933x` on
+Gendarmenmarkt and `1.127536x` on Roman; Roman has no admissible all-camera
+scale. The correction norm reaches `6.14e13/2.16e11` on the 1DSfM pair. BAL52
+still declines. Trajectory/state neutrality is exact. Keep unique cameras
+locally owned and restrict the proposal correction to duplicated cameras; do
+not scale-tune this route. Report:
+`benchmark_results/k24_all_camera_schur_residual_oracle_sentinel/report.md`.
+
 Fresh isolated bridge gate (2026-08-19):
 `serverTest/client_drs_k1_bridge.py` preserves `client_drs.py` and pins the
 mature legacy backbone while exposing ordered `legacy`, `direct`, and

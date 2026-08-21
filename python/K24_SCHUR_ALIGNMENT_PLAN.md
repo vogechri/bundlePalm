@@ -253,3 +253,10 @@ but weaker `0.934688x`. The exact ordinary/proposal endpoint race ceiling is
 Gendarmenmarkt loss at the cost of duplicated I91--I120 and missing full DRS
 snapshot infrastructure. Do not implement a shadow branch. See
 `benchmark_results/k24_schur_proposal_continuation_policy_oracles/report.md`.
+
+Full-camera residual correction is closed. It worsens the shared-only
+candidate by `1.001933x` on Gendarmenmarkt and `1.127536x` on Roman, with
+unique-inclusive correction norms `6.14e13/2.16e11`; BAL52 still declines.
+Exact trajectory/state neutrality holds. Keep unique cameras locally owned and
+restrict residual repair to shared cameras. See
+`benchmark_results/k24_all_camera_schur_residual_oracle_sentinel/report.md`.

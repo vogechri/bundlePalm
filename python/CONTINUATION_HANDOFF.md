@@ -304,6 +304,13 @@ by falling back only on Gendarmenmarkt; it costs at least `1.25x` outer work and
 requires absent full DRS snapshots. Do not rebuild a shadow race. See
 `benchmark_results/k24_schur_proposal_continuation_policy_oracles/report.md`.
 
+The all-camera residual oracle is rejected. Versus shared-only depth one it is
+`1.001933x` on Gendarmenmarkt and `1.127536x` on Roman, with correction norms
+`6.14e13/2.16e11`; BAL52 still declines. Exact trajectories/states confirm
+telemetry neutrality. Unique cameras remain locally owned; do not tune this
+route. See
+`benchmark_results/k24_all_camera_schur_residual_oracle_sentinel/report.md`.
+
 Only `all15_corrected/` is authoritative. The sibling `all15/` directory is a
 quarantined setup error with the wrong trust cap and recovery controls.
 
