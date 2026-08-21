@@ -94,7 +94,6 @@ def validate_configuration(row, scene):
         "trustRegionPolicy": "drs",
         "persistentTrustRegion": True,
         "sharedOnlyCameraProximal": True,
-        "schurAlignmentDiagnosticIterations": [90],
         "oneStepSchurResidualProposalIterations": [90],
         "schurCoupledConsensusOracle": False,
         "sharedSchurMinimumRelativeDecrease": 1e-3,
@@ -105,6 +104,13 @@ def validate_configuration(row, scene):
                 f"configuration mismatch {scene}: {field}={row.get(field)!r}, "
                 f"expected={value!r}"
             )
+    if row.get("schurAlignmentDiagnosticIterations") not in ([], [90]):
+        raise ValueError(
+            f"configuration mismatch {scene}: "
+            "schurAlignmentDiagnosticIterations="
+            f"{row.get('schurAlignmentDiagnosticIterations')!r}, "
+            "expected [] or [90]"
+        )
     if row.get("terminationReason") != "iteration_limit":
         raise ValueError(f"termination mismatch for {scene}")
 

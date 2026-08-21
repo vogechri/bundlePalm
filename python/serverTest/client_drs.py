@@ -3073,12 +3073,6 @@ def main():
         raise ValueError("one-step Schur proposal iterations must be positive")
     if len(one_step_schur_residual_proposal_iterations) > 1:
         raise ValueError("at most one one-step Schur proposal is permitted")
-    if not one_step_schur_residual_proposal_iterations.issubset(
-        schur_alignment_diagnostic_iterations
-    ):
-        raise ValueError(
-            "one-step Schur proposals require matching alignment diagnostics"
-        )
     if (
         one_step_schur_residual_proposal_iterations
         and arguments.schur_model_consensus_clipping
@@ -3086,7 +3080,10 @@ def main():
         raise ValueError(
             "one-step Schur proposals and consensus clipping are mutually exclusive"
         )
-    if schur_alignment_diagnostic_iterations and not (
+    if (
+        schur_alignment_diagnostic_iterations
+        or one_step_schur_residual_proposal_iterations
+    ) and not (
         arguments.schur_alignment_camera_damping > 0.0
         and arguments.schur_alignment_landmark_damping >= 0.0
         and arguments.schur_alignment_maximum_iterations > 0
@@ -4082,8 +4079,12 @@ def main():
                         acceleration_failures = 0
             schur_alignment_tangent = None
             schur_alignment_base_cameras = None
+            schur_alignment_systems = None
             schur_alignment_diagnostics = None
-            if iteration in schur_alignment_diagnostic_iterations:
+            if iteration in (
+                schur_alignment_diagnostic_iterations
+                | one_step_schur_residual_proposal_iterations
+            ):
                 diagnostic_landmarks = accepted_landmarks.copy()
                 if arguments.worker_owned_landmarks:
                     diagnostic_landmarks = worker.materialize_current_landmarks(
@@ -4104,6 +4105,7 @@ def main():
                     cluster_count,
                     arguments.schur_alignment_landmark_damping,
                 )
+            if iteration in schur_alignment_diagnostic_iterations:
                 (
                     schur_alignment_tangent,
                     schur_alignment_solve_diagnostics,
@@ -5205,6 +5207,117 @@ def main():
                             selected_metric_blocks,
                             shared_only=arguments.shared_only_camera_proximal,
                         )
+            elif iteration in one_step_schur_residual_proposal_iterations:
+                consensus_tangent = left_se3_camera_minus(
+                    physical_candidate, schur_alignment_base_cameras
+                )
+                shared_cameras = camera_copy_count > 1
+                shared_consensus_tangent = np.zeros_like(consensus_tangent)
+                shared_consensus_tangent[shared_cameras] = (
+                    consensus_tangent[shared_cameras]
+                )
+                (
+                    one_step_schur_tangent,
+                    one_step_schur_diagnostics,
+                ) = jacobi_refine_schur_tangent(
+                    schur_alignment_systems,
+                    camera_count,
+                    arguments.schur_alignment_camera_damping,
+                    shared_consensus_tangent,
+                    shared_cameras,
+                )
+                schur_alignment_diagnostics = {
+                    "cameraDamping": arguments.schur_alignment_camera_damping,
+                    "landmarkDamping": (
+                        arguments.schur_alignment_landmark_damping
+                    ),
+                    "referenceSolveSkipped": True,
+                    "coupledConsensusOracle": None,
+                    "oneStepSchurResidualOracle": one_step_schur_diagnostics,
+                }
+                ordinary_worker_sse = worker.evaluate_consensus_sse(
+                    camera_indices_in_cluster,
+                    candidate_consensus,
+                    cluster_count,
+                    preserve_cameras=True,
+                    packed_request_buffers=arguments.packed_request_buffers,
+                )
+                correction = one_step_schur_tangent - shared_consensus_tangent
+                one_step_attempts = []
+                selected_scale = 0.0
+                selected_worker_sse = ordinary_worker_sse
+                selected_consensus = candidate_consensus
+                selected_physical_candidate = physical_candidate
+                required_worker_sse = ordinary_worker_sse * (
+                    1.0 - arguments.shared_schur_minimum_relative_decrease
+                )
+                for attempt in range(8):
+                    scale = 0.5 ** attempt
+                    trial_tangent = consensus_tangent + scale * correction
+                    trial_physical_candidate = left_se3_camera_plus(
+                        schur_alignment_base_cameras,
+                        trial_tangent,
+                    )
+                    trial_consensus = to_scaled_cameras(
+                        trial_physical_candidate, camera_scaling
+                    )
+                    trial_worker_sse = worker.evaluate_consensus_sse(
+                        camera_indices_in_cluster,
+                        trial_consensus,
+                        cluster_count,
+                        preserve_cameras=True,
+                        packed_request_buffers=arguments.packed_request_buffers,
+                    )
+                    one_step_attempts.append({
+                        "scale": scale,
+                        "workerSSE": trial_worker_sse,
+                    })
+                    if (
+                        np.isfinite(trial_worker_sse)
+                        and trial_worker_sse < selected_worker_sse
+                        and trial_worker_sse < required_worker_sse
+                    ):
+                        selected_scale = scale
+                        selected_worker_sse = trial_worker_sse
+                        selected_consensus = trial_consensus
+                        selected_physical_candidate = trial_physical_candidate
+                one_step_selected = selected_scale > 0.0
+                schur_alignment_diagnostics[
+                    "oneStepSchurResidualProposal"
+                ] = {
+                    "ordinaryWorkerSSE": ordinary_worker_sse,
+                    "candidateWorkerSSE": selected_worker_sse,
+                    "minimumRelativeDecrease": (
+                        arguments.shared_schur_minimum_relative_decrease
+                    ),
+                    "selectedScale": selected_scale,
+                    "selected": one_step_selected,
+                    "attempts": one_step_attempts,
+                    "productStateRestarted": False,
+                }
+                if one_step_selected:
+                    candidate_consensus = selected_consensus
+                    physical_candidate = selected_physical_candidate
+                    local_cameras = np.repeat(
+                        candidate_consensus[None, :, :],
+                        cluster_count,
+                        axis=0,
+                    )
+                    restart_centers = local_cameras.copy()
+                    candidate_centers, residuals = drs_state_for_consensus(
+                        local_cameras,
+                        restart_centers,
+                        camera_masks,
+                        candidate_consensus,
+                        arguments.relaxation,
+                        selected_metric_blocks,
+                        shared_only=arguments.shared_only_camera_proximal,
+                    )
+                    accelerator.reset()
+                    acceleration_failures = 0
+                    schur_alignment_diagnostics[
+                        "oneStepSchurResidualProposal"
+                    ]["productStateRestarted"] = True
             worker_sse = None
             if arguments.worker_owned_landmarks:
                 worker_sse = worker.evaluate_consensus_sse(

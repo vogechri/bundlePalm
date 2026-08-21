@@ -135,16 +135,19 @@ def jacobi_refine_schur_tangent(
         np.add.at(action, system.block_rows, block_action)
         offdiagonal = system.block_rows != system.block_columns
         if np.any(offdiagonal):
-            transpose_action = np.einsum(
-                "bji,bj->bi",
-                system.blocks[offdiagonal],
-                tangent[system.block_rows[offdiagonal]],
-            )
-            np.add.at(
-                action,
-                system.block_columns[offdiagonal],
-                transpose_action,
-            )
+            offdiagonal_indices = np.flatnonzero(offdiagonal)
+            for start in range(0, offdiagonal_indices.size, 16384):
+                chunk = offdiagonal_indices[start:start + 16384]
+                transpose_action = np.einsum(
+                    "bji,bj->bi",
+                    system.blocks[chunk],
+                    tangent[system.block_rows[chunk]],
+                )
+                np.add.at(
+                    action,
+                    system.block_columns[chunk],
+                    transpose_action,
+                )
         diagonal = ~offdiagonal
         np.add.at(
             preconditioner,
