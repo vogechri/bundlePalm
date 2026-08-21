@@ -5053,6 +5053,9 @@ def main():
                     selected_worker_sse = ordinary_worker_sse
                     selected_consensus = candidate_consensus
                     selected_physical_candidate = physical_candidate
+                    required_worker_sse = ordinary_worker_sse * (
+                        1.0 - arguments.shared_schur_minimum_relative_decrease
+                    )
                     for attempt in range(8):
                         scale = 0.5 ** attempt
                         trial_tangent = consensus_tangent + scale * correction
@@ -5079,6 +5082,7 @@ def main():
                         if (
                             np.isfinite(trial_worker_sse)
                             and trial_worker_sse < selected_worker_sse
+                            and trial_worker_sse < required_worker_sse
                         ):
                             selected_scale = scale
                             selected_worker_sse = trial_worker_sse
@@ -5092,6 +5096,9 @@ def main():
                     ] = {
                         "ordinaryWorkerSSE": ordinary_worker_sse,
                         "candidateWorkerSSE": selected_worker_sse,
+                        "minimumRelativeDecrease": (
+                            arguments.shared_schur_minimum_relative_decrease
+                        ),
                         "selectedScale": selected_scale,
                         "selected": one_step_selected,
                         "attempts": one_step_attempts,

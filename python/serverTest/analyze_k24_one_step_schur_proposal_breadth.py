@@ -97,6 +97,7 @@ def validate_configuration(row, scene):
         "schurAlignmentDiagnosticIterations": [90],
         "oneStepSchurResidualProposalIterations": [90],
         "schurCoupledConsensusOracle": False,
+        "sharedSchurMinimumRelativeDecrease": 1e-3,
     }
     for field, value in expected.items():
         if row.get(field) != value:
@@ -173,6 +174,8 @@ def analyze(root, control_root, families):
             proposal = diagnostic["oneStepSchurResidualProposal"]
             if proposal is None or len(proposal["attempts"]) != 8:
                 raise ValueError(f"proposal telemetry mismatch for {scene}")
+            if proposal.get("minimumRelativeDecrease") != 1e-3:
+                raise ValueError(f"proposal progress floor mismatch for {scene}")
             selected_scale = float(proposal["selectedScale"])
             selected = bool(proposal["selected"])
             if selected != (selected_scale > 0.0):

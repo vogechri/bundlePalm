@@ -668,6 +668,7 @@ for problem in "${PROBLEMS[@]}"; do
     alignment_schur_args=()
     if [[ -n "$SCHUR_ALIGNMENT_DIAGNOSTIC_ITERATIONS" ]]; then
       alignment_schur_args+=(
+        --shared-schur-minimum-relative-decrease "$SHARED_SCHUR_MINIMUM_RELATIVE_DECREASE"
         --shared-schur-relative-tolerance "$SHARED_SCHUR_RELATIVE_TOLERANCE"
         --shared-schur-operator "$SHARED_SCHUR_OPERATOR"
         --shared-schur-preconditioner "$SHARED_SCHUR_PRECONDITIONER"
