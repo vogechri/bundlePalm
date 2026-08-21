@@ -84,7 +84,7 @@ def assert_prefix(control, candidate, scene):
                 raise ValueError(f"prefix mismatch {scene}/I{iteration}/{field}")
 
 
-def validate_configuration(row, scene):
+def validate_configuration(row, scene, proposal_trust_rebase):
     expected = {
         "clusters": 24,
         "iterations": 120,
@@ -104,6 +104,15 @@ def validate_configuration(row, scene):
                 f"configuration mismatch {scene}: {field}={row.get(field)!r}, "
                 f"expected={value!r}"
             )
+    actual_trust_rebase = bool(
+        row.get("oneStepSchurResidualProposalRebaseTrustState", False)
+    )
+    if actual_trust_rebase != proposal_trust_rebase:
+        raise ValueError(
+            f"configuration mismatch {scene}: "
+            "oneStepSchurResidualProposalRebaseTrustState="
+            f"{actual_trust_rebase!r}, expected={proposal_trust_rebase!r}"
+        )
     if row.get("schurAlignmentDiagnosticIterations") not in ([], [90]):
         raise ValueError(
             f"configuration mismatch {scene}: "
@@ -150,7 +159,7 @@ def summarize(rows, ceres):
     }
 
 
-def analyze(root, control_root, families):
+def analyze(root, control_root, families, proposal_trust_rebase=False):
     ceres = ceres_rows()
     details = {}
     summaries = {}
@@ -172,7 +181,7 @@ def analyze(root, control_root, families):
             candidate = candidates[scene]
             control = controls[scene]
             status = statuses[scene]
-            validate_configuration(candidate, scene)
+            validate_configuration(candidate, scene, proposal_trust_rebase)
             assert_prefix(control, candidate, scene)
             if status["status"] != "completed" or int(status["exit_code"]) != 0:
                 raise ValueError(f"failed case status for {scene}")
@@ -188,6 +197,22 @@ def analyze(root, control_root, families):
                 raise ValueError(f"selection mismatch for {scene}")
             if proposal["candidateWorkerSSE"] > proposal["ordinaryWorkerSSE"]:
                 raise ValueError(f"proposal selected an inferior worker SSE for {scene}")
+            trust_rebase_iterations = [
+                iteration + 1
+                for iteration, trajectory_row in enumerate(
+                    candidate["trajectory"]
+                )
+                if trajectory_row.get("proposalTrustStateRebaseApplied", False)
+            ]
+            expected_rebase_iterations = (
+                [91] if proposal_trust_rebase and selected else []
+            )
+            if trust_rebase_iterations != expected_rebase_iterations:
+                raise ValueError(
+                    f"proposal trust rebase mismatch for {scene}: "
+                    f"{trust_rebase_iterations!r}, expected "
+                    f"{expected_rebase_iterations!r}"
+                )
             control_delivered = min(
                 row["sumSquaredError"] for row in control["trajectory"][:120]
             )
@@ -230,6 +255,7 @@ def analyze(root, control_root, families):
     return {
         "status": "passed" if passed else "failed",
         "families": list(families),
+        "proposal_trust_rebase": proposal_trust_rebase,
         "summaries": summaries,
         "scenes": details,
     }
@@ -241,8 +267,14 @@ def write_report(path, summary):
         output.write(
             "One global I90 proposal, eight fixed geometric scales, precise "
             "worker-SSE selection, atomic DRS state rebuild, and I120 delivery. "
-            "The rejected coupled-consensus oracle is disabled.\n\n"
+            "The rejected coupled-consensus oracle is disabled."
         )
+        if summary["proposal_trust_rebase"]:
+            output.write(
+                " Selected proposals rebase worker trust and coordinator "
+                "curvature/acceleration state at I91."
+            )
+        output.write("\n\n")
         output.write("| Family | Completed | Selected/declined | Immediate I90 | Trajectory I120 | Delivered/control | Summed | W/T/L | Candidate/Ceres | Max RSS GiB C/W |\n")
         output.write("|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|\n")
         for family in summary["families"]:
@@ -280,8 +312,14 @@ def main():
     parser.add_argument(
         "--families", nargs="+", choices=tuple(EXPECTED), default=tuple(EXPECTED)
     )
+    parser.add_argument("--proposal-trust-rebase", action="store_true")
     arguments = parser.parse_args()
-    summary = analyze(arguments.root, arguments.control_root, arguments.families)
+    summary = analyze(
+        arguments.root,
+        arguments.control_root,
+        arguments.families,
+        proposal_trust_rebase=arguments.proposal_trust_rebase,
+    )
     arguments.root.mkdir(parents=True, exist_ok=True)
     (arguments.root / "summary.json").write_text(
         json.dumps(summary, indent=2, sort_keys=True) + "\n", encoding="utf-8"

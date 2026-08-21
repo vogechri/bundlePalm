@@ -211,3 +211,14 @@ model evaluation; it retains only Schur-system construction, one block-Jacobi
 residual action, and eight fixed worker-SSE trials. Recovered BAL961 completed
 at `7,187,668/8,902,156 KiB` coordinator/worker RSS. This closes BAL safety but
 not promotion because BAL receives no gain and the 1DSfM no-loss gate fails.
+
+The post-selection state-consistency gate is also complete. Both prior losses
+showed immediate I90 gains followed by extra rejections. A selected-only I91
+trust/curvature/acceleration rebase reduces all-15 delivered/control from
+`0.887673x` to `0.884652x` geometrically and changes W/T/L from `12/1/2` to
+`13/1/1`, with exact I1--I90 prefixes and unchanged proposal scales. Tower is
+now `0.999139x`; Gendarmenmarkt remains `1.010662x`. BAL proposals all decline,
+so this mechanism is inactive there; BAL52 is bitwise exact. Retain the
+rebase-enhanced proposal as a research component, close rebase timing/radius
+tuning, and do not promote while the strict no-loss gate still fails. See
+`benchmark_results/k24_one_step_schur_proposal_i90_trust_rebase_breadth/report.md`.

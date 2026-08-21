@@ -287,6 +287,19 @@ completed at `7,187,668/8,902,156 KiB` coordinator/worker RSS with the reference
 solve skipped. Cross-family safety therefore passes, but promotion remains
 closed: BAL gains nothing and the all-15 1DSfM result still has two losses.
 
+Post-proposal continuation diagnosis is complete. The two 1DSfM losses both
+improve immediately at I90 but accumulate extra rejections afterward. A
+default-off, selected-only I91 trust/curvature/acceleration rebase preserves
+the exact I1--I90 prefix and proposal decisions. On all 15 1DSfM scenes it
+improves delivered/control from `0.887673x` to `0.884652x` geometrically and
+from `0.861948x` to `0.860613x` summed, with W/T/L improving from `12/1/2` to
+`13/1/1`. Tower becomes `0.999139x`; Gendarmenmarkt improves from `1.037742x`
+to a bounded `1.010662x` loss. Existing BAL29 proposals all decline, so the
+selected-only rebase cannot alter them; BAL52 was explicitly confirmed exact.
+Retain the rebase as part of the research proposal component, but do not
+promote it as the common default or tune timing/radius from Gendarmenmarkt.
+Report: `benchmark_results/k24_one_step_schur_proposal_i90_trust_rebase_breadth/report.md`.
+
 Fresh isolated bridge gate (2026-08-19):
 `serverTest/client_drs_k1_bridge.py` preserves `client_drs.py` and pins the
 mature legacy backbone while exposing ordered `legacy`, `direct`, and

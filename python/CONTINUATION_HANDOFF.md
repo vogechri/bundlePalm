@@ -264,6 +264,17 @@ eight fixed scales only. BAL961 then completed at
 `7,187,668/8,902,156 KiB` coordinator/worker RSS. Safety transfer passes, but
 do not promote: BAL has no selected updates and 1DSfM retains two losses.
 
+The continuation-state follow-up is complete. Selected proposals now have an
+opt-in I91 worker trust and coordinator curvature/acceleration rebase. It keeps
+I1--I90 and proposal choices exact. All-15 1DSfM improves from `0.887673x` to
+`0.884652x` control geometrically and from `0.861948x` to `0.860613x` summed;
+W/T/L becomes `13/1/1`. Tower is repaired to `0.999139x`; Gendarmenmarkt is the
+only remaining loss at `1.010662x`. All BAL29 proposals previously declined,
+so this selected-only mechanism leaves that exact safety result unchanged;
+BAL52 was reconfirmed bitwise. Retain as a bounded-loss proposal component,
+not a promoted common default. Do not tune rebase timing or radius. See
+`benchmark_results/k24_one_step_schur_proposal_i90_trust_rebase_breadth/report.md`.
+
 Only `all15_corrected/` is authoritative. The sibling `all15/` directory is a
 quarantined setup error with the wrong trust cap and recovery controls.
 
