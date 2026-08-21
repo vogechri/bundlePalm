@@ -211,6 +211,15 @@ is now the per-camera distribution of the projected shared tangent: determine
 whether a small high-energy camera subset or broad camera-wise misalignment
 causes the low global cosine.
 
+That per-camera test identifies broad missing coupling. Roman has median camera
+cosine `0.21--0.28`, only `71--75%` positive cameras, and signed action balance
+`0.42--0.80`; BAL52 reaches `0.39--0.59`, `81--100%`, and `0.96--1.00`.
+The next gate is a behavior-neutral factorized cross-camera consensus oracle on
+the same reflected copies. It tests the curvature mechanism before any solver
+change. If successful, integrate coupled curvature into our DRS metric on both
+sides of the proximal/consensus contract; do not substitute a Ceres step or
+switch wholesale to the historical Schur-PCG preset.
+
 Fresh isolated bridge gate (2026-08-19):
 `serverTest/client_drs_k1_bridge.py` preserves `client_drs.py` and pins the
 mature legacy backbone while exposing ordered `legacy`, `direct`, and

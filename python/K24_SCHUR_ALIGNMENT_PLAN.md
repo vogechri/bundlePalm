@@ -1,8 +1,8 @@
 # K24 DRS/Schur Direction-Alignment Diagnostic
 
 Date: 2026-08-21
-Status: copy-level mechanisms closed; projected-camera distribution active
-Source checkpoint: `8107fb2`
+Status: direction diagnosis complete; coupled-consensus oracle next
+Source checkpoint: `6e9d436`
 
 This is the restart contract for the behavior-neutral diagnostic following the
 integrated K24/I200 quality ceiling. It does not alter DRS proposals or apply
@@ -123,8 +123,19 @@ both directions, so neither erased coherent copy signal nor incorrect copy
 weighting explains why projected BAL52 aligns much better than Roman. See
 `benchmark_results/k24_schur_contribution_alignment_sentinel/report.md`.
 
-Next decompose the projected shared-camera tangent by camera. If most cameras
-align but a small high-energy subset dominates the global mismatch, robust
-camera-level control is plausible. If per-camera median and positive fraction
-are also poor, the accepted consensus direction is broadly missing global
-coupling. Keep this telemetry-only; do not select cameras or alter steps.
+The projected-camera sentinel shows broad misalignment rather than a small
+outlier set. Roman has median camera cosine `0.21--0.28`, only `71--75%`
+positive cameras, and signed action balance `0.42--0.80`. BAL52 has median
+cosine `0.39--0.59`, `81--100%` positive cameras, and action balance
+`0.96--1.00`. See
+`benchmark_results/k24_schur_camera_distribution_sentinel/report.md`.
+
+The next experiment is a behavior-neutral cross-camera coupled-consensus
+oracle. Using the same reflected copies and distributed Schur factors, compute
+but do not apply the factorized coupled projection alongside the current
+per-camera block projection on Roman and BAL52. The mechanism passes only if it
+materially improves Roman's camera-wise/global alignment while preserving
+BAL52. Only then implement the same coupled metric consistently in both local
+proximal solves and consensus projection. Do not replace DRS with a Ceres or
+global Schur step, and do not blindly switch the mature Nesterov backbone to
+the historical Schur-PCG C3 preset.

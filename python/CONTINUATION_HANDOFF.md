@@ -195,6 +195,15 @@ sole active diagnostic is the projected shared-camera cosine/action
 distribution, separating broad misalignment from domination by a small
 high-energy camera subset.
 
+The projected-camera sentinel identifies broad misalignment. Roman has median
+camera cosine `0.21--0.28`, `71--75%` positive cameras, and signed action
+balance `0.42--0.80`; BAL52 has `0.39--0.59`, `81--100%`, and `0.96--1.00`.
+See `benchmark_results/k24_schur_camera_distribution_sentinel/report.md`.
+Next compute a behavior-neutral factorized cross-camera consensus oracle from
+the same reflected copies and distributed Schur factors. Apply nothing until
+that oracle improves Roman while preserving BAL52; any promoted implementation
+must keep the coupled metric consistent in our DRS local and consensus steps.
+
 Only `all15_corrected/` is authoritative. The sibling `all15/` directory is a
 quarantined setup error with the wrong trust cap and recovery controls.
 
