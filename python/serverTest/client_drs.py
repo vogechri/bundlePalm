@@ -22,6 +22,7 @@ from bal_evaluator import (
 )
 from camera_tangent_diagnostics import (
     consensus_vote_coherence,
+    consensus_vote_contributions,
     diagonal_weighted_copy_alignment,
     diagonal_weighted_tangent_alignment,
     left_se3_camera_minus,
@@ -4767,6 +4768,42 @@ def main():
                     schur_alignment_diagonal,
                     copy_camera_indices,
                 )
+                (
+                    contribution_camera_indices,
+                    scaled_vote_contributions,
+                    _,
+                    _,
+                ) = consensus_vote_contributions(
+                    reflected,
+                    accepted_consensus,
+                    selected_metric_blocks.cluster_indices,
+                    selected_metric_blocks.camera_indices,
+                    selected_metric_blocks.blocks,
+                    camera_copy_count,
+                )
+                if not np.array_equal(
+                    contribution_camera_indices, copy_camera_indices
+                ):
+                    raise RuntimeError(
+                        "consensus contribution copies are misordered"
+                    )
+                physical_vote_targets = to_physical_cameras(
+                    accepted_consensus[copy_camera_indices]
+                    + scaled_vote_contributions,
+                    copy_scaling,
+                )
+                vote_contribution_tangents = left_se3_camera_minus(
+                    physical_vote_targets,
+                    schur_alignment_base_cameras[copy_camera_indices],
+                )
+                contribution_schur_alignment = (
+                    diagonal_weighted_copy_alignment(
+                        schur_alignment_tangent,
+                        vote_contribution_tangents,
+                        schur_alignment_diagonal,
+                        copy_camera_indices,
+                    )
+                )
                 similarity_gauge_basis = similarity_gauge_tangent_basis(
                     schur_alignment_base_cameras
                 )
@@ -4819,6 +4856,9 @@ def main():
                     },
                     "consensusVoteCoherence": vote_coherence,
                     "reflectedCopySchurAlignment": copy_schur_alignment,
+                    "metricContributionSchurAlignment": (
+                        contribution_schur_alignment
+                    ),
                     "quotientAllCamerasDiagonalWeighted": (
                         diagonal_weighted_tangent_alignment(
                             quotient_schur_tangent,

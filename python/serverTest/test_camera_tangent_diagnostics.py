@@ -2,6 +2,7 @@ import numpy as np
 
 from camera_tangent_diagnostics import (
     consensus_vote_coherence,
+    consensus_vote_contributions,
     diagonal_weighted_copy_alignment,
     diagonal_weighted_tangent_alignment,
     left_se3_camera_minus,
@@ -165,6 +166,29 @@ def test_copy_alignment_reports_signal_before_cancellation():
     )
 
     assert diagnostics["positiveCopyFraction"] == 0.5
+    np.testing.assert_allclose(diagnostics["signedActionBalance"], 1.0 / 3.0)
+    np.testing.assert_allclose(diagnostics["positiveActionFraction"], 2.0 / 3.0)
     assert diagnostics["positiveCameraFraction"] == 1.0
     assert diagnostics["cameraBestCosineMedian"] == 1.0
     assert diagnostics["global"]["cosine"] > 0.0
+
+
+def test_consensus_vote_contributions_sum_to_projection_step():
+    values = np.zeros((2, 1, 9))
+    values[:, 0, 0] = [2.0, -1.0]
+    metrics = np.broadcast_to(np.eye(9), (2, 9, 9)).copy()
+
+    camera_indices, contributions, aggregate, _ = (
+        consensus_vote_contributions(
+            values,
+            np.zeros((1, 9)),
+            np.array([0, 1]),
+            np.array([0, 0]),
+            metrics,
+            np.array([2]),
+        )
+    )
+
+    summed = np.zeros_like(aggregate)
+    np.add.at(summed, camera_indices, contributions)
+    np.testing.assert_allclose(summed, aggregate)

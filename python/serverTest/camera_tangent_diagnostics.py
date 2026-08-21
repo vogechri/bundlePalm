@@ -169,7 +169,7 @@ def project_tangent_orthogonal_to_basis(tangent, basis, diagonal=None):
     }
 
 
-def consensus_vote_coherence(
+def consensus_vote_contributions(
     values,
     previous_consensus,
     cluster_indices,
@@ -177,7 +177,7 @@ def consensus_vote_coherence(
     metric_blocks,
     copy_count,
 ):
-    """Measure cancellation of block-metric consensus votes per shared camera."""
+    """Return shared-camera contributions to block-metric consensus."""
     values = np.asarray(values, dtype=np.float64)
     previous_consensus = np.asarray(previous_consensus, dtype=np.float64)
     cluster_indices = np.asarray(cluster_indices)
@@ -210,6 +210,41 @@ def consensus_vote_coherence(
         metric_sum[shared_camera_indices],
         products[active_shared, ..., None],
     )[..., 0]
+    shared = copy_count > 1
+    aggregate = np.zeros_like(right_hand_side)
+    aggregate[shared] = np.linalg.solve(
+        metric_sum[shared], right_hand_side[shared, ..., None]
+    )[..., 0]
+    return shared_camera_indices, contributions, aggregate, metric_sum
+
+
+def consensus_vote_coherence(
+    values,
+    previous_consensus,
+    cluster_indices,
+    camera_indices,
+    metric_blocks,
+    copy_count,
+):
+    """Measure cancellation of block-metric consensus votes per shared camera."""
+    copy_count = np.asarray(copy_count)
+    (
+        shared_camera_indices,
+        contributions,
+        aggregate,
+        metric_sum,
+    ) = consensus_vote_contributions(
+        values,
+        previous_consensus,
+        cluster_indices,
+        camera_indices,
+        metric_blocks,
+        copy_count,
+    )
+    aggregate_norm = np.sqrt(np.maximum(
+        np.einsum("bi,bij,bj->b", aggregate, metric_sum, aggregate),
+        0.0,
+    ))
     contribution_norms = np.sqrt(np.maximum(
         np.einsum(
             "bi,bij,bj->b",
@@ -219,17 +254,9 @@ def consensus_vote_coherence(
         ),
         0.0,
     ))
-    denominator = np.zeros(values.shape[1], dtype=np.float64)
+    denominator = np.zeros(aggregate.shape[0], dtype=np.float64)
     np.add.at(denominator, shared_camera_indices, contribution_norms)
     shared = copy_count > 1
-    aggregate = np.zeros_like(right_hand_side)
-    aggregate[shared] = np.linalg.solve(
-        metric_sum[shared], right_hand_side[shared, ..., None]
-    )[..., 0]
-    aggregate_norm = np.sqrt(np.maximum(
-        np.einsum("bi,bij,bj->b", aggregate, metric_sum, aggregate),
-        0.0,
-    ))
     valid = shared & (denominator > 0.0)
     coherence = np.divide(
         aggregate_norm,
@@ -289,6 +316,11 @@ def diagonal_weighted_copy_alignment(
         where=denominators > 0.0,
     )
     finite = np.isfinite(copy_cosines)
+    signed_actions = np.sum(
+        weighted_reference * weighted_candidates, axis=1
+    )
+    absolute_action = float(np.sum(np.abs(signed_actions)))
+    positive_action = float(np.sum(np.maximum(signed_actions, 0.0)))
     unique_cameras = np.unique(camera_indices)
     best_cosines = np.array([
         np.nanmax(copy_cosines[camera_indices == camera])
@@ -304,6 +336,14 @@ def diagonal_weighted_copy_alignment(
         "finiteCopyCount": int(np.count_nonzero(finite)),
         "positiveCopyFraction": float(np.mean(copy_cosines[finite] > 0.0))
         if np.any(finite) else 0.0,
+        "signedActionBalance": (
+            float(np.sum(signed_actions)) / absolute_action
+            if absolute_action > 0.0 else 0.0
+        ),
+        "positiveActionFraction": (
+            positive_action / absolute_action
+            if absolute_action > 0.0 else 0.0
+        ),
         "copyCosineMedian": float(np.median(copy_cosines[finite]))
         if np.any(finite) else float("nan"),
         "cameraBestCosineMedian": float(np.median(best_cosines))
