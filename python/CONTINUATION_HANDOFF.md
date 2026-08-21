@@ -254,6 +254,16 @@ serial BAL safety transfer under the memory ceiling, allowed by the repository
 bounded-loss component policy. See
 `benchmark_results/k24_one_step_schur_proposal_i90_breadth/report.md`.
 
+The all-29 BAL transfer is complete and behavior-exact: all 29 proposals
+decline at the fixed `1e-3` floor, W/T/L `0/29/0`, with geometric and summed
+delivered ratios `1.000000x`. BAL961 first failed locally at the 14 GiB ceiling
+inside the unnecessary full reference Schur solve. Proposal checkpoints are
+now independent of full alignment diagnostics; they build the distributed
+Schur systems, apply one block-Jacobi residual correction, and evaluate the
+eight fixed scales only. BAL961 then completed at
+`7,187,668/8,902,156 KiB` coordinator/worker RSS. Safety transfer passes, but
+do not promote: BAL has no selected updates and 1DSfM retains two losses.
+
 Only `all15_corrected/` is authoritative. The sibling `all15/` directory is a
 quarantined setup error with the wrong trust cap and recovery controls.
 

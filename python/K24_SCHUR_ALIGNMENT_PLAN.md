@@ -201,3 +201,13 @@ Tower `1.011275x`. The strict no-loss gate fails, so do not promote or tune.
 Proceed only with unchanged serial BAL safety transfer under the memory cap,
 consistent with the repository's bounded-loss component policy. See
 `benchmark_results/k24_one_step_schur_proposal_i90_breadth/report.md`.
+
+The serial all-29 BAL safety transfer is complete. All 29 proposals decline,
+yielding exact control trajectories and W/T/L `0/29/0`. BAL961 exposed one
+remaining diagnostic-only memory dependency: proposal execution still invoked
+the full reference PCG solve and failed locally at the 14 GiB ceiling. The
+proposal checkpoint now skips that solve, gauge/copy telemetry, and global
+model evaluation; it retains only Schur-system construction, one block-Jacobi
+residual action, and eight fixed worker-SSE trials. Recovered BAL961 completed
+at `7,187,668/8,902,156 KiB` coordinator/worker RSS. This closes BAL safety but
+not promotion because BAL receives no gain and the 1DSfM no-loss gate fails.

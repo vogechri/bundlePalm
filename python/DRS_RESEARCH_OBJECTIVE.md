@@ -277,6 +277,16 @@ under the memory ceiling before deciding whether to retain this as a research
 component. Report:
 `benchmark_results/k24_one_step_schur_proposal_i90_breadth/report.md`.
 
+The unchanged all-29 BAL transfer is complete: every proposal declines under
+the fixed `1e-3` floor, so all 29 trajectories and delivered states tie control
+with zero losses. BAL961 initially hit the 14 GiB ceiling because proposal
+execution unnecessarily ran the full reference PCG diagnostic. The proposal is
+now independent of alignment diagnostics and performs only Schur-system build,
+one block-Jacobi residual action, and eight worker-SSE trials. Recovered BAL961
+completed at `7,187,668/8,902,156 KiB` coordinator/worker RSS with the reference
+solve skipped. Cross-family safety therefore passes, but promotion remains
+closed: BAL gains nothing and the all-15 1DSfM result still has two losses.
+
 Fresh isolated bridge gate (2026-08-19):
 `serverTest/client_drs_k1_bridge.py` preserves `client_drs.py` and pins the
 mature legacy backbone while exposing ordered `legacy`, `direct`, and

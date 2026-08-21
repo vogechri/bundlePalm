@@ -5,10 +5,40 @@ One global I90 proposal, eight fixed geometric scales, precise worker-SSE select
 | Family | Completed | Selected/declined | Immediate I90 | Trajectory I120 | Delivered/control | Summed | W/T/L | Candidate/Ceres | Max RSS GiB C/W |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
 | 1dsfm | 15/15 | 14/1 | 0.920695087 | 0.887752412 | 0.887673383 | 0.861947562 | 12/1/2 | 1.321671226 | 2.407/1.775 |
+| bal | 29/29 | 0/29 | 1.000000000 | 1.000000000 | 1.000000000 | 1.000000000 | 0/29/0 | 0.999038939 | 7.982/8.490 |
 
 | Scene | Scale | Worker SSE | I90 | I120 trajectory | Delivered | Rejections C/P |
 |---|---:|---:|---:|---:|---:|---:|
 | alamo | 0.5 | 0.948638101 | 0.948866260 | 0.925691984 | 0.925691984 | 12/7 |
+| bal1064 | declined | 1.000000000 | 1.000000000 | 1.000000000 | 1.000000000 | 0/0 |
+| bal126 | declined | 1.000000000 | 1.000000000 | 1.000000000 | 1.000000000 | 0/0 |
+| bal1266 | declined | 1.000000000 | 1.000000000 | 1.000000000 | 1.000000000 | 0/0 |
+| bal135 | declined | 1.000000000 | 1.000000000 | 1.000000000 | 1.000000000 | 3/3 |
+| bal142 | declined | 1.000000000 | 1.000000000 | 1.000000000 | 1.000000000 | 0/0 |
+| bal1490 | declined | 1.000000000 | 1.000000000 | 1.000000000 | 1.000000000 | 0/0 |
+| bal1723 | declined | 1.000000000 | 1.000000000 | 1.000000000 | 1.000000000 | 16/16 |
+| bal173 | declined | 1.000000000 | 1.000000000 | 1.000000000 | 1.000000000 | 0/0 |
+| bal1778 | declined | 1.000000000 | 1.000000000 | 1.000000000 | 1.000000000 | 0/0 |
+| bal245 | declined | 1.000000000 | 1.000000000 | 1.000000000 | 1.000000000 | 4/4 |
+| bal253 | declined | 1.000000000 | 1.000000000 | 1.000000000 | 1.000000000 | 1/1 |
+| bal257 | declined | 1.000000000 | 1.000000000 | 1.000000000 | 1.000000000 | 0/0 |
+| bal287 | declined | 1.000000000 | 1.000000000 | 1.000000000 | 1.000000000 | 3/3 |
+| bal3068 | declined | 1.000000000 | 1.000000000 | 1.000000000 | 1.000000000 | 3/3 |
+| bal308 | declined | 1.000000000 | 1.000000000 | 1.000000000 | 1.000000000 | 2/2 |
+| bal356 | declined | 1.000000000 | 1.000000000 | 1.000000000 | 1.000000000 | 0/0 |
+| bal394 | declined | 1.000000000 | 1.000000000 | 1.000000000 | 1.000000000 | 0/0 |
+| bal427 | declined | 1.000000000 | 1.000000000 | 1.000000000 | 1.000000000 | 0/0 |
+| bal49 | declined | 1.000000000 | 1.000000000 | 1.000000000 | 1.000000000 | 0/0 |
+| bal52 | declined | 1.000000000 | 1.000000000 | 1.000000000 | 1.000000000 | 0/0 |
+| bal646 | declined | 1.000000000 | 1.000000000 | 1.000000000 | 1.000000000 | 0/0 |
+| bal744 | declined | 1.000000000 | 1.000000000 | 1.000000000 | 1.000000000 | 0/0 |
+| bal783 | declined | 1.000000000 | 1.000000000 | 1.000000000 | 1.000000000 | 0/0 |
+| bal871 | declined | 1.000000000 | 1.000000000 | 1.000000000 | 1.000000000 | 0/0 |
+| bal88 | declined | 1.000000000 | 1.000000000 | 1.000000000 | 1.000000000 | 0/0 |
+| bal89 | declined | 1.000000000 | 1.000000000 | 1.000000000 | 1.000000000 | 0/0 |
+| bal931 | declined | 1.000000000 | 1.000000000 | 1.000000000 | 1.000000000 | 0/0 |
+| bal951 | declined | 1.000000000 | 1.000000000 | 1.000000000 | 1.000000000 | 0/0 |
+| bal961 | declined | 1.000000000 | 1.000000000 | 1.000000000 | 1.000000000 | 0/0 |
 | ellis_island | 0.5 | 0.990576419 | 0.990576419 | 0.977816094 | 0.977816094 | 17/18 |
 | gendarmenmarkt | 0.25 | 0.993459701 | 0.995591705 | 1.037741851 | 1.037741851 | 2/9 |
 | madrid_metropolis | declined | 1.000000000 | 1.000000000 | 1.000000000 | 1.000000000 | 4/4 |
@@ -25,17 +55,3 @@ One global I90 proposal, eight fixed geometric scales, precise worker-SSE select
 | yorkminster | 0.25 | 0.961323905 | 0.961765917 | 0.937862772 | 0.937862772 | 14/11 |
 
 Gate status: **failed**.
-
-## Decision
-
-Canonical product-state restart removes the catastrophic post-I90 live-state
-instability. The aggregate effect is strong (`0.887673383x` geometric,
-`0.861947562x` summed), with 12 wins, one exact declined tie, and two bounded
-losses: Gendarmenmarkt `1.058521266x` and Tower of London `1.011274778x`.
-
-The strict no-loss promotion gate therefore fails. Do not promote or tune the
-scale grid, damping, proposal time, or progress floor from these tails. The
-existing component policy permits an unchanged BAL safety transfer because the
-losses are bounded and the aggregate gain is material. BAL must run serially
-under the memory ceiling; its result decides whether this remains a research
-component or closes entirely.
