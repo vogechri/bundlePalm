@@ -18,6 +18,15 @@ Schur is the reference tangent; DRS is the candidate tangent.
 | 160 | 0.000000 | 0.023518 | 0.009127 | -2871993701402099.000000 | 6 |
 | 200 | 0.000000 | 0.048797 | 0.030495 | -9375523867495114752.000000 | 6 |
 
+## Reflected-copy vote coherence
+
+| I | Median global coherence | Median per-camera coherence |
+|---:|---:|---:|
+| 90 | 0.030996 | 0.014423 |
+| 120 | 0.019888 | 0.013229 |
+| 160 | 0.021173 | 0.012958 |
+| 200 | 0.030635 | 0.023928 |
+
 | Scene | I | Shared weighted cosine | DRS/Schur norm | Shared-model ratio | Shared/unique reduction | T/R/I cosine | PCG iters |
 |---|---:|---:|---:|---:|---:|---|---:|
 | montreal_notre_dame | 90 | 0.003446 | 0.015275 | 0.000001 | 2.85/-6.72e+07 | -0.001/0.004/0.023 | 125 |

@@ -179,6 +179,14 @@ fractions on BAL3068. Gauge drift is closed. The sole active mechanism test is
 behavior-neutral coherence of the exact metric-weighted reflected copy votes
 entering shared-camera consensus.
 
+That coherence test passes neutrality and shows heavy cancellation, with
+median global coherence `0.0199--0.0310`, but cancellation does not predict
+quality: full-cohort Spearman correlations are only `0.190` with Schur cosine
+and `0.223` with shared model gain, and BAL52 has low coherence with far better
+alignment. Close aggregate cancellation as the primary mechanism. The next
+telemetry-only test compares each reflected shared-camera copy tangent against
+its corresponding global Schur tangent before projection.
+
 Only `all15_corrected/` is authoritative. The sibling `all15/` directory is a
 quarantined setup error with the wrong trust cap and recovery controls.
 

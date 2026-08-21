@@ -1,8 +1,8 @@
 # K24 DRS/Schur Direction-Alignment Diagnostic
 
 Date: 2026-08-21
-Status: gauge mechanism falsified; copy-vote coherence follow-up active
-Source checkpoint: `afb622d`
+Status: gauge and cancellation mechanisms closed; copy-direction follow-up active
+Source checkpoint: `0e0285a`
 
 This is the restart contract for the behavior-neutral diagnostic following the
 integrated K24/I200 quality ceiling. It does not alter DRS proposals or apply
@@ -108,10 +108,17 @@ the median shared cosine (`0.0503 -> 0.0505` at I90,
 fractions below `1.1e-15`, so its `1e17--1e18` norm anomaly is not similarity
 gauge motion.
 
-Next test one mechanism without changing behavior: measure cancellation among
-the exact block-metric reflected copy votes entering shared-camera consensus.
-The metric-invariant coherence ratio is the norm of their aggregate divided by
-the sum of their individual contribution norms. Copy cancellation predicts low
-coherence where DRS/Schur alignment and shared model gain are low. High
-coherence falsifies cancellation and means the local copies agree on the wrong
-direction. Do not change the projection or apply a Schur tangent.
+Reflected-copy cancellation is real but not the discriminating mechanism.
+Median global coherence is only `0.0199--0.0310`, but across all 27 rows its
+Spearman correlation is only `0.190` with shared Schur cosine and `0.223` with
+shared model gain; excluding anomalous BAL3068, both correlations are slightly
+negative. BAL52 is the direct counterexample: it has lower coherence than most
+1DSfM rows while retaining much stronger Schur alignment and model gain.
+
+Next test one mechanism without changing behavior: compare each individual
+reflected shared-camera copy tangent with the corresponding global Schur camera
+tangent before consensus projection. If strong Schur-aligned copy signal exists
+but the aggregate is weak, the projection/metric destroys useful information.
+If individual copies are also poorly aligned, the missing curvature coupling is
+already in the cluster-local resolvents. Do not select, clip, or apply a copy
+tangent.

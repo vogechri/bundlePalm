@@ -195,8 +195,13 @@ astronomical shared norm mismatch. Similarity-gauge drift is now falsified:
 median DRS gauge fraction falls from `1.58e-9` at I90 to `1.93e-13` at I200,
 and quotient projection does not materially change cosine, norm, or model
 action, including on BAL3068. The active falsifiable mechanism is cancellation
-among metric-weighted reflected copy votes. Test their behavior-neutral
-coherence, not another scalar sweep or correction.
+among metric-weighted reflected copy votes. That follow-up finds real heavy
+cancellation (`0.0199--0.0310` median global coherence), but closes it as the
+primary explanation: coherence has only `0.190` Spearman correlation with
+shared Schur cosine and `0.223` with shared model gain, and BAL52 is a strong
+low-coherence/high-alignment counterexample. Next measure individual reflected
+copy-to-Schur alignment before projection to locate whether global signal is
+lost by aggregation or absent from local resolvents.
 
 Fresh isolated bridge gate (2026-08-19):
 `serverTest/client_drs_k1_bridge.py` preserves `client_drs.py` and pins the
