@@ -220,6 +220,17 @@ change. If successful, integrate coupled curvature into our DRS metric on both
 sides of the proximal/consensus contract; do not substitute a Ceres step or
 switch wholesale to the historical Schur-PCG preset.
 
+That projection-only oracle is rejected. Roman coupled/Schur norms are
+`337--1249x`; BAL52 reaches `275--26512x`; every coupled camera-model gain is
+strongly negative. The experiment remains exactly trajectory/state neutral.
+This does not reject cross-camera curvature: it proves the local and consensus
+metrics cannot be mixed. The next gate is the frozen transient Frobenius Schur
+majorizer, consistently active in both local prox and consensus, composed with
+the mature C1/Nesterov backbone. The recovered worker client currently blocks
+that path with an explicit `NotImplementedError`; restore the verified
+historical dispatch before running Roman/BAL52. See
+`benchmark_results/k24_coupled_consensus_oracle_sentinel/report.md`.
+
 Fresh isolated bridge gate (2026-08-19):
 `serverTest/client_drs_k1_bridge.py` preserves `client_drs.py` and pins the
 mature legacy backbone while exposing ordered `legacy`, `direct`, and

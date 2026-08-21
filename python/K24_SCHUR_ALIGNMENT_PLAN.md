@@ -1,8 +1,8 @@
 # K24 DRS/Schur Direction-Alignment Diagnostic
 
 Date: 2026-08-21
-Status: direction diagnosis complete; coupled-consensus oracle next
-Source checkpoint: `6e9d436`
+Status: projection-only coupling rejected; consistent metric restoration next
+Source checkpoint: `8180a7f`
 
 This is the restart contract for the behavior-neutral diagnostic following the
 integrated K24/I200 quality ceiling. It does not alter DRS proposals or apply
@@ -130,12 +130,16 @@ cosine `0.39--0.59`, `81--100%` positive cameras, and action balance
 `0.96--1.00`. See
 `benchmark_results/k24_schur_camera_distribution_sentinel/report.md`.
 
-The next experiment is a behavior-neutral cross-camera coupled-consensus
-oracle. Using the same reflected copies and distributed Schur factors, compute
-but do not apply the factorized coupled projection alongside the current
-per-camera block projection on Roman and BAL52. The mechanism passes only if it
-materially improves Roman's camera-wise/global alignment while preserving
-BAL52. Only then implement the same coupled metric consistently in both local
-proximal solves and consensus projection. Do not replace DRS with a Ceres or
-global Schur step, and do not blindly switch the mature Nesterov backbone to
-the historical Schur-PCG C3 preset.
+The behavior-neutral coupled-consensus oracle fails decisively. Its norm is
+`337--1249x` Schur on Roman and `275--26512x` on BAL52, with strongly negative
+camera-model gain everywhere. See
+`benchmark_results/k24_coupled_consensus_oracle_sentinel/report.md`.
+
+This rejects projection-only coupling, not cross-camera curvature. The local
+copies were generated under the block metric, so projecting them under a new
+coupled metric violates product-space DRS consistency. The next matched solver
+gate must use one metric in both local prox and consensus. Restore the verified
+transient Frobenius-majorizer worker dispatch currently blocked by the recovered
+backend's explicit `NotImplementedError`, then compose its frozen threshold
+`0.55`, scale `0.5`, I2--I10 policy with the mature C1/Nesterov Roman/BAL52
+backbone. Do not replace DRS with Ceres or a global Schur step.

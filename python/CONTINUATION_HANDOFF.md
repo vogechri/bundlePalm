@@ -204,6 +204,15 @@ the same reflected copies and distributed Schur factors. Apply nothing until
 that oracle improves Roman while preserving BAL52; any promoted implementation
 must keep the coupled metric consistent in our DRS local and consensus steps.
 
+The projection-only oracle fails on both scenes: coupled/Schur norms are
+`337--1249x` on Roman and `275--26512x` on BAL52, with strongly negative model
+gain throughout. Exact trajectory/state neutrality still passes. Close this
+oracle because it mixes block-metric local copies with a coupled coordinator
+projection. Next restore the crash-lost observability/off-diagonal-majorizer
+dispatch currently guarded by `NotImplementedError`, then run the frozen
+threshold `0.55`, scale `0.5`, I2--I10 majorizer consistently in local prox and
+consensus on the mature C1/Nesterov Roman/BAL52 pair.
+
 Only `all15_corrected/` is authoritative. The sibling `all15/` directory is a
 quarantined setup error with the wrong trust cap and recovery controls.
 
