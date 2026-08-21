@@ -1806,6 +1806,7 @@ public:
         pro.collect_camera_diagonal_metrics();
       factorized_coupled_schur_metric =
         pro.factorized_coupled_schur_metric();
+      schur_offdiagonal_majorizer = pro.schur_offdiagonal_majorizer();
       proximal_defect_diagnostic = pro.proximal_defect_diagnostic();
         diagonal_trust_damping = pro.diagonal_trust_damping()
           || DiagonalTrustDampingEnabled();
@@ -3627,6 +3628,7 @@ public:
         update.collect_camera_diagonal_metrics();
       factorized_coupled_schur_metric =
         update.factorized_coupled_schur_metric();
+      schur_offdiagonal_majorizer = update.schur_offdiagonal_majorizer();
       if (collect_camera_diagonal_metrics) {
         std::ostringstream metric;
         metric << "CAMERA_DIAGONAL_REQUEST cluster=" << cluster_id
@@ -4507,7 +4509,7 @@ void UpdateStepSizeAndSolve() {//bool keep_cameras_fixed = false) { // Recompute
   const bool factorized_coupled_schur_metric_active =
       factorized_coupled_schur_metric;
   SparseMatrix<double, RowMajor> metricLandmarkInverse;
-  if (SchurProximalMetricEnabled() ||
+  if (SchurProximalMetricEnabled() || schur_offdiagonal_majorizer ||
       factorized_coupled_schur_metric_active) {
     metricLandmarkInverse = Vl;
     BlockInverse<3>(metricLandmarkInverse);
@@ -4515,6 +4517,14 @@ void UpdateStepSizeAndSolve() {//bool keep_cameras_fixed = false) { // Recompute
         metricLandmarkInverse, metricCameraHessian);
     FloorSymmetricBlocks<9>(metricCameraHessian,
       std::max(PobaBlockRelativeFloor(), 1e-16));
+  }
+  if (schur_offdiagonal_majorizer) {
+    camera_landmark_hessian.AddBucketedSchurOffDiagonalFrobeniusBounds(
+      metricLandmarkInverse,
+      camera_proximal_multipliers,
+      CoupledSchurProximalMetricStabilization(),
+      FactorizedSchurProximalMetricStabilizationBuckets(),
+      metricCameraHessian);
   }
   const Eigen::DiagonalMatrix<double, Eigen::Dynamic> consensusDiagUP =
     CameraDiagonalMetricScale() * Diagonal<9>(
@@ -5872,6 +5882,7 @@ private:
   MetricDiagnostic metric_diagnostic;
   bool scalar_proximal_prior = false;
   bool factorized_coupled_schur_metric = false;
+  bool schur_offdiagonal_majorizer = false;
   double proximal_rho = 1.;
   bool split_camera_penalty = false;
   double proximal_rho_intrinsics = 1.;

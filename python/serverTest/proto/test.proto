@@ -44,8 +44,9 @@ message program_proto {
   int32 outer_iteration = 39;
   int32 oracle_kind = 40; // 0=bootstrap/other, 1=nominal, 2=accelerated trial
   bool collect_camera_diagonal_metrics = 41;
-  double huber_delta = 42; // 0=L2, >0=Huber scale in pixel units
+  double huber_delta = 42;
   bool factorized_coupled_schur_metric = 43;
+  bool schur_offdiagonal_majorizer = 44;
 }
 
 // sent once
@@ -111,6 +112,7 @@ message prox_cluster_proto {
   int32 oracle_kind = 39; // 0=bootstrap/other, 1=nominal, 2=accelerated trial
   bool collect_camera_diagonal_metrics = 40;
   bool factorized_coupled_schur_metric = 41;
+  bool schur_offdiagonal_majorizer = 42;
   // clustering: lms by cam. # lms that can fill up cam in cl.
 }
 
@@ -148,18 +150,6 @@ message return_cluster_proto {
   double trust_region_radius = 27;
   bytes step_size_upper_f64 = 28; // packed upper triangle: 45 float64 values per camera
   bytes consensus_step_size_upper_f64 = 29; // optional unfloored vote metric
-  double unique_camera_interior_defect_squared = 30;
-  double landmark_interior_defect_squared = 31;
-  double interior_defect_squared = 32;
-  int32 linear_iterations = 33;
-  double linear_relative_residual = 34;
-  bool has_factorized_metric = 35;
-  bytes factorized_metric_camera_ids_u32 = 36;
-  bytes factorized_metric_diagonal_blocks_f64 = 37; // row-major 9x9 A blocks
-  bytes factorized_metric_inverse_blocks_f64 = 38; // row-major 3x3 V^-1 blocks
-  bytes factorized_metric_edge_factors_u32 = 39;
-  bytes factorized_metric_edge_cameras_u32 = 40; // global camera IDs
-  bytes factorized_metric_edge_blocks_f64 = 41; // row-major 9x3 W blocks
 }
 
 // send to get cost
@@ -183,7 +173,6 @@ message return_cost_proto {
   uint64 phase_id = 4;
   repeated double landmarks = 5; // physical landmarks used for this cost
   double precise_cost = 6;
-  double precise_l2_cost = 7;
 }
 
 message best_cost_proto {
@@ -205,7 +194,6 @@ message landmark_state_proto {
     MATERIALIZE_BEST = 8;
     RESTORE_NOMINAL_ROUNDTRIP = 9;
     RESTORE_BEST = 10;
-    MATERIALIZE_ACCEPTED = 11;
   }
   int32 cluster_id = 1;
   uint64 run_id = 2;
@@ -222,41 +210,6 @@ message landmark_state_reply_proto {
   bytes landmarks_f64 = 5; // packed physical landmarks for explicit materialization
 }
 
-message schur_system_proto {
-  int32 cluster_id = 1;
-  uint64 run_id = 2;
-  uint64 phase_id = 3;
-  bytes cameras_f64 = 4; // scaled camera state for locally active cameras
-  bytes landmarks_f64 = 5; // physical state for locally owned landmarks
-  double landmark_damping = 6; // relative diagonal damping before elimination
-}
-
-message return_schur_system_proto {
-  int32 cluster_id = 1;
-  uint64 run_id = 2;
-  uint64 phase_id = 3;
-  bytes camera_ids_u32 = 4; // global camera id for each reduced-gradient block
-  bytes block_rows_u32 = 5; // global row camera id for each upper block
-  bytes block_columns_u32 = 6; // global column camera id for each upper block
-  bytes blocks_f64 = 7; // row-major 9x9 upper camera-pair blocks
-  bytes reduced_gradient_f64 = 8; // 9 values per camera_ids_u32 entry
-  bytes camera_diagonal_f64 = 9; // row-major 9x9 uneliminated data blocks
-  double landmark_model_reduction = 10; // 0.5 g_l' (V + lambda D)^-1 g_l
-}
-
-message camera_step_proto {
-  int32 cluster_id = 1;
-  uint64 run_id = 2;
-  uint64 phase_id = 3;
-  bytes cameras_f64 = 4; // scaled camera state for locally active cameras
-  bytes landmarks_f64 = 5; // physical state for locally owned landmarks
-  bytes tangent_step_f64 = 6; // 9 values per locally active camera
-  int32 landmark_refinement_steps = 7;
-  bool rebase_trust_state = 8; // commit external geometry as a fresh trust state
-  bool transport_product_state = 9; // commit tangent-updated local copies without resetting trust
-  bytes centers_f64 = 10; // transported local DRS centers for active cameras
-}
-
 // can be one of messages. so proto converts to correct message. client messages server messages
 message request_proto {
     oneof options {
@@ -267,8 +220,6 @@ message request_proto {
         preconditioning_proto preconditioning_update = 5;
         best_cost_proto best_cost = 6;
         landmark_state_proto landmark_state = 7;
-        schur_system_proto schur_system = 8;
-        camera_step_proto camera_step = 9;
   }
 }
 

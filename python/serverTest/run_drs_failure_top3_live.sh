@@ -95,6 +95,8 @@ WORKER_OWNED_CAMERAS=${WORKER_OWNED_CAMERAS:-1}
 WORKER_CONSENSUS_SHADOW=${WORKER_CONSENSUS_SHADOW:-0}
 PACKED_REQUEST_BUFFERS=${PACKED_REQUEST_BUFFERS:-1}
 SHARED_ONLY_CAMERA_PROXIMAL=${SHARED_ONLY_CAMERA_PROXIMAL:-0}
+GLOBAL_SCHUR_MAJORIZER_OBSERVABILITY_THRESHOLD=${GLOBAL_SCHUR_MAJORIZER_OBSERVABILITY_THRESHOLD:--1}
+GLOBAL_SCHUR_MAJORIZER_UNTIL=${GLOBAL_SCHUR_MAJORIZER_UNTIL:-0}
 INITIAL_SHARED_SCHUR_CORRECTION=${INITIAL_SHARED_SCHUR_CORRECTION:-0}
 INITIAL_SHARED_SCHUR_MAXIMUM_CORRECTIONS=${INITIAL_SHARED_SCHUR_MAXIMUM_CORRECTIONS:-1}
 INITIAL_SHARED_SCHUR_MAXIMUM_ITERATIONS=${INITIAL_SHARED_SCHUR_MAXIMUM_ITERATIONS:-0}
@@ -301,6 +303,9 @@ if [[ "$CONSENSUS_LANDMARK_REFINEMENT_POLICY" != "safeguard" ]]; then
 fi
 if [[ "$HUBER_DELTA" != "0" && "$HUBER_DELTA" != "0.0" ]]; then
   VARIANT_NAME="${VARIANT_NAME}_huber${HUBER_DELTA}"
+fi
+if [[ "$GLOBAL_SCHUR_MAJORIZER_UNTIL" != "0" ]]; then
+  VARIANT_NAME="${VARIANT_NAME}_schur_majorizer${GLOBAL_SCHUR_MAJORIZER_UNTIL}"
 fi
 if [[ "$INITIAL_SHARED_SCHUR_CORRECTION" == "1" ]]; then
   VARIANT_NAME="${VARIANT_NAME}_initial_schur${INITIAL_SHARED_SCHUR_MAXIMUM_CORRECTIONS}"
@@ -757,6 +762,8 @@ for problem in "${PROBLEMS[@]}"; do
             --consensus-metric "$CONSENSUS_METRIC" \
             --consensus-execution "$CONSENSUS_EXECUTION" \
             --consensus-shared-floor-prior-scale "$CONSENSUS_SHARED_FLOOR_PRIOR_SCALE" \
+            --global-schur-majorizer-observability-threshold "$GLOBAL_SCHUR_MAJORIZER_OBSERVABILITY_THRESHOLD" \
+            --global-schur-majorizer-until "$GLOBAL_SCHUR_MAJORIZER_UNTIL" \
             --block-regularization "$BLOCK_REGULARIZATION" \
             --block-curvature-multiplier "$BLOCK_CURVATURE_MULTIPLIER" \
             --block-recovery-mode "$BLOCK_RECOVERY_MODE" \
@@ -852,6 +859,8 @@ for problem in "${PROBLEMS[@]}"; do
             --consensus-metric "$CONSENSUS_METRIC" \
             --consensus-execution "$CONSENSUS_EXECUTION" \
             --consensus-shared-floor-prior-scale "$CONSENSUS_SHARED_FLOOR_PRIOR_SCALE" \
+            --global-schur-majorizer-observability-threshold "$GLOBAL_SCHUR_MAJORIZER_OBSERVABILITY_THRESHOLD" \
+            --global-schur-majorizer-until "$GLOBAL_SCHUR_MAJORIZER_UNTIL" \
             --block-regularization "$BLOCK_REGULARIZATION" \
             --block-curvature-multiplier "$BLOCK_CURVATURE_MULTIPLIER" \
             --block-recovery-mode "$BLOCK_RECOVERY_MODE" \

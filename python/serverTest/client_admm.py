@@ -44,7 +44,6 @@ from bal_evaluator import (
 from clustering import cluster_by_landmark_scalable_stable
 from drs_consensus import ActiveCameraMetricBlocks
 from drs_consensus_metrics import unpack_symmetric_camera_metric_blocks
-from drs_factorized_metrics import FactorizedCameraMetric
 
 
 SCRIPT_DIRECTORY = Path(__file__).resolve().parent
@@ -61,6 +60,7 @@ _REQUIRED_PROTO_FIELDS = {
         "collect_camera_diagonal_metrics",
         "oracle_kind",
         "outer_iteration",
+        "schur_offdiagonal_majorizer",
     },
     "prox_cluster_proto": {
         "block_curvature_multiplier",
@@ -68,36 +68,12 @@ _REQUIRED_PROTO_FIELDS = {
         "collect_camera_diagonal_metrics",
         "oracle_kind",
         "outer_iteration",
+        "schur_offdiagonal_majorizer",
     },
     "return_cluster_proto": {
         "cameras_f64",
         "landmarks_f64",
-        "interior_defect_squared",
-        "landmark_interior_defect_squared",
-        "linear_iterations",
-        "linear_relative_residual",
-        "has_factorized_metric",
-        "factorized_metric_camera_ids_u32",
-        "factorized_metric_diagonal_blocks_f64",
-        "factorized_metric_inverse_blocks_f64",
-        "factorized_metric_edge_factors_u32",
-        "factorized_metric_edge_cameras_u32",
-        "factorized_metric_edge_blocks_f64",
         "step_size_upper_f32",
-        "unique_camera_interior_defect_squared",
-    },
-    "return_schur_system_proto": {
-        "block_columns_u32",
-        "block_rows_u32",
-        "blocks_f64",
-        "camera_diagonal_f64",
-        "camera_ids_u32",
-        "landmark_model_reduction",
-        "reduced_gradient_f64",
-    },
-    "camera_step_proto": {
-        "centers_f64",
-        "transport_product_state",
     },
 }
 _missing_proto_fields = {
@@ -129,17 +105,6 @@ class SingleNodeConsensusSummary:
     reflection_projection_squared: float
     center_step_squared: float
     splitting_term: float
-
-
-@dataclass
-class ClusterSchurSystem:
-    camera_ids: np.ndarray
-    block_rows: np.ndarray
-    block_columns: np.ndarray
-    blocks: np.ndarray
-    reduced_gradient: np.ndarray
-    camera_diagonal: np.ndarray
-    landmark_model_reduction: float = 0.0
 
 
 def _timed_operation(name):
@@ -234,16 +199,10 @@ class AdmmWorkerClient:
         self.received_bytes = 0
         self.maximum_metric_asymmetry = 0.0
         self.last_trust_region_radii = np.empty(0, dtype=np.float64)
-        self.last_linear_iterations = np.empty(0, dtype=np.int32)
-        self.last_linear_relative_residuals = np.empty(0, dtype=np.float64)
-        self.last_consensus_l2_sse = float("nan")
         self.last_consensus_metric_blocks = None
         self.operation_seconds = {
             "solveBatch": 0.0,
             "updatePreconditioning": 0.0,
-            "buildSchurSystems": 0.0,
-            "applyCameraStep": 0.0,
-            "transportProductState": 0.0,
             "refineLandmarksAtConsensus": 0.0,
             "evaluateConsensusSSE": 0.0,
             "controlLandmarkState": 0.0,
@@ -341,10 +300,9 @@ class AdmmWorkerClient:
     ):
         batch_setup_started_at = time.perf_counter()
         self.last_consensus_metric_blocks = None
-        if schur_observability_diagnostic or schur_offdiagonal_majorizer:
+        if schur_observability_diagnostic:
             raise NotImplementedError(
-                "Schur observability diagnostics and off-diagonal "
-                "majorization are unavailable in the recovered worker backend"
+                "Schur observability diagnostics require startup Schur systems"
             )
         if return_consensus_rhs and not return_metric_blocks:
             raise ValueError(
@@ -364,35 +322,6 @@ class AdmmWorkerClient:
             )
         if not 0.0 < nesterov_stop_tolerance < 1.0:
             raise ValueError("Nesterov stop tolerance must be in (0, 1)")
-        local_steps_by_cluster = np.asarray(local_steps, dtype=np.int32)
-        if local_steps_by_cluster.ndim == 0:
-            local_steps_by_cluster = np.full(
-                cluster_count, int(local_steps_by_cluster), dtype=np.int32
-            )
-        elif local_steps_by_cluster.shape != (cluster_count,):
-            raise ValueError(
-                "local steps must be a scalar or one value per cluster"
-            )
-        if np.any(local_steps_by_cluster <= 0):
-            raise ValueError("local steps must be positive")
-        forced_trust_region_radii = None
-        if forced_trust_region_radius is not None:
-            forced_trust_region_radii = np.asarray(
-                forced_trust_region_radius, dtype=np.float64
-            )
-            if forced_trust_region_radii.ndim == 0:
-                forced_trust_region_radii = np.full(
-                    cluster_count, float(forced_trust_region_radii)
-                )
-            elif forced_trust_region_radii.shape != (cluster_count,):
-                raise ValueError(
-                    "forced trust radius must be scalar or one per cluster"
-                )
-            if (
-                np.any(~np.isfinite(forced_trust_region_radii))
-                or np.any(forced_trust_region_radii <= 0.0)
-            ):
-                raise ValueError("forced trust radii must be finite and positive")
         self.phase_id += 1
         phase_id = self.phase_id
         unique_cameras_by_cluster = [
@@ -406,7 +335,6 @@ class AdmmWorkerClient:
         )
         for cluster_id in range(cluster_count):
             request_build_started_at = time.perf_counter()
-            cluster_local_steps = int(local_steps_by_cluster[cluster_id])
             unique_cameras = unique_cameras_by_cluster[cluster_id]
             unique_points = unique_points_by_cluster[cluster_id]
             request = test_pb2.request_proto()
@@ -418,7 +346,7 @@ class AdmmWorkerClient:
                 program.observations[:] = points_2d_in_cluster[cluster_id].ravel()
                 program.cam_id[:] = local_camera_indices[cluster_id]
                 program.lm_id[:] = local_point_indices[cluster_id]
-                program.iterations = cluster_local_steps
+                program.iterations = local_steps
                 program.be = block_regularization
                 program.block_curvature_multiplier = block_curvature_multiplier
                 program.metric_diagnostic_iterations = metric_diagnostic_iterations
@@ -434,14 +362,17 @@ class AdmmWorkerClient:
                 program.nesterov_max_iterations = nesterov_max_iterations
                 program.nesterov_min_iterations = nesterov_min_iterations
                 program.nesterov_stop_tolerance = nesterov_stop_tolerance
-                if forced_trust_region_radii is not None:
+                if forced_trust_region_radius is not None:
                     program.forced_trust_region_radius = (
-                        forced_trust_region_radii[cluster_id]
+                        forced_trust_region_radius
                     )
                 program.outer_iteration = outer_iteration
                 program.oracle_kind = oracle_kind
                 program.collect_camera_diagonal_metrics = (
                     collect_camera_diagonal_metrics
+                )
+                program.schur_offdiagonal_majorizer = (
+                    schur_offdiagonal_majorizer
                 )
                 program.factorized_coupled_schur_metric = (
                     factorized_coupled_schur_metric
@@ -451,17 +382,11 @@ class AdmmWorkerClient:
                 program.num_clusters = cluster_count
                 program.run_id = self.run_id
                 program.phase_id = phase_id
-                if np.asarray(camera_scaling).ndim == 2:
-                    program.unorm[:] = (1.0 / camera_scaling[
-                        unique_cameras]).ravel()
-                    program.camera_transform[:] = np.tile(
-                        np.eye(9), (unique_cameras.size, 1, 1)).ravel()
-                else:
-                    program.unorm[:] = np.ones(9 * unique_cameras.size)
-                    program.camera_transform[:] = camera_scaling[
-                        unique_cameras
-                    ].ravel()
+                program.unorm[:] = (1.0 / camera_scaling[
+                    unique_cameras]).ravel()
                 program.vnorm[:] = np.ones(3 * unique_points.size)
+                program.camera_transform[:] = np.tile(
+                    np.eye(9), (unique_cameras.size, 1, 1)).ravel()
                 program.scalar_proximal_prior = scalar_proximal_prior
                 program.proximal_rho = extrinsics_penalty
                 program.split_camera_penalty = split_camera_penalty
@@ -507,14 +432,17 @@ class AdmmWorkerClient:
                 update.nesterov_max_iterations = nesterov_max_iterations
                 update.nesterov_min_iterations = nesterov_min_iterations
                 update.nesterov_stop_tolerance = nesterov_stop_tolerance
-                if forced_trust_region_radii is not None:
+                if forced_trust_region_radius is not None:
                     update.forced_trust_region_radius = (
-                        forced_trust_region_radii[cluster_id]
+                        forced_trust_region_radius
                     )
                 update.outer_iteration = outer_iteration
                 update.oracle_kind = oracle_kind
                 update.collect_camera_diagonal_metrics = (
                     collect_camera_diagonal_metrics
+                )
+                update.schur_offdiagonal_majorizer = (
+                    schur_offdiagonal_majorizer
                 )
                 update.factorized_coupled_schur_metric = (
                     factorized_coupled_schur_metric
@@ -540,7 +468,7 @@ class AdmmWorkerClient:
                     update.camera_proximal_multiplier[:] = (
                         camera_proximal_multipliers[unique_cameras]
                     )
-                update.local_iterations = cluster_local_steps
+                update.local_iterations = local_steps
                 update.landmark_refinement_steps = landmark_refinement_steps
                 update.omit_landmarks = not return_landmarks
                 update.scalar_proximal_prior = scalar_proximal_prior
@@ -572,16 +500,6 @@ class AdmmWorkerClient:
         costs = np.zeros(cluster_count)
         metric_blocks = None
         consensus_metric_blocks = None
-        factorized_diagonal_clusters = []
-        factorized_diagonal_cameras = []
-        factorized_diagonal_blocks = []
-        factorized_factor_clusters = []
-        factorized_inverse_blocks = []
-        factorized_edge_factors = []
-        factorized_edge_cameras = []
-        factorized_edge_blocks = []
-        factorized_metric_reply_count = 0
-        factorized_factor_offset = 0
         metric_offsets = None
         collect_metric_blocks = return_metric_blocks and not single_node_consensus
         if return_metric_blocks:
@@ -629,12 +547,7 @@ class AdmmWorkerClient:
         camera_proximal_defect_squared = np.full(cluster_count, np.nan)
         landmark_proximal_defect_squared = np.full(cluster_count, np.nan)
         proximal_defect_squared = np.full(cluster_count, np.nan)
-        unique_camera_interior_defect_squared = np.full(cluster_count, np.nan)
-        landmark_interior_defect_squared = np.full(cluster_count, np.nan)
-        interior_defect_squared = np.full(cluster_count, np.nan)
         trust_region_radii = np.full(cluster_count, np.nan)
-        linear_iterations = np.zeros(cluster_count, dtype=np.int32)
-        linear_relative_residuals = np.full(cluster_count, np.nan)
         consensus_rhs = (
             np.empty((metric_offsets[-1], 9), dtype=np.float64)
             if return_consensus_rhs else None
@@ -730,63 +643,6 @@ class AdmmWorkerClient:
                     self.maximum_metric_asymmetry = max(
                         self.maximum_metric_asymmetry, asymmetry
                     )
-                if reply.has_factorized_metric:
-                    reply_camera_ids = np.frombuffer(
-                        reply.factorized_metric_camera_ids_u32, dtype="<u4"
-                    ).astype(np.int64)
-                    reply_diagonal_blocks = np.frombuffer(
-                        reply.factorized_metric_diagonal_blocks_f64,
-                        dtype="<f8",
-                    )
-                    reply_inverse_blocks = np.frombuffer(
-                        reply.factorized_metric_inverse_blocks_f64,
-                        dtype="<f8",
-                    )
-                    reply_edge_factors = np.frombuffer(
-                        reply.factorized_metric_edge_factors_u32, dtype="<u4"
-                    ).astype(np.int64)
-                    reply_edge_cameras = np.frombuffer(
-                        reply.factorized_metric_edge_cameras_u32, dtype="<u4"
-                    ).astype(np.int64)
-                    reply_edge_blocks = np.frombuffer(
-                        reply.factorized_metric_edge_blocks_f64, dtype="<f8"
-                    )
-                    if not (
-                        reply_diagonal_blocks.size == 81 * reply_camera_ids.size
-                        and reply_inverse_blocks.size % 9 == 0
-                        and reply_edge_factors.size == reply_edge_cameras.size
-                        and reply_edge_blocks.size == 27 * reply_edge_factors.size
-                    ):
-                        raise RuntimeError(
-                            "worker returned an invalid factorized camera metric"
-                        )
-                    factor_count = reply_inverse_blocks.size // 9
-                    if np.any(reply_edge_factors >= factor_count):
-                        raise RuntimeError(
-                            "worker returned an invalid factorized edge index"
-                        )
-                    factorized_diagonal_clusters.append(np.full(
-                        reply_camera_ids.size, cluster_id, dtype=np.int64
-                    ))
-                    factorized_diagonal_cameras.append(reply_camera_ids)
-                    factorized_diagonal_blocks.append(
-                        reply_diagonal_blocks.reshape((-1, 9, 9))
-                    )
-                    factorized_factor_clusters.append(np.full(
-                        factor_count, cluster_id, dtype=np.int64
-                    ))
-                    factorized_inverse_blocks.append(
-                        reply_inverse_blocks.reshape((-1, 3, 3))
-                    )
-                    factorized_edge_factors.append(
-                        reply_edge_factors + factorized_factor_offset
-                    )
-                    factorized_edge_cameras.append(reply_edge_cameras)
-                    factorized_edge_blocks.append(
-                        reply_edge_blocks.reshape((-1, 9, 3))
-                    )
-                    factorized_factor_offset += factor_count
-                    factorized_metric_reply_count += 1
             local_cameras[cluster_id][unique_cameras] = reply_cameras.reshape(
                 -1, 9
             )
@@ -864,45 +720,12 @@ class AdmmWorkerClient:
             proximal_defect_squared[cluster_id] = (
                 reply.proximal_defect_squared
             )
-            unique_camera_interior_defect_squared[cluster_id] = (
-                reply.unique_camera_interior_defect_squared
-            )
-            landmark_interior_defect_squared[cluster_id] = (
-                reply.landmark_interior_defect_squared
-            )
-            interior_defect_squared[cluster_id] = (
-                reply.interior_defect_squared
-            )
             trust_region_radii[cluster_id] = reply.trust_region_radius
-            linear_iterations[cluster_id] = reply.linear_iterations
-            linear_relative_residuals[cluster_id] = (
-                reply.linear_relative_residual
-            )
             self.transport_phase_seconds["replyDecode"] += (
                 time.perf_counter() - decode_started_at
             )
         batch_finalize_started_at = time.perf_counter()
-        if factorized_metric_reply_count:
-            if factorized_metric_reply_count != cluster_count:
-                raise RuntimeError(
-                    "workers returned a partial factorized camera metric"
-                )
-            metric_blocks = FactorizedCameraMetric(
-                np.concatenate(factorized_diagonal_clusters),
-                np.concatenate(factorized_diagonal_cameras),
-                np.concatenate(factorized_diagonal_blocks),
-                np.concatenate(factorized_factor_clusters),
-                np.concatenate(factorized_inverse_blocks),
-                np.concatenate(factorized_edge_factors),
-                np.concatenate(factorized_edge_cameras),
-                np.concatenate(factorized_edge_blocks),
-                cluster_count,
-                local_cameras.shape[1],
-            )
-            consensus_metric_blocks = metric_blocks
         self.last_trust_region_radii = trust_region_radii
-        self.last_linear_iterations = linear_iterations
-        self.last_linear_relative_residuals = linear_relative_residuals
         diagnostics = None
         if return_metric_diagnostics:
             diagnostics = {
@@ -916,16 +739,6 @@ class AdmmWorkerClient:
                     landmark_proximal_defect_squared
                 ),
                 "proximalDefectSquared": proximal_defect_squared,
-                "uniqueCameraInteriorDefectSquared": (
-                    unique_camera_interior_defect_squared
-                ),
-                "landmarkInteriorDefectSquared": (
-                    landmark_interior_defect_squared
-                ),
-                "interiorDefectSquared": interior_defect_squared,
-                "schurObservabilityFractions": np.full(
-                    cluster_count, np.nan
-                ),
             }
         self.transport_phase_seconds["batchFinalize"] += (
             time.perf_counter() - batch_finalize_started_at
@@ -957,16 +770,6 @@ class AdmmWorkerClient:
                     landmark_proximal_defect_squared
                 ),
                 "proximalDefectSquared": proximal_defect_squared,
-                "uniqueCameraInteriorDefectSquared": (
-                    unique_camera_interior_defect_squared
-                ),
-                "landmarkInteriorDefectSquared": (
-                    landmark_interior_defect_squared
-                ),
-                "interiorDefectSquared": interior_defect_squared,
-                "schurObservabilityFractions": np.full(
-                    cluster_count, np.nan
-                ),
             }
         return costs
 
@@ -984,15 +787,7 @@ class AdmmWorkerClient:
             unique_points = np.unique(point_indices_in_cluster[cluster_id])
             request = test_pb2.request_proto()
             update = request.preconditioning_update
-            if np.asarray(camera_scaling).ndim == 2:
-                update.unorm[:] = (
-                    1.0 / camera_scaling[unique_cameras]
-                ).ravel()
-            else:
-                update.unorm[:] = np.ones(9 * unique_cameras.size)
-                update.camera_transform[:] = camera_scaling[
-                    unique_cameras
-                ].ravel()
+            update.unorm[:] = (1.0 / camera_scaling[unique_cameras]).ravel()
             update.vnorm[:] = np.ones(3 * unique_points.size)
             if camera_state is not None:
                 update.cameras[:] = camera_state[cluster_id][
@@ -1000,274 +795,6 @@ class AdmmWorkerClient:
                 ].ravel()
             update.cluster_id = cluster_id
             self._send(request)
-
-    @_timed_operation("buildSchurSystems")
-    def build_schur_systems(
-        self,
-        camera_indices_in_cluster,
-        point_indices_in_cluster,
-        consensus,
-        landmarks,
-        cluster_count,
-        landmark_damping,
-    ):
-        if landmark_damping < 0.0:
-            raise ValueError("landmark damping must be nonnegative")
-        self.phase_id += 1
-        phase_id = self.phase_id
-        for cluster_id in range(cluster_count):
-            unique_cameras = np.unique(camera_indices_in_cluster[cluster_id])
-            unique_points = np.unique(point_indices_in_cluster[cluster_id])
-            request = test_pb2.request_proto()
-            update = request.schur_system
-            update.cluster_id = cluster_id
-            update.run_id = self.run_id
-            update.phase_id = phase_id
-            update.cameras_f64 = np.ascontiguousarray(
-                consensus[unique_cameras], dtype="<f8"
-            ).tobytes()
-            update.landmarks_f64 = np.ascontiguousarray(
-                landmarks[unique_points], dtype="<f8"
-            ).tobytes()
-            update.landmark_damping = landmark_damping
-            self._send(request)
-
-        systems = [None] * cluster_count
-        pending = set(range(cluster_count))
-        while pending:
-            payload = self.pull_socket.recv()
-            self.received_bytes += len(payload)
-            reply = test_pb2.return_schur_system_proto()
-            reply.ParseFromString(payload)
-            if reply.run_id != self.run_id or reply.phase_id != phase_id:
-                continue
-            cluster_id = reply.cluster_id
-            if cluster_id not in pending:
-                raise RuntimeError(
-                    f"duplicate Schur reply for cluster {cluster_id}"
-                )
-            pending.remove(cluster_id)
-            camera_ids = np.frombuffer(
-                reply.camera_ids_u32, dtype="<u4"
-            ).astype(np.int64)
-            block_rows = np.frombuffer(
-                reply.block_rows_u32, dtype="<u4"
-            ).astype(np.int64)
-            block_columns = np.frombuffer(
-                reply.block_columns_u32, dtype="<u4"
-            ).astype(np.int64)
-            blocks = np.frombuffer(reply.blocks_f64, dtype="<f8")
-            reduced_gradient = np.frombuffer(
-                reply.reduced_gradient_f64, dtype="<f8"
-            )
-            camera_diagonal = np.frombuffer(
-                reply.camera_diagonal_f64, dtype="<f8"
-            )
-            if block_rows.size != block_columns.size or (
-                blocks.size != 81 * block_rows.size
-            ):
-                raise RuntimeError("worker returned invalid Schur blocks")
-            if reduced_gradient.size != 9 * camera_ids.size:
-                raise RuntimeError("worker returned invalid Schur gradient")
-            if camera_diagonal.size != 81 * camera_ids.size:
-                raise RuntimeError(
-                    "worker returned invalid Schur camera diagonal"
-                )
-            finite_fields = {
-                "blocks": np.all(np.isfinite(blocks)),
-                "reduced_gradient": np.all(np.isfinite(reduced_gradient)),
-                "camera_diagonal": np.all(np.isfinite(camera_diagonal)),
-                "landmark_model_reduction": np.isfinite(
-                    reply.landmark_model_reduction
-                ),
-            }
-            if not all(finite_fields.values()):
-                invalid = sorted(
-                    name for name, finite in finite_fields.items() if not finite
-                )
-                raise RuntimeError(
-                    f"worker cluster {cluster_id} returned non-finite Schur "
-                    f"fields: {invalid}"
-                )
-            systems[cluster_id] = ClusterSchurSystem(
-                camera_ids,
-                block_rows,
-                block_columns,
-                blocks.reshape((-1, 9, 9)),
-                reduced_gradient.reshape((-1, 9)),
-                camera_diagonal.reshape((-1, 9, 9)),
-                reply.landmark_model_reduction,
-            )
-        return systems
-
-    @_timed_operation("applyCameraStep")
-    def apply_camera_step(
-        self,
-        camera_indices_in_cluster,
-        point_indices_in_cluster,
-        consensus,
-        landmarks,
-        tangent_step,
-        cluster_count,
-        landmark_refinement_steps,
-        rebase_trust_state=False,
-    ):
-        tangent_step = np.asarray(tangent_step, dtype=np.float64)
-        if tangent_step.shape != consensus.shape:
-            raise ValueError("tangent step shape must match consensus")
-        if not 0 <= landmark_refinement_steps <= 20:
-            raise ValueError("landmark refinement steps must be in [0, 20]")
-        self.phase_id += 1
-        phase_id = self.phase_id
-        for cluster_id in range(cluster_count):
-            unique_cameras = np.unique(camera_indices_in_cluster[cluster_id])
-            unique_points = np.unique(point_indices_in_cluster[cluster_id])
-            request = test_pb2.request_proto()
-            update = request.camera_step
-            update.cluster_id = cluster_id
-            update.run_id = self.run_id
-            update.phase_id = phase_id
-            update.cameras_f64 = np.ascontiguousarray(
-                consensus[unique_cameras], dtype="<f8"
-            ).tobytes()
-            update.landmarks_f64 = np.ascontiguousarray(
-                landmarks[unique_points], dtype="<f8"
-            ).tobytes()
-            update.tangent_step_f64 = np.ascontiguousarray(
-                tangent_step[unique_cameras], dtype="<f8"
-            ).tobytes()
-            update.landmark_refinement_steps = landmark_refinement_steps
-            update.rebase_trust_state = rebase_trust_state
-            self._send(request)
-
-        corrected_cameras = np.full_like(consensus, np.nan)
-        corrected_landmarks = landmarks.copy()
-        costs = np.empty(cluster_count, dtype=np.float64)
-        trust_region_radii = np.empty(cluster_count, dtype=np.float64)
-        pending = set(range(cluster_count))
-        while pending:
-            payload = self.pull_socket.recv()
-            self.received_bytes += len(payload)
-            reply = test_pb2.return_cluster_proto()
-            reply.ParseFromString(payload)
-            if reply.run_id != self.run_id or reply.phase_id != phase_id:
-                continue
-            cluster_id = reply.cluster_id
-            if cluster_id not in pending:
-                raise RuntimeError(
-                    f"duplicate camera-step reply for cluster {cluster_id}"
-                )
-            pending.remove(cluster_id)
-            unique_cameras = np.unique(camera_indices_in_cluster[cluster_id])
-            unique_points = np.unique(point_indices_in_cluster[cluster_id])
-            local_cameras = np.frombuffer(
-                reply.cameras_f64, dtype="<f8"
-            ).reshape((-1, 9))
-            local_landmarks = np.frombuffer(
-                reply.landmarks_f64, dtype="<f8"
-            ).reshape((-1, 3))
-            if local_cameras.shape[0] != unique_cameras.size:
-                raise RuntimeError("worker returned invalid corrected cameras")
-            if local_landmarks.shape[0] != unique_points.size:
-                raise RuntimeError("worker returned invalid corrected landmarks")
-            existing = corrected_cameras[unique_cameras]
-            overlap = np.all(np.isfinite(existing), axis=1)
-            if np.any(overlap) and not np.allclose(
-                existing[overlap], local_cameras[overlap], rtol=1e-10, atol=1e-12
-            ):
-                raise RuntimeError("workers disagree on corrected camera state")
-            corrected_cameras[unique_cameras] = local_cameras
-            corrected_landmarks[unique_points] = local_landmarks
-            costs[cluster_id] = reply.cost
-            trust_region_radii[cluster_id] = reply.trust_region_radius
-        if not np.all(np.isfinite(corrected_cameras)):
-            raise RuntimeError("corrected camera state is incomplete")
-        self.last_trust_region_radii = trust_region_radii
-        return costs, corrected_cameras, corrected_landmarks
-
-    @_timed_operation("transportProductState")
-    def transport_product_state(
-        self,
-        camera_indices_in_cluster,
-        point_indices_in_cluster,
-        local_cameras,
-        centers,
-        landmarks,
-        tangent_step,
-        cluster_count,
-    ):
-        local_cameras = np.asarray(local_cameras, dtype=np.float64)
-        centers = np.asarray(centers, dtype=np.float64)
-        tangent_step = np.asarray(tangent_step, dtype=np.float64)
-        if local_cameras.shape != centers.shape or local_cameras.ndim != 3:
-            raise ValueError("local cameras and centers must have equal 3D shapes")
-        if tangent_step.shape != local_cameras.shape[1:]:
-            raise ValueError("tangent step must match one global camera state")
-        if local_cameras.shape[0] != cluster_count:
-            raise ValueError("local camera cluster count mismatch")
-
-        self.phase_id += 1
-        phase_id = self.phase_id
-        for cluster_id in range(cluster_count):
-            unique_cameras = np.unique(camera_indices_in_cluster[cluster_id])
-            unique_points = np.unique(point_indices_in_cluster[cluster_id])
-            request = test_pb2.request_proto()
-            update = request.camera_step
-            update.cluster_id = cluster_id
-            update.run_id = self.run_id
-            update.phase_id = phase_id
-            update.cameras_f64 = np.ascontiguousarray(
-                local_cameras[cluster_id, unique_cameras], dtype="<f8"
-            ).tobytes()
-            update.centers_f64 = np.ascontiguousarray(
-                centers[cluster_id, unique_cameras], dtype="<f8"
-            ).tobytes()
-            update.landmarks_f64 = np.ascontiguousarray(
-                landmarks[unique_points], dtype="<f8"
-            ).tobytes()
-            update.tangent_step_f64 = np.ascontiguousarray(
-                tangent_step[unique_cameras], dtype="<f8"
-            ).tobytes()
-            update.transport_product_state = True
-            self._send(request)
-
-        transported_cameras = local_cameras.copy()
-        transported_landmarks = landmarks.copy()
-        costs = np.empty(cluster_count, dtype=np.float64)
-        trust_region_radii = np.empty(cluster_count, dtype=np.float64)
-        pending = set(range(cluster_count))
-        while pending:
-            payload = self.pull_socket.recv()
-            self.received_bytes += len(payload)
-            reply = test_pb2.return_cluster_proto()
-            reply.ParseFromString(payload)
-            if reply.run_id != self.run_id or reply.phase_id != phase_id:
-                continue
-            cluster_id = reply.cluster_id
-            if cluster_id not in pending:
-                raise RuntimeError(
-                    f"duplicate product-state reply for cluster {cluster_id}"
-                )
-            pending.remove(cluster_id)
-            unique_cameras = np.unique(camera_indices_in_cluster[cluster_id])
-            unique_points = np.unique(point_indices_in_cluster[cluster_id])
-            returned_cameras = np.frombuffer(
-                reply.cameras_f64, dtype="<f8"
-            ).reshape((-1, 9))
-            returned_landmarks = np.frombuffer(
-                reply.landmarks_f64, dtype="<f8"
-            ).reshape((-1, 3))
-            if returned_cameras.shape[0] != unique_cameras.size:
-                raise RuntimeError("worker returned invalid transported cameras")
-            if returned_landmarks.shape[0] != unique_points.size:
-                raise RuntimeError("worker returned invalid transported landmarks")
-            transported_cameras[cluster_id, unique_cameras] = returned_cameras
-            transported_landmarks[unique_points] = returned_landmarks
-            costs[cluster_id] = reply.cost
-            trust_region_radii[cluster_id] = reply.trust_region_radius
-
-        self.last_trust_region_radii = trust_region_radii
-        return costs, transported_cameras, transported_landmarks
 
     @_timed_operation("refineLandmarksAtConsensus")
     def refine_landmarks_at_consensus(
@@ -1374,7 +901,6 @@ class AdmmWorkerClient:
 
         pending = set(range(cluster_count))
         costs = np.zeros(cluster_count, dtype=np.float64)
-        l2_costs = np.zeros(cluster_count, dtype=np.float64)
         while pending:
             payload = self.pull_socket.recv()
             self.received_bytes += len(payload)
@@ -1391,8 +917,6 @@ class AdmmWorkerClient:
             if reply.landmarks:
                 raise RuntimeError("worker unexpectedly returned landmarks")
             costs[cluster_id] = reply.precise_cost
-            l2_costs[cluster_id] = reply.precise_l2_cost
-        self.last_consensus_l2_sse = float(np.sum(l2_costs))
         return float(np.sum(costs))
 
     @_timed_operation("controlLandmarkState")
@@ -1462,7 +986,6 @@ class AdmmWorkerClient:
             raise ValueError("landmark state ID must be positive")
         operations = {
             "current": test_pb2.landmark_state_proto.MATERIALIZE_CURRENT,
-            "accepted": test_pb2.landmark_state_proto.MATERIALIZE_ACCEPTED,
             "best": test_pb2.landmark_state_proto.MATERIALIZE_BEST,
         }
         if source not in operations:

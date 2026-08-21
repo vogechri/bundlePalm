@@ -3465,7 +3465,7 @@ def main():
                 else None
             ),
         )
-        if arguments.factorized_coupled_schur_proximal_metric:
+        if arguments.global_schur_majorizer_observability_threshold >= 0.0:
             startup_schur_systems = worker.build_schur_systems(
                 camera_indices_in_cluster,
                 point_indices_in_cluster,
