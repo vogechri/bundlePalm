@@ -1,0 +1,103 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+WORKSPACE=$(cd -- "$SCRIPT_DIR/.." && pwd)
+DETACHED_ROOT=${DETACHED_ROOT:-/home/chvogel/bundlePalm_k1_long/python}
+RUNNER=${RUNNER:-"$DETACHED_ROOT/serverTest/run_drs_failure_top3_live.sh"}
+PROTO_BUILD=${PROTO_BUILD:-"$DETACHED_ROOT/serverTest/build"}
+WORKER=${WORKER:-"$PROTO_BUILD/zeromq_cpp_server_ex"}
+OUTPUT_ROOT=${OUTPUT_ROOT:-"$WORKSPACE/benchmark_results/k24_one_step_schur_proposal_i90_breadth"}
+CONTROL_ROOT=${CONTROL_ROOT:-"$WORKSPACE/benchmark_results/k24_i200_terminal_correction_breadth"}
+REQUEST_PORT=${REQUEST_PORT:-30990}
+OVERWRITE=${OVERWRITE:-0}
+FAMILIES=${FAMILIES:-"1dsfm bal"}
+ANALYZE=${ANALYZE:-1}
+MEMORY_LIMIT_KB=${MEMORY_LIMIT_KB:-14680064}
+CASE_TIMEOUT_SECONDS=${CASE_TIMEOUT_SECONDS:-14400}
+
+mkdir -p "$OUTPUT_ROOT"
+if [[ "$MEMORY_LIMIT_KB" != "0" ]]; then
+  ulimit -v "$MEMORY_LIMIT_KB"
+fi
+
+one_d_sfm_manifest="$DETACHED_ROOT/serverTest/1dsfm_all_fifteen_datasets.txt"
+one_d_sfm_filter=${ONE_D_SFM_PROBLEM_FILTER:-"$(cut -d'|' -f1 "$one_d_sfm_manifest" | tr '\n' ' ')"}
+bal_manifest="$OUTPUT_ROOT/bal_datasets.txt"
+: > "$bal_manifest"
+for dataset in $(find "$WORKSPACE" -maxdepth 1 -type f \
+  -name 'problem-*-pre.txt' -printf '%p\n' | sort -V); do
+  problem_id=$(basename "$dataset" | sed -E 's/^problem-([0-9]+)-.*/\1/')
+  printf '%s|%s\n' "$problem_id" "$dataset" >> "$bal_manifest"
+done
+bal_filter=${BAL_PROBLEM_FILTER:-"$(cut -d'|' -f1 "$bal_manifest" | tr '\n' ' ')"}
+
+run_family() {
+  local family=$1 port=$2 manifest filter
+  if [[ "$family" == "1dsfm" ]]; then
+    manifest=$one_d_sfm_manifest
+    filter=$one_d_sfm_filter
+  elif [[ "$family" == "bal" ]]; then
+    manifest=$bal_manifest
+    filter=$bal_filter
+  else
+    echo "Unknown family: $family" >&2
+    return 2
+  fi
+
+  cd "$DETACHED_ROOT/serverTest"
+  env \
+    MALLOC_ARENA_MAX=2 PROTO_BUILD="$PROTO_BUILD" WORKER="$WORKER" \
+    OUTPUT_DIR="$OUTPUT_ROOT/$family" DATASET_LIST_FILE="$manifest" \
+    PROBLEM_FILTER="$filter" CLUSTERS_LIST=24 ITERATIONS=120 \
+    LOCAL_STEPS=1 THREADS_PER_CLUSTER=1 \
+    CAMERA_UPDATE=se3_left LOCAL_SOLVER=nesterov \
+    NESTEROV_MAX_ITERATIONS=300 ENHANCED_INNER_MAX_ITERATIONS=300 \
+    NESTEROV_MIN_ITERATIONS=1 NESTEROV_STOP_TOLERANCE=1e-2 \
+    ENHANCED_INNER_UNTIL=30 TRUST_REGION_POLICY=drs PERSISTENT_TRUST_REGION=1 \
+    TRUST_REGION_RECOVERY_RATIO=0.5 SCENE_NORMALIZATION=points_p95 \
+    CAMERA_SCALING=jacobi_initial PROXIMAL_METRIC=block CONSENSUS_METRIC=full \
+    CONSENSUS_EXECUTION=coordinator SHARED_ONLY_CAMERA_PROXIMAL=1 \
+    BLOCK_REGULARIZATION=1e-4 BLOCK_CURVATURE_MULTIPLIER=0.4 \
+    BLOCK_RECOVERY_MODE=curvature MAXIMUM_BLOCK_CURVATURE_MULTIPLIER=64 \
+    CURVATURE_DECAY_AFTER=5 CURVATURE_DECAY_RATIO=0.5 \
+    METRIC_PROPOSAL_DISAGREEMENT_SCALE=1 OUTER_ACCELERATION=themelis_nesterov \
+    LINE_SEARCH_GRID=0,1 ACCELERATION_RESTART_AFTER=3 ADAPTIVE_LOCAL_DEPTH=0 \
+    SAFEGUARD_ANNEALING_ITERATIONS=200 \
+    WORKER_OWNED_LANDMARKS=1 WORKER_OWNED_CAMERAS=0 PACKED_REQUEST_BUFFERS=1 \
+    SCHUR_ALIGNMENT_DIAGNOSTIC_ITERATIONS=90 \
+    ONE_STEP_SCHUR_RESIDUAL_PROPOSAL_ITERATIONS=90 \
+    SCHUR_ALIGNMENT_CAMERA_DAMPING=0.005859375 \
+    SCHUR_ALIGNMENT_LANDMARK_DAMPING=0.005859375 \
+    SCHUR_ALIGNMENT_MAXIMUM_ITERATIONS=5000 \
+    SHARED_SCHUR_RELATIVE_TOLERANCE=1e-6 \
+    SHARED_SCHUR_OPERATOR=bsr_low_memory SHARED_SCHUR_PRECONDITIONER=jacobi \
+    BUNDLE_PALM_DIRECT_TANGENT_NORMAL_EQUATIONS=1 \
+    BUNDLE_PALM_DISABLE_LANDMARK_PRECONDITIONING=0 \
+    BUNDLE_PALM_DIAGONAL_TRUST_DAMPING=0 BUNDLE_PALM_BAE_TRUST_SCHEDULE=0 \
+    BUNDLE_PALM_CUMULATIVE_DIAGONAL_DAMPING=0 \
+    BUNDLE_PALM_CAMERA_DIAGONAL_METRIC_SCALE=75 \
+    BUNDLE_PALM_CAMERA_TRUST_DIAGONAL_SCALE=1e-4 \
+    BUNDLE_PALM_INITIAL_TRUST_REGION_RADIUS=10 \
+    BUNDLE_PALM_MAXIMUM_TRUST_REGION_RADIUS=10000 \
+    BUNDLE_PALM_DABA_INITIAL_TRUST_REGION_CAP=100 \
+    BUNDLE_PALM_REQUEST_PORT="$port" BUNDLE_PALM_RESULT_PORT="$((port + 1))" \
+    DEBUG_OUTPUT=1 LIVE_OUTPUT=0 WORKER_LIVE_OUTPUT=0 OVERWRITE="$OVERWRITE" \
+    CASE_TIMEOUT_SECONDS="$CASE_TIMEOUT_SECONDS" \
+    VARIANT_TAG="one_step_schur_i90_${family}" \
+    "$RUNNER"
+}
+
+port=$REQUEST_PORT
+for family in $FAMILIES; do
+  run_family "$family" "$port"
+  port=$((port + 2))
+done
+
+if [[ "$ANALYZE" == "1" ]]; then
+  "$WORKSPACE/serverTest/.venv/bin/python" \
+    "$WORKSPACE/serverTest/analyze_k24_one_step_schur_proposal_breadth.py" \
+    --root "$OUTPUT_ROOT" --control-root "$CONTROL_ROOT" \
+    --families $FAMILIES
+fi
