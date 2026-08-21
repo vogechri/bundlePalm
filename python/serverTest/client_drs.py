@@ -21,6 +21,7 @@ from bal_evaluator import (
     save_bal_state,
 )
 from camera_tangent_diagnostics import (
+    consensus_vote_coherence,
     diagonal_weighted_tangent_alignment,
     left_se3_camera_minus,
     left_se3_camera_plus,
@@ -4614,6 +4615,7 @@ def main():
                 )
 
             consensus_started_at = time.perf_counter()
+            reflected = None
             if single_node_summary is not None:
                 (
                     candidate_consensus,
@@ -4648,7 +4650,7 @@ def main():
                     (
                         candidate_consensus,
                         candidate_centers,
-                        _,
+                        reflected,
                         residuals,
                         selected_metric_blocks,
                     ) = drs_step(
@@ -4718,6 +4720,21 @@ def main():
                 shared_schur_tangent[shared_cameras] = (
                     schur_alignment_tangent[shared_cameras]
                 )
+                if not isinstance(
+                    selected_metric_blocks, ActiveCameraMetricBlocks
+                ) or reflected is None or consensus_prior_blocks is not None:
+                    raise RuntimeError(
+                        "Schur alignment vote coherence requires unregularized "
+                        "active block-metric consensus"
+                    )
+                vote_coherence = consensus_vote_coherence(
+                    reflected,
+                    accepted_consensus,
+                    selected_metric_blocks.cluster_indices,
+                    selected_metric_blocks.camera_indices,
+                    selected_metric_blocks.blocks,
+                    camera_copy_count,
+                )
                 similarity_gauge_basis = similarity_gauge_tangent_basis(
                     schur_alignment_base_cameras
                 )
@@ -4768,6 +4785,7 @@ def main():
                         "schur": schur_gauge_diagnostics,
                         "consensus": consensus_gauge_diagnostics,
                     },
+                    "consensusVoteCoherence": vote_coherence,
                     "quotientAllCamerasDiagonalWeighted": (
                         diagonal_weighted_tangent_alignment(
                             quotient_schur_tangent,

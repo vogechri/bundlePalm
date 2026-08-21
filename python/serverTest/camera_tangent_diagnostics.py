@@ -169,6 +169,90 @@ def project_tangent_orthogonal_to_basis(tangent, basis, diagonal=None):
     }
 
 
+def consensus_vote_coherence(
+    values,
+    previous_consensus,
+    cluster_indices,
+    camera_indices,
+    metric_blocks,
+    copy_count,
+):
+    """Measure cancellation of block-metric consensus votes per shared camera."""
+    values = np.asarray(values, dtype=np.float64)
+    previous_consensus = np.asarray(previous_consensus, dtype=np.float64)
+    cluster_indices = np.asarray(cluster_indices)
+    camera_indices = np.asarray(camera_indices)
+    metric_blocks = np.asarray(metric_blocks, dtype=np.float64)
+    copy_count = np.asarray(copy_count)
+    if values.ndim != 3 or values.shape[2] != 9:
+        raise ValueError("values must have shape (clusters, cameras, 9)")
+    if previous_consensus.shape != values.shape[1:]:
+        raise ValueError("previous consensus must match global cameras")
+    if cluster_indices.shape != camera_indices.shape:
+        raise ValueError("active metric indices must match")
+    if metric_blocks.shape != (camera_indices.size, 9, 9):
+        raise ValueError("metric blocks must match active copies")
+    if copy_count.shape != (values.shape[1],):
+        raise ValueError("copy count must match global cameras")
+
+    displacements = (
+        values[cluster_indices, camera_indices]
+        - previous_consensus[camera_indices]
+    )
+    products = np.einsum("bij,bj->bi", metric_blocks, displacements)
+    metric_sum = np.zeros((values.shape[1], 9, 9), dtype=np.float64)
+    right_hand_side = np.zeros((values.shape[1], 9), dtype=np.float64)
+    np.add.at(metric_sum, camera_indices, metric_blocks)
+    np.add.at(right_hand_side, camera_indices, products)
+    active_shared = copy_count[camera_indices] > 1
+    shared_camera_indices = camera_indices[active_shared]
+    contributions = np.linalg.solve(
+        metric_sum[shared_camera_indices],
+        products[active_shared, ..., None],
+    )[..., 0]
+    contribution_norms = np.sqrt(np.maximum(
+        np.einsum(
+            "bi,bij,bj->b",
+            contributions,
+            metric_sum[shared_camera_indices],
+            contributions,
+        ),
+        0.0,
+    ))
+    denominator = np.zeros(values.shape[1], dtype=np.float64)
+    np.add.at(denominator, shared_camera_indices, contribution_norms)
+    shared = copy_count > 1
+    aggregate = np.zeros_like(right_hand_side)
+    aggregate[shared] = np.linalg.solve(
+        metric_sum[shared], right_hand_side[shared, ..., None]
+    )[..., 0]
+    aggregate_norm = np.sqrt(np.maximum(
+        np.einsum("bi,bij,bj->b", aggregate, metric_sum, aggregate),
+        0.0,
+    ))
+    valid = shared & (denominator > 0.0)
+    coherence = np.divide(
+        aggregate_norm,
+        denominator,
+        out=np.zeros_like(aggregate_norm),
+        where=denominator > 0.0,
+    )
+    shared_coherence = coherence[valid]
+    return {
+        "sharedCameraCount": int(np.count_nonzero(shared)),
+        "activeSharedCameraCount": int(shared_coherence.size),
+        "global": float(
+            np.sum(aggregate_norm[shared]) / np.sum(denominator[shared])
+        ) if np.sum(denominator[shared]) > 0.0 else 0.0,
+        "minimum": float(np.min(shared_coherence))
+        if shared_coherence.size else 0.0,
+        "median": float(np.median(shared_coherence))
+        if shared_coherence.size else 0.0,
+        "maximum": float(np.max(shared_coherence))
+        if shared_coherence.size else 0.0,
+    }
+
+
 def diagonal_weighted_tangent_alignment(reference, candidate, diagonal):
     """Return tangent alignment after whitening by a positive diagonal."""
     reference = np.asarray(reference, dtype=np.float64)

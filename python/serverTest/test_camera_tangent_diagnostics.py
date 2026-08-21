@@ -1,6 +1,7 @@
 import numpy as np
 
 from camera_tangent_diagnostics import (
+    consensus_vote_coherence,
     diagonal_weighted_tangent_alignment,
     left_se3_camera_minus,
     left_se3_camera_plus,
@@ -92,3 +93,61 @@ def test_tangent_projection_is_orthogonal_in_diagonal_metric():
     np.testing.assert_allclose(
         basis[:, 0] @ (diagonal.ravel() * residual.ravel()), 0.0, atol=1e-12
     )
+
+
+def test_consensus_vote_coherence_detects_cancellation():
+    values = np.zeros((2, 1, 9))
+    values[:, 0, 0] = [2.0, -1.0]
+    metrics = np.broadcast_to(np.eye(9), (2, 9, 9)).copy()
+
+    diagnostics = consensus_vote_coherence(
+        values,
+        np.zeros((1, 9)),
+        np.array([0, 1]),
+        np.array([0, 0]),
+        metrics,
+        np.array([2]),
+    )
+
+    np.testing.assert_allclose(diagnostics["global"], 1.0 / 3.0)
+    np.testing.assert_allclose(diagnostics["median"], 1.0 / 3.0)
+
+
+def test_consensus_vote_coherence_is_one_for_aligned_votes():
+    values = np.zeros((2, 1, 9))
+    values[:, 0, 0] = [2.0, 1.0]
+    metrics = np.broadcast_to(np.eye(9), (2, 9, 9)).copy()
+
+    diagnostics = consensus_vote_coherence(
+        values,
+        np.zeros((1, 9)),
+        np.array([0, 1]),
+        np.array([0, 0]),
+        metrics,
+        np.array([2]),
+    )
+
+    np.testing.assert_allclose(diagnostics["global"], 1.0)
+    np.testing.assert_allclose(diagnostics["median"], 1.0)
+
+
+def test_consensus_vote_coherence_ignores_singular_unique_metrics():
+    values = np.zeros((2, 2, 9))
+    values[:, 0, 0] = [2.0, 1.0]
+    values[0, 1, 0] = 5.0
+    metrics = np.concatenate([
+        np.broadcast_to(np.eye(9), (2, 9, 9)),
+        np.zeros((1, 9, 9)),
+    ])
+
+    diagnostics = consensus_vote_coherence(
+        values,
+        np.zeros((2, 9)),
+        np.array([0, 1, 0]),
+        np.array([0, 0, 1]),
+        metrics,
+        np.array([2, 1]),
+    )
+
+    np.testing.assert_allclose(diagnostics["global"], 1.0)
+    assert diagnostics["sharedCameraCount"] == 1

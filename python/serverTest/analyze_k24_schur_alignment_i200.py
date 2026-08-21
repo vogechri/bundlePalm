@@ -116,6 +116,7 @@ def extract_checkpoint(scene, checkpoint, diagnostic):
     quotient_shared = data["quotientSharedCamerasDiagonalWeighted"]["global"]
     quotient_all = data["quotientAllCamerasDiagonalWeighted"]["global"]
     gauge = data["similarityGauge"]
+    vote_coherence = data["consensusVoteCoherence"]
     return {
         "scene": scene,
         "checkpoint": checkpoint,
@@ -162,6 +163,9 @@ def extract_checkpoint(scene, checkpoint, diagnostic):
             quotient_drs_camera_reduction,
             quotient_schur_camera_reduction,
         ),
+        "vote_coherence_global": vote_coherence["global"],
+        "vote_coherence_minimum": vote_coherence["minimum"],
+        "vote_coherence_median": vote_coherence["median"],
         "linear_iterations": schur["linearIterations"],
         "relative_residual": schur["relativeResidual"],
         "linear_seconds": schur["totalLinearSystemSeconds"],
@@ -234,6 +238,12 @@ def analyze(root):
             "nonpositive_quotient_drs_camera_models": sum(
                 row["quotient_drs_camera_model_reduction"] <= 0.0 for row in rows
             ),
+            "median_vote_coherence_global": statistics.median(
+                row["vote_coherence_global"] for row in rows
+            ),
+            "median_vote_coherence_per_camera": statistics.median(
+                row["vote_coherence_median"] for row in rows
+            ),
         }
     return {
         "status": "passed",
@@ -269,6 +279,15 @@ def write_report(path, summary):
                 f"{row['median_quotient_shared_drs_over_schur_norm']:.6f} | "
                 f"{row['median_quotient_camera_model_reduction_ratio']:.6f} | "
                 f"{row['nonpositive_quotient_drs_camera_models']} |\n"
+            )
+        output.write("\n## Reflected-copy vote coherence\n\n")
+        output.write("| I | Median global coherence | Median per-camera coherence |\n")
+        output.write("|---:|---:|---:|\n")
+        for checkpoint, row in summary["checkpoint_summaries"].items():
+            output.write(
+                f"| {checkpoint} | "
+                f"{row['median_vote_coherence_global']:.6f} | "
+                f"{row['median_vote_coherence_per_camera']:.6f} |\n"
             )
         output.write("\n| Scene | I | Shared weighted cosine | DRS/Schur norm | Shared-model ratio | Shared/unique reduction | T/R/I cosine | PCG iters |\n")
         output.write("|---|---:|---:|---:|---:|---:|---|---:|\n")
