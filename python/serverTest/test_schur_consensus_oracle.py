@@ -95,3 +95,37 @@ def test_jacobi_refinement_solves_diagonal_schur_system_in_one_step():
     np.testing.assert_allclose(refined[0], 2.0)
     np.testing.assert_allclose(refined[1], 0.0)
     assert diagnostics["activeCameraCount"] == 1
+
+
+def test_second_jacobi_refinement_contracts_coupled_residual():
+    identity = np.eye(9)
+    system = SimpleNamespace(
+        camera_ids=np.array([0, 1]),
+        block_rows=np.array([0, 0, 1]),
+        block_columns=np.array([0, 1, 1]),
+        blocks=np.array([
+            2.0 * identity,
+            -0.5 * identity,
+            2.0 * identity,
+        ]),
+        reduced_gradient=np.array([
+            np.full(9, -1.0),
+            np.full(9, -2.0),
+        ]),
+        camera_diagonal=np.array([identity, identity]),
+    )
+
+    refined, diagnostics = jacobi_refine_schur_tangent(
+        [system],
+        camera_count=2,
+        camera_damping=0.5,
+        tangent=np.zeros((2, 9)),
+        active_cameras=np.array([True, True]),
+        refinement_steps=2,
+    )
+
+    assert diagnostics["refinementSteps"] == 2
+    assert diagnostics["steps"][1]["residualNorm"] < (
+        diagnostics["steps"][0]["residualNorm"]
+    )
+    assert np.all(np.isfinite(refined))

@@ -1487,6 +1487,10 @@ def parse_arguments():
         action="store_true",
     )
     parser.add_argument(
+        "--two-step-schur-residual-oracle",
+        action="store_true",
+    )
+    parser.add_argument(
         "--schur-model-consensus-clipping", action="store_true"
     )
     parser.add_argument(
@@ -3083,6 +3087,20 @@ def main():
     ):
         raise ValueError(
             "one-step Schur proposal trust rebase requires a proposal iteration"
+        )
+    if (
+        arguments.two_step_schur_residual_oracle
+        and not one_step_schur_residual_proposal_iterations
+    ):
+        raise ValueError(
+            "two-step Schur residual oracle requires a proposal iteration"
+        )
+    if (
+        arguments.two_step_schur_residual_oracle
+        and schur_alignment_diagnostic_iterations
+    ):
+        raise ValueError(
+            "two-step Schur residual oracle requires proposal-only diagnostics"
         )
     if (
         one_step_schur_residual_proposal_iterations
@@ -5288,6 +5306,20 @@ def main():
                     shared_consensus_tangent,
                     shared_cameras,
                 )
+                two_step_schur_tangent = None
+                two_step_schur_diagnostics = None
+                if arguments.two_step_schur_residual_oracle:
+                    (
+                        two_step_schur_tangent,
+                        two_step_schur_diagnostics,
+                    ) = jacobi_refine_schur_tangent(
+                        schur_alignment_systems,
+                        camera_count,
+                        arguments.schur_alignment_camera_damping,
+                        shared_consensus_tangent,
+                        shared_cameras,
+                        refinement_steps=2,
+                    )
                 schur_alignment_diagnostics = {
                     "cameraDamping": arguments.schur_alignment_camera_damping,
                     "landmarkDamping": (
@@ -5357,6 +5389,57 @@ def main():
                     "attempts": one_step_attempts,
                     "productStateRestarted": False,
                 }
+                if two_step_schur_tangent is not None:
+                    two_step_correction = (
+                        two_step_schur_tangent - shared_consensus_tangent
+                    )
+                    two_step_attempts = []
+                    two_step_selected_scale = 0.0
+                    two_step_worker_sse = ordinary_worker_sse
+                    for attempt in range(8):
+                        scale = 0.5 ** attempt
+                        trial_physical_candidate = left_se3_camera_plus(
+                            schur_alignment_base_cameras,
+                            consensus_tangent
+                            + scale * two_step_correction,
+                        )
+                        trial_consensus = to_scaled_cameras(
+                            trial_physical_candidate, camera_scaling
+                        )
+                        trial_worker_sse = worker.evaluate_consensus_sse(
+                            camera_indices_in_cluster,
+                            trial_consensus,
+                            cluster_count,
+                            preserve_cameras=True,
+                            packed_request_buffers=(
+                                arguments.packed_request_buffers
+                            ),
+                        )
+                        two_step_attempts.append({
+                            "scale": scale,
+                            "workerSSE": trial_worker_sse,
+                        })
+                        if (
+                            np.isfinite(trial_worker_sse)
+                            and trial_worker_sse < two_step_worker_sse
+                            and trial_worker_sse < required_worker_sse
+                        ):
+                            two_step_selected_scale = scale
+                            two_step_worker_sse = trial_worker_sse
+                    schur_alignment_diagnostics[
+                        "twoStepSchurResidualOracle"
+                    ] = {
+                        **two_step_schur_diagnostics,
+                        "ordinaryWorkerSSE": ordinary_worker_sse,
+                        "candidateWorkerSSE": two_step_worker_sse,
+                        "minimumRelativeDecrease": (
+                            arguments.shared_schur_minimum_relative_decrease
+                        ),
+                        "selectedScale": two_step_selected_scale,
+                        "selected": two_step_selected_scale > 0.0,
+                        "attempts": two_step_attempts,
+                        "applied": False,
+                    }
                 if one_step_selected:
                     one_step_proposal_selected_this_iteration = True
                     candidate_consensus = selected_consensus
@@ -7520,6 +7603,9 @@ def main():
         ),
         "oneStepSchurResidualProposalRebaseTrustState": (
             arguments.one_step_schur_residual_proposal_rebase_trust_state
+        ),
+        "twoStepSchurResidualOracle": (
+            arguments.two_step_schur_residual_oracle
         ),
         "schurAlignmentCameraDamping": (
             arguments.schur_alignment_camera_damping

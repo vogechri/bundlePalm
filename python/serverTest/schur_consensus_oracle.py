@@ -111,8 +111,9 @@ def jacobi_refine_schur_tangent(
     camera_damping,
     tangent,
     active_cameras,
+    refinement_steps=1,
 ):
-    """Apply one block-Jacobi correction to a restricted Schur tangent."""
+    """Apply fixed block-Jacobi corrections to a restricted Schur tangent."""
     tangent = np.asarray(tangent, dtype=np.float64)
     active_cameras = np.asarray(active_cameras, dtype=bool)
     if tangent.shape != (camera_count, 9):
@@ -121,33 +122,16 @@ def jacobi_refine_schur_tangent(
         raise ValueError("active camera mask has an invalid shape")
     if camera_damping <= 0.0:
         raise ValueError("camera damping must be positive")
+    if refinement_steps <= 0:
+        raise ValueError("refinement steps must be positive")
 
     gradient = np.zeros_like(tangent)
     camera_diagonal = np.zeros((camera_count, 9, 9), dtype=np.float64)
     preconditioner = np.zeros_like(camera_diagonal)
-    action = np.zeros_like(tangent)
     for system in systems:
         np.add.at(gradient, system.camera_ids, system.reduced_gradient)
         np.add.at(camera_diagonal, system.camera_ids, system.camera_diagonal)
-        block_action = np.einsum(
-            "bij,bj->bi", system.blocks, tangent[system.block_columns]
-        )
-        np.add.at(action, system.block_rows, block_action)
         offdiagonal = system.block_rows != system.block_columns
-        if np.any(offdiagonal):
-            offdiagonal_indices = np.flatnonzero(offdiagonal)
-            for start in range(0, offdiagonal_indices.size, 16384):
-                chunk = offdiagonal_indices[start:start + 16384]
-                transpose_action = np.einsum(
-                    "bji,bj->bi",
-                    system.blocks[chunk],
-                    tangent[system.block_rows[chunk]],
-                )
-                np.add.at(
-                    action,
-                    system.block_columns[chunk],
-                    transpose_action,
-                )
         diagonal = ~offdiagonal
         np.add.at(
             preconditioner,
@@ -164,7 +148,6 @@ def jacobi_refine_schur_tangent(
         if positive.size else 1e-12
     )
     damping_diagonal = np.maximum(damping_diagonal, floor)
-    action += camera_damping * damping_diagonal * tangent
     indices = np.arange(9)
     preconditioner[:, indices, indices] += (
         camera_damping * damping_diagonal
@@ -184,13 +167,48 @@ def jacobi_refine_schur_tangent(
         1.0 / np.maximum(eigenvalues, eigenvalue_floor),
         eigenvectors,
     )
-    residual = -(gradient + action)
-    residual[~active_cameras] = 0.0
-    correction = np.einsum("bij,bj->bi", inverse, residual)
-    correction[~active_cameras] = 0.0
-    refined = tangent + correction
+    refined = tangent.copy()
+    step_diagnostics = []
+    for _ in range(refinement_steps):
+        action = np.zeros_like(refined)
+        for system in systems:
+            block_action = np.einsum(
+                "bij,bj->bi",
+                system.blocks,
+                refined[system.block_columns],
+            )
+            np.add.at(action, system.block_rows, block_action)
+            offdiagonal = system.block_rows != system.block_columns
+            if np.any(offdiagonal):
+                offdiagonal_indices = np.flatnonzero(offdiagonal)
+                for start in range(0, offdiagonal_indices.size, 16384):
+                    chunk = offdiagonal_indices[start:start + 16384]
+                    transpose_action = np.einsum(
+                        "bji,bj->bi",
+                        system.blocks[chunk],
+                        refined[system.block_rows[chunk]],
+                    )
+                    np.add.at(
+                        action,
+                        system.block_columns[chunk],
+                        transpose_action,
+                    )
+        action += camera_damping * damping_diagonal * refined
+        residual = -(gradient + action)
+        residual[~active_cameras] = 0.0
+        correction = np.einsum("bij,bj->bi", inverse, residual)
+        correction[~active_cameras] = 0.0
+        refined += correction
+        step_diagnostics.append({
+            "residualNorm": float(np.linalg.norm(residual[active_cameras])),
+            "correctionNorm": float(
+                np.linalg.norm(correction[active_cameras])
+            ),
+        })
     return refined, {
         "activeCameraCount": int(np.count_nonzero(active_cameras)),
-        "residualNorm": float(np.linalg.norm(residual[active_cameras])),
-        "correctionNorm": float(np.linalg.norm(correction[active_cameras])),
+        "refinementSteps": refinement_steps,
+        "residualNorm": step_diagnostics[-1]["residualNorm"],
+        "correctionNorm": step_diagnostics[-1]["correctionNorm"],
+        "steps": step_diagnostics,
     }
