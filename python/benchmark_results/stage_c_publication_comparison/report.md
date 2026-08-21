@@ -15,6 +15,8 @@ All rows use independently evaluated standard pixel SSE. Iteration and thread bu
 | DRS+Schur quality | K24/I60 + up to 16 corrections | 15 | 1.215246 | 1.109252 | 2/0/13 | 381.521 | CPU DRS + Schur optimization | 0.834064 | 0.666529 |
 | DRS K4 | frozen C1+C5 resource endpoint, I30, T1/cluster | 15 | 2.052536 | 1.924183 | 0/0/15 | 160.607 | CPU DRS optimization | 1.408725 | 0.280585 |
 | DRS K16 | frozen C1+C5 latency endpoint, I30, T1/cluster | 15 | 1.957296 | 1.848750 | 0/0/15 | 93.793 | CPU DRS optimization | 1.343358 | 0.163860 |
+| DRS K4 + terminal correction | frozen C1+C5 resource endpoint, I30 + one correction | 15 | 1.612187 | 1.495152 | 0/0/15 | 178.001 | CPU DRS + terminal correction | 1.106498 | 0.310973 |
+| DRS K16 + terminal correction | frozen C1+C5 latency endpoint, I30 + one correction | 15 | 1.523013 | 1.382982 | 1/0/14 | 109.890 | CPU DRS + terminal correction | 1.045295 | 0.191982 |
 
 ## Complete BAL cohort (29/29)
 
@@ -24,6 +26,8 @@ All rows use independently evaluated standard pixel SSE. Iteration and thread bu
 | Base DRS K24 | established quality baseline, I90, T1/cluster | 29 | 0.998404 | 0.995488 | 12/0/17 | 1271.575 | CPU DRS optimization | 1.000000 | 1.000000 |
 | DRS K4 | frozen C1+C5 resource endpoint, I30, T1/cluster | 29 | 1.007309 | 1.010726 | 8/0/21 | 939.466 | CPU DRS optimization | 1.008920 | 0.738821 |
 | DRS K16 | frozen C1+C5 latency endpoint, I30, T1/cluster | 29 | 1.010098 | 1.016017 | 8/0/21 | 479.087 | CPU DRS optimization | 1.011713 | 0.376767 |
+| DRS K4 + terminal correction | frozen C1+C5 resource endpoint, I30 + one correction | 29 | 1.005041 | 1.006497 | 9/0/20 | 1547.694 | CPU DRS + terminal correction | 1.006648 | 1.217147 |
+| DRS K16 + terminal correction | frozen C1+C5 latency endpoint, I30 + one correction | 29 | 1.007594 | 1.012005 | 9/0/20 | 1000.459 | CPU DRS + terminal correction | 1.009206 | 0.786788 |
 
 K1 has no authoritative matched all-29 BAL artifact and is therefore omitted from the BAL panel.
 
@@ -37,9 +41,11 @@ K1 has no authoritative matched all-29 BAL artifact and is therefore omitted fro
 | Base DRS K24 | preserved quality baseline, I200 | 6 | 1.304394 | 1.203876 | 1/0/5 | 315.889 | CPU DRS optimization | 1.380797 |
 | DRS K4 | frozen C1+C5 resource endpoint, I30, T1/cluster | 6 | 1.922802 | 1.720695 | 0/0/6 | 93.262 | CPU DRS optimization | 2.035427 |
 | DRS K16 | frozen C1+C5 latency endpoint, I30, T1/cluster | 6 | 1.745880 | 1.627073 | 0/0/6 | 52.823 | CPU DRS optimization | 1.848141 |
+| DRS K4 + terminal correction | frozen C1+C5 resource endpoint, I30 + one correction | 6 | 1.558589 | 1.449650 | 0/0/6 | 105.185 | CPU DRS + terminal correction | 1.649881 |
+| DRS K16 + terminal correction | frozen C1+C5 latency endpoint, I30 + one correction | 6 | 1.387400 | 1.304608 | 1/0/5 | 63.850 | CPU DRS + terminal correction | 1.468664 |
 | BAE Schur-PCG CG | verified exported state, I90 | 6 | 0.944668 | 0.894484 | 4/0/2 | 56.170 | RTX 5090 GPU optimization | 1.000000 |
 | BAE Schur-PCG Nesterov | verified exported state, I90 | 6 | 1.091773 | 1.147230 | 4/0/2 | 90.859 | RTX 5090 GPU optimization | 1.155722 |
 
 ## Interpretation
 
-The best BAE-style K1 local diagnostic reaches near-Ceres aggregate quality on all 15 1DSfM scenes but is neither distributed nor a matched work budget. The preserved longer-horizon base DRS is better in endpoint quality than current K4/K16 on both families. K4 and K16 are therefore speed endpoints, not quality replacements: C1+C5 improves its matched I30 plain control, but that gain does not overcome the shorter horizon. The three DRS+Schur rows are separately labeled polishing workflows rather than DRS-only gains. Each improves both endpoint quality and measured optimization time relative to the preserved I200 base; fast, balanced, and quality expose distinct budget points. Verified BAE coverage is only six 1DSfM scenes, uses GPU hardware, and is basin-sensitive on Trafalgar; it is contextual evidence, not an all-scene or deterministic reference. No per-scene settings or solver routing are used.
+The best BAE-style K1 local diagnostic reaches near-Ceres aggregate quality on all 15 1DSfM scenes but is neither distributed nor a matched work budget. The preserved longer-horizon base DRS is better in endpoint quality than both raw and terminal-corrected K4/K16 on both families. Raw K4 and K16 remain the DRS-only resource and latency endpoints. The single terminal-correction variants are separately labeled: they improve all 15 1DSfM scenes and safely improve or no-op on all 29 BAL scenes, but remain `1.045295x` and `1.009206x` the corresponding preserved base DRS quality at corrected K16. The correction cost is modest on 1DSfM and material on large BAL. The three DRS+Schur rows are separately labeled polishing workflows rather than DRS-only gains. Each improves both endpoint quality and measured optimization time relative to the preserved I200 base; fast, balanced, and quality expose distinct budget points. Verified BAE coverage is only six 1DSfM scenes, uses GPU hardware, and is basin-sensitive on Trafalgar; it is contextual evidence, not an all-scene or deterministic reference. No per-scene settings or solver routing are used.

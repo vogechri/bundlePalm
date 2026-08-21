@@ -176,8 +176,8 @@ def summarize(rows, ceres):
         "summed_corrected_over_ceres": math.fsum(row["final"] for row in rows)
         / math.fsum(ceres[row["scene"]] for row in rows),
         "ceres_wins": sum(row["final"] < ceres[row["scene"]] for row in rows),
-        "wins": sum(value < 1.0 for value in ratios),
-        "noops": sum(value == 1.0 for value in ratios),
+        "wins": sum(row["accepted"] for row in rows),
+        "noops": sum(not row["accepted"] for row in rows),
         "worst": max(ratios),
         "total_correction_seconds": math.fsum(row["seconds"] for row in rows),
         "maximum_coordinator_rss_gib": max(
@@ -193,6 +193,7 @@ def analyze(root):
     original = original_rows()
     ceres = ceres_rows()
     details = {}
+    selected_rows = {}
     recovery_counts = {}
     for clusters in (4, 16):
         reload_rows = load_rows(root / f"reload_k{clusters}")
@@ -228,6 +229,7 @@ def analyze(root):
                 selected_status["worker_max_rss_kb"]
             )
             details[(scene, clusters)] = result
+            selected_rows[(scene, clusters)] = selected
         recovery_counts[str(clusters)] = recovered
     summaries = {}
     for clusters in (4, 16):
@@ -262,7 +264,7 @@ def analyze(root):
         for row in details.values()
     )
     residuals = [row["residual"] for row in details.values() if row["residual"] is not None]
-    return {
+    summary = {
         "status": "passed",
         "recovery_counts": recovery_counts,
         "summaries": summaries,
@@ -274,6 +276,7 @@ def analyze(root):
             for (scene, clusters), row in sorted(details.items())
         },
     }
+    return summary, selected_rows
 
 
 def write_report(path, summary):
@@ -316,11 +319,16 @@ def main():
     if arguments.prepare_recovery:
         prepare_recovery(arguments.root)
         return
-    summary = analyze(arguments.root)
+    summary, selected_rows = analyze(arguments.root)
     (arguments.root / "summary.json").write_text(
         json.dumps(summary, indent=2, sort_keys=True) + "\n", encoding="utf-8"
     )
     write_report(arguments.root / "report.md", summary)
+    with (arguments.root / "selected_results.jsonl").open(
+        "w", encoding="utf-8"
+    ) as output:
+        for key in sorted(selected_rows):
+            output.write(json.dumps(selected_rows[key]) + "\n")
     print(json.dumps(summary, indent=2, sort_keys=True))
 
 

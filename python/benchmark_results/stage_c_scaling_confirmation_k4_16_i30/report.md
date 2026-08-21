@@ -19,3 +19,23 @@ One global L2 C1+C5 policy is held fixed for K=[4, 16], with one thread per clus
 ## Decision
 
 Retain two global, nondominated operating points with identical solver settings: K4 is the resource endpoint and K16 is the latency endpoint. K16/K4 geometric SSE is `0.953599x` on 1DSfM and `1.002768x` on BAL; optimization time is `0.584x` and `0.510x`. Worker CPU rises to `1.456x`/`1.568x`, and traffic rises to `1.927x`/`1.985x`. Do not route K by scene and do not alter C1 or C5.
+
+## Terminal-Correction Transfer
+
+The frozen one-step terminal correction was transferred unchanged to both
+operating points. Physical-SSE validation accepted all 1DSfM states and 23/29
+BAL states per K; the same six corrupt BAL states were rerun in-process at K4
+and K16.
+
+| K | Family | Correction/prestate | Summed | Accepted/no-op | Corrected/Ceres | Correction s |
+|---:|---|---:|---:|---:|---:|---:|
+| 4 | 1DSfM | 0.785461 | 0.777032 | 15/0 | 1.612187 | 17.394 |
+| 4 | BAL | 0.997869 | 0.996093 | 26/3 | 1.005041 | 608.228 |
+| 16 | 1DSfM | 0.778120 | 0.748063 | 15/0 | 1.523013 | 16.097 |
+| 16 | BAL | 0.997663 | 0.996418 | 27/2 | 1.007594 | 521.372 |
+
+No accepted solve is nonconverged; the maximum accepted residual is
+`9.971e-7`. The raw endpoints remain the DRS-only resource/latency claims. The
+corrected endpoints are separately labeled one-correction variants. Corrected
+K16/K4 SSE is `0.944688x` on 1DSfM and `1.002540x` on BAL, preserving the same
+quality tradeoff while K16 remains the lower-latency corrected option.

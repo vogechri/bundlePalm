@@ -34,6 +34,9 @@ BASE_DRS_PATHS = {
     ),
 }
 SCALING_ROOT = RESULTS / "stage_c_scaling_confirmation_k4_16_i30"
+CORRECTED_SCALING_SUMMARY = (
+    RESULTS / "terminal_correction_scaling_all/summary.json"
+)
 SCHUR_PRESET_SOURCES = {
     "fast": (
         RESULTS / "schur20_all15/"
@@ -133,6 +136,31 @@ def load_scaling(family):
             raise ValueError(f"non-L2 scaling row {scene}/K{cluster}")
         rows[cluster][scene] = row
     return rows, paths[0]
+
+
+def load_corrected_scaling(family, scaling):
+    summary = json.loads(CORRECTED_SCALING_SUMMARY.read_text(encoding="utf-8"))
+    corrected = {4: {}, 16: {}}
+    expected_prefix = "bal" if family == "bal" else ""
+    for clusters in corrected:
+        for scene, base_row in scaling[clusters].items():
+            if scene.startswith("bal") != bool(expected_prefix):
+                raise ValueError(f"corrected scaling family mismatch: {scene}")
+            key = f"{scene}_k{clusters}"
+            correction = summary["scenes"].get(key)
+            if correction is None:
+                raise ValueError(f"missing corrected scaling row {key}")
+            row = dict(base_row)
+            row["qualityMetrics"] = dict(base_row["qualityMetrics"])
+            row["qualityMetrics"]["sumSquaredError"] = correction["final"]
+            row["qualityMetrics"]["objectiveValue"] = correction["final"]
+            row["optimizationSeconds"] = (
+                base_row["optimizationSeconds"] + correction["seconds"]
+            )
+            row["overallSeconds"] = base_row["overallSeconds"] + correction["seconds"]
+            row["variant"] = f"{base_row['variant']}_terminal_schur1"
+            corrected[clusters][scene] = row
+    return corrected
 
 
 def validate_k1(rows, iterations, threads, bae_style=False):
@@ -363,6 +391,8 @@ def main():
     validate_base_drs(base_drs["bal"], 29, 90)
     scaling_1dsfm, scaling_1dsfm_path = load_scaling("1dsfm")
     scaling_bal, scaling_bal_path = load_scaling("bal")
+    corrected_scaling_1dsfm = load_corrected_scaling("1dsfm", scaling_1dsfm)
+    corrected_scaling_bal = load_corrected_scaling("bal", scaling_bal)
     schur_presets = {
         name: load_schur_preset(*source)
         for name, source in SCHUR_PRESET_SOURCES.items()
@@ -398,12 +428,16 @@ def main():
         summarize("DRS+Schur quality", schur_presets["quality"], ceres["1dsfm"], one_d_sfm_scenes, "drs", "K24/I60 + up to 16 corrections", "CPU DRS + Schur optimization", base_drs["1dsfm"]),
         summarize("DRS K4", scaling_1dsfm[4], ceres["1dsfm"], one_d_sfm_scenes, "drs", "frozen C1+C5 resource endpoint, I30, T1/cluster", "CPU DRS optimization", base_drs["1dsfm"]),
         summarize("DRS K16", scaling_1dsfm[16], ceres["1dsfm"], one_d_sfm_scenes, "drs", "frozen C1+C5 latency endpoint, I30, T1/cluster", "CPU DRS optimization", base_drs["1dsfm"]),
+        summarize("DRS K4 + terminal correction", corrected_scaling_1dsfm[4], ceres["1dsfm"], one_d_sfm_scenes, "drs", "frozen C1+C5 resource endpoint, I30 + one correction", "CPU DRS + terminal correction", base_drs["1dsfm"]),
+        summarize("DRS K16 + terminal correction", corrected_scaling_1dsfm[16], ceres["1dsfm"], one_d_sfm_scenes, "drs", "frozen C1+C5 latency endpoint, I30 + one correction", "CPU DRS + terminal correction", base_drs["1dsfm"]),
     ]
     all29 = [
         summarize("Ceres", ceres["bal"], ceres["bal"], bal_scenes, "ceres", "left-SE3, I90, T16", "CPU native solve", base_drs["bal"]),
         summarize("Base DRS K24", base_drs["bal"], ceres["bal"], bal_scenes, "drs", "established quality baseline, I90, T1/cluster", "CPU DRS optimization", base_drs["bal"]),
         summarize("DRS K4", scaling_bal[4], ceres["bal"], bal_scenes, "drs", "frozen C1+C5 resource endpoint, I30, T1/cluster", "CPU DRS optimization", base_drs["bal"]),
         summarize("DRS K16", scaling_bal[16], ceres["bal"], bal_scenes, "drs", "frozen C1+C5 latency endpoint, I30, T1/cluster", "CPU DRS optimization", base_drs["bal"]),
+        summarize("DRS K4 + terminal correction", corrected_scaling_bal[4], ceres["bal"], bal_scenes, "drs", "frozen C1+C5 resource endpoint, I30 + one correction", "CPU DRS + terminal correction", base_drs["bal"]),
+        summarize("DRS K16 + terminal correction", corrected_scaling_bal[16], ceres["bal"], bal_scenes, "drs", "frozen C1+C5 latency endpoint, I30 + one correction", "CPU DRS + terminal correction", base_drs["bal"]),
     ]
     six_scenes = list(BAE_SCENES)
     six_sources = [
@@ -413,6 +447,8 @@ def main():
         ("Base DRS K24", base_drs["1dsfm"], "drs", "preserved quality baseline, I200", "CPU DRS optimization"),
         ("DRS K4", scaling_1dsfm[4], "drs", "frozen C1+C5 resource endpoint, I30, T1/cluster", "CPU DRS optimization"),
         ("DRS K16", scaling_1dsfm[16], "drs", "frozen C1+C5 latency endpoint, I30, T1/cluster", "CPU DRS optimization"),
+        ("DRS K4 + terminal correction", corrected_scaling_1dsfm[4], "drs", "frozen C1+C5 resource endpoint, I30 + one correction", "CPU DRS + terminal correction"),
+        ("DRS K16 + terminal correction", corrected_scaling_1dsfm[16], "drs", "frozen C1+C5 latency endpoint, I30 + one correction", "CPU DRS + terminal correction"),
         ("BAE Schur-PCG CG", bae["BAE Schur-PCG CG"], "bae", "verified exported state, I90", "RTX 5090 GPU optimization"),
         ("BAE Schur-PCG Nesterov", bae["BAE Schur-PCG Nesterov"], "bae", "verified exported state, I90", "RTX 5090 GPU optimization"),
     ]
@@ -441,6 +477,9 @@ def main():
             "base_drs_bal": str(BASE_DRS_PATHS["bal"].relative_to(ROOT)),
             "k4_k16_1dsfm": str(scaling_1dsfm_path.relative_to(ROOT)),
             "k4_k16_bal": str(scaling_bal_path.relative_to(ROOT)),
+            "k4_k16_terminal_correction": str(
+                CORRECTED_SCALING_SUMMARY.relative_to(ROOT)
+            ),
             "schur_fast": str(SCHUR_PRESET_SOURCES["fast"][0].relative_to(ROOT)),
             "schur_balanced": str(SCHUR_PRESET_SOURCES["balanced"][0].relative_to(ROOT)),
             "schur_quality": str(SCHUR_PRESET_SOURCES["quality"][0].relative_to(ROOT)),
@@ -476,9 +515,13 @@ def main():
             "The best BAE-style K1 local diagnostic reaches near-Ceres aggregate "
             "quality on all 15 1DSfM scenes but is neither distributed nor a matched "
             "work budget. The preserved longer-horizon base DRS is better in endpoint "
-            "quality than current K4/K16 on both families. K4 and K16 are therefore "
-            "speed endpoints, not quality replacements: C1+C5 improves its matched "
-            "I30 plain control, but that gain does not overcome the shorter horizon. "
+            "quality than both raw and terminal-corrected K4/K16 on both families. "
+            "Raw K4 and K16 remain the DRS-only resource and latency endpoints. The "
+            "single terminal-correction variants are separately labeled: they improve "
+            "all 15 1DSfM scenes and safely improve or no-op on all 29 BAL scenes, but "
+            "remain `1.045295x` and `1.009206x` the corresponding preserved base DRS "
+            "quality at corrected K16. The correction cost is modest on 1DSfM and "
+            "material on large BAL. "
             "The three DRS+Schur rows are separately labeled polishing workflows "
             "rather than DRS-only gains. Each improves both endpoint quality and "
             "measured optimization time relative to the preserved I200 base; fast, "

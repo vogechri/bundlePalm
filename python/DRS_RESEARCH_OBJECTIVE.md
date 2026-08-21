@@ -246,6 +246,17 @@ in-process I30 reruns because its saved K4/K16 states are corrupt. The active
 gate is full all-15/all-29 transfer with physical-SSE state validation and
 in-process recovery, frozen in `TERMINAL_CORRECTION_SCALING_PLAN.md`.
 
+Terminal-correction K4/K16 breadth (2026-08-21): the unchanged policy passes
+all four complete cohorts. K4 correction/prestate is `0.785461x` on all-15
+1DSfM and `0.997869x` on all-29 BAL, with accepted/no-op `15/0` and `26/3`.
+K16 is `0.778120x` and `0.997663x`, with `15/0` and `27/2`. Corrected/Ceres is
+`1.612187x`/`1.005041x` at K4 and `1.523013x`/`1.007594x` at K16. No accepted
+solve is nonconverged; maximum residual is `9.971e-7`. Correction time totals
+`17.394/16.097s` on 1DSfM and `608.228/521.372s` on BAL for K4/K16. Keep raw
+K4/K16 as DRS-only resource/latency endpoints; add separately labeled terminal
+correction variants. See
+`benchmark_results/terminal_correction_scaling_all/report.md`.
+
 Do not implement an adaptive forcing policy from these eight outcomes. The only
 remaining targeted experiment in this direction is a default-off true
 interior-only trial that holds shared cameras fixed, rolls back unless the local

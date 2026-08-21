@@ -1,7 +1,7 @@
 # Terminal Correction K4/K16 Transfer Plan
 
 Date: 2026-08-21
-Status: active; sentinel gate passed
+Status: complete; full transfer passed
 Source checkpoint: `caacacd`
 
 This is the restart contract for transferring the frozen one-step terminal
@@ -100,12 +100,11 @@ absolute paths, symlinked states, and NPZ outputs remain untracked.
 |---|---|---|
 | Sentinel K4/K16 | passed | `terminal_correction_scaling_sentinels/report.md` |
 | Full reload inventory | complete | `recovery_inventory.json` |
-| Invalid-state in-process recovery | active | K4/K16: BAL1490, 1778, 245, 427, 744, 951 |
-| Merged all-15/all-29 decision | blocked by recovery | -- |
+| Invalid-state in-process recovery | complete | K4/K16: BAL1490, 1778, 245, 427, 744, 951 |
+| Merged all-15/all-29 decision | passed | `terminal_correction_scaling_all/report.md` |
 
 ## Immediate Next Action
 
-Resume the six K4 and six K16 in-process recoveries with `OVERWRITE=0`, then run
-the merged analyzer. All 30 1DSfM states reproduce after exact structured state
-resolution; the six BAL IDs above are the only physical-SSE-invalid states at
-both K values.
+No scaling-transfer run remains. Integrate the committed full report into the
+publication comparison while retaining raw K4/K16 as the DRS-only resource and
+latency endpoints and labeling corrected rows as one terminal correction.

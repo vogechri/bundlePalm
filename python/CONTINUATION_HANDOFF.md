@@ -135,6 +135,14 @@ corrected/prestate is `0.822336x`/`0.775883x` on 1DSfM and
 `TERMINAL_CORRECTION_SCALING_PLAN.md`; many BAL NPZ states are corrupt, so
 validate physical SSE and rerun invalid rows in-process.
 
+That K4/K16 breadth gate is complete and passes. Correction/prestate is
+`0.785461x`/`0.778120x` on all-15 1DSfM and
+`0.997869x`/`0.997663x` on all-29 BAL for K4/K16. Accepted/no-op counts are
+`15/0`, `15/0`, `26/3`, and `27/2`; no nonconverged solve is accepted. Raw
+K4/K16 remain the DRS-only resource/latency endpoints. Publication tables now
+include separately labeled one-terminal-correction rows. Full report:
+`benchmark_results/terminal_correction_scaling_all/report.md`.
+
 Only `all15_corrected/` is authoritative. The sibling `all15/` directory is a
 quarantined setup error with the wrong trust cap and recovery controls.
 
