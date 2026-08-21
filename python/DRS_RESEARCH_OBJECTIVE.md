@@ -40,6 +40,9 @@ Active K1 carryover and crash-resume test protocol:
 Active terminal-correction K4/K16 transfer protocol:
 `TERMINAL_CORRECTION_SCALING_PLAN.md`.
 
+Active integrated K24/I200 quality protocol:
+`K24_I200_QUALITY_PLAN.md`.
+
 ## 1. North Star
 
 Develop one genuinely distributed product-space DRS method for bundle
@@ -143,6 +146,13 @@ bridge or the early plain I1000 run. It is an all-15/all-29 longer-horizon
 evaluation of the integrated mature backbone, with direct tangent and
 shared-only semantics retained, against the preserved legacy quality
 references. Do not claim that gate has already been completed at I200.
+
+That gate is now active under `K24_I200_QUALITY_PLAN.md`. The first experiment
+uses one I200 horizon for both matched arms: one stops ordinary DRS at I90 and
+then applies the frozen terminal correction; the other completes I200 and
+applies the same correction. Their first 90 trajectory rows must match exactly.
+Roman, Trafalgar, BAL52, and BAL3068 form the frozen sentinel; no duration or
+policy sweep is permitted.
 
 Fresh isolated bridge gate (2026-08-19):
 `serverTest/client_drs_k1_bridge.py` preserves `client_drs.py` and pins the

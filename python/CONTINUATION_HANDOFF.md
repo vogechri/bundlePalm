@@ -143,6 +143,13 @@ K4/K16 remain the DRS-only resource/latency endpoints. Publication tables now
 include separately labeled one-terminal-correction rows. Full report:
 `benchmark_results/terminal_correction_scaling_all/report.md`.
 
+The active quality gate is now the unresolved integrated K24/I200 continuation,
+frozen in `K24_I200_QUALITY_PLAN.md`. Both sentinel arms request I200 so their
+first 90 rows must match exactly; one stops at I90 before the terminal
+correction, while the other runs through I200 before the same correction. Start
+with Roman, Trafalgar, BAL52, and BAL3068. Do not substitute the historical
+pre-integration I200 artifact or the failed plain-resolvent I1000 preset.
+
 Only `all15_corrected/` is authoritative. The sibling `all15/` directory is a
 quarantined setup error with the wrong trust cap and recovery controls.
 
