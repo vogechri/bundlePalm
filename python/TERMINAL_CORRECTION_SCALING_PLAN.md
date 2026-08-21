@@ -99,12 +99,13 @@ absolute paths, symlinked states, and NPZ outputs remain untracked.
 | Phase | Status | Artifact |
 |---|---|---|
 | Sentinel K4/K16 | passed | `terminal_correction_scaling_sentinels/report.md` |
-| Full reload inventory | ready to run | `serverTest/run_terminal_correction_scaling_all.sh` |
-| Invalid-state in-process recovery | blocked by inventory | -- |
+| Full reload inventory | complete | `recovery_inventory.json` |
+| Invalid-state in-process recovery | active | K4/K16: BAL1490, 1778, 245, 427, 744, 951 |
 | Merged all-15/all-29 decision | blocked by recovery | -- |
 
 ## Immediate Next Action
 
-Launch the committed all-88 reload inventory unchanged. The runner will write
-physical-SSE recovery manifests, rerun invalid rows in-process, and then merge
-the final all-15/all-29 decision.
+Resume the six K4 and six K16 in-process recoveries with `OVERWRITE=0`, then run
+the merged analyzer. All 30 1DSfM states reproduce after exact structured state
+resolution; the six BAL IDs above are the only physical-SSE-invalid states at
+both K values.
