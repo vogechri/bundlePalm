@@ -1486,6 +1486,9 @@ def parse_arguments():
         "--schur-model-consensus-clipping", action="store_true"
     )
     parser.add_argument(
+        "--schur-coupled-consensus-oracle", action="store_true"
+    )
+    parser.add_argument(
         "--schur-model-consensus-clipping-minimum-scale",
         type=float,
         default=0.01,
@@ -4844,38 +4847,49 @@ def main():
                         copy_camera_indices,
                     )
                 )
-                coupled_oracle_started_at = time.perf_counter()
-                physical_reflected = to_physical_cameras(
-                    reflected, camera_scaling
-                )
-                repeated_base_cameras = np.broadcast_to(
-                    schur_alignment_base_cameras,
-                    physical_reflected.shape,
-                ).copy()
-                reflected_tangent_copies = left_se3_camera_minus(
-                    physical_reflected, repeated_base_cameras
-                )
-                coupled_oracle_tangent = project_stabilized_coupled_tangents(
-                    reflected_tangent_copies,
-                    camera_masks,
-                    schur_alignment_systems,
-                )
-                coupled_oracle_seconds = (
-                    time.perf_counter() - coupled_oracle_started_at
-                )
-                coupled_oracle_alignment = (
-                    diagonal_weighted_tangent_alignment(
-                        schur_alignment_tangent[shared_cameras],
-                        coupled_oracle_tangent[shared_cameras],
-                        schur_alignment_diagonal[shared_cameras],
+                coupled_oracle_diagnostics = None
+                if arguments.schur_coupled_consensus_oracle:
+                    coupled_oracle_started_at = time.perf_counter()
+                    physical_reflected = to_physical_cameras(
+                        reflected, camera_scaling
                     )
-                )
-                coupled_oracle_model = evaluate_global_schur_direction(
-                    schur_alignment_systems,
-                    camera_count,
-                    arguments.schur_alignment_camera_damping,
-                    coupled_oracle_tangent,
-                )
+                    repeated_base_cameras = np.broadcast_to(
+                        schur_alignment_base_cameras,
+                        physical_reflected.shape,
+                    ).copy()
+                    reflected_tangent_copies = left_se3_camera_minus(
+                        physical_reflected, repeated_base_cameras
+                    )
+                    coupled_oracle_tangent = (
+                        project_stabilized_coupled_tangents(
+                            reflected_tangent_copies,
+                            camera_masks,
+                            schur_alignment_systems,
+                        )
+                    )
+                    coupled_oracle_seconds = (
+                        time.perf_counter() - coupled_oracle_started_at
+                    )
+                    coupled_oracle_alignment = (
+                        diagonal_weighted_tangent_alignment(
+                            schur_alignment_tangent[shared_cameras],
+                            coupled_oracle_tangent[shared_cameras],
+                            schur_alignment_diagonal[shared_cameras],
+                        )
+                    )
+                    coupled_oracle_model = evaluate_global_schur_direction(
+                        schur_alignment_systems,
+                        camera_count,
+                        arguments.schur_alignment_camera_damping,
+                        coupled_oracle_tangent,
+                    )
+                    coupled_oracle_diagnostics = {
+                        "seconds": coupled_oracle_seconds,
+                        "sharedCamerasDiagonalWeighted": (
+                            coupled_oracle_alignment
+                        ),
+                        "model": coupled_oracle_model,
+                    }
                 (
                     one_step_schur_tangent,
                     one_step_schur_diagnostics,
@@ -4957,13 +4971,7 @@ def main():
                     "metricContributionSchurAlignment": (
                         contribution_schur_alignment
                     ),
-                    "coupledConsensusOracle": {
-                        "seconds": coupled_oracle_seconds,
-                        "sharedCamerasDiagonalWeighted": (
-                            coupled_oracle_alignment
-                        ),
-                        "model": coupled_oracle_model,
-                    },
+                    "coupledConsensusOracle": coupled_oracle_diagnostics,
                     "oneStepSchurResidualOracle": {
                         **one_step_schur_diagnostics,
                         "sharedCamerasDiagonalWeighted": (
@@ -7321,6 +7329,9 @@ def main():
         ),
         "schurModelConsensusClipping": (
             arguments.schur_model_consensus_clipping
+        ),
+        "schurCoupledConsensusOracle": (
+            arguments.schur_coupled_consensus_oracle
         ),
         "schurModelConsensusClippingMinimumScale": (
             arguments.schur_model_consensus_clipping_minimum_scale
