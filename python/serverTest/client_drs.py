@@ -5095,19 +5095,31 @@ def main():
                         "selectedScale": selected_scale,
                         "selected": one_step_selected,
                         "attempts": one_step_attempts,
+                        "productStateRestarted": False,
                     }
                     if one_step_selected:
                         candidate_consensus = selected_consensus
                         physical_candidate = selected_physical_candidate
+                        local_cameras = np.repeat(
+                            candidate_consensus[None, :, :],
+                            cluster_count,
+                            axis=0,
+                        )
+                        restart_centers = local_cameras.copy()
                         candidate_centers, residuals = drs_state_for_consensus(
                             local_cameras,
-                            centers,
+                            restart_centers,
                             camera_masks,
                             candidate_consensus,
                             arguments.relaxation,
                             selected_metric_blocks,
                             shared_only=arguments.shared_only_camera_proximal,
                         )
+                        accelerator.reset()
+                        acceleration_failures = 0
+                        schur_alignment_diagnostics[
+                            "oneStepSchurResidualProposal"
+                        ]["productStateRestarted"] = True
                 if arguments.schur_model_consensus_clipping:
                     consensus_model = schur_alignment_diagnostics[
                         "consensusModel"
