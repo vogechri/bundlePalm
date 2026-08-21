@@ -22,6 +22,7 @@ from bal_evaluator import (
 )
 from camera_tangent_diagnostics import (
     consensus_vote_coherence,
+    diagonal_weighted_copy_alignment,
     diagonal_weighted_tangent_alignment,
     left_se3_camera_minus,
     left_se3_camera_plus,
@@ -4735,6 +4736,37 @@ def main():
                     selected_metric_blocks.blocks,
                     camera_copy_count,
                 )
+                active_shared_copies = shared_cameras[
+                    selected_metric_blocks.camera_indices
+                ]
+                copy_cluster_indices = selected_metric_blocks.cluster_indices[
+                    active_shared_copies
+                ]
+                copy_camera_indices = selected_metric_blocks.camera_indices[
+                    active_shared_copies
+                ]
+                scaled_reflected_copies = reflected[
+                    copy_cluster_indices, copy_camera_indices
+                ]
+                scaling = np.asarray(camera_scaling)
+                copy_scaling = (
+                    scaling[copy_camera_indices]
+                    if scaling.ndim in (2, 3)
+                    else scaling
+                )
+                physical_reflected_copies = to_physical_cameras(
+                    scaled_reflected_copies, copy_scaling
+                )
+                reflected_copy_tangents = left_se3_camera_minus(
+                    physical_reflected_copies,
+                    schur_alignment_base_cameras[copy_camera_indices],
+                )
+                copy_schur_alignment = diagonal_weighted_copy_alignment(
+                    schur_alignment_tangent,
+                    reflected_copy_tangents,
+                    schur_alignment_diagonal,
+                    copy_camera_indices,
+                )
                 similarity_gauge_basis = similarity_gauge_tangent_basis(
                     schur_alignment_base_cameras
                 )
@@ -4786,6 +4818,7 @@ def main():
                         "consensus": consensus_gauge_diagnostics,
                     },
                     "consensusVoteCoherence": vote_coherence,
+                    "reflectedCopySchurAlignment": copy_schur_alignment,
                     "quotientAllCamerasDiagonalWeighted": (
                         diagonal_weighted_tangent_alignment(
                             quotient_schur_tangent,

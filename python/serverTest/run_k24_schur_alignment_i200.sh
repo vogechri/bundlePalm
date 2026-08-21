@@ -12,6 +12,7 @@ REQUEST_PORT=${REQUEST_PORT:-30920}
 OVERWRITE=${OVERWRITE:-0}
 PROBLEM_FILTER=${PROBLEM_FILTER:-"montreal_notre_dame piazza_del_popolo roman_forum trafalgar yorkminster 52 3068"}
 SCHUR_ALIGNMENT_MAXIMUM_ITERATIONS=${SCHUR_ALIGNMENT_MAXIMUM_ITERATIONS:-5000}
+ANALYZE=${ANALYZE:-1}
 
 mkdir -p "$OUTPUT_ROOT"
 one_d_sfm_manifest="$DETACHED_ROOT/serverTest/1dsfm_all_fifteen_datasets.txt"
@@ -71,6 +72,8 @@ env \
   CASE_TIMEOUT_SECONDS=28800 VARIANT_TAG=align_i200 \
   "$RUNNER"
 
-"$WORKSPACE/serverTest/.venv/bin/python" \
-  "$WORKSPACE/serverTest/analyze_k24_schur_alignment_i200.py" \
-  --root "$OUTPUT_ROOT"
+if [[ "$ANALYZE" == "1" ]]; then
+  "$WORKSPACE/serverTest/.venv/bin/python" \
+    "$WORKSPACE/serverTest/analyze_k24_schur_alignment_i200.py" \
+    --root "$OUTPUT_ROOT"
+fi

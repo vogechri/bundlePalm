@@ -2,6 +2,7 @@ import numpy as np
 
 from camera_tangent_diagnostics import (
     consensus_vote_coherence,
+    diagonal_weighted_copy_alignment,
     diagonal_weighted_tangent_alignment,
     left_se3_camera_minus,
     left_se3_camera_plus,
@@ -151,3 +152,19 @@ def test_consensus_vote_coherence_ignores_singular_unique_metrics():
 
     np.testing.assert_allclose(diagnostics["global"], 1.0)
     assert diagnostics["sharedCameraCount"] == 1
+
+
+def test_copy_alignment_reports_signal_before_cancellation():
+    reference = np.zeros((1, 9))
+    reference[0, 0] = 1.0
+    candidates = np.zeros((2, 9))
+    candidates[:, 0] = [2.0, -1.0]
+
+    diagnostics = diagonal_weighted_copy_alignment(
+        reference, candidates, np.ones_like(reference), np.array([0, 0])
+    )
+
+    assert diagnostics["positiveCopyFraction"] == 0.5
+    assert diagnostics["positiveCameraFraction"] == 1.0
+    assert diagnostics["cameraBestCosineMedian"] == 1.0
+    assert diagnostics["global"]["cosine"] > 0.0

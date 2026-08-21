@@ -253,6 +253,66 @@ def consensus_vote_coherence(
     }
 
 
+def diagonal_weighted_copy_alignment(
+    reference, candidates, diagonal, camera_indices
+):
+    """Compare individual camera-copy tangents with global reference tangents."""
+    reference = np.asarray(reference, dtype=np.float64)
+    candidates = np.asarray(candidates, dtype=np.float64)
+    diagonal = np.asarray(diagonal, dtype=np.float64)
+    camera_indices = np.asarray(camera_indices)
+    if reference.ndim != 2 or reference.shape[1] != 9:
+        raise ValueError("reference must have shape (cameras, 9)")
+    if diagonal.shape != reference.shape:
+        raise ValueError("diagonal must match reference")
+    if candidates.shape != (camera_indices.size, 9):
+        raise ValueError("candidates must match camera indices")
+    if np.any(camera_indices < 0) or np.any(camera_indices >= reference.shape[0]):
+        raise ValueError("camera index is out of range")
+    selected_diagonal = diagonal[camera_indices]
+    positive = diagonal[diagonal > 0.0]
+    floor = (
+        float(np.median(positive)) * 1e-12
+        if positive.size
+        else np.finfo(np.float64).tiny
+    )
+    weights = np.sqrt(np.maximum(selected_diagonal, floor))
+    weighted_reference = reference[camera_indices] * weights
+    weighted_candidates = candidates * weights
+    reference_norms = np.linalg.norm(weighted_reference, axis=1)
+    candidate_norms = np.linalg.norm(weighted_candidates, axis=1)
+    denominators = reference_norms * candidate_norms
+    copy_cosines = np.divide(
+        np.sum(weighted_reference * weighted_candidates, axis=1),
+        denominators,
+        out=np.full(camera_indices.size, np.nan),
+        where=denominators > 0.0,
+    )
+    finite = np.isfinite(copy_cosines)
+    unique_cameras = np.unique(camera_indices)
+    best_cosines = np.array([
+        np.nanmax(copy_cosines[camera_indices == camera])
+        for camera in unique_cameras
+        if np.any(np.isfinite(copy_cosines[camera_indices == camera]))
+    ])
+    global_alignment = tangent_alignment(
+        weighted_reference, weighted_candidates
+    )["global"]
+    return {
+        "global": global_alignment,
+        "copyCount": int(camera_indices.size),
+        "finiteCopyCount": int(np.count_nonzero(finite)),
+        "positiveCopyFraction": float(np.mean(copy_cosines[finite] > 0.0))
+        if np.any(finite) else 0.0,
+        "copyCosineMedian": float(np.median(copy_cosines[finite]))
+        if np.any(finite) else float("nan"),
+        "cameraBestCosineMedian": float(np.median(best_cosines))
+        if best_cosines.size else float("nan"),
+        "positiveCameraFraction": float(np.mean(best_cosines > 0.0))
+        if best_cosines.size else 0.0,
+    }
+
+
 def diagonal_weighted_tangent_alignment(reference, candidate, diagonal):
     """Return tangent alignment after whitening by a positive diagonal."""
     reference = np.asarray(reference, dtype=np.float64)
