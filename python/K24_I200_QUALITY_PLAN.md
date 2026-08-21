@@ -1,7 +1,7 @@
 # Integrated K24/I200 Quality Gate
 
 Date: 2026-08-21
-Status: ready to run sentinel
+Status: sentinel passed; breadth active
 Source checkpoint: `0b5b401`
 
 This is the restart contract for the remaining apples-to-apples longer-horizon
@@ -79,10 +79,13 @@ logs, memory traces, NPZ states, and absolute-path manifests untracked.
 
 | Phase | Status | Artifact |
 |---|---|---|
-| Four-scene sentinel | ready | `serverTest/run_k24_i200_quality_gate.sh` |
-| All-15/all-29 breadth | blocked by sentinel | -- |
+| Four-scene sentinel | passed | `k24_i200_terminal_correction_sentinel/report.md` |
+| All-15/all-29 breadth | ready | -- |
 | Publication decision | blocked by breadth | -- |
 
 ## Immediate Next Action
 
-Run the committed four-scene sentinel unchanged and apply the promotion gate.
+Run the unchanged I200 + one-correction policy on all 15 1DSfM and all 29 BAL
+scenes. The horizon-matched sentinel passes: corrected-I200/corrected-I90 is
+`0.948260x` on Roman/Trafalgar and `0.989516x` on BAL52/3068, with all four
+scenes improving.

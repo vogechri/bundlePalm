@@ -150,6 +150,12 @@ correction, while the other runs through I200 before the same correction. Start
 with Roman, Trafalgar, BAL52, and BAL3068. Do not substitute the historical
 pre-integration I200 artifact or the failed plain-resolvent I1000 preset.
 
+The four-scene K24/I200 sentinel passes. Corrected-I200/corrected-I90 is
+`0.948260x` on Roman/Trafalgar and `0.989516x` on BAL52/3068, with all four
+scenes improving; corrected I200 is `1.072873x`/`0.976646x` Ceres on the two
+pairs. Continue unchanged to all-15/all-29 breadth from
+`K24_I200_QUALITY_PLAN.md`.
+
 Only `all15_corrected/` is authoritative. The sibling `all15/` directory is a
 quarantined setup error with the wrong trust cap and recovery controls.
 

@@ -154,6 +154,15 @@ applies the same correction. Their first 90 trajectory rows must match exactly.
 Roman, Trafalgar, BAL52, and BAL3068 form the frozen sentinel; no duration or
 policy sweep is permitted.
 
+Integrated K24/I200 sentinel result (2026-08-21): the two I200-horizon arms
+match exactly through I90 and the continuation gate passes. Raw I200/raw I90 is
+`0.943915x` on Roman/Trafalgar and `0.989118x` on BAL52/3068.
+Corrected-I200/corrected-I90 is `0.948260x` and `0.989516x`, W/L `2/0` in both
+families. Corrected I200 reaches `1.072873x` Ceres on the 1DSfM pair and
+`0.976646x` on the BAL pair. The frozen next action is unchanged all-15/all-29
+breadth; do not tune duration or correction policy. See
+`benchmark_results/k24_i200_terminal_correction_sentinel/report.md`.
+
 Fresh isolated bridge gate (2026-08-19):
 `serverTest/client_drs_k1_bridge.py` preserves `client_drs.py` and pins the
 mature legacy backbone while exposing ordered `legacy`, `direct`, and

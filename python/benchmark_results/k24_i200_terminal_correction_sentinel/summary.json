@@ -1,0 +1,95 @@
+{
+  "families": {
+    "1dsfm": {
+      "corrected_i200_over_ceres": 1.072873269863171,
+      "corrected_i200_over_i90": 0.9482603605517065,
+      "corrected_i200_over_raw_i200": 0.7917190383375143,
+      "corrected_i90_over_ceres": 1.1314121252932725,
+      "losses": 0,
+      "raw_i200_over_i90": 0.9439150828882346,
+      "summed_corrected_i200_over_i90": 0.9619043220907222,
+      "wins": 2
+    },
+    "bal": {
+      "corrected_i200_over_ceres": 0.9766461806290925,
+      "corrected_i200_over_i90": 0.9895163390950499,
+      "corrected_i200_over_raw_i200": 0.9995513859540782,
+      "corrected_i90_over_ceres": 0.9869934856480209,
+      "losses": 0,
+      "raw_i200_over_i90": 0.9891179395601029,
+      "summed_corrected_i200_over_i90": 0.9898913945083224,
+      "wins": 2
+    }
+  },
+  "scenes": {
+    "bal3068": {
+      "corrected_i200": 3134961.891328278,
+      "corrected_i200_over_i90": 0.9900256948133898,
+      "corrected_i200_over_raw_i200": 0.9996006283525826,
+      "corrected_i90": 3166545.987393982,
+      "i200_coordinator_max_rss_kb": 8651312,
+      "i200_correction_seconds": 131.88101965602254,
+      "i200_damping": 0.0234375,
+      "i200_overall_seconds": 340.4179125780065,
+      "i200_worker_max_rss_kb": 5023276,
+      "i90_correction_seconds": 134.09882081102114,
+      "i90_damping": 0.0234375,
+      "raw_i200": 3136214.406442433,
+      "raw_i200_over_i90": 0.9892687004160544,
+      "raw_i90": 3170235.1495841756,
+      "scene": "bal3068"
+    },
+    "bal52": {
+      "corrected_i200": 475703.96946956543,
+      "corrected_i200_over_i90": 0.9890072454337953,
+      "corrected_i200_over_raw_i200": 0.9995021459813566,
+      "corrected_i90": 480991.3897657177,
+      "i200_coordinator_max_rss_kb": 794940,
+      "i200_correction_seconds": 0.19636203799746,
+      "i200_damping": 0.005859375,
+      "i200_overall_seconds": 31.367632552981377,
+      "i200_worker_max_rss_kb": 418932,
+      "i90_correction_seconds": 0.1937649970059283,
+      "i90_damping": 0.005859375,
+      "raw_i200": 475940.9185685116,
+      "raw_i200_over_i90": 0.9889672016795428,
+      "raw_i90": 481250.45781116997,
+      "scene": "bal52"
+    },
+    "roman_forum": {
+      "corrected_i200": 2390238.718854979,
+      "corrected_i200_over_i90": 0.9270675547065625,
+      "corrected_i200_over_raw_i200": 0.6788736389667193,
+      "corrected_i90": 2578278.9039699947,
+      "i200_coordinator_max_rss_kb": 998996,
+      "i200_correction_seconds": 1.1879617839877028,
+      "i200_damping": 0.005859375,
+      "i200_overall_seconds": 70.53348763199756,
+      "i200_worker_max_rss_kb": 779500,
+      "i90_correction_seconds": 0.8177398790139705,
+      "i90_damping": 0.005859375,
+      "raw_i200": 3520888.986782645,
+      "raw_i200_over_i90": 0.9287401367023331,
+      "raw_i90": 3791037.8238677448,
+      "scene": "roman_forum"
+    },
+    "trafalgar": {
+      "corrected_i200": 10844683.381168153,
+      "corrected_i200_over_i90": 0.9699376348881807,
+      "corrected_i200_over_raw_i200": 0.9233221025051574,
+      "corrected_i90": 11180804.817846235,
+      "i200_coordinator_max_rss_kb": 2553776,
+      "i200_correction_seconds": 13.520103843999095,
+      "i200_damping": 0.005859375,
+      "i200_overall_seconds": 227.80672091897577,
+      "i200_worker_max_rss_kb": 2482816,
+      "i90_correction_seconds": 5.234954660991207,
+      "i90_damping": 0.005859375,
+      "raw_i200": 11745287.318200614,
+      "raw_i200_over_i90": 0.9593379767859282,
+      "raw_i90": 12243117.235440707,
+      "scene": "trafalgar"
+    }
+  },
+  "status": "passed"
+}
