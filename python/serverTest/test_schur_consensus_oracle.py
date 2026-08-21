@@ -4,6 +4,7 @@ import numpy as np
 
 from drs_coupled_metrics import assemble_coupled_metric
 from schur_consensus_oracle import (
+    jacobi_refine_schur_tangent,
     project_stabilized_coupled_tangents,
     stabilized_coupled_metric_from_schur_systems,
 )
@@ -67,3 +68,30 @@ def test_coupled_tangent_oracle_preserves_direct_singletons():
 
     assert projected[2, 0] == 0.0
     assert np.all(np.isfinite(projected))
+
+
+def test_jacobi_refinement_solves_diagonal_schur_system_in_one_step():
+    identity = np.eye(9)
+    system = SimpleNamespace(
+        camera_ids=np.array([0, 1]),
+        block_rows=np.array([0, 1]),
+        block_columns=np.array([0, 1]),
+        blocks=np.array([2.0 * identity, 3.0 * identity]),
+        reduced_gradient=np.array([
+            np.full(9, -5.0),
+            np.full(9, -7.0),
+        ]),
+        camera_diagonal=np.array([identity, identity]),
+    )
+
+    refined, diagnostics = jacobi_refine_schur_tangent(
+        [system],
+        camera_count=2,
+        camera_damping=0.5,
+        tangent=np.zeros((2, 9)),
+        active_cameras=np.array([True, False]),
+    )
+
+    np.testing.assert_allclose(refined[0], 2.0)
+    np.testing.assert_allclose(refined[1], 0.0)
+    assert diagnostics["activeCameraCount"] == 1

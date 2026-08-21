@@ -103,3 +103,91 @@ def project_stabilized_coupled_tangents(
         metric,
         direct_singletons=np.zeros_like(tangent_copies),
     )
+
+
+def jacobi_refine_schur_tangent(
+    systems,
+    camera_count,
+    camera_damping,
+    tangent,
+    active_cameras,
+):
+    """Apply one block-Jacobi correction to a restricted Schur tangent."""
+    tangent = np.asarray(tangent, dtype=np.float64)
+    active_cameras = np.asarray(active_cameras, dtype=bool)
+    if tangent.shape != (camera_count, 9):
+        raise ValueError("tangent must match the global camera shape")
+    if active_cameras.shape != (camera_count,):
+        raise ValueError("active camera mask has an invalid shape")
+    if camera_damping <= 0.0:
+        raise ValueError("camera damping must be positive")
+
+    gradient = np.zeros_like(tangent)
+    camera_diagonal = np.zeros((camera_count, 9, 9), dtype=np.float64)
+    preconditioner = np.zeros_like(camera_diagonal)
+    action = np.zeros_like(tangent)
+    for system in systems:
+        np.add.at(gradient, system.camera_ids, system.reduced_gradient)
+        np.add.at(camera_diagonal, system.camera_ids, system.camera_diagonal)
+        block_action = np.einsum(
+            "bij,bj->bi", system.blocks, tangent[system.block_columns]
+        )
+        np.add.at(action, system.block_rows, block_action)
+        offdiagonal = system.block_rows != system.block_columns
+        if np.any(offdiagonal):
+            transpose_action = np.einsum(
+                "bji,bj->bi",
+                system.blocks[offdiagonal],
+                tangent[system.block_rows[offdiagonal]],
+            )
+            np.add.at(
+                action,
+                system.block_columns[offdiagonal],
+                transpose_action,
+            )
+        diagonal = ~offdiagonal
+        np.add.at(
+            preconditioner,
+            system.block_rows[diagonal],
+            system.blocks[diagonal],
+        )
+
+    damping_diagonal = np.diagonal(
+        camera_diagonal, axis1=1, axis2=2
+    )
+    positive = damping_diagonal[damping_diagonal > 0.0]
+    floor = (
+        float(np.median(positive)) * 1e-12
+        if positive.size else 1e-12
+    )
+    damping_diagonal = np.maximum(damping_diagonal, floor)
+    action += camera_damping * damping_diagonal * tangent
+    indices = np.arange(9)
+    preconditioner[:, indices, indices] += (
+        camera_damping * damping_diagonal
+    )
+    preconditioner = 0.5 * (
+        preconditioner + np.swapaxes(preconditioner, 1, 2)
+    )
+    eigenvalues, eigenvectors = np.linalg.eigh(preconditioner)
+    positive = eigenvalues[eigenvalues > 0.0]
+    eigenvalue_floor = max(
+        float(np.median(positive)) * 1e-12 if positive.size else 0.0,
+        np.finfo(np.float64).tiny,
+    )
+    inverse = np.einsum(
+        "bij,bj,bkj->bik",
+        eigenvectors,
+        1.0 / np.maximum(eigenvalues, eigenvalue_floor),
+        eigenvectors,
+    )
+    residual = -(gradient + action)
+    residual[~active_cameras] = 0.0
+    correction = np.einsum("bij,bj->bi", inverse, residual)
+    correction[~active_cameras] = 0.0
+    refined = tangent + correction
+    return refined, {
+        "activeCameraCount": int(np.count_nonzero(active_cameras)),
+        "residualNorm": float(np.linalg.norm(residual[active_cameras])),
+        "correctionNorm": float(np.linalg.norm(correction[active_cameras])),
+    }
