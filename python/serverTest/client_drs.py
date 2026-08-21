@@ -24,6 +24,7 @@ from camera_tangent_diagnostics import (
     diagonal_weighted_tangent_alignment,
     left_se3_camera_minus,
     left_se3_camera_plus,
+    project_tangent_orthogonal_to_basis,
     tangent_alignment,
 )
 from client_admm import AdmmWorkerClient as DrsWorkerClient
@@ -4717,6 +4718,25 @@ def main():
                 shared_schur_tangent[shared_cameras] = (
                     schur_alignment_tangent[shared_cameras]
                 )
+                similarity_gauge_basis = similarity_gauge_tangent_basis(
+                    schur_alignment_base_cameras
+                )
+                (
+                    quotient_schur_tangent,
+                    schur_gauge_diagnostics,
+                ) = project_tangent_orthogonal_to_basis(
+                    schur_alignment_tangent,
+                    similarity_gauge_basis,
+                    schur_alignment_diagonal,
+                )
+                (
+                    quotient_consensus_tangent,
+                    consensus_gauge_diagnostics,
+                ) = project_tangent_orthogonal_to_basis(
+                    consensus_tangent,
+                    similarity_gauge_basis,
+                    schur_alignment_diagonal,
+                )
                 schur_alignment_diagnostics = {
                     "cameraDamping": arguments.schur_alignment_camera_damping,
                     "landmarkDamping": (
@@ -4740,6 +4760,25 @@ def main():
                         diagonal_weighted_tangent_alignment(
                             schur_alignment_tangent[shared_cameras],
                             consensus_tangent[shared_cameras],
+                            schur_alignment_diagonal[shared_cameras],
+                        )
+                    ),
+                    "similarityGauge": {
+                        "rank": int(similarity_gauge_basis.shape[1]),
+                        "schur": schur_gauge_diagnostics,
+                        "consensus": consensus_gauge_diagnostics,
+                    },
+                    "quotientAllCamerasDiagonalWeighted": (
+                        diagonal_weighted_tangent_alignment(
+                            quotient_schur_tangent,
+                            quotient_consensus_tangent,
+                            schur_alignment_diagonal,
+                        )
+                    ),
+                    "quotientSharedCamerasDiagonalWeighted": (
+                        diagonal_weighted_tangent_alignment(
+                            quotient_schur_tangent[shared_cameras],
+                            quotient_consensus_tangent[shared_cameras],
                             schur_alignment_diagonal[shared_cameras],
                         )
                     ),
@@ -4772,6 +4811,18 @@ def main():
                         camera_count,
                         arguments.schur_alignment_camera_damping,
                         shared_schur_tangent,
+                    ),
+                    "quotientConsensusModel": evaluate_global_schur_direction(
+                        schur_alignment_systems,
+                        camera_count,
+                        arguments.schur_alignment_camera_damping,
+                        quotient_consensus_tangent,
+                    ),
+                    "quotientSchurModel": evaluate_global_schur_direction(
+                        schur_alignment_systems,
+                        camera_count,
+                        arguments.schur_alignment_camera_damping,
+                        quotient_schur_tangent,
                     ),
                     "schur": schur_alignment_solve_diagnostics,
                 }

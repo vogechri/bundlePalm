@@ -105,6 +105,17 @@ def extract_checkpoint(scene, checkpoint, diagnostic):
     shared_schur_camera_reduction = camera_model_reduction(
         shared_schur_model
     )
+    quotient_consensus_model = data["quotientConsensusModel"]
+    quotient_schur_model = data["quotientSchurModel"]
+    quotient_drs_camera_reduction = camera_model_reduction(
+        quotient_consensus_model
+    )
+    quotient_schur_camera_reduction = camera_model_reduction(
+        quotient_schur_model
+    )
+    quotient_shared = data["quotientSharedCamerasDiagonalWeighted"]["global"]
+    quotient_all = data["quotientAllCamerasDiagonalWeighted"]["global"]
+    gauge = data["similarityGauge"]
     return {
         "scene": scene,
         "checkpoint": checkpoint,
@@ -134,6 +145,23 @@ def extract_checkpoint(scene, checkpoint, diagnostic):
             shared_drs_camera_reduction, shared_schur_camera_reduction
         ),
         "unique_drs_camera_model_reduction": unique_drs_camera_reduction,
+        "consensus_gauge_fraction": gauge["consensus"]["componentFraction"],
+        "schur_gauge_fraction": gauge["schur"]["componentFraction"],
+        "quotient_shared_weighted_cosine": quotient_shared["cosine"],
+        "quotient_shared_drs_over_schur_norm": ratio(
+            quotient_shared["candidateNorm"],
+            quotient_shared["referenceNorm"],
+        ),
+        "quotient_all_weighted_cosine": quotient_all["cosine"],
+        "quotient_all_drs_over_schur_norm": ratio(
+            quotient_all["candidateNorm"], quotient_all["referenceNorm"]
+        ),
+        "quotient_drs_camera_model_reduction": quotient_drs_camera_reduction,
+        "quotient_schur_camera_model_reduction": quotient_schur_camera_reduction,
+        "quotient_camera_model_reduction_ratio": ratio(
+            quotient_drs_camera_reduction,
+            quotient_schur_camera_reduction,
+        ),
         "linear_iterations": schur["linearIterations"],
         "relative_residual": schur["relativeResidual"],
         "linear_seconds": schur["totalLinearSystemSeconds"],
@@ -191,6 +219,21 @@ def analyze(root):
             "nonpositive_unique_drs_camera_models": sum(
                 row["unique_drs_camera_model_reduction"] <= 0.0 for row in rows
             ),
+            "median_consensus_gauge_fraction": statistics.median(
+                row["consensus_gauge_fraction"] for row in rows
+            ),
+            "median_quotient_shared_weighted_cosine": statistics.median(
+                row["quotient_shared_weighted_cosine"] for row in rows
+            ),
+            "median_quotient_shared_drs_over_schur_norm": statistics.median(
+                row["quotient_shared_drs_over_schur_norm"] for row in rows
+            ),
+            "median_quotient_camera_model_reduction_ratio": statistics.median(
+                row["quotient_camera_model_reduction_ratio"] for row in rows
+            ),
+            "nonpositive_quotient_drs_camera_models": sum(
+                row["quotient_drs_camera_model_reduction"] <= 0.0 for row in rows
+            ),
         }
     return {
         "status": "passed",
@@ -214,6 +257,18 @@ def write_report(path, summary):
                 f"{row['median_shared_camera_model_reduction_ratio']:.6f} | "
                 f"{row['nonpositive_shared_drs_camera_models']}/"
                 f"{row['nonpositive_unique_drs_camera_models']} |\n"
+            )
+        output.write("\n## Similarity-gauge quotient\n\n")
+        output.write("| I | Median DRS gauge fraction | Median quotient shared cosine | Median quotient DRS/Schur norm | Median quotient-model ratio | Nonpositive quotient models |\n")
+        output.write("|---:|---:|---:|---:|---:|---:|\n")
+        for checkpoint, row in summary["checkpoint_summaries"].items():
+            output.write(
+                f"| {checkpoint} | "
+                f"{row['median_consensus_gauge_fraction']:.6f} | "
+                f"{row['median_quotient_shared_weighted_cosine']:.6f} | "
+                f"{row['median_quotient_shared_drs_over_schur_norm']:.6f} | "
+                f"{row['median_quotient_camera_model_reduction_ratio']:.6f} | "
+                f"{row['nonpositive_quotient_drs_camera_models']} |\n"
             )
         output.write("\n| Scene | I | Shared weighted cosine | DRS/Schur norm | Shared-model ratio | Shared/unique reduction | T/R/I cosine | PCG iters |\n")
         output.write("|---|---:|---:|---:|---:|---:|---|---:|\n")
