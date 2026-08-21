@@ -62,6 +62,7 @@ from drs_safeguards import (
 )
 from outer_acceleration import create_accelerator, interpolate_line_search_center
 from partition_cache import PARTITION_CACHE_MODES, partition_with_cache
+from schur_consensus_oracle import project_stabilized_coupled_tangents
 from admm_scaling import (
     aggregate_camera_metric_blocks,
     block_jacobi_coordinate_maps,
@@ -4811,6 +4812,38 @@ def main():
                         copy_camera_indices,
                     )
                 )
+                coupled_oracle_started_at = time.perf_counter()
+                physical_reflected = to_physical_cameras(
+                    reflected, camera_scaling
+                )
+                repeated_base_cameras = np.broadcast_to(
+                    schur_alignment_base_cameras,
+                    physical_reflected.shape,
+                ).copy()
+                reflected_tangent_copies = left_se3_camera_minus(
+                    physical_reflected, repeated_base_cameras
+                )
+                coupled_oracle_tangent = project_stabilized_coupled_tangents(
+                    reflected_tangent_copies,
+                    camera_masks,
+                    schur_alignment_systems,
+                )
+                coupled_oracle_seconds = (
+                    time.perf_counter() - coupled_oracle_started_at
+                )
+                coupled_oracle_alignment = (
+                    diagonal_weighted_tangent_alignment(
+                        schur_alignment_tangent[shared_cameras],
+                        coupled_oracle_tangent[shared_cameras],
+                        schur_alignment_diagonal[shared_cameras],
+                    )
+                )
+                coupled_oracle_model = evaluate_global_schur_direction(
+                    schur_alignment_systems,
+                    camera_count,
+                    arguments.schur_alignment_camera_damping,
+                    coupled_oracle_tangent,
+                )
                 similarity_gauge_basis = similarity_gauge_tangent_basis(
                     schur_alignment_base_cameras
                 )
@@ -4869,6 +4902,13 @@ def main():
                     "metricContributionSchurAlignment": (
                         contribution_schur_alignment
                     ),
+                    "coupledConsensusOracle": {
+                        "seconds": coupled_oracle_seconds,
+                        "sharedCamerasDiagonalWeighted": (
+                            coupled_oracle_alignment
+                        ),
+                        "model": coupled_oracle_model,
+                    },
                     "quotientAllCamerasDiagonalWeighted": (
                         diagonal_weighted_tangent_alignment(
                             quotient_schur_tangent,
