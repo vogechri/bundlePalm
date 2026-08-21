@@ -80,7 +80,7 @@ logs, memory traces, NPZ states, and absolute-path manifests untracked.
 | Phase | Status | Artifact |
 |---|---|---|
 | Four-scene sentinel | passed | `k24_i200_terminal_correction_sentinel/report.md` |
-| All-15/all-29 breadth | ready | -- |
+| All-15/all-29 breadth | ready | `serverTest/run_k24_i200_quality_breadth.sh` |
 | Publication decision | blocked by breadth | -- |
 
 ## Immediate Next Action
