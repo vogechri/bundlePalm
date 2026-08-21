@@ -275,6 +275,14 @@ BAL52 was reconfirmed bitwise. Retain as a bounded-loss proposal component,
 not a promoted common default. Do not tune rebase timing or radius. See
 `benchmark_results/k24_one_step_schur_proposal_i90_trust_rebase_breadth/report.md`.
 
+The next behavior-neutral oracle rejects a second fixed unit block-Jacobi
+residual correction. Two-step/one-step worker SSE is `1.000710x` on
+Gendarmenmarkt and `1.008820x` on Roman; their second-step residual norms grow
+`4.92x` and `238x`. BAL52 contracts `0.845x` but still declines. Trajectories
+and endpoint states remain exact. Keep one residual action only; do not run
+depth/relaxation sweeps. See
+`benchmark_results/k24_two_step_schur_residual_oracle_sentinel/report.md`.
+
 Only `all15_corrected/` is authoritative. The sibling `all15/` directory is a
 quarantined setup error with the wrong trust cap and recovery controls.
 

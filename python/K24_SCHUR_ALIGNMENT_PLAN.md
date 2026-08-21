@@ -222,3 +222,11 @@ so this mechanism is inactive there; BAL52 is bitwise exact. Retain the
 rebase-enhanced proposal as a research component, close rebase timing/radius
 tuning, and do not promote while the strict no-loss gate still fails. See
 `benchmark_results/k24_one_step_schur_proposal_i90_trust_rebase_breadth/report.md`.
+
+Fixed stationary depth two is closed by a behavior-neutral sentinel. The
+second unit Jacobi action worsens actual candidate SSE by `1.000710x` on
+Gendarmenmarkt and `1.008820x` on Roman relative to depth one, while residual
+norms expand `4.92x` and `238x`. BAL52 residual contracts `0.845x` but neither
+depth passes the SSE floor. All trajectories and endpoint states are exact.
+Do not apply or broaden depth two and do not tune stationary relaxation. See
+`benchmark_results/k24_two_step_schur_residual_oracle_sentinel/report.md`.

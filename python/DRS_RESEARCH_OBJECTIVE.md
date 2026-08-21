@@ -300,6 +300,17 @@ Retain the rebase as part of the research proposal component, but do not
 promote it as the common default or tune timing/radius from Gendarmenmarkt.
 Report: `benchmark_results/k24_one_step_schur_proposal_i90_trust_rebase_breadth/report.md`.
 
+A behavior-neutral depth-two follow-up closes fixed stationary Jacobi
+iteration. Relative to the retained one-step candidate, two unit residual
+corrections worsen worker SSE by `1.000710x` on Gendarmenmarkt and `1.008820x`
+on Roman. The second-step residual expands `4.92x` and `238x`, respectively.
+BAL52 contracts `0.845x` but still declines both candidates. Every trajectory
+and endpoint state is exact because depth two is telemetry-only. Do not apply
+or broaden fixed-depth Jacobi and do not sweep depth/relaxation. One action is
+a useful direction repair; stationary repetition is unstable on the real
+restricted Schur systems. Report:
+`benchmark_results/k24_two_step_schur_residual_oracle_sentinel/report.md`.
+
 Fresh isolated bridge gate (2026-08-19):
 `serverTest/client_drs_k1_bridge.py` preserves `client_drs.py` and pins the
 mature legacy backbone while exposing ordered `legacy`, `direct`, and
