@@ -4705,6 +4705,18 @@ def main():
                         ),
                     )
                 shared_cameras = camera_copy_count > 1
+                shared_consensus_tangent = np.zeros_like(consensus_tangent)
+                shared_consensus_tangent[shared_cameras] = (
+                    consensus_tangent[shared_cameras]
+                )
+                unique_consensus_tangent = np.zeros_like(consensus_tangent)
+                unique_consensus_tangent[~shared_cameras] = (
+                    consensus_tangent[~shared_cameras]
+                )
+                shared_schur_tangent = np.zeros_like(schur_alignment_tangent)
+                shared_schur_tangent[shared_cameras] = (
+                    schur_alignment_tangent[shared_cameras]
+                )
                 schur_alignment_diagnostics = {
                     "cameraDamping": arguments.schur_alignment_camera_damping,
                     "landmarkDamping": (
@@ -4742,6 +4754,24 @@ def main():
                         camera_count,
                         arguments.schur_alignment_camera_damping,
                         consensus_tangent,
+                    ),
+                    "sharedConsensusModel": evaluate_global_schur_direction(
+                        schur_alignment_systems,
+                        camera_count,
+                        arguments.schur_alignment_camera_damping,
+                        shared_consensus_tangent,
+                    ),
+                    "uniqueConsensusModel": evaluate_global_schur_direction(
+                        schur_alignment_systems,
+                        camera_count,
+                        arguments.schur_alignment_camera_damping,
+                        unique_consensus_tangent,
+                    ),
+                    "sharedSchurModel": evaluate_global_schur_direction(
+                        schur_alignment_systems,
+                        camera_count,
+                        arguments.schur_alignment_camera_damping,
+                        shared_schur_tangent,
                     ),
                     "schur": schur_alignment_solve_diagnostics,
                 }

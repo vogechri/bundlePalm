@@ -55,7 +55,8 @@ At every available checkpoint report:
 - DRS/Schur tangent norm ratio;
 - translation, rotation, and intrinsics cosine/norm ratios;
 - gradient-action ratio;
-- camera-only damped model reduction for each direction and their ratio;
+- camera-only damped model reduction split into shared and unique camera
+  components, with a shared-DRS/shared-Schur ratio;
 - Schur PCG termination, iterations, residual, and solve time.
 
 Piazza is expected to have no I200 checkpoint because its ordinary trajectory

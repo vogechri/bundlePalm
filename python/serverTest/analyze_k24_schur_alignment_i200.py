@@ -68,6 +68,14 @@ def ratio(candidate, reference):
     return candidate / reference if reference > 0.0 else math.nan
 
 
+def signed_ratio(candidate, reference):
+    return candidate / reference if reference != 0.0 else math.nan
+
+
+def camera_model_reduction(model):
+    return model["dampedPredictedReduction"] - model["landmarkModelReduction"]
+
+
 def extract_checkpoint(scene, checkpoint, diagnostic):
     row = next(
         entry for entry in diagnostic["trajectory"]
@@ -82,10 +90,20 @@ def extract_checkpoint(scene, checkpoint, diagnostic):
     shared = data["sharedCamerasDiagonalWeighted"]["global"]
     all_cameras = data["allCamerasDiagonalWeighted"]["global"]
     consensus_model = data["consensusModel"]
+    shared_consensus_model = data["sharedConsensusModel"]
+    unique_consensus_model = data["uniqueConsensusModel"]
+    shared_schur_model = data["sharedSchurModel"]
     landmark_reduction = schur["landmarkModelReduction"]
     schur_camera_reduction = schur["dampedPredictedReduction"] - landmark_reduction
-    drs_camera_reduction = (
-        consensus_model["dampedPredictedReduction"] - landmark_reduction
+    drs_camera_reduction = camera_model_reduction(consensus_model)
+    shared_drs_camera_reduction = camera_model_reduction(
+        shared_consensus_model
+    )
+    unique_drs_camera_reduction = camera_model_reduction(
+        unique_consensus_model
+    )
+    shared_schur_camera_reduction = camera_model_reduction(
+        shared_schur_model
     )
     return {
         "scene": scene,
@@ -102,7 +120,7 @@ def extract_checkpoint(scene, checkpoint, diagnostic):
         "translation_cosine": data["sharedCamerasDiagonalWeighted"]["translation"]["cosine"],
         "rotation_cosine": data["sharedCamerasDiagonalWeighted"]["rotation"]["cosine"],
         "intrinsics_cosine": data["sharedCamerasDiagonalWeighted"]["intrinsics"]["cosine"],
-        "gradient_action_ratio": ratio(
+        "gradient_action_ratio": signed_ratio(
             data["consensusGradientAction"], data["schurGradientAction"]
         ),
         "drs_camera_model_reduction": drs_camera_reduction,
@@ -110,6 +128,12 @@ def extract_checkpoint(scene, checkpoint, diagnostic):
         "camera_model_reduction_ratio": ratio(
             drs_camera_reduction, schur_camera_reduction
         ),
+        "shared_drs_camera_model_reduction": shared_drs_camera_reduction,
+        "shared_schur_camera_model_reduction": shared_schur_camera_reduction,
+        "shared_camera_model_reduction_ratio": ratio(
+            shared_drs_camera_reduction, shared_schur_camera_reduction
+        ),
+        "unique_drs_camera_model_reduction": unique_drs_camera_reduction,
         "linear_iterations": schur["linearIterations"],
         "relative_residual": schur["relativeResidual"],
         "linear_seconds": schur["totalLinearSystemSeconds"],
@@ -158,11 +182,14 @@ def analyze(root):
             "median_shared_drs_over_schur_norm": statistics.median(
                 row["shared_drs_over_schur_norm"] for row in rows
             ),
-            "median_camera_model_reduction_ratio": statistics.median(
-                row["camera_model_reduction_ratio"] for row in rows
+            "median_shared_camera_model_reduction_ratio": statistics.median(
+                row["shared_camera_model_reduction_ratio"] for row in rows
             ),
-            "nonpositive_drs_camera_models": sum(
-                row["drs_camera_model_reduction"] <= 0.0 for row in rows
+            "nonpositive_shared_drs_camera_models": sum(
+                row["shared_drs_camera_model_reduction"] <= 0.0 for row in rows
+            ),
+            "nonpositive_unique_drs_camera_models": sum(
+                row["unique_drs_camera_model_reduction"] <= 0.0 for row in rows
             ),
         }
     return {
@@ -176,7 +203,7 @@ def write_report(path, summary):
     with path.open("w", encoding="utf-8") as output:
         output.write("# K24 Late DRS/Schur Direction Alignment\n\n")
         output.write("Schur is the reference tangent; DRS is the candidate tangent.\n\n")
-        output.write("| I | N | Median shared weighted cosine | Minimum cosine | Median DRS/Schur norm | Median camera-model ratio | Nonpositive DRS models |\n")
+        output.write("| I | N | Median shared weighted cosine | Minimum cosine | Median DRS/Schur norm | Median shared-model ratio | Nonpositive shared/unique models |\n")
         output.write("|---:|---:|---:|---:|---:|---:|---:|\n")
         for checkpoint, row in summary["checkpoint_summaries"].items():
             output.write(
@@ -184,17 +211,20 @@ def write_report(path, summary):
                 f"{row['median_shared_weighted_cosine']:.6f} | "
                 f"{row['minimum_shared_weighted_cosine']:.6f} | "
                 f"{row['median_shared_drs_over_schur_norm']:.6f} | "
-                f"{row['median_camera_model_reduction_ratio']:.6f} | "
-                f"{row['nonpositive_drs_camera_models']} |\n"
+                f"{row['median_shared_camera_model_reduction_ratio']:.6f} | "
+                f"{row['nonpositive_shared_drs_camera_models']}/"
+                f"{row['nonpositive_unique_drs_camera_models']} |\n"
             )
-        output.write("\n| Scene | I | Shared weighted cosine | DRS/Schur norm | Camera-model ratio | T/R/I cosine | PCG iters |\n")
-        output.write("|---|---:|---:|---:|---:|---|---:|\n")
+        output.write("\n| Scene | I | Shared weighted cosine | DRS/Schur norm | Shared-model ratio | Shared/unique reduction | T/R/I cosine | PCG iters |\n")
+        output.write("|---|---:|---:|---:|---:|---:|---|---:|\n")
         for row in summary["records"]:
             output.write(
                 f"| {row['scene']} | {row['checkpoint']} | "
                 f"{row['shared_weighted_cosine']:.6f} | "
                 f"{row['shared_drs_over_schur_norm']:.6f} | "
-                f"{row['camera_model_reduction_ratio']:.6f} | "
+                f"{row['shared_camera_model_reduction_ratio']:.6f} | "
+                f"{row['shared_drs_camera_model_reduction']:.3g}/"
+                f"{row['unique_drs_camera_model_reduction']:.3g} | "
                 f"{row['translation_cosine']:.3f}/"
                 f"{row['rotation_cosine']:.3f}/"
                 f"{row['intrinsics_cosine']:.3f} | "
