@@ -1,8 +1,8 @@
 # K24 DRS/Schur Direction-Alignment Diagnostic
 
 Date: 2026-08-21
-Status: one-step oracle passed; safeguarded I90 proposal next
-Source checkpoint: `504b427`
+Status: safeguarded I90 proposal passed; seven-scene transfer next
+Source checkpoint: `d326283`
 
 This is the restart contract for the behavior-neutral diagnostic following the
 integrated K24/I200 quality ceiling. It does not alter DRS proposals or apply
@@ -169,3 +169,14 @@ centers and residuals atomically with `drs_state_for_consensus`. Permit one
 proposal maximum. Keep the full Schur solve diagnostic-only; the applied
 proposal itself uses one matvec and block-Jacobi correction. Roman and BAL52 are
 the first gate, with no scene routing.
+
+The applied sentinel passes with fixed geometric SSE backtracking. Roman selects
+scale `0.5`, reaches `0.888157x` control immediately and `0.797016x` delivered
+at I120, with 8 versus 11 rejections. BAL52 selects `0.0625` and remains
+effectively neutral (`0.9999995x`) with no rejection. See
+`benchmark_results/k24_one_step_schur_proposal_i90_sentinel/report.md`.
+
+Next run the unchanged I90 proposal through I120 on the frozen seven-scene
+direction cohort. Report every selection scale, immediate and delivered ratio,
+completion, and loss. Do not tune the eight geometric scales, damping, or
+proposal time before this transfer.

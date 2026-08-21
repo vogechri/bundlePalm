@@ -229,6 +229,13 @@ one default-off I90 proposal selected only by lower precise worker SSE, with
 atomic `drs_state_for_consensus` rebuild and one proposal maximum. Keep the full
 Schur direction diagnostic-only.
 
+The applied I90 gate passes after fixed geometric SSE backtracking. Roman uses
+scale `0.5` and reaches `0.797016x` delivered control at I120 with fewer
+rejections; BAL52 uses `0.0625` and remains `0.9999995x`. See
+`benchmark_results/k24_one_step_schur_proposal_i90_sentinel/report.md`. Next run
+the exact policy on the frozen seven-scene direction cohort through I120. No
+timing, damping, or scale changes before that transfer.
+
 Only `all15_corrected/` is authoritative. The sibling `all15/` directory is a
 quarantined setup error with the wrong trust cap and recovery controls.
 

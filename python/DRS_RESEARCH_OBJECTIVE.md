@@ -249,6 +249,15 @@ state rebuild. The proposal is one distributed matvec plus block-Jacobi
 correction, not Ceres or a full Schur solve. Report:
 `benchmark_results/k24_one_step_schur_oracle_sentinel/report.md`.
 
+The safeguarded applied gate also passes. Fixed geometric SSE backtracking
+selects scale `0.5` on Roman, giving `0.888157x` immediate and `0.797016x`
+delivered I120 control with fewer rejections. BAL52 selects `0.0625` and is
+effectively neutral at `0.9999995x`. This remains our DRS: one distributed
+Schur matvec/Jacobi acceleration proposal, actual-SSE selection, and atomic
+product-state rebuild; it is not a full global solve. Next transfer unchanged
+to the frozen seven-scene cohort before breadth. Report:
+`benchmark_results/k24_one_step_schur_proposal_i90_sentinel/report.md`.
+
 Fresh isolated bridge gate (2026-08-19):
 `serverTest/client_drs_k1_bridge.py` preserves `client_drs.py` and pins the
 mature legacy backbone while exposing ordered `legacy`, `direct`, and
