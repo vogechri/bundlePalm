@@ -164,6 +164,11 @@ corrected-I200 1DSfM losses. Do not tune the horizon or safeguards. Retain this
 as a diagnostic quality ceiling and next collect behavior-neutral nominal-DRS
 versus global-Schur direction alignment at I90/I120/I160/I200.
 
+The active diagnostic is `K24_SCHUR_ALIGNMENT_PLAN.md`. It uses the actual
+low-damping correction direction and must remain bitwise trajectory/state
+neutral. The fixed cohort is Roman, Trafalgar, Montreal, Yorkminster, Piazza,
+BAL52, and BAL3068; do not tune checkpoints or damping from its outcome.
+
 Only `all15_corrected/` is authoritative. The sibling `all15/` directory is a
 quarantined setup error with the wrong trust cap and recovery controls.
 

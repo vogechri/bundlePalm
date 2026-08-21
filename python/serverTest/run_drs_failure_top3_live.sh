@@ -34,6 +34,9 @@ METRIC_PROPOSAL_DISAGREEMENT_HYSTERESIS=${METRIC_PROPOSAL_DISAGREEMENT_HYSTERESI
 CAMERA_DIAGONAL_QUANTILE_ITERATIONS=${CAMERA_DIAGONAL_QUANTILE_ITERATIONS:-}
 CAMERA_DISAGREEMENT_DIAGNOSTIC_IDS=${CAMERA_DISAGREEMENT_DIAGNOSTIC_IDS:-}
 CAMERA_DISAGREEMENT_DIAGNOSTIC_ITERATIONS=${CAMERA_DISAGREEMENT_DIAGNOSTIC_ITERATIONS:-}
+SCHUR_ALIGNMENT_DIAGNOSTIC_ITERATIONS=${SCHUR_ALIGNMENT_DIAGNOSTIC_ITERATIONS:-}
+SCHUR_ALIGNMENT_CAMERA_DAMPING=${SCHUR_ALIGNMENT_CAMERA_DAMPING:-3}
+SCHUR_ALIGNMENT_LANDMARK_DAMPING=${SCHUR_ALIGNMENT_LANDMARK_DAMPING:-3}
 SHARED_CAMERA_METRIC_BETA=${SHARED_CAMERA_METRIC_BETA:-0.0}
 ADAPTIVE_LOCAL_DEPTH=${ADAPTIVE_LOCAL_DEPTH:-0}
 ADAPTIVE_LOCAL_DEPTH_START=${ADAPTIVE_LOCAL_DEPTH_START:-0}
@@ -107,6 +110,7 @@ SHARED_SCHUR_CAMERA_DAMPING=${SHARED_SCHUR_CAMERA_DAMPING:-3}
 SHARED_SCHUR_LANDMARK_DAMPING=${SHARED_SCHUR_LANDMARK_DAMPING:-3}
 SHARED_SCHUR_MINIMUM_RELATIVE_DECREASE=${SHARED_SCHUR_MINIMUM_RELATIVE_DECREASE:-1e-4}
 SHARED_SCHUR_RELATIVE_TOLERANCE=${SHARED_SCHUR_RELATIVE_TOLERANCE:-1e-6}
+SHARED_SCHUR_MAXIMUM_ITERATIONS=${SHARED_SCHUR_MAXIMUM_ITERATIONS:-500}
 SHARED_SCHUR_OPERATOR=${SHARED_SCHUR_OPERATOR:-python}
 SHARED_SCHUR_PRECONDITIONER=${SHARED_SCHUR_PRECONDITIONER:-jacobi}
 VARIANT_TAG=${VARIANT_TAG:-}
@@ -314,6 +318,9 @@ if [[ "$MID_SHARED_SCHUR_CORRECTION_ITERATION" != "0" ]]; then
   if [[ "$MID_SHARED_SCHUR_TRANSPORT_PRODUCT_STATE" == "1" ]]; then
     VARIANT_NAME="${VARIANT_NAME}_transport"
   fi
+fi
+if [[ -n "$SCHUR_ALIGNMENT_DIAGNOSTIC_ITERATIONS" ]]; then
+  VARIANT_NAME="${VARIANT_NAME}_align${SCHUR_ALIGNMENT_DIAGNOSTIC_ITERATIONS//,/x}"
 fi
 if [[ "$FINAL_SHARED_SCHUR_CORRECTION" == "1" ]]; then
   VARIANT_NAME="${VARIANT_NAME}_final_schur${SHARED_SCHUR_MAXIMUM_CORRECTIONS}"
@@ -648,6 +655,15 @@ for problem in "${PROBLEMS[@]}"; do
         mid_shared_schur_args+=(--mid-shared-schur-transport-product-state)
       fi
     fi
+    alignment_schur_args=()
+    if [[ -n "$SCHUR_ALIGNMENT_DIAGNOSTIC_ITERATIONS" ]]; then
+      alignment_schur_args+=(
+        --shared-schur-relative-tolerance "$SHARED_SCHUR_RELATIVE_TOLERANCE"
+        --shared-schur-maximum-iterations "$SHARED_SCHUR_MAXIMUM_ITERATIONS"
+        --shared-schur-operator "$SHARED_SCHUR_OPERATOR"
+        --shared-schur-preconditioner "$SHARED_SCHUR_PRECONDITIONER"
+      )
+    fi
     final_shared_schur_args=()
     if [[ "$FINAL_SHARED_SCHUR_CORRECTION" == "1" ]]; then
       final_shared_schur_args+=(
@@ -700,6 +716,9 @@ for problem in "${PROBLEMS[@]}"; do
             --camera-diagonal-quantile-iterations "$CAMERA_DIAGONAL_QUANTILE_ITERATIONS" \
             --camera-disagreement-diagnostic-ids "$CAMERA_DISAGREEMENT_DIAGNOSTIC_IDS" \
             --camera-disagreement-diagnostic-iterations "$CAMERA_DISAGREEMENT_DIAGNOSTIC_ITERATIONS" \
+            --schur-alignment-diagnostic-iterations "$SCHUR_ALIGNMENT_DIAGNOSTIC_ITERATIONS" \
+            --schur-alignment-camera-damping "$SCHUR_ALIGNMENT_CAMERA_DAMPING" \
+            --schur-alignment-landmark-damping "$SCHUR_ALIGNMENT_LANDMARK_DAMPING" \
             --shared-camera-metric-beta "$SHARED_CAMERA_METRIC_BETA" \
             --threads-per-cluster "$THREADS_PER_CLUSTER" \
             --nesterov-max-iterations "$NESTEROV_MAX_ITERATIONS" \
@@ -764,7 +783,7 @@ for problem in "${PROBLEMS[@]}"; do
             --catastrophic-ratio "$CATASTROPHIC_RATIO" \
             --recovery-penalty-ratio "$RECOVERY_PENALTY_RATIO" \
             --results "$RESULT_FILE" --state "$state_file" \
-            "${debug_args[@]}" "${trust_args[@]}" "${scaling_args[@]}" "${worker_sse_args[@]}" "${adaptive_depth_args[@]}" "${single_cluster_args[@]}" "${shared_only_args[@]}" "${initial_shared_schur_args[@]}" "${mid_shared_schur_args[@]}" "${final_shared_schur_args[@]}" "${initial_state_args[@]}") 2>&1 | tee "$log_file"
+            "${debug_args[@]}" "${trust_args[@]}" "${scaling_args[@]}" "${worker_sse_args[@]}" "${adaptive_depth_args[@]}" "${single_cluster_args[@]}" "${shared_only_args[@]}" "${initial_shared_schur_args[@]}" "${mid_shared_schur_args[@]}" "${alignment_schur_args[@]}" "${final_shared_schur_args[@]}" "${initial_state_args[@]}") 2>&1 | tee "$log_file"
       exit_code=${PIPESTATUS[0]}
     else
       (cd "$SCRIPT_DIR" && /usr/bin/time -v -o "$coordinator_time" \
@@ -791,6 +810,9 @@ for problem in "${PROBLEMS[@]}"; do
             --camera-diagonal-quantile-iterations "$CAMERA_DIAGONAL_QUANTILE_ITERATIONS" \
             --camera-disagreement-diagnostic-ids "$CAMERA_DISAGREEMENT_DIAGNOSTIC_IDS" \
             --camera-disagreement-diagnostic-iterations "$CAMERA_DISAGREEMENT_DIAGNOSTIC_ITERATIONS" \
+            --schur-alignment-diagnostic-iterations "$SCHUR_ALIGNMENT_DIAGNOSTIC_ITERATIONS" \
+            --schur-alignment-camera-damping "$SCHUR_ALIGNMENT_CAMERA_DAMPING" \
+            --schur-alignment-landmark-damping "$SCHUR_ALIGNMENT_LANDMARK_DAMPING" \
             --shared-camera-metric-beta "$SHARED_CAMERA_METRIC_BETA" \
             --threads-per-cluster "$THREADS_PER_CLUSTER" \
             --nesterov-max-iterations "$NESTEROV_MAX_ITERATIONS" \
@@ -855,7 +877,7 @@ for problem in "${PROBLEMS[@]}"; do
             --catastrophic-ratio "$CATASTROPHIC_RATIO" \
             --recovery-penalty-ratio "$RECOVERY_PENALTY_RATIO" \
             --results "$RESULT_FILE" --state "$state_file" \
-            "${debug_args[@]}" "${trust_args[@]}" "${scaling_args[@]}" "${worker_sse_args[@]}" "${adaptive_depth_args[@]}" "${single_cluster_args[@]}" "${shared_only_args[@]}" "${initial_shared_schur_args[@]}" "${mid_shared_schur_args[@]}" "${final_shared_schur_args[@]}" "${initial_state_args[@]}") > "$log_file" 2>&1
+            "${debug_args[@]}" "${trust_args[@]}" "${scaling_args[@]}" "${worker_sse_args[@]}" "${adaptive_depth_args[@]}" "${single_cluster_args[@]}" "${shared_only_args[@]}" "${initial_shared_schur_args[@]}" "${mid_shared_schur_args[@]}" "${alignment_schur_args[@]}" "${final_shared_schur_args[@]}" "${initial_state_args[@]}") > "$log_file" 2>&1
       exit_code=$?
     fi
     set -e

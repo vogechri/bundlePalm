@@ -43,6 +43,9 @@ Active terminal-correction K4/K16 transfer protocol:
 Active integrated K24/I200 quality protocol:
 `K24_I200_QUALITY_PLAN.md`.
 
+Active late-direction diagnostic protocol:
+`K24_SCHUR_ALIGNMENT_PLAN.md`.
+
 ## 1. North Star
 
 Develop one genuinely distributed product-space DRS method for bundle
@@ -175,6 +178,13 @@ Retain I200+one correction as a diagnostic quality ceiling, not the promoted
 common method. Next use behavior-neutral DRS/Schur direction-alignment
 telemetry at fixed I90/I120/I160/I200 checkpoints. See
 `benchmark_results/k24_i200_terminal_correction_breadth/report.md`.
+
+That diagnostic is frozen in `K24_SCHUR_ALIGNMENT_PLAN.md`. It compares the
+nominal accepted DRS consensus tangent with the actual low-damping terminal
+Schur tangent at I90/I120/I160/I200 on Roman, Trafalgar, Montreal, Yorkminster,
+Piazza, BAL52, and BAL3068. Clipping is disabled, and the run must reproduce
+the I200 reference trajectories and endpoint states exactly before any
+mechanism is inferred.
 
 Fresh isolated bridge gate (2026-08-19):
 `serverTest/client_drs_k1_bridge.py` preserves `client_drs.py` and pins the
