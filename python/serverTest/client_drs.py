@@ -1491,6 +1491,10 @@ def parse_arguments():
         action="store_true",
     )
     parser.add_argument(
+        "--relinearized-second-schur-residual-oracle",
+        action="store_true",
+    )
+    parser.add_argument(
         "--schur-model-consensus-clipping", action="store_true"
     )
     parser.add_argument(
@@ -3101,6 +3105,20 @@ def main():
     ):
         raise ValueError(
             "two-step Schur residual oracle requires proposal-only diagnostics"
+        )
+    if (
+        arguments.relinearized_second_schur_residual_oracle
+        and not one_step_schur_residual_proposal_iterations
+    ):
+        raise ValueError(
+            "relinearized Schur residual oracle requires a proposal iteration"
+        )
+    if (
+        arguments.relinearized_second_schur_residual_oracle
+        and schur_alignment_diagnostic_iterations
+    ):
+        raise ValueError(
+            "relinearized Schur residual oracle requires proposal-only diagnostics"
         )
     if (
         one_step_schur_residual_proposal_iterations
@@ -5403,6 +5421,89 @@ def main():
                     "attempts": one_step_attempts,
                     "productStateRestarted": False,
                 }
+                if arguments.relinearized_second_schur_residual_oracle:
+                    relinearized_diagnostics = {
+                        "eligible": one_step_selected,
+                        "baseWorkerSSE": selected_worker_sse,
+                        "candidateWorkerSSE": selected_worker_sse,
+                        "minimumRelativeDecrease": (
+                            arguments.shared_schur_minimum_relative_decrease
+                        ),
+                        "selectedScale": 0.0,
+                        "selected": False,
+                        "attempts": [],
+                        "applied": False,
+                    }
+                    if one_step_selected:
+                        if not arguments.two_step_schur_residual_oracle:
+                            schur_alignment_systems = None
+                        relinearized_systems = worker.build_schur_systems(
+                            camera_indices_in_cluster,
+                            point_indices_in_cluster,
+                            selected_consensus,
+                            diagnostic_landmarks,
+                            cluster_count,
+                            arguments.schur_alignment_landmark_damping,
+                        )
+                        (
+                            relinearized_tangent,
+                            relinearized_step_diagnostics,
+                        ) = jacobi_refine_schur_tangent(
+                            relinearized_systems,
+                            camera_count,
+                            arguments.schur_alignment_camera_damping,
+                            np.zeros_like(consensus_tangent),
+                            shared_cameras,
+                        )
+                        relinearized_attempts = []
+                        relinearized_selected_scale = 0.0
+                        relinearized_worker_sse = selected_worker_sse
+                        relinearized_required_sse = selected_worker_sse * (
+                            1.0
+                            - arguments.shared_schur_minimum_relative_decrease
+                        )
+                        for attempt in range(8):
+                            scale = 0.5 ** attempt
+                            trial_physical_candidate = left_se3_camera_plus(
+                                selected_physical_candidate,
+                                scale * relinearized_tangent,
+                            )
+                            trial_consensus = to_scaled_cameras(
+                                trial_physical_candidate, camera_scaling
+                            )
+                            trial_worker_sse = worker.evaluate_consensus_sse(
+                                camera_indices_in_cluster,
+                                trial_consensus,
+                                cluster_count,
+                                preserve_cameras=True,
+                                packed_request_buffers=(
+                                    arguments.packed_request_buffers
+                                ),
+                            )
+                            relinearized_attempts.append({
+                                "scale": scale,
+                                "workerSSE": trial_worker_sse,
+                            })
+                            if (
+                                np.isfinite(trial_worker_sse)
+                                and trial_worker_sse
+                                < relinearized_worker_sse
+                                and trial_worker_sse
+                                < relinearized_required_sse
+                            ):
+                                relinearized_selected_scale = scale
+                                relinearized_worker_sse = trial_worker_sse
+                        relinearized_diagnostics = {
+                            **relinearized_step_diagnostics,
+                            **relinearized_diagnostics,
+                            "candidateWorkerSSE": relinearized_worker_sse,
+                            "selectedScale": relinearized_selected_scale,
+                            "selected": relinearized_selected_scale > 0.0,
+                            "attempts": relinearized_attempts,
+                        }
+                    schur_alignment_diagnostics[
+                        "relinearizedSecondSchurResidualOracle"
+                    ] = relinearized_diagnostics
                 def evaluate_residual_oracle(
                     oracle_tangent, oracle_diagnostics
                 ):
@@ -7634,6 +7735,9 @@ def main():
         ),
         "twoStepSchurResidualOracle": (
             arguments.two_step_schur_residual_oracle
+        ),
+        "relinearizedSecondSchurResidualOracle": (
+            arguments.relinearized_second_schur_residual_oracle
         ),
         "schurAlignmentCameraDamping": (
             arguments.schur_alignment_camera_damping
