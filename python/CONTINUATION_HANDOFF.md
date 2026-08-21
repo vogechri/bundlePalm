@@ -246,6 +246,14 @@ ceiling and `8,358,544/4,603,516 KiB` coordinator/worker RSS. See
 a low-memory resumable all-15/all-29 runner; serialize large BAL and keep the
 coupled oracle disabled.
 
+Canonical product-state restart stabilizes all-15 continuation. Delivered I120
+is `0.887673x` control geometrically and `0.861948x` summed, W/T/L `12/1/2`;
+Gendarmenmarkt is `1.058521x` and Tower `1.011275x`. Strict no-loss promotion
+fails, so do not tune or promote. The next and only active run is unchanged
+serial BAL safety transfer under the memory ceiling, allowed by the repository
+bounded-loss component policy. See
+`benchmark_results/k24_one_step_schur_proposal_i90_breadth/report.md`.
+
 Only `all15_corrected/` is authoritative. The sibling `all15/` directory is a
 quarantined setup error with the wrong trust cap and recovery controls.
 

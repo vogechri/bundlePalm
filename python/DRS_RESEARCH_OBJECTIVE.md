@@ -268,6 +268,15 @@ under a 14 GiB process ceiling. See
 a resumable low-memory all-15/all-29 runner that serializes large BAL cases and
 never enables the coupled oracle.
 
+The stabilized all-15 run uses canonical product-state restart after selection.
+It reaches `0.887673x` control geometrically and `0.861948x` summed, W/T/L
+`12/1/2`. Gendarmenmarkt (`1.058521x`) and Tower (`1.011275x`) fail the strict
+no-loss promotion gate. Do not tune from these tails. Under the existing
+bounded-loss component policy, run the unchanged serial BAL safety transfer
+under the memory ceiling before deciding whether to retain this as a research
+component. Report:
+`benchmark_results/k24_one_step_schur_proposal_i90_breadth/report.md`.
+
 Fresh isolated bridge gate (2026-08-19):
 `serverTest/client_drs_k1_bridge.py` preserves `client_drs.py` and pins the
 mature legacy backbone while exposing ordered `legacy`, `direct`, and

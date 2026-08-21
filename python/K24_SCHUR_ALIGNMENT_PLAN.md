@@ -192,3 +192,12 @@ now explicit opt-in. Recovered BAL3068 completed alone under a 14 GiB process
 ceiling at `8,358,544 KiB` coordinator RSS. Never enable the coupled oracle in
 proposal breadth. Before all-15/all-29 transfer, add a resumable low-memory
 runner/analyzer that serializes large BAL cases with an explicit ceiling.
+
+The low-memory all-15 run initially exposed product-state incompatibility:
+several live trajectories exploded after I90. Canonical restart at the selected
+consensus fixes that failure. The stable all-15 result is `0.887673x` geometric
+and `0.861948x` summed, W/T/L `12/1/2`; Gendarmenmarkt loses `1.058521x` and
+Tower `1.011275x`. The strict no-loss gate fails, so do not promote or tune.
+Proceed only with unchanged serial BAL safety transfer under the memory cap,
+consistent with the repository's bounded-loss component policy. See
+`benchmark_results/k24_one_step_schur_proposal_i90_breadth/report.md`.
