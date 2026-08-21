@@ -17,6 +17,7 @@ mkdir -p "$OUTPUT_ROOT"
 one_d_sfm_manifest="$DETACHED_ROOT/serverTest/1dsfm_all_fifteen_datasets.txt"
 one_d_sfm_filter=$(cut -d'|' -f1 "$one_d_sfm_manifest" | tr '\n' ' ')
 bal_manifest="$OUTPUT_ROOT/bal_datasets.txt"
+: > "$bal_manifest"
 for dataset in $(find "$WORKSPACE" -maxdepth 1 -type f -name 'problem-*-pre.txt' -printf '%p\n' | sort -V); do
   problem_id=$(basename "$dataset" | sed -E 's/^problem-([0-9]+)-.*/\1/')
   printf '%s|%s\n' "$problem_id" "$dataset" >> "$bal_manifest"
