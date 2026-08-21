@@ -311,6 +311,17 @@ a useful direction repair; stationary repetition is unstable on the real
 restricted Schur systems. Report:
 `benchmark_results/k24_two_step_schur_residual_oracle_sentinel/report.md`.
 
+Exact Schur-quadratic line minimization of the second correction also fails.
+Its coefficients are already near unit on Gendarmenmarkt/Roman
+(`0.964/1.075`) and increase frozen-model decrease as designed, yet physical
+worker SSE remains `1.000677x/1.010264x` the retained depth-one candidate.
+BAL52 chooses coefficient `3.356` but still has no admissible candidate. All
+trajectories and states remain exact. This falsifies wrong second-step length:
+the second direction itself does not transfer from frozen Schur model to
+physical SSE. Close further fixed local Schur iteration and retain one action.
+Report:
+`benchmark_results/k24_model_optimal_two_step_schur_oracle_sentinel/report.md`.
+
 Fresh isolated bridge gate (2026-08-19):
 `serverTest/client_drs_k1_bridge.py` preserves `client_drs.py` and pins the
 mature legacy backbone while exposing ordered `legacy`, `direct`, and

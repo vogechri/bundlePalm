@@ -283,6 +283,13 @@ and endpoint states remain exact. Keep one residual action only; do not run
 depth/relaxation sweeps. See
 `benchmark_results/k24_two_step_schur_residual_oracle_sentinel/report.md`.
 
+An exact frozen-Schur line minimization of the second correction also fails.
+Gendarmenmarkt/Roman coefficients are near unit (`0.964/1.075`) and improve
+the quadratic model, but physical candidate SSE is still
+`1.000677x/1.010264x` depth one. BAL52 still declines. This closes coefficient
+error and further fixed local Schur iteration; retain one action only. See
+`benchmark_results/k24_model_optimal_two_step_schur_oracle_sentinel/report.md`.
+
 Only `all15_corrected/` is authoritative. The sibling `all15/` directory is a
 quarantined setup error with the wrong trust cap and recovery controls.
 

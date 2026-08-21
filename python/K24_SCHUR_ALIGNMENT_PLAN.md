@@ -230,3 +230,12 @@ norms expand `4.92x` and `238x`. BAL52 residual contracts `0.845x` but neither
 depth passes the SSE floor. All trajectories and endpoint states are exact.
 Do not apply or broaden depth two and do not tune stationary relaxation. See
 `benchmark_results/k24_two_step_schur_residual_oracle_sentinel/report.md`.
+
+Exact model line minimization does not rescue the second action. The
+Gendarmenmarkt/Roman coefficients are `0.964/1.075`; frozen-model decrease
+improves, but physical worker SSE remains `1.000677x/1.010264x` depth one.
+BAL52 still declines. Trajectory/state neutrality is exact. Therefore the
+second direction, not a materially wrong unit coefficient, fails transfer.
+Close further fixed local Schur iteration and keep the one-action proposal.
+See
+`benchmark_results/k24_model_optimal_two_step_schur_oracle_sentinel/report.md`.
