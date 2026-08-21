@@ -1,8 +1,8 @@
 # K24 DRS/Schur Direction-Alignment Diagnostic
 
 Date: 2026-08-21
-Status: gauge and cancellation mechanisms closed; copy-direction follow-up active
-Source checkpoint: `0e0285a`
+Status: copy-level mechanisms closed; projected-camera distribution active
+Source checkpoint: `8107fb2`
 
 This is the restart contract for the behavior-neutral diagnostic following the
 integrated K24/I200 quality ceiling. It does not alter DRS proposals or apply
@@ -115,10 +115,16 @@ shared model gain; excluding anomalous BAL3068, both correlations are slightly
 negative. BAL52 is the direct counterexample: it has lower coherence than most
 1DSfM rows while retaining much stronger Schur alignment and model gain.
 
-Next test one mechanism without changing behavior: compare each individual
-reflected shared-camera copy tangent with the corresponding global Schur camera
-tangent before consensus projection. If strong Schur-aligned copy signal exists
-but the aggregate is weak, the projection/metric destroys useful information.
-If individual copies are also poorly aligned, the missing curvature coupling is
-already in the cluster-local resolvents. Do not select, clip, or apply a copy
-tangent.
+The Roman/BAL52 sentinel closes the copy-level mechanism. Raw-copy global
+cosines are near zero in both. Exact metric-contribution cosines are also near
+zero, with signed action balance `0.0068--0.1091` on Roman and
+`0.0191--0.0602` on BAL52. Median best-copy cosines overlap. Projection improves
+both directions, so neither erased coherent copy signal nor incorrect copy
+weighting explains why projected BAL52 aligns much better than Roman. See
+`benchmark_results/k24_schur_contribution_alignment_sentinel/report.md`.
+
+Next decompose the projected shared-camera tangent by camera. If most cameras
+align but a small high-energy subset dominates the global mismatch, robust
+camera-level control is plausible. If per-camera median and positive fraction
+are also poor, the accepted consensus direction is broadly missing global
+coupling. Keep this telemetry-only; do not select cameras or alter steps.

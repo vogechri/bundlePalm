@@ -203,6 +203,14 @@ low-coherence/high-alignment counterexample. Next measure individual reflected
 copy-to-Schur alignment before projection to locate whether global signal is
 lost by aggregation or absent from local resolvents.
 
+The Roman/BAL52 copy sentinel closes both alternatives at copy level. Raw and
+exact metric-contribution global cosines are near zero in both scenes, signed
+contribution balance overlaps, and best-copy cosine does not explain the much
+stronger BAL52 projected direction. Projection improves both. The active test
+is now the per-camera distribution of the projected shared tangent: determine
+whether a small high-energy camera subset or broad camera-wise misalignment
+causes the low global cosine.
+
 Fresh isolated bridge gate (2026-08-19):
 `serverTest/client_drs_k1_bridge.py` preserves `client_drs.py` and pins the
 mature legacy backbone while exposing ordered `legacy`, `direct`, and

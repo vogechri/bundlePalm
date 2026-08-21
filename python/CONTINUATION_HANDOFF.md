@@ -187,6 +187,14 @@ alignment. Close aggregate cancellation as the primary mechanism. The next
 telemetry-only test compares each reflected shared-camera copy tangent against
 its corresponding global Schur tangent before projection.
 
+The Roman/BAL52 sentinel closes that copy-level test. Raw and exact
+metric-contribution cosines are near zero in both, signed action balance
+overlaps, and projection improves both; see
+`benchmark_results/k24_schur_contribution_alignment_sentinel/report.md`. The
+sole active diagnostic is the projected shared-camera cosine/action
+distribution, separating broad misalignment from domination by a small
+high-energy camera subset.
+
 Only `all15_corrected/` is authoritative. The sibling `all15/` directory is a
 quarantined setup error with the wrong trust cap and recovery controls.
 
