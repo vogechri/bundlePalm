@@ -50,11 +50,27 @@ for clusters in 4 16; do
     mkdir -p "$state_dir"
     while IFS='|' read -r key dataset; do
       if [[ "$key" =~ ^[0-9]+$ ]]; then
-        state_root="$WORKSPACE/benchmark_results/stage_c_scaling_confirmation_k4_16_i30/bal/c1_c5/states"
+        results_path=$(find "$WORKSPACE/benchmark_results/stage_c_scaling_confirmation_k4_16_i30/bal/c1_c5" \
+          -maxdepth 1 -name '*.jsonl' -print -quit)
       else
-        state_root="$WORKSPACE/benchmark_results/stage_c_scaling_confirmation_k4_16_i30/1dsfm/c1_c5/states"
+        results_path=$(find "$WORKSPACE/benchmark_results/stage_c_scaling_confirmation_k4_16_i30/1dsfm/c1_c5" \
+          -maxdepth 1 -name '*.jsonl' -print -quit)
       fi
-      state=$(find "$state_root" -maxdepth 1 -name "*_${key}_k${clusters}_i30_l1_t1.npz" -print -quit)
+      state=$("$WORKSPACE/serverTest/.venv/bin/python" -c '
+import json, re, sys
+from pathlib import Path
+path, key, clusters = sys.argv[1], sys.argv[2], int(sys.argv[3])
+for line in Path(path).read_text().splitlines():
+    if not line.strip():
+        continue
+    row = json.loads(line)
+    dataset = Path(row["dataset"])
+    match = re.search(r"problem-(\d+)-", dataset.name)
+    scene = match.group(1) if match else dataset.parent.name
+    if scene == key and row["clusters"] == clusters:
+        print(row["stateFile"])
+        break
+' "$results_path" "$key" "$clusters")
       if [[ -z "$state" || ! -f "$state" ]]; then
         echo "Missing K${clusters} state for $key" >&2
         exit 2
