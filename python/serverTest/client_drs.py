@@ -4710,6 +4710,13 @@ def main():
                         ),
                     )
                 shared_cameras = camera_copy_count > 1
+                shared_camera_ids = np.flatnonzero(shared_cameras)
+                projected_camera_alignment = diagonal_weighted_copy_alignment(
+                    schur_alignment_tangent,
+                    consensus_tangent[shared_cameras],
+                    schur_alignment_diagonal,
+                    shared_camera_ids,
+                )
                 shared_consensus_tangent = np.zeros_like(consensus_tangent)
                 shared_consensus_tangent[shared_cameras] = (
                     consensus_tangent[shared_cameras]
@@ -4848,6 +4855,9 @@ def main():
                             consensus_tangent[shared_cameras],
                             schur_alignment_diagonal[shared_cameras],
                         )
+                    ),
+                    "projectedCameraSchurAlignment": (
+                        projected_camera_alignment
                     ),
                     "similarityGauge": {
                         "rank": int(similarity_gauge_basis.shape[1]),
