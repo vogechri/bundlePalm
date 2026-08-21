@@ -114,6 +114,7 @@ SHARED_SCHUR_MINIMUM_RELATIVE_DECREASE=${SHARED_SCHUR_MINIMUM_RELATIVE_DECREASE:
 SHARED_SCHUR_RELATIVE_TOLERANCE=${SHARED_SCHUR_RELATIVE_TOLERANCE:-1e-6}
 SHARED_SCHUR_MAXIMUM_ITERATIONS=${SHARED_SCHUR_MAXIMUM_ITERATIONS:-500}
 SCHUR_ALIGNMENT_MAXIMUM_ITERATIONS=${SCHUR_ALIGNMENT_MAXIMUM_ITERATIONS:-$SHARED_SCHUR_MAXIMUM_ITERATIONS}
+ONE_STEP_SCHUR_RESIDUAL_PROPOSAL_ITERATIONS=${ONE_STEP_SCHUR_RESIDUAL_PROPOSAL_ITERATIONS:-}
 SHARED_SCHUR_OPERATOR=${SHARED_SCHUR_OPERATOR:-python}
 SHARED_SCHUR_PRECONDITIONER=${SHARED_SCHUR_PRECONDITIONER:-jacobi}
 VARIANT_TAG=${VARIANT_TAG:-}
@@ -327,6 +328,9 @@ if [[ "$MID_SHARED_SCHUR_CORRECTION_ITERATION" != "0" ]]; then
 fi
 if [[ -n "$SCHUR_ALIGNMENT_DIAGNOSTIC_ITERATIONS" ]]; then
   VARIANT_NAME="${VARIANT_NAME}_align"
+fi
+if [[ -n "$ONE_STEP_SCHUR_RESIDUAL_PROPOSAL_ITERATIONS" ]]; then
+  VARIANT_NAME="${VARIANT_NAME}_one_step_schur${ONE_STEP_SCHUR_RESIDUAL_PROPOSAL_ITERATIONS}"
 fi
 if [[ "$FINAL_SHARED_SCHUR_CORRECTION" == "1" ]]; then
   VARIANT_NAME="${VARIANT_NAME}_final_schur${SHARED_SCHUR_MAXIMUM_CORRECTIONS}"
@@ -725,6 +729,7 @@ for problem in "${PROBLEMS[@]}"; do
             --schur-alignment-camera-damping "$SCHUR_ALIGNMENT_CAMERA_DAMPING" \
             --schur-alignment-landmark-damping "$SCHUR_ALIGNMENT_LANDMARK_DAMPING" \
             --schur-alignment-maximum-iterations "$SCHUR_ALIGNMENT_MAXIMUM_ITERATIONS" \
+            --one-step-schur-residual-proposal-iterations "$ONE_STEP_SCHUR_RESIDUAL_PROPOSAL_ITERATIONS" \
             --shared-camera-metric-beta "$SHARED_CAMERA_METRIC_BETA" \
             --threads-per-cluster "$THREADS_PER_CLUSTER" \
             --nesterov-max-iterations "$NESTEROV_MAX_ITERATIONS" \
@@ -822,6 +827,7 @@ for problem in "${PROBLEMS[@]}"; do
             --schur-alignment-camera-damping "$SCHUR_ALIGNMENT_CAMERA_DAMPING" \
             --schur-alignment-landmark-damping "$SCHUR_ALIGNMENT_LANDMARK_DAMPING" \
             --schur-alignment-maximum-iterations "$SCHUR_ALIGNMENT_MAXIMUM_ITERATIONS" \
+            --one-step-schur-residual-proposal-iterations "$ONE_STEP_SCHUR_RESIDUAL_PROPOSAL_ITERATIONS" \
             --shared-camera-metric-beta "$SHARED_CAMERA_METRIC_BETA" \
             --threads-per-cluster "$THREADS_PER_CLUSTER" \
             --nesterov-max-iterations "$NESTEROV_MAX_ITERATIONS" \

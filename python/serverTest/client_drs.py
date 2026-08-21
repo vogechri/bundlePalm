@@ -1478,6 +1478,11 @@ def parse_arguments():
         "--schur-alignment-maximum-iterations", type=int, default=500
     )
     parser.add_argument(
+        "--one-step-schur-residual-proposal-iterations",
+        default="",
+        help="at most one comma-separated one-based alignment iteration",
+    )
+    parser.add_argument(
         "--schur-model-consensus-clipping", action="store_true"
     )
     parser.add_argument(
@@ -3046,6 +3051,13 @@ def main():
         for value in arguments.schur_alignment_diagnostic_iterations.split(",")
         if value
     }
+    one_step_schur_residual_proposal_iterations = {
+        int(value) - 1
+        for value in (
+            arguments.one_step_schur_residual_proposal_iterations.split(",")
+        )
+        if value
+    }
     if any(value < 0 for value in camera_disagreement_diagnostic_ids):
         raise ValueError("camera disagreement diagnostic IDs must be nonnegative")
     if any(value < 0 for value in camera_disagreement_diagnostic_iterations):
@@ -3054,6 +3066,23 @@ def main():
         )
     if any(value < 0 for value in schur_alignment_diagnostic_iterations):
         raise ValueError("Schur alignment diagnostic iterations must be positive")
+    if any(value < 0 for value in one_step_schur_residual_proposal_iterations):
+        raise ValueError("one-step Schur proposal iterations must be positive")
+    if len(one_step_schur_residual_proposal_iterations) > 1:
+        raise ValueError("at most one one-step Schur proposal is permitted")
+    if not one_step_schur_residual_proposal_iterations.issubset(
+        schur_alignment_diagnostic_iterations
+    ):
+        raise ValueError(
+            "one-step Schur proposals require matching alignment diagnostics"
+        )
+    if (
+        one_step_schur_residual_proposal_iterations
+        and arguments.schur_model_consensus_clipping
+    ):
+        raise ValueError(
+            "one-step Schur proposals and consensus clipping are mutually exclusive"
+        )
     if schur_alignment_diagnostic_iterations and not (
         arguments.schur_alignment_camera_damping > 0.0
         and arguments.schur_alignment_landmark_damping >= 0.0
@@ -5000,6 +5029,51 @@ def main():
                     ),
                     "schur": schur_alignment_solve_diagnostics,
                 }
+                if iteration in one_step_schur_residual_proposal_iterations:
+                    ordinary_worker_sse = worker.evaluate_consensus_sse(
+                        camera_indices_in_cluster,
+                        candidate_consensus,
+                        cluster_count,
+                        preserve_cameras=True,
+                        packed_request_buffers=arguments.packed_request_buffers,
+                    )
+                    one_step_physical_candidate = left_se3_camera_plus(
+                        schur_alignment_base_cameras,
+                        one_step_schur_tangent,
+                    )
+                    one_step_consensus = to_scaled_cameras(
+                        one_step_physical_candidate, camera_scaling
+                    )
+                    one_step_worker_sse = worker.evaluate_consensus_sse(
+                        camera_indices_in_cluster,
+                        one_step_consensus,
+                        cluster_count,
+                        preserve_cameras=True,
+                        packed_request_buffers=arguments.packed_request_buffers,
+                    )
+                    one_step_selected = (
+                        np.isfinite(one_step_worker_sse)
+                        and one_step_worker_sse < ordinary_worker_sse
+                    )
+                    schur_alignment_diagnostics[
+                        "oneStepSchurResidualProposal"
+                    ] = {
+                        "ordinaryWorkerSSE": ordinary_worker_sse,
+                        "candidateWorkerSSE": one_step_worker_sse,
+                        "selected": one_step_selected,
+                    }
+                    if one_step_selected:
+                        candidate_consensus = one_step_consensus
+                        physical_candidate = one_step_physical_candidate
+                        candidate_centers, residuals = drs_state_for_consensus(
+                            local_cameras,
+                            centers,
+                            camera_masks,
+                            candidate_consensus,
+                            arguments.relaxation,
+                            selected_metric_blocks,
+                            shared_only=arguments.shared_only_camera_proximal,
+                        )
                 if arguments.schur_model_consensus_clipping:
                     consensus_model = schur_alignment_diagnostics[
                         "consensusModel"
@@ -7205,6 +7279,10 @@ def main():
         "schurAlignmentDiagnosticIterations": sorted(
             iteration + 1
             for iteration in schur_alignment_diagnostic_iterations
+        ),
+        "oneStepSchurResidualProposalIterations": sorted(
+            iteration + 1
+            for iteration in one_step_schur_residual_proposal_iterations
         ),
         "schurAlignmentCameraDamping": (
             arguments.schur_alignment_camera_damping
