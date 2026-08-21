@@ -513,17 +513,33 @@ def solve_global_schur_system(
             block_rows = []
             block_columns = []
             block_sources = []
+            block_source_transposed = []
             for system in systems:
                 block_rows.append(system.block_rows)
                 block_columns.append(system.block_columns)
                 block_sources.append(system.blocks)
+                block_source_transposed.append(False)
                 off_diagonal = system.block_rows != system.block_columns
                 if np.any(off_diagonal):
-                    block_rows.append(system.block_columns[off_diagonal])
-                    block_columns.append(system.block_rows[off_diagonal])
-                    block_sources.append(np.swapaxes(
-                        system.blocks[off_diagonal], 1, 2
-                    ))
+                    if operator_mode == "bsr":
+                        block_rows.append(system.block_columns[off_diagonal])
+                        block_columns.append(system.block_rows[off_diagonal])
+                        block_sources.append(np.swapaxes(
+                            system.blocks[off_diagonal], 1, 2
+                        ))
+                    else:
+                        off_diagonal_indices = np.flatnonzero(off_diagonal)
+                        block_rows.append(
+                            system.block_columns[off_diagonal_indices]
+                        )
+                        block_columns.append(
+                            system.block_rows[off_diagonal_indices]
+                        )
+                        block_sources.append((
+                            system.blocks,
+                            off_diagonal_indices,
+                        ))
+                    block_source_transposed.append(True)
             block_rows.append(np.arange(camera_count, dtype=np.int64))
             block_columns.append(np.arange(camera_count, dtype=np.int64))
             damping_blocks = np.zeros(
@@ -533,6 +549,7 @@ def solve_global_schur_system(
                 camera_damping * damping_diagonal
             )
             block_sources.append(damping_blocks)
+            block_source_transposed.append(False)
             if operator_mode == "bsr":
                 numeric_assembly_started_at = time.perf_counter()
                 block_rows = np.concatenate(block_rows)
@@ -598,8 +615,8 @@ def solve_global_schur_system(
                     source_inverse = []
                     source_is_unique = []
                     source_offset = 0
-                    for source in block_sources:
-                        source_end = source_offset + source.shape[0]
+                    for source_rows in block_rows:
+                        source_end = source_offset + source_rows.shape[0]
                         source_mapping = inverse[
                             source_offset:source_end
                         ].copy()
@@ -636,15 +653,31 @@ def solve_global_schur_system(
                 numeric_assembly_started_at = time.perf_counter()
                 bsr_operator = cache.operator
                 bsr_operator.data.fill(0.0)
-                for source, inverse, source_is_unique in zip(
+                for source, transposed, inverse, source_is_unique in zip(
                     block_sources,
+                    block_source_transposed,
                     cache.source_inverse,
                     cache.source_is_unique,
                 ):
-                    if source_is_unique:
+                    if not transposed and source_is_unique:
                         bsr_operator.data[inverse] += source
-                    else:
+                    elif not transposed:
                         np.add.at(bsr_operator.data, inverse, source)
+                    else:
+                        source_blocks, source_indices = source
+                        for start in range(0, source_indices.size, 16384):
+                            stop = min(start + 16384, source_indices.size)
+                            chunk = source_indices[start:stop]
+                            values = np.swapaxes(
+                                source_blocks[chunk], 1, 2
+                            )
+                            mapping = inverse[start:stop]
+                            if source_is_unique:
+                                bsr_operator.data[mapping] += values
+                            else:
+                                np.add.at(
+                                    bsr_operator.data, mapping, values
+                                )
                 numeric_assembly_seconds = (
                     time.perf_counter() - numeric_assembly_started_at
                 )
