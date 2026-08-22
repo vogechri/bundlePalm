@@ -363,6 +363,12 @@ Roman/Trafalgar geomean `0.761715x` control versus I90 `0.762678x`; BAL52/3068
 decline exactly. Transfer unchanged to all-15 once. Do not test another timing.
 See `benchmark_results/k24_landmark_response_proposal_i60_sentinel_actual/report.md`.
 
+All-15 I60 passes unchanged at `0.786533x` geometric and `0.754474x` summed
+control, W/T/L `14/1/0`, improving I90 `0.790889x/0.760039x`. Candidate/Ceres
+is `1.171081x`. Close timing comparison; run unchanged serial BAL29 once and do
+not test another checkpoint. See
+`benchmark_results/k24_landmark_response_proposal_i60_breadth/report.md`.
+
 Only `all15_corrected/` is authoritative. The sibling `all15/` directory is a
 quarantined setup error with the wrong trust cap and recovery controls.
 

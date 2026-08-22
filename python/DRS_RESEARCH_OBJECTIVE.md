@@ -420,6 +420,15 @@ aggregate-positive for the joint camera/landmark proposal. Roman is
 exactly. Transfer I60 unchanged to all-15 once; do not test another checkpoint.
 Report: `benchmark_results/k24_landmark_response_proposal_i60_sentinel_actual/report.md`.
 
+Unchanged all-15 I60 transfer passes: geometric/summed delivered/control
+`0.786533x/0.754474x`, W/T/L `14/1/0`, versus I90
+`0.790889x/0.760039x`. All 14 accepted scenes select scale `1.0`; Madrid
+declines exactly. Candidate/Ceres improves from `1.177568x` at I90 to
+`1.171081x` at I60. Effects remain mixed but bounded, so close checkpoint
+comparison and run I60 unchanged on serial BAL29 once. Do not test another
+timing. Report:
+`benchmark_results/k24_landmark_response_proposal_i60_breadth/report.md`.
+
 Fresh isolated bridge gate (2026-08-19):
 `serverTest/client_drs_k1_bridge.py` preserves `client_drs.py` and pins the
 mature legacy backbone while exposing ordered `legacy`, `direct`, and

@@ -304,6 +304,12 @@ slightly aggregate-positive on Roman/Trafalgar (`0.761715x` versus I90
 timing afterward. See
 `benchmark_results/k24_landmark_response_proposal_i60_sentinel_actual/report.md`.
 
+All-15 confirms I60 as the aggregate-better frozen checkpoint:
+geometric/summed control `0.786533x/0.754474x`, W/T/L `14/1/0`, versus I90
+`0.790889x/0.760039x`. Candidate/Ceres is `1.171081x`. Close timing and run
+unchanged BAL29 once. See
+`benchmark_results/k24_landmark_response_proposal_i60_breadth/report.md`.
+
 The serial BAL29 gate passes unchanged: all 29 proposals decline exactly,
 W/T/L `0/29/0`, with `6.873/9.689 GiB` maximum coordinator/worker RSS. Together
 with all-15 `0.790889x`, W/T/L `14/1/0`, this promotes the common no-loss

@@ -1,0 +1,16 @@
+variant	dataset	clusters	iterations	local_steps	threads_per_cluster	status	exit_code	elapsed_seconds	coordinator_max_rss_kb	worker_max_rss_kb
+landmark_proposal_i60	benchmark_results/sfm_init_1dsfm/alamo/alamo_sfm_init_derived.txt	24	120	1	1	completed	0	35	1041796	724264
+landmark_proposal_i60	benchmark_results/sfm_init_1dsfm/ellis_island/ellis_island_sfm_init_derived.txt	24	120	1	1	completed	0	18	822288	240480
+landmark_proposal_i60	benchmark_results/sfm_init_1dsfm/gendarmenmarkt/gendarmenmarkt_sfm_init_derived.txt	24	120	1	1	completed	0	16	761488	147152
+landmark_proposal_i60	benchmark_results/sfm_init_1dsfm/madrid_metropolis/madrid_metropolis_sfm_init_derived.txt	24	120	1	1	completed	0	14	731244	104092
+landmark_proposal_i60	benchmark_results/sfm_init_1dsfm/montreal_notre_dame/montreal_notre_dame_sfm_init_derived.txt	24	120	1	1	completed	0	57	1365924	1128300
+landmark_proposal_i60	benchmark_results/sfm_init_1dsfm/notre_dame/notre_dame_sfm_init_derived.txt	24	120	1	1	completed	0	50	1076712	847620
+landmark_proposal_i60	benchmark_results/sfm_init_1dsfm/nyc_library/nyc_library_sfm_init_derived.txt	24	120	1	1	completed	0	18	780860	180772
+landmark_proposal_i60	benchmark_results/sfm_init_1dsfm/piazza_del_popolo/piazza_del_popolo_sfm_init_derived.txt	24	120	1	1	completed	0	16	794288	268468
+landmark_proposal_i60	benchmark_results/sfm_init_1dsfm/piccadilly/piccadilly_sfm_init_derived.txt	24	120	1	1	completed	0	52	1080464	772636
+landmark_proposal_i60	benchmark_results/sfm_init_1dsfm/roman_forum/roman_forum_sfm_init_derived.txt	24	120	1	1	completed	0	50	941568	724344
+landmark_proposal_i60	benchmark_results/sfm_init_1dsfm/tower_of_london/tower_of_london_sfm_init_derived.txt	24	120	1	1	completed	0	19	786568	227176
+landmark_proposal_i60	benchmark_results/sfm_init_1dsfm/trafalgar/trafalgar_sfm_init_derived.txt	24	120	1	1	completed	0	135	1847640	1806084
+landmark_proposal_i60	benchmark_results/sfm_init_1dsfm/union_square/union_square_sfm_init_derived.txt	24	120	1	1	completed	0	29	873684	397432
+landmark_proposal_i60	benchmark_results/sfm_init_1dsfm/vienna_cathedral/vienna_cathedral_sfm_init_derived.txt	24	120	1	1	completed	0	52	1101224	1002552
+landmark_proposal_i60	benchmark_results/sfm_init_1dsfm/yorkminster/yorkminster_sfm_init_derived.txt	24	120	1	1	completed	0	27	863504	404652

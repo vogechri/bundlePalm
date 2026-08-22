@@ -73,11 +73,15 @@ def geometric_mean(values):
     return math.exp(math.fsum(math.log(value) for value in values) / len(values))
 
 
-def assert_prefix(control, candidate, scene):
+def assert_prefix(control, candidate, scene, proposal_iteration):
     if len(control["trajectory"]) < 120 or len(candidate["trajectory"]) != 120:
         raise ValueError(f"trajectory length mismatch for {scene}")
     for iteration, (left, right) in enumerate(
-        zip(control["trajectory"][:89], candidate["trajectory"][:89]), 1
+        zip(
+            control["trajectory"][:proposal_iteration - 1],
+            candidate["trajectory"][:proposal_iteration - 1],
+        ),
+        1,
     ):
         for field in PREFIX_FIELDS:
             if left[field] != right[field]:
@@ -89,6 +93,7 @@ def validate_configuration(
     scene,
     proposal_trust_rebase,
     proposal_landmark_response,
+    proposal_iteration,
 ):
     expected = {
         "clusters": 24,
@@ -99,7 +104,7 @@ def validate_configuration(
         "trustRegionPolicy": "drs",
         "persistentTrustRegion": True,
         "sharedOnlyCameraProximal": True,
-        "oneStepSchurResidualProposalIterations": [90],
+        "oneStepSchurResidualProposalIterations": [proposal_iteration],
         "schurCoupledConsensusOracle": False,
         "sharedSchurMinimumRelativeDecrease": 1e-3,
     }
@@ -180,6 +185,7 @@ def analyze(
     families,
     proposal_trust_rebase=False,
     proposal_landmark_response=False,
+    proposal_iteration=90,
 ):
     ceres = ceres_rows()
     details = {}
@@ -207,11 +213,14 @@ def analyze(
                 scene,
                 proposal_trust_rebase,
                 proposal_landmark_response,
+                proposal_iteration,
             )
-            assert_prefix(control, candidate, scene)
+            assert_prefix(control, candidate, scene, proposal_iteration)
             if status["status"] != "completed" or int(status["exit_code"]) != 0:
                 raise ValueError(f"failed case status for {scene}")
-            diagnostic = candidate["trajectory"][89]["schurAlignmentDiagnostics"]
+            diagnostic = candidate["trajectory"][proposal_iteration - 1][
+                "schurAlignmentDiagnostics"
+            ]
             proposal = diagnostic["oneStepSchurResidualProposal"]
             if proposal is None or len(proposal["attempts"]) != 8:
                 raise ValueError(f"proposal telemetry mismatch for {scene}")
@@ -257,7 +266,9 @@ def analyze(
                 if trajectory_row.get("proposalTrustStateRebaseApplied", False)
             ]
             expected_rebase_iterations = (
-                [91] if proposal_trust_rebase and selected else []
+                [proposal_iteration + 1]
+                if proposal_trust_rebase and selected
+                else []
             )
             if trust_rebase_iterations != expected_rebase_iterations:
                 raise ValueError(
@@ -275,8 +286,12 @@ def analyze(
                 "selected_scale": selected_scale,
                 "worker_sse_ratio": worker_sse_ratio,
                 "immediate_i90_ratio": (
-                    candidate["trajectory"][89]["sumSquaredError"]
-                    / control["trajectory"][89]["sumSquaredError"]
+                    candidate["trajectory"][proposal_iteration - 1][
+                        "sumSquaredError"
+                    ]
+                    / control["trajectory"][proposal_iteration - 1][
+                        "sumSquaredError"
+                    ]
                 ),
                 "trajectory_i120_ratio": (
                     candidate["trajectory"][119]["sumSquaredError"]
@@ -307,6 +322,7 @@ def analyze(
         "families": list(families),
         "proposal_trust_rebase": proposal_trust_rebase,
         "proposal_landmark_response": proposal_landmark_response,
+        "proposal_iteration": proposal_iteration,
         "summaries": summaries,
         "scenes": details,
     }
@@ -314,16 +330,20 @@ def analyze(
 
 def write_report(path, summary):
     with path.open("w", encoding="utf-8") as output:
-        output.write("# K24 I90 One-Step Schur Proposal Breadth\n\n")
         output.write(
-            "One global I90 proposal, eight fixed geometric scales, precise "
+            f"# K24 I{summary['proposal_iteration']} One-Step Schur Proposal "
+            "Breadth\n\n"
+        )
+        output.write(
+            f"One global I{summary['proposal_iteration']} proposal, eight fixed "
+            "geometric scales, precise "
             "worker-SSE selection, atomic DRS state rebuild, and I120 delivery. "
             "The rejected coupled-consensus oracle is disabled."
         )
         if summary["proposal_trust_rebase"]:
             output.write(
                 " Selected proposals rebase worker trust and coordinator "
-                "curvature/acceleration state at I91."
+                "curvature/acceleration state on the next iteration."
             )
         if summary["proposal_landmark_response"]:
             output.write(
@@ -371,6 +391,7 @@ def main():
     )
     parser.add_argument("--proposal-trust-rebase", action="store_true")
     parser.add_argument("--proposal-landmark-response", action="store_true")
+    parser.add_argument("--proposal-iteration", type=int, default=90)
     arguments = parser.parse_args()
     summary = analyze(
         arguments.root,
@@ -378,6 +399,7 @@ def main():
         arguments.families,
         proposal_trust_rebase=arguments.proposal_trust_rebase,
         proposal_landmark_response=arguments.proposal_landmark_response,
+        proposal_iteration=arguments.proposal_iteration,
     )
     arguments.root.mkdir(parents=True, exist_ok=True)
     (arguments.root / "summary.json").write_text(
