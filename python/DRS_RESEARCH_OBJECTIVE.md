@@ -497,6 +497,20 @@ damping unchanged on BAL29 before promotion. See
 `benchmark_results/k24_landmark_response_parameter_sensitivity/report.md` and
 `benchmark_results/k24_landmark_response_damping_half_validation/report.md`.
 
+The final bounded decomposition shows landmark damping drives the gain:
+camera-half alone is slightly worse than base, landmark-half improves base, and
+quarter damping (`0.00146484375` for both terms) improves the development tails
+again. Frozen held-out validation gives all-15 delivered/control `0.774687x`
+geometric and `0.746302x` summed, candidate/Ceres `1.153445x`, W/T/L versus
+control `14/1/0`; quarter/half is `0.995929x`, W/T/L `12/1/2`. Tower and
+Yorkminster improve to `0.873032x/0.792652x` control. Madrid remains declined
+and moves away from the floor, proving this is accepted-tail quality rather
+than marginal activation. BAL29 remains bitwise exact with all proposals
+declined. Promote quarter damping as the common global proposal setting and
+close damping/depth sensitivity; do not halve again. See
+`benchmark_results/k24_landmark_response_damping_quarter_validation/report.md`
+and `benchmark_results/k24_landmark_response_damping_quarter_breadth/report.md`.
+
 Fresh isolated bridge gate (2026-08-19):
 `serverTest/client_drs_k1_bridge.py` preserves `client_drs.py` and pins the
 mature legacy backbone while exposing ordered `legacy`, `direct`, and

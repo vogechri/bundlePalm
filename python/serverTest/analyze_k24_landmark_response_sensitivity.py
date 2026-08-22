@@ -10,11 +10,46 @@ from analyze_k24_one_step_schur_proposal_breadth import ceres_rows, load_rows
 
 
 ARMS = {
-    "damping_half": {"damping": 0.0029296875, "steps": 3},
-    "base": {"damping": 0.005859375, "steps": 3},
-    "damping_double": {"damping": 0.01171875, "steps": 3},
-    "landmarks_1": {"damping": 0.005859375, "steps": 1},
-    "landmarks_5": {"damping": 0.005859375, "steps": 5},
+    "damping_half": {
+        "camera_damping": 0.0029296875,
+        "landmark_damping": 0.0029296875,
+        "steps": 3,
+    },
+    "base": {
+        "camera_damping": 0.005859375,
+        "landmark_damping": 0.005859375,
+        "steps": 3,
+    },
+    "damping_double": {
+        "camera_damping": 0.01171875,
+        "landmark_damping": 0.01171875,
+        "steps": 3,
+    },
+    "landmarks_1": {
+        "camera_damping": 0.005859375,
+        "landmark_damping": 0.005859375,
+        "steps": 1,
+    },
+    "landmarks_5": {
+        "camera_damping": 0.005859375,
+        "landmark_damping": 0.005859375,
+        "steps": 5,
+    },
+    "camera_half": {
+        "camera_damping": 0.0029296875,
+        "landmark_damping": 0.005859375,
+        "steps": 3,
+    },
+    "landmark_half": {
+        "camera_damping": 0.005859375,
+        "landmark_damping": 0.0029296875,
+        "steps": 3,
+    },
+    "damping_quarter": {
+        "camera_damping": 0.00146484375,
+        "landmark_damping": 0.00146484375,
+        "steps": 3,
+    },
 }
 SCENES = ("madrid_metropolis", "tower_of_london", "yorkminster")
 
@@ -38,9 +73,9 @@ def analyze(root, control_root):
             row = rows[scene]
             if row.get("oneStepSchurResidualProposalIterations") != [60]:
                 raise ValueError(f"proposal checkpoint mismatch {arm}/{scene}")
-            if row.get("schurAlignmentCameraDamping") != expected["damping"]:
+            if row.get("schurAlignmentCameraDamping") != expected["camera_damping"]:
                 raise ValueError(f"camera damping mismatch {arm}/{scene}")
-            if row.get("schurAlignmentLandmarkDamping") != expected["damping"]:
+            if row.get("schurAlignmentLandmarkDamping") != expected["landmark_damping"]:
                 raise ValueError(f"landmark damping mismatch {arm}/{scene}")
             if row.get("sharedSchurLandmarkRefinementSteps") != expected["steps"]:
                 raise ValueError(f"landmark depth mismatch {arm}/{scene}")
@@ -95,14 +130,15 @@ def write_report(path, summary):
             "grid, `1e-3` floor, restart, and trust policy are frozen.\n\n"
         )
         output.write(
-            "| Arm | Damping | Landmark steps | Geometric/control | "
+            "| Arm | Camera damping | Landmark damping | Landmark steps | Geometric/control | "
             "Geometric/Ceres | Selected | Rejections |\n"
         )
-        output.write("|---|---:|---:|---:|---:|---:|---:|\n")
+        output.write("|---|---:|---:|---:|---:|---:|---:|---:|\n")
         for arm, settings in ARMS.items():
             row = summary["summaries"][arm]
             output.write(
-                f"| {arm} | {settings['damping']:.9g} | {settings['steps']} | "
+                f"| {arm} | {settings['camera_damping']:.9g} | "
+                f"{settings['landmark_damping']:.9g} | {settings['steps']} | "
                 f"{row['geometric_over_control']:.9f} | "
                 f"{row['geometric_over_ceres']:.9f} | "
                 f"{row['selected']}/3 | {row['total_rejections']} |\n"

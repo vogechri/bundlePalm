@@ -407,6 +407,13 @@ bounded regressions. Madrid remains below the unchanged `0.1%` floor. Close
 damping/depth sweeps; run half damping unchanged on BAL29. See
 `benchmark_results/k24_landmark_response_damping_half_validation/report.md`.
 
+The final decomposition promotes quarter damping (`0.00146484375` camera and
+landmark). All-15 is `0.774687x` control, `0.746302x` summed, and `1.153445x`
+Ceres, W/T/L `14/1/0`; BAL29 remains bitwise exact with all proposals declined.
+Landmark damping drives the gain; Madrid remains below the unchanged floor.
+Close damping/depth sensitivity and do not halve again. See
+`benchmark_results/k24_landmark_response_damping_quarter_breadth/report.md`.
+
 BAL29 confirms I60 unchanged: all 29 proposals decline exactly, W/T/L
 `0/29/0`, peak RSS `6.859/9.823 GiB`. Promote I60 as the common checkpoint with
 all-15 `0.786533x` control, `1.171081x` Ceres, W/T/L `14/1/0`. Freeze timing and

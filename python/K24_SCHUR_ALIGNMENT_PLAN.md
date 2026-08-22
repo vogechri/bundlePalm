@@ -340,6 +340,12 @@ the fixed floor. Close damping/depth sweeps and transfer half damping unchanged
 to BAL29. See `benchmark_results/k24_proposal_full_1dsfm_evaluation/report.md`
 and `benchmark_results/k24_landmark_response_damping_half_validation/report.md`.
 
+Final damping decomposition promotes quarter damping (`0.00146484375` both):
+all-15 `0.774687x` control and `1.153445x` Ceres, W/T/L `14/1/0`; BAL29 is
+bitwise exact. Landmark damping is the useful sensitivity and Madrid still
+declines. Close damping/depth sweeps and freeze quarter damping. See
+`benchmark_results/k24_landmark_response_damping_quarter_breadth/report.md`.
+
 BAL29 closes timing: all 29 I60 proposals decline exactly, while all-15 is
 `0.786533x` control and `1.171081x` Ceres with no losses. Promote I60 as the
 common checkpoint and freeze all timing/scale/depth/floor/restart settings. See

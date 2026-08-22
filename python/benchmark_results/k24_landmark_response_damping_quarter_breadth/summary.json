@@ -1,0 +1,473 @@
+{
+  "scenes": {
+    "alamo": {
+      "family": "1dsfm",
+      "over_base": 0.9980858993388677,
+      "over_ceres": 1.0772261882111867,
+      "over_control": 0.896539558659075
+    },
+    "bal1064": {
+      "family": "bal",
+      "over_base": 1.0,
+      "over_ceres": 1.0017986653532909,
+      "over_control": 1.0000000000027887
+    },
+    "bal126": {
+      "family": "bal",
+      "over_base": 1.0,
+      "over_ceres": 1.0168522497985126,
+      "over_control": 0.9999999999999992
+    },
+    "bal1266": {
+      "family": "bal",
+      "over_base": 1.0,
+      "over_ceres": 1.0022869852733614,
+      "over_control": 1.0000000000031402
+    },
+    "bal135": {
+      "family": "bal",
+      "over_base": 1.0,
+      "over_ceres": 1.0014612133381067,
+      "over_control": 0.9999999999999993
+    },
+    "bal142": {
+      "family": "bal",
+      "over_base": 1.0,
+      "over_ceres": 1.0033813511183087,
+      "over_control": 1.0
+    },
+    "bal1490": {
+      "family": "bal",
+      "over_base": 1.0,
+      "over_ceres": 0.9947708421769396,
+      "over_control": 1.0000000000000007
+    },
+    "bal1723": {
+      "family": "bal",
+      "over_base": 1.0,
+      "over_ceres": 0.9964969233729449,
+      "over_control": 1.0000000000019915
+    },
+    "bal173": {
+      "family": "bal",
+      "over_base": 1.0,
+      "over_ceres": 0.9987153341886121,
+      "over_control": 1.000000000000002
+    },
+    "bal1778": {
+      "family": "bal",
+      "over_base": 1.0,
+      "over_ceres": 1.01213780229864,
+      "over_control": 0.9999999999999997
+    },
+    "bal245": {
+      "family": "bal",
+      "over_base": 1.0,
+      "over_ceres": 0.9642969600522376,
+      "over_control": 1.0000000000000029
+    },
+    "bal253": {
+      "family": "bal",
+      "over_base": 1.0,
+      "over_ceres": 0.9964606847305623,
+      "over_control": 1.000000000000001
+    },
+    "bal257": {
+      "family": "bal",
+      "over_base": 1.0,
+      "over_ceres": 1.0257017605747354,
+      "over_control": 0.9999999999999988
+    },
+    "bal287": {
+      "family": "bal",
+      "over_base": 1.0,
+      "over_ceres": 0.9986829862547778,
+      "over_control": 0.9999999999999992
+    },
+    "bal3068": {
+      "family": "bal",
+      "over_base": 1.0,
+      "over_ceres": 0.9909239428919583,
+      "over_control": 0.9999999999999986
+    },
+    "bal308": {
+      "family": "bal",
+      "over_base": 1.0,
+      "over_ceres": 1.0029295347325342,
+      "over_control": 0.9999999999999991
+    },
+    "bal356": {
+      "family": "bal",
+      "over_base": 1.0,
+      "over_ceres": 1.020981401359244,
+      "over_control": 0.9999999999999993
+    },
+    "bal394": {
+      "family": "bal",
+      "over_base": 1.0,
+      "over_ceres": 1.0073675095382986,
+      "over_control": 1.0000000000000007
+    },
+    "bal427": {
+      "family": "bal",
+      "over_base": 1.0,
+      "over_ceres": 0.9969463893167924,
+      "over_control": 1.0000000000000009
+    },
+    "bal49": {
+      "family": "bal",
+      "over_base": 1.0,
+      "over_ceres": 1.0020883945405954,
+      "over_control": 0.9999999999999994
+    },
+    "bal52": {
+      "family": "bal",
+      "over_base": 1.0,
+      "over_ceres": 0.9706850334514984,
+      "over_control": 0.9999999999999997
+    },
+    "bal646": {
+      "family": "bal",
+      "over_base": 1.0,
+      "over_ceres": 1.00205231370768,
+      "over_control": 0.9999999999975442
+    },
+    "bal744": {
+      "family": "bal",
+      "over_base": 1.0,
+      "over_ceres": 0.9973144668457183,
+      "over_control": 0.9999999999999983
+    },
+    "bal783": {
+      "family": "bal",
+      "over_base": 1.0,
+      "over_ceres": 1.0006926638574811,
+      "over_control": 1.0000000000001743
+    },
+    "bal871": {
+      "family": "bal",
+      "over_base": 1.0,
+      "over_ceres": 1.0006148839773534,
+      "over_control": 1.0000000000000007
+    },
+    "bal88": {
+      "family": "bal",
+      "over_base": 1.0,
+      "over_ceres": 1.0000939681719225,
+      "over_control": 1.0
+    },
+    "bal89": {
+      "family": "bal",
+      "over_base": 1.0,
+      "over_ceres": 1.006441419225707,
+      "over_control": 1.0000000000000009
+    },
+    "bal931": {
+      "family": "bal",
+      "over_base": 1.0,
+      "over_ceres": 1.0003085654635482,
+      "over_control": 1.0000000000013871
+    },
+    "bal951": {
+      "family": "bal",
+      "over_base": 1.0,
+      "over_ceres": 0.9622798874103952,
+      "over_control": 1.0000000000000042
+    },
+    "bal961": {
+      "family": "bal",
+      "over_base": 1.0,
+      "over_ceres": 1.0000733240861008,
+      "over_control": 0.9999999999999981
+    },
+    "ellis_island": {
+      "family": "1dsfm",
+      "over_base": 0.9957433531161587,
+      "over_ceres": 1.0542681883414438,
+      "over_control": 0.9588446965467489
+    },
+    "gendarmenmarkt": {
+      "family": "1dsfm",
+      "over_base": 1.00677968658465,
+      "over_ceres": 1.2585452876627372,
+      "over_control": 0.9641126427171559
+    },
+    "madrid_metropolis": {
+      "family": "1dsfm",
+      "over_base": 1.0,
+      "over_ceres": 1.1212537575963075,
+      "over_control": 0.9999999999986623
+    },
+    "montreal_notre_dame": {
+      "family": "1dsfm",
+      "over_base": 0.9864616190069693,
+      "over_ceres": 1.1239176323301001,
+      "over_control": 0.5655991383173856
+    },
+    "notre_dame": {
+      "family": "1dsfm",
+      "over_base": 0.9800507992598919,
+      "over_ceres": 1.0857698590520442,
+      "over_control": 0.6108288449312885
+    },
+    "nyc_library": {
+      "family": "1dsfm",
+      "over_base": 0.9796388944883512,
+      "over_ceres": 1.1161295990189253,
+      "over_control": 0.8610879564990136
+    },
+    "piazza_del_popolo": {
+      "family": "1dsfm",
+      "over_base": 0.9527306464422055,
+      "over_ceres": 1.0029456131471186,
+      "over_control": 0.5491666422393299
+    },
+    "piccadilly": {
+      "family": "1dsfm",
+      "over_base": 0.9942931107425086,
+      "over_ceres": 0.7214901949241345,
+      "over_control": 0.896571507211949
+    },
+    "roman_forum": {
+      "family": "1dsfm",
+      "over_base": 0.9536881508867588,
+      "over_ceres": 1.1313478077067882,
+      "over_control": 0.622680590041681
+    },
+    "tower_of_london": {
+      "family": "1dsfm",
+      "over_base": 0.9781174357783144,
+      "over_ceres": 1.7902706614334682,
+      "over_control": 0.8730319615744704
+    },
+    "trafalgar": {
+      "family": "1dsfm",
+      "over_base": 1.0104147758158688,
+      "over_ceres": 0.9514711473774043,
+      "over_control": 0.8978958409260547
+    },
+    "union_square": {
+      "family": "1dsfm",
+      "over_base": 0.9874744009679404,
+      "over_ceres": 1.1502045269383203,
+      "over_control": 0.7678115077066412
+    },
+    "vienna_cathedral": {
+      "family": "1dsfm",
+      "over_base": 0.9799455019865299,
+      "over_ceres": 1.095304076821972,
+      "over_control": 0.6023217465040035
+    },
+    "yorkminster": {
+      "family": "1dsfm",
+      "over_base": 0.9727267286360947,
+      "over_ceres": 2.219245186058242,
+      "over_control": 0.7926518171097232
+    }
+  },
+  "status": "passed",
+  "summaries": {
+    "1dsfm": {
+      "count": 15,
+      "over_base": {
+        "geometric": 0.9849397297417758,
+        "losses": 2,
+        "ratios": {
+          "alamo": 0.9980858993388677,
+          "ellis_island": 0.9957433531161587,
+          "gendarmenmarkt": 1.00677968658465,
+          "madrid_metropolis": 1.0,
+          "montreal_notre_dame": 0.9864616190069693,
+          "notre_dame": 0.9800507992598919,
+          "nyc_library": 0.9796388944883512,
+          "piazza_del_popolo": 0.9527306464422055,
+          "piccadilly": 0.9942931107425086,
+          "roman_forum": 0.9536881508867588,
+          "tower_of_london": 0.9781174357783144,
+          "trafalgar": 1.0104147758158688,
+          "union_square": 0.9874744009679404,
+          "vienna_cathedral": 0.9799455019865299,
+          "yorkminster": 0.9727267286360947
+        },
+        "summed": 0.9891680370021217,
+        "ties": 1,
+        "wins": 12,
+        "worst": 1.0104147758158688
+      },
+      "over_ceres": {
+        "geometric": 1.1534445806293592,
+        "losses": 13,
+        "ratios": {
+          "alamo": 1.0772261882111867,
+          "ellis_island": 1.0542681883414438,
+          "gendarmenmarkt": 1.2585452876627372,
+          "madrid_metropolis": 1.1212537575963075,
+          "montreal_notre_dame": 1.1239176323301001,
+          "notre_dame": 1.0857698590520442,
+          "nyc_library": 1.1161295990189253,
+          "piazza_del_popolo": 1.0029456131471186,
+          "piccadilly": 0.7214901949241345,
+          "roman_forum": 1.1313478077067882,
+          "tower_of_london": 1.7902706614334682,
+          "trafalgar": 0.9514711473774043,
+          "union_square": 1.1502045269383203,
+          "vienna_cathedral": 1.095304076821972,
+          "yorkminster": 2.219245186058242
+        },
+        "summed": 1.0652784826278572,
+        "ties": 0,
+        "wins": 2,
+        "worst": 2.219245186058242
+      },
+      "over_control": {
+        "geometric": 0.774687405343962,
+        "losses": 0,
+        "ratios": {
+          "alamo": 0.896539558659075,
+          "ellis_island": 0.9588446965467489,
+          "gendarmenmarkt": 0.9641126427171559,
+          "madrid_metropolis": 0.9999999999986623,
+          "montreal_notre_dame": 0.5655991383173856,
+          "notre_dame": 0.6108288449312885,
+          "nyc_library": 0.8610879564990136,
+          "piazza_del_popolo": 0.5491666422393299,
+          "piccadilly": 0.896571507211949,
+          "roman_forum": 0.622680590041681,
+          "tower_of_london": 0.8730319615744704,
+          "trafalgar": 0.8978958409260547,
+          "union_square": 0.7678115077066412,
+          "vienna_cathedral": 0.6023217465040035,
+          "yorkminster": 0.7926518171097232
+        },
+        "summed": 0.746301671469126,
+        "ties": 1,
+        "wins": 14,
+        "worst": 0.9999999999986623
+      },
+      "selected": 14,
+      "total_rejections": 122
+    },
+    "bal": {
+      "count": 29,
+      "over_base": {
+        "geometric": 1.0,
+        "losses": 0,
+        "ratios": {
+          "bal1064": 1.0,
+          "bal126": 1.0,
+          "bal1266": 1.0,
+          "bal135": 1.0,
+          "bal142": 1.0,
+          "bal1490": 1.0,
+          "bal1723": 1.0,
+          "bal173": 1.0,
+          "bal1778": 1.0,
+          "bal245": 1.0,
+          "bal253": 1.0,
+          "bal257": 1.0,
+          "bal287": 1.0,
+          "bal3068": 1.0,
+          "bal308": 1.0,
+          "bal356": 1.0,
+          "bal394": 1.0,
+          "bal427": 1.0,
+          "bal49": 1.0,
+          "bal52": 1.0,
+          "bal646": 1.0,
+          "bal744": 1.0,
+          "bal783": 1.0,
+          "bal871": 1.0,
+          "bal88": 1.0,
+          "bal89": 1.0,
+          "bal931": 1.0,
+          "bal951": 1.0,
+          "bal961": 1.0
+        },
+        "summed": 1.0,
+        "ties": 29,
+        "wins": 0,
+        "worst": 1.0
+      },
+      "over_ceres": {
+        "geometric": 0.9990389394935648,
+        "losses": 18,
+        "ratios": {
+          "bal1064": 1.0017986653532909,
+          "bal126": 1.0168522497985126,
+          "bal1266": 1.0022869852733614,
+          "bal135": 1.0014612133381067,
+          "bal142": 1.0033813511183087,
+          "bal1490": 0.9947708421769396,
+          "bal1723": 0.9964969233729449,
+          "bal173": 0.9987153341886121,
+          "bal1778": 1.01213780229864,
+          "bal245": 0.9642969600522376,
+          "bal253": 0.9964606847305623,
+          "bal257": 1.0257017605747354,
+          "bal287": 0.9986829862547778,
+          "bal3068": 0.9909239428919583,
+          "bal308": 1.0029295347325342,
+          "bal356": 1.020981401359244,
+          "bal394": 1.0073675095382986,
+          "bal427": 0.9969463893167924,
+          "bal49": 1.0020883945405954,
+          "bal52": 0.9706850334514984,
+          "bal646": 1.00205231370768,
+          "bal744": 0.9973144668457183,
+          "bal783": 1.0006926638574811,
+          "bal871": 1.0006148839773534,
+          "bal88": 1.0000939681719225,
+          "bal89": 1.006441419225707,
+          "bal931": 1.0003085654635482,
+          "bal951": 0.9622798874103952,
+          "bal961": 1.0000733240861008
+        },
+        "summed": 0.9950795731275637,
+        "ties": 0,
+        "wins": 11,
+        "worst": 1.0257017605747354
+      },
+      "over_control": {
+        "geometric": 1.0000000000002425,
+        "losses": 0,
+        "ratios": {
+          "bal1064": 1.0000000000027887,
+          "bal126": 0.9999999999999992,
+          "bal1266": 1.0000000000031402,
+          "bal135": 0.9999999999999993,
+          "bal142": 1.0,
+          "bal1490": 1.0000000000000007,
+          "bal1723": 1.0000000000019915,
+          "bal173": 1.000000000000002,
+          "bal1778": 0.9999999999999997,
+          "bal245": 1.0000000000000029,
+          "bal253": 1.000000000000001,
+          "bal257": 0.9999999999999988,
+          "bal287": 0.9999999999999992,
+          "bal3068": 0.9999999999999986,
+          "bal308": 0.9999999999999991,
+          "bal356": 0.9999999999999993,
+          "bal394": 1.0000000000000007,
+          "bal427": 1.0000000000000009,
+          "bal49": 0.9999999999999994,
+          "bal52": 0.9999999999999997,
+          "bal646": 0.9999999999975442,
+          "bal744": 0.9999999999999983,
+          "bal783": 1.0000000000001743,
+          "bal871": 1.0000000000000007,
+          "bal88": 1.0,
+          "bal89": 1.0000000000000009,
+          "bal931": 1.0000000000013871,
+          "bal951": 1.0000000000000042,
+          "bal961": 0.9999999999999981
+        },
+        "summed": 1.000000000000136,
+        "ties": 29,
+        "wins": 0,
+        "worst": 1.0000000000031402
+      },
+      "selected": 0,
+      "total_rejections": 32
+    }
+  }
+}
