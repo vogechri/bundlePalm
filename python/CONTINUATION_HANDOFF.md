@@ -341,6 +341,15 @@ promoted I120 state. Incremental correction/raw is `0.963498x` on 1DSfM and
 all-15/all-29 as a separately labeled polished endpoint. See
 `benchmark_results/k24_landmark_response_terminal_correction_sentinel/report.md`.
 
+Polished breadth is complete. One correction gives `0.964507x` the promoted
+1DSfM handoff and `1.135772x` Ceres geometrically (`1.044180x` summed), with all
+15 accepted. BAL is `0.999642x` handoff and `0.998681x` Ceres geometrically
+(`0.994776x` summed), correction W/T/L `26/3/0`; three nonconverged solves no-op
+exactly. Bounded low-memory transpose assembly keeps peak BAL RSS at
+`8.306/12.051 GiB`. Keep this separately labeled polish. The remaining gap is
+1DSfM trajectory/basin quality, not terminal descent. See
+`benchmark_results/k24_landmark_response_terminal_correction_breadth/report.md`.
+
 Only `all15_corrected/` is authoritative. The sibling `all15/` directory is a
 quarantined setup error with the wrong trust cap and recovery controls.
 

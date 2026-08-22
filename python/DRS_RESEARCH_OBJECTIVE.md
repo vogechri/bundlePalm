@@ -390,6 +390,18 @@ Expand the exact one-correction policy unchanged to all-15/all-29 as a
 separately labeled polished endpoint, not another DRS mechanism. Report:
 `benchmark_results/k24_landmark_response_terminal_correction_sentinel/report.md`.
 
+The polished all-15/all-29 breadth is complete after bounding transposed
+`bsr_low_memory` assembly in 16K-block chunks. On 1DSfM, one correction improves
+the promoted handoff by `0.964507x` geometrically and reaches `1.135772x` Ceres
+geometrically (`1.044180x` summed); all 15 corrections converge and accept.
+On BAL, correction/handoff is `0.999642x`, corrected/Ceres is `0.998681x`
+geometric and `0.994776x` summed, with W/T/L `26/3/0`; the three nonconverged
+solves no-op exactly. Peak BAL coordinator/worker RSS is `8.306/12.051 GiB`.
+Retain this as the separately labeled one-correction polished endpoint. The
+remaining research gap is 1DSfM basin/trajectory quality (`1.135772x` Ceres),
+not blocked terminal descent or BAL safety. Report:
+`benchmark_results/k24_landmark_response_terminal_correction_breadth/report.md`.
+
 Fresh isolated bridge gate (2026-08-19):
 `serverTest/client_drs_k1_bridge.py` preserves `client_drs.py` and pins the
 mature legacy backbone while exposing ordered `legacy`, `direct`, and

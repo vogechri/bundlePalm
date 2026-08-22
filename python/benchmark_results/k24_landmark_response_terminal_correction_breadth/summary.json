@@ -1,0 +1,507 @@
+{
+  "scenes": {
+    "alamo": {
+      "accepted": true,
+      "attempts": 1,
+      "corrected_over_ceres": 1.0757233337148808,
+      "corrected_over_handoff": 0.9949495893540954,
+      "family": "1dsfm",
+      "final_damping": 0.0029296875
+    },
+    "bal1064": {
+      "accepted": true,
+      "attempts": 1,
+      "corrected_over_ceres": 1.0017399307030226,
+      "corrected_over_handoff": 0.9999413708068237,
+      "family": "bal",
+      "final_damping": 0.0029296875
+    },
+    "bal126": {
+      "accepted": true,
+      "attempts": 1,
+      "corrected_over_ceres": 1.0167739918562424,
+      "corrected_over_handoff": 0.9999230390233323,
+      "family": "bal",
+      "final_damping": 0.0029296875
+    },
+    "bal1266": {
+      "accepted": true,
+      "attempts": 1,
+      "corrected_over_ceres": 1.0020560778745375,
+      "corrected_over_handoff": 0.9997696194811766,
+      "family": "bal",
+      "final_damping": 0.0029296875
+    },
+    "bal135": {
+      "accepted": true,
+      "attempts": 1,
+      "corrected_over_ceres": 0.9977997047901385,
+      "corrected_over_handoff": 0.9963438338907163,
+      "family": "bal",
+      "final_damping": 0.0029296875
+    },
+    "bal142": {
+      "accepted": true,
+      "attempts": 1,
+      "corrected_over_ceres": 1.0020567771310656,
+      "corrected_over_handoff": 0.9986798897689627,
+      "family": "bal",
+      "final_damping": 0.0029296875
+    },
+    "bal1490": {
+      "accepted": false,
+      "attempts": 6,
+      "corrected_over_ceres": 0.9947708421769389,
+      "corrected_over_handoff": 1.0,
+      "family": "bal",
+      "final_damping": 0.375
+    },
+    "bal1723": {
+      "accepted": true,
+      "attempts": 1,
+      "corrected_over_ceres": 0.9964271118073768,
+      "corrected_over_handoff": 0.9999299430214521,
+      "family": "bal",
+      "final_damping": 0.0029296875
+    },
+    "bal173": {
+      "accepted": true,
+      "attempts": 1,
+      "corrected_over_ceres": 0.9982069442733253,
+      "corrected_over_handoff": 0.9994909561334633,
+      "family": "bal",
+      "final_damping": 0.0029296875
+    },
+    "bal1778": {
+      "accepted": false,
+      "attempts": 6,
+      "corrected_over_ceres": 1.0121378022986403,
+      "corrected_over_handoff": 1.0,
+      "family": "bal",
+      "final_damping": 0.375
+    },
+    "bal245": {
+      "accepted": true,
+      "attempts": 1,
+      "corrected_over_ceres": 0.9639339001049388,
+      "corrected_over_handoff": 0.9996234977788624,
+      "family": "bal",
+      "final_damping": 0.0029296875
+    },
+    "bal253": {
+      "accepted": true,
+      "attempts": 1,
+      "corrected_over_ceres": 0.9964369836772278,
+      "corrected_over_handoff": 0.999976214763215,
+      "family": "bal",
+      "final_damping": 0.0029296875
+    },
+    "bal257": {
+      "accepted": true,
+      "attempts": 2,
+      "corrected_over_ceres": 1.0256540833742585,
+      "corrected_over_handoff": 0.9999535174820686,
+      "family": "bal",
+      "final_damping": 0.005859375
+    },
+    "bal287": {
+      "accepted": true,
+      "attempts": 1,
+      "corrected_over_ceres": 0.9986479356110627,
+      "corrected_over_handoff": 0.9999649031332282,
+      "family": "bal",
+      "final_damping": 0.0029296875
+    },
+    "bal3068": {
+      "accepted": true,
+      "attempts": 2,
+      "corrected_over_ceres": 0.9896423984624678,
+      "corrected_over_handoff": 0.9987067176661896,
+      "family": "bal",
+      "final_damping": 0.005859375
+    },
+    "bal308": {
+      "accepted": true,
+      "attempts": 1,
+      "corrected_over_ceres": 1.0028577892472914,
+      "corrected_over_handoff": 0.9999284640817135,
+      "family": "bal",
+      "final_damping": 0.0029296875
+    },
+    "bal356": {
+      "accepted": true,
+      "attempts": 1,
+      "corrected_over_ceres": 1.0208622401214464,
+      "corrected_over_handoff": 0.999883287552898,
+      "family": "bal",
+      "final_damping": 0.0029296875
+    },
+    "bal394": {
+      "accepted": true,
+      "attempts": 1,
+      "corrected_over_ceres": 1.0070005154331623,
+      "corrected_over_handoff": 0.9996356899526134,
+      "family": "bal",
+      "final_damping": 0.0029296875
+    },
+    "bal427": {
+      "accepted": true,
+      "attempts": 3,
+      "corrected_over_ceres": 0.9962946576012627,
+      "corrected_over_handoff": 0.9993462720538309,
+      "family": "bal",
+      "final_damping": 0.01171875
+    },
+    "bal49": {
+      "accepted": true,
+      "attempts": 1,
+      "corrected_over_ceres": 1.0017892027401858,
+      "corrected_over_handoff": 0.9997014317279392,
+      "family": "bal",
+      "final_damping": 0.0029296875
+    },
+    "bal52": {
+      "accepted": true,
+      "attempts": 1,
+      "corrected_over_ceres": 0.9701146175139939,
+      "corrected_over_handoff": 0.9994123573375016,
+      "family": "bal",
+      "final_damping": 0.0029296875
+    },
+    "bal646": {
+      "accepted": true,
+      "attempts": 1,
+      "corrected_over_ceres": 1.001765750457221,
+      "corrected_over_handoff": 0.9997140236602432,
+      "family": "bal",
+      "final_damping": 0.0029296875
+    },
+    "bal744": {
+      "accepted": true,
+      "attempts": 4,
+      "corrected_over_ceres": 0.9973037013178666,
+      "corrected_over_handoff": 0.9999892054831137,
+      "family": "bal",
+      "final_damping": 0.0234375
+    },
+    "bal783": {
+      "accepted": true,
+      "attempts": 1,
+      "corrected_over_ceres": 1.0005878742409646,
+      "corrected_over_handoff": 0.9998952829173964,
+      "family": "bal",
+      "final_damping": 0.0029296875
+    },
+    "bal871": {
+      "accepted": true,
+      "attempts": 1,
+      "corrected_over_ceres": 1.0005446329092194,
+      "corrected_over_handoff": 0.9999297921015785,
+      "family": "bal",
+      "final_damping": 0.0029296875
+    },
+    "bal88": {
+      "accepted": true,
+      "attempts": 1,
+      "corrected_over_ceres": 1.0000082206882779,
+      "corrected_over_handoff": 0.9999142605731325,
+      "family": "bal",
+      "final_damping": 0.0029296875
+    },
+    "bal89": {
+      "accepted": true,
+      "attempts": 1,
+      "corrected_over_ceres": 1.0064335117111716,
+      "corrected_over_handoff": 0.9999921430950839,
+      "family": "bal",
+      "final_damping": 0.0029296875
+    },
+    "bal931": {
+      "accepted": true,
+      "attempts": 1,
+      "corrected_over_ceres": 1.0002929270371885,
+      "corrected_over_handoff": 0.9999843663990171,
+      "family": "bal",
+      "final_damping": 0.0029296875
+    },
+    "bal951": {
+      "accepted": false,
+      "attempts": 6,
+      "corrected_over_ceres": 0.962279887410391,
+      "corrected_over_handoff": 1.0,
+      "family": "bal",
+      "final_damping": 0.375
+    },
+    "bal961": {
+      "accepted": true,
+      "attempts": 1,
+      "corrected_over_ceres": 1.000060488208987,
+      "corrected_over_handoff": 0.9999871650639942,
+      "family": "bal",
+      "final_damping": 0.0029296875
+    },
+    "ellis_island": {
+      "accepted": true,
+      "attempts": 1,
+      "corrected_over_ceres": 1.048919333062509,
+      "corrected_over_handoff": 0.9894330126958625,
+      "family": "1dsfm",
+      "final_damping": 0.0029296875
+    },
+    "gendarmenmarkt": {
+      "accepted": true,
+      "attempts": 1,
+      "corrected_over_ceres": 1.2642038414845445,
+      "corrected_over_handoff": 0.9922372659425687,
+      "family": "1dsfm",
+      "final_damping": 0.0029296875
+    },
+    "madrid_metropolis": {
+      "accepted": true,
+      "attempts": 1,
+      "corrected_over_ceres": 1.1156356059986148,
+      "corrected_over_handoff": 0.9949894022105852,
+      "family": "1dsfm",
+      "final_damping": 0.0029296875
+    },
+    "montreal_notre_dame": {
+      "accepted": true,
+      "attempts": 1,
+      "corrected_over_ceres": 1.0663670192275914,
+      "corrected_over_handoff": 0.9384888737903104,
+      "family": "1dsfm",
+      "final_damping": 0.0029296875
+    },
+    "notre_dame": {
+      "accepted": true,
+      "attempts": 1,
+      "corrected_over_ceres": 1.0509051559399827,
+      "corrected_over_handoff": 0.9348798382773009,
+      "family": "1dsfm",
+      "final_damping": 0.0029296875
+    },
+    "nyc_library": {
+      "accepted": true,
+      "attempts": 1,
+      "corrected_over_ceres": 1.1072112176959397,
+      "corrected_over_handoff": 0.9769309097272899,
+      "family": "1dsfm",
+      "final_damping": 0.0029296875
+    },
+    "piazza_del_popolo": {
+      "accepted": true,
+      "attempts": 1,
+      "corrected_over_ceres": 0.9659074433307238,
+      "corrected_over_handoff": 0.9112354151015022,
+      "family": "1dsfm",
+      "final_damping": 0.0029296875
+    },
+    "piccadilly": {
+      "accepted": true,
+      "attempts": 1,
+      "corrected_over_ceres": 0.7357898540885041,
+      "corrected_over_handoff": 0.9829898484414651,
+      "family": "1dsfm",
+      "final_damping": 0.0029296875
+    },
+    "roman_forum": {
+      "accepted": true,
+      "attempts": 1,
+      "corrected_over_ceres": 1.1225586509449608,
+      "corrected_over_handoff": 0.951065924425222,
+      "family": "1dsfm",
+      "final_damping": 0.0029296875
+    },
+    "tower_of_london": {
+      "accepted": true,
+      "attempts": 1,
+      "corrected_over_ceres": 1.7458081486981367,
+      "corrected_over_handoff": 0.9545951551438627,
+      "family": "1dsfm",
+      "final_damping": 0.0029296875
+    },
+    "trafalgar": {
+      "accepted": true,
+      "attempts": 1,
+      "corrected_over_ceres": 0.9261366640038555,
+      "corrected_over_handoff": 0.9760926681023249,
+      "family": "1dsfm",
+      "final_damping": 0.0029296875
+    },
+    "union_square": {
+      "accepted": true,
+      "attempts": 1,
+      "corrected_over_ceres": 1.134246243928734,
+      "corrected_over_handoff": 0.9677289334965753,
+      "family": "1dsfm",
+      "final_damping": 0.0029296875
+    },
+    "vienna_cathedral": {
+      "accepted": true,
+      "attempts": 1,
+      "corrected_over_ceres": 1.0700196400961928,
+      "corrected_over_handoff": 0.9560607253755034,
+      "family": "1dsfm",
+      "final_damping": 0.0029296875
+    },
+    "yorkminster": {
+      "accepted": true,
+      "attempts": 1,
+      "corrected_over_ceres": 2.1838106679361946,
+      "corrected_over_handoff": 0.9505378488966033,
+      "family": "1dsfm",
+      "final_damping": 0.0029296875
+    }
+  },
+  "status": "passed",
+  "summaries": {
+    "1dsfm": {
+      "accepted": 15,
+      "corrected_over_ceres": {
+        "geometric": 1.1357719149935042,
+        "losses": 12,
+        "ratios": {
+          "alamo": 1.0757233337148808,
+          "ellis_island": 1.048919333062509,
+          "gendarmenmarkt": 1.2642038414845445,
+          "madrid_metropolis": 1.1156356059986148,
+          "montreal_notre_dame": 1.0663670192275914,
+          "notre_dame": 1.0509051559399827,
+          "nyc_library": 1.1072112176959397,
+          "piazza_del_popolo": 0.9659074433307238,
+          "piccadilly": 0.7357898540885041,
+          "roman_forum": 1.1225586509449608,
+          "tower_of_london": 1.7458081486981367,
+          "trafalgar": 0.9261366640038555,
+          "union_square": 1.134246243928734,
+          "vienna_cathedral": 1.0700196400961928,
+          "yorkminster": 2.1838106679361946
+        },
+        "summed": 1.0441801041617618,
+        "ties": 0,
+        "wins": 3,
+        "worst": 2.1838106679361946
+      },
+      "corrected_over_handoff": {
+        "geometric": 0.9645067951147245,
+        "losses": 0,
+        "ratios": {
+          "alamo": 0.9949495893540954,
+          "ellis_island": 0.9894330126958625,
+          "gendarmenmarkt": 0.9922372659425687,
+          "madrid_metropolis": 0.9949894022105852,
+          "montreal_notre_dame": 0.9384888737903104,
+          "notre_dame": 0.9348798382773009,
+          "nyc_library": 0.9769309097272899,
+          "piazza_del_popolo": 0.9112354151015022,
+          "piccadilly": 0.9829898484414651,
+          "roman_forum": 0.951065924425222,
+          "tower_of_london": 0.9545951551438627,
+          "trafalgar": 0.9760926681023249,
+          "union_square": 0.9677289334965753,
+          "vienna_cathedral": 0.9560607253755034,
+          "yorkminster": 0.9505378488966033
+        },
+        "summed": 0.9624777483161223,
+        "ties": 0,
+        "wins": 15,
+        "worst": 0.9949894022105852
+      },
+      "count": 15,
+      "elapsed_seconds": 604.0,
+      "maximum_coordinator_rss_gib": 2.4424819946289062,
+      "maximum_worker_rss_gib": 1.9128150939941406,
+      "nonconverged_noops": 0,
+      "noops": 0,
+      "schur_seconds": 20.470944608005084
+    },
+    "bal": {
+      "accepted": 26,
+      "corrected_over_ceres": {
+        "geometric": 0.9986810045673219,
+        "losses": 17,
+        "ratios": {
+          "bal1064": 1.0017399307030226,
+          "bal126": 1.0167739918562424,
+          "bal1266": 1.0020560778745375,
+          "bal135": 0.9977997047901385,
+          "bal142": 1.0020567771310656,
+          "bal1490": 0.9947708421769389,
+          "bal1723": 0.9964271118073768,
+          "bal173": 0.9982069442733253,
+          "bal1778": 1.0121378022986403,
+          "bal245": 0.9639339001049388,
+          "bal253": 0.9964369836772278,
+          "bal257": 1.0256540833742585,
+          "bal287": 0.9986479356110627,
+          "bal3068": 0.9896423984624678,
+          "bal308": 1.0028577892472914,
+          "bal356": 1.0208622401214464,
+          "bal394": 1.0070005154331623,
+          "bal427": 0.9962946576012627,
+          "bal49": 1.0017892027401858,
+          "bal52": 0.9701146175139939,
+          "bal646": 1.001765750457221,
+          "bal744": 0.9973037013178666,
+          "bal783": 1.0005878742409646,
+          "bal871": 1.0005446329092194,
+          "bal88": 1.0000082206882779,
+          "bal89": 1.0064335117111716,
+          "bal931": 1.0002929270371885,
+          "bal951": 0.962279887410391,
+          "bal961": 1.000060488208987
+        },
+        "summed": 0.9947764290088374,
+        "ties": 0,
+        "wins": 12,
+        "worst": 1.0256540833742585
+      },
+      "corrected_over_handoff": {
+        "geometric": 0.9996417207459578,
+        "losses": 0,
+        "ratios": {
+          "bal1064": 0.9999413708068237,
+          "bal126": 0.9999230390233323,
+          "bal1266": 0.9997696194811766,
+          "bal135": 0.9963438338907163,
+          "bal142": 0.9986798897689627,
+          "bal1490": 1.0,
+          "bal1723": 0.9999299430214521,
+          "bal173": 0.9994909561334633,
+          "bal1778": 1.0,
+          "bal245": 0.9996234977788624,
+          "bal253": 0.999976214763215,
+          "bal257": 0.9999535174820686,
+          "bal287": 0.9999649031332282,
+          "bal3068": 0.9987067176661896,
+          "bal308": 0.9999284640817135,
+          "bal356": 0.999883287552898,
+          "bal394": 0.9996356899526134,
+          "bal427": 0.9993462720538309,
+          "bal49": 0.9997014317279392,
+          "bal52": 0.9994123573375016,
+          "bal646": 0.9997140236602432,
+          "bal744": 0.9999892054831137,
+          "bal783": 0.9998952829173964,
+          "bal871": 0.9999297921015785,
+          "bal88": 0.9999142605731325,
+          "bal89": 0.9999921430950839,
+          "bal931": 0.9999843663990171,
+          "bal951": 1.0,
+          "bal961": 0.9999871650639942
+        },
+        "summed": 0.9996953569073493,
+        "ties": 3,
+        "wins": 26,
+        "worst": 1.0
+      },
+      "count": 29,
+      "elapsed_seconds": 3336.0,
+      "maximum_coordinator_rss_gib": 8.305755615234375,
+      "maximum_worker_rss_gib": 12.050640106201172,
+      "nonconverged_noops": 3,
+      "noops": 3,
+      "schur_seconds": 576.0505043799967
+    }
+  }
+}

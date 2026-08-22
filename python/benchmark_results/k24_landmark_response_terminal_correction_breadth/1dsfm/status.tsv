@@ -1,0 +1,16 @@
+variant	dataset	clusters	iterations	local_steps	threads_per_cluster	status	exit_code	elapsed_seconds	coordinator_max_rss_kb	worker_max_rss_kb
+landmark_i90_i120_terminal1	benchmark_results/sfm_init_1dsfm/alamo/alamo_sfm_init_derived.txt	24	120	1	1	completed	0	38	1230388	800332
+landmark_i90_i120_terminal1	benchmark_results/sfm_init_1dsfm/ellis_island/ellis_island_sfm_init_derived.txt	24	120	1	1	completed	0	18	776712	266084
+landmark_i90_i120_terminal1	benchmark_results/sfm_init_1dsfm/gendarmenmarkt/gendarmenmarkt_sfm_init_derived.txt	24	120	1	1	completed	0	16	693084	149952
+landmark_i90_i120_terminal1	benchmark_results/sfm_init_1dsfm/madrid_metropolis/madrid_metropolis_sfm_init_derived.txt	24	120	1	1	completed	0	14	647796	103328
+landmark_i90_i120_terminal1	benchmark_results/sfm_init_1dsfm/montreal_notre_dame/montreal_notre_dame_sfm_init_derived.txt	24	120	1	1	completed	0	59	1633756	1212172
+landmark_i90_i120_terminal1	benchmark_results/sfm_init_1dsfm/notre_dame/notre_dame_sfm_init_derived.txt	24	120	1	1	completed	0	51	1193728	867524
+landmark_i90_i120_terminal1	benchmark_results/sfm_init_1dsfm/nyc_library/nyc_library_sfm_init_derived.txt	24	120	1	1	completed	0	17	703340	181404
+landmark_i90_i120_terminal1	benchmark_results/sfm_init_1dsfm/piazza_del_popolo/piazza_del_popolo_sfm_init_derived.txt	24	120	1	1	completed	0	16	861504	264052
+landmark_i90_i120_terminal1	benchmark_results/sfm_init_1dsfm/piccadilly/piccadilly_sfm_init_derived.txt	24	120	1	1	completed	0	53	1255972	783684
+landmark_i90_i120_terminal1	benchmark_results/sfm_init_1dsfm/roman_forum/roman_forum_sfm_init_derived.txt	24	120	1	1	completed	0	50	1011416	723828
+landmark_i90_i120_terminal1	benchmark_results/sfm_init_1dsfm/tower_of_london/tower_of_london_sfm_init_derived.txt	24	120	1	1	completed	0	19	704872	225852
+landmark_i90_i120_terminal1	benchmark_results/sfm_init_1dsfm/trafalgar/trafalgar_sfm_init_derived.txt	24	120	1	1	completed	0	145	2561128	2005732
+landmark_i90_i120_terminal1	benchmark_results/sfm_init_1dsfm/union_square/union_square_sfm_init_derived.txt	24	120	1	1	completed	0	29	887332	418868
+landmark_i90_i120_terminal1	benchmark_results/sfm_init_1dsfm/vienna_cathedral/vienna_cathedral_sfm_init_derived.txt	24	120	1	1	completed	0	51	1225484	1003256
+landmark_i90_i120_terminal1	benchmark_results/sfm_init_1dsfm/yorkminster/yorkminster_sfm_init_derived.txt	24	120	1	1	completed	0	28	874400	405028

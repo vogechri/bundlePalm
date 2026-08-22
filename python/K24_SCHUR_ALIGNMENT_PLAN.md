@@ -282,6 +282,14 @@ BAL52/3068, with all solves converged and accepted. Expand unchanged to breadth
 as a separately labeled polish, not a DRS mechanism. See
 `benchmark_results/k24_landmark_response_terminal_correction_sentinel/report.md`.
 
+Polished breadth is complete with bounded low-memory transpose assembly.
+Correction/handoff is `0.964507x` on all-15 and `0.999642x` on BAL29;
+corrected/Ceres is `1.135772x` and `0.998681x`. All 15 1DSfM corrections accept;
+BAL correction W/T/L is `26/3/0`, with exact no-op for nonconverged solves.
+Peak BAL RSS is `8.306/12.051 GiB`. Retain one correction as separate polish;
+the remaining 1DSfM gap is upstream trajectory/basin quality. See
+`benchmark_results/k24_landmark_response_terminal_correction_breadth/report.md`.
+
 The serial BAL29 gate passes unchanged: all 29 proposals decline exactly,
 W/T/L `0/29/0`, with `6.873/9.689 GiB` maximum coordinator/worker RSS. Together
 with all-15 `0.790889x`, W/T/L `14/1/0`, this promotes the common no-loss
