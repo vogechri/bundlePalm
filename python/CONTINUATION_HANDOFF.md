@@ -381,6 +381,13 @@ An explicit second joint proposal at I90 improves the Roman/Trafalgar pair from
 not add a checkpoint or proposal-count sweep. See
 `benchmark_results/k24_landmark_response_proposal_i60_i90_sentinel/report.md`.
 
+All-15 I60+I90 improves aggregate control to `0.766084x` geometric and
+`0.732090x` summed, but Gendarmenmarkt regresses to `1.019557x`; W/T/L
+`13/1/1`. Weak second gains correlate with extra rejections. Retain only as a
+bounded-loss candidate and do not floor-tune. Next test first-rebase-only state
+handling. See
+`benchmark_results/k24_landmark_response_proposal_i60_i90_breadth/report.md`.
+
 BAL29 confirms I60 unchanged: all 29 proposals decline exactly, W/T/L
 `0/29/0`, peak RSS `6.859/9.823 GiB`. Promote I60 as the common checkpoint with
 all-15 `0.786533x` control, `1.171081x` Ceres, W/T/L `14/1/0`. Freeze timing and

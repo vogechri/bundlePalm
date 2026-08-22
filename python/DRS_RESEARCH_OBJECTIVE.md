@@ -456,6 +456,16 @@ unchanged to all-15 once; do not add another checkpoint or proposal-count
 sweep. Report:
 `benchmark_results/k24_landmark_response_proposal_i60_i90_sentinel/report.md`.
 
+All-15 I60+I90 is aggregate-strong but fails the no-loss gate. It reaches
+`0.766084x` geometric and `0.732090x` summed control versus I60-only
+`0.786533x/0.754474x`, but W/T/L becomes `13/1/1`: Gendarmenmarkt regresses to
+`1.019557x` from `0.957620x`. Its weak `0.2475%` second-checkpoint gain is
+followed by rejections increasing `2 -> 8`; Alamo shows the same weaker pattern.
+Retain as a bounded-loss candidate, not the common default. Do not tune the SSE
+floor. Next test only the state mechanism: keep the proven first trust rebase
+but suppress the second. Report:
+`benchmark_results/k24_landmark_response_proposal_i60_i90_breadth/report.md`.
+
 Fresh isolated bridge gate (2026-08-19):
 `serverTest/client_drs_k1_bridge.py` preserves `client_drs.py` and pins the
 mature legacy backbone while exposing ordered `legacy`, `direct`, and

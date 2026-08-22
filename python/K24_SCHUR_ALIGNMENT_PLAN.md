@@ -320,6 +320,12 @@ The explicit two-proposal I60+I90 gate improves Roman/Trafalgar geomean from
 unchanged all-15 once and close proposal count/checkpoint additions. See
 `benchmark_results/k24_landmark_response_proposal_i60_i90_sentinel/report.md`.
 
+All-15 I60+I90 reaches `0.766084x` control but loses Gendarmenmarkt
+`1.019557x`, W/T/L `13/1/1`; weak second gains create extra rejections. Keep as
+bounded-loss evidence, do not tune the floor, and test only suppressing the
+second trust rebase. See
+`benchmark_results/k24_landmark_response_proposal_i60_i90_breadth/report.md`.
+
 BAL29 closes timing: all 29 I60 proposals decline exactly, while all-15 is
 `0.786533x` control and `1.171081x` Ceres with no losses. Promote I60 as the
 common checkpoint and freeze all timing/scale/depth/floor/restart settings. See
