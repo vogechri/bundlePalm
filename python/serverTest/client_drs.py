@@ -1525,6 +1525,10 @@ def parse_arguments():
         action="store_true",
     )
     parser.add_argument(
+        "--allow-two-schur-residual-proposals",
+        action="store_true",
+    )
+    parser.add_argument(
         "--two-step-schur-residual-oracle",
         action="store_true",
     )
@@ -3148,8 +3152,14 @@ def main():
         raise ValueError("Schur alignment diagnostic iterations must be positive")
     if any(value < 0 for value in one_step_schur_residual_proposal_iterations):
         raise ValueError("one-step Schur proposal iterations must be positive")
-    if len(one_step_schur_residual_proposal_iterations) > 1:
-        raise ValueError("at most one one-step Schur proposal is permitted")
+    maximum_proposals = (
+        2 if arguments.allow_two_schur_residual_proposals else 1
+    )
+    if len(one_step_schur_residual_proposal_iterations) > maximum_proposals:
+        raise ValueError(
+            f"at most {maximum_proposals} Schur residual proposal(s) are "
+            "permitted"
+        )
     if (
         arguments.one_step_schur_residual_proposal_rebase_trust_state
         and not one_step_schur_residual_proposal_iterations
@@ -8189,6 +8199,9 @@ def main():
         "oneStepSchurResidualProposalIterations": sorted(
             iteration + 1
             for iteration in one_step_schur_residual_proposal_iterations
+        ),
+        "allowTwoSchurResidualProposals": (
+            arguments.allow_two_schur_residual_proposals
         ),
         "drsCandidateLandmarkResponseDiagnosticIterations": sorted(
             iteration + 1

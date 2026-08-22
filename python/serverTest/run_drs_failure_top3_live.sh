@@ -116,6 +116,7 @@ SHARED_SCHUR_RELATIVE_TOLERANCE=${SHARED_SCHUR_RELATIVE_TOLERANCE:-1e-6}
 SHARED_SCHUR_MAXIMUM_ITERATIONS=${SHARED_SCHUR_MAXIMUM_ITERATIONS:-500}
 SCHUR_ALIGNMENT_MAXIMUM_ITERATIONS=${SCHUR_ALIGNMENT_MAXIMUM_ITERATIONS:-$SHARED_SCHUR_MAXIMUM_ITERATIONS}
 ONE_STEP_SCHUR_RESIDUAL_PROPOSAL_ITERATIONS=${ONE_STEP_SCHUR_RESIDUAL_PROPOSAL_ITERATIONS:-}
+ALLOW_TWO_SCHUR_RESIDUAL_PROPOSALS=${ALLOW_TWO_SCHUR_RESIDUAL_PROPOSALS:-0}
 ONE_STEP_SCHUR_RESIDUAL_PROPOSAL_REBASE_TRUST_STATE=${ONE_STEP_SCHUR_RESIDUAL_PROPOSAL_REBASE_TRUST_STATE:-0}
 TWO_STEP_SCHUR_RESIDUAL_ORACLE=${TWO_STEP_SCHUR_RESIDUAL_ORACLE:-0}
 RELINEARIZED_SECOND_SCHUR_RESIDUAL_ORACLE=${RELINEARIZED_SECOND_SCHUR_RESIDUAL_ORACLE:-0}
@@ -714,6 +715,10 @@ for problem in "${PROBLEMS[@]}"; do
         --one-step-schur-residual-proposal-rebase-trust-state
       )
     fi
+    proposal_count_args=()
+    if [[ "$ALLOW_TWO_SCHUR_RESIDUAL_PROPOSALS" == "1" ]]; then
+      proposal_count_args+=(--allow-two-schur-residual-proposals)
+    fi
     two_step_schur_oracle_args=()
     if [[ "$TWO_STEP_SCHUR_RESIDUAL_ORACLE" == "1" ]]; then
       two_step_schur_oracle_args+=(--two-step-schur-residual-oracle)
@@ -863,7 +868,7 @@ for problem in "${PROBLEMS[@]}"; do
             --catastrophic-ratio "$CATASTROPHIC_RATIO" \
             --recovery-penalty-ratio "$RECOVERY_PENALTY_RATIO" \
             --results "$RESULT_FILE" --state "$state_file" \
-            "${debug_args[@]}" "${trust_args[@]}" "${scaling_args[@]}" "${worker_sse_args[@]}" "${adaptive_depth_args[@]}" "${single_cluster_args[@]}" "${shared_only_args[@]}" "${initial_shared_schur_args[@]}" "${mid_shared_schur_args[@]}" "${alignment_schur_args[@]}" "${proposal_trust_rebase_args[@]}" "${two_step_schur_oracle_args[@]}" "${relinearized_schur_oracle_args[@]}" "${all_camera_schur_oracle_args[@]}" "${landmark_response_oracle_args[@]}" "${final_shared_schur_args[@]}" "${initial_state_args[@]}") 2>&1 | tee "$log_file"
+            "${debug_args[@]}" "${trust_args[@]}" "${scaling_args[@]}" "${worker_sse_args[@]}" "${adaptive_depth_args[@]}" "${single_cluster_args[@]}" "${shared_only_args[@]}" "${initial_shared_schur_args[@]}" "${mid_shared_schur_args[@]}" "${alignment_schur_args[@]}" "${proposal_trust_rebase_args[@]}" "${proposal_count_args[@]}" "${two_step_schur_oracle_args[@]}" "${relinearized_schur_oracle_args[@]}" "${all_camera_schur_oracle_args[@]}" "${landmark_response_oracle_args[@]}" "${final_shared_schur_args[@]}" "${initial_state_args[@]}") 2>&1 | tee "$log_file"
       exit_code=${PIPESTATUS[0]}
     else
       (cd "$SCRIPT_DIR" && /usr/bin/time -v -o "$coordinator_time" \
@@ -962,7 +967,7 @@ for problem in "${PROBLEMS[@]}"; do
             --catastrophic-ratio "$CATASTROPHIC_RATIO" \
             --recovery-penalty-ratio "$RECOVERY_PENALTY_RATIO" \
             --results "$RESULT_FILE" --state "$state_file" \
-            "${debug_args[@]}" "${trust_args[@]}" "${scaling_args[@]}" "${worker_sse_args[@]}" "${adaptive_depth_args[@]}" "${single_cluster_args[@]}" "${shared_only_args[@]}" "${initial_shared_schur_args[@]}" "${mid_shared_schur_args[@]}" "${alignment_schur_args[@]}" "${proposal_trust_rebase_args[@]}" "${two_step_schur_oracle_args[@]}" "${relinearized_schur_oracle_args[@]}" "${all_camera_schur_oracle_args[@]}" "${landmark_response_oracle_args[@]}" "${final_shared_schur_args[@]}" "${initial_state_args[@]}") > "$log_file" 2>&1
+            "${debug_args[@]}" "${trust_args[@]}" "${scaling_args[@]}" "${worker_sse_args[@]}" "${adaptive_depth_args[@]}" "${single_cluster_args[@]}" "${shared_only_args[@]}" "${initial_shared_schur_args[@]}" "${mid_shared_schur_args[@]}" "${alignment_schur_args[@]}" "${proposal_trust_rebase_args[@]}" "${proposal_count_args[@]}" "${two_step_schur_oracle_args[@]}" "${relinearized_schur_oracle_args[@]}" "${all_camera_schur_oracle_args[@]}" "${landmark_response_oracle_args[@]}" "${final_shared_schur_args[@]}" "${initial_state_args[@]}") > "$log_file" 2>&1
       exit_code=$?
     fi
     set -e

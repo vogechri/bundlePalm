@@ -447,6 +447,15 @@ Retain I60 for the promoted DRS endpoint and I90 for the separately labeled
 one-correction polished scoreboard; do not checkpoint-tune polishing. Report:
 `benchmark_results/k24_i60_landmark_response_terminal1_sentinel/report.md`.
 
+One additional joint proposal at I90 after the promoted I60 restart passes the
+frozen four-scene gate. Roman/Trafalgar geomean improves from `0.761715x` to
+`0.748524x` control: Roman improves `0.652918x -> 0.628975x`, while Trafalgar
+has a bounded `0.888641x -> 0.890795x` regression. BAL52/3068 decline both
+proposals exactly. Transfer the explicit default-off two-proposal policy
+unchanged to all-15 once; do not add another checkpoint or proposal-count
+sweep. Report:
+`benchmark_results/k24_landmark_response_proposal_i60_i90_sentinel/report.md`.
+
 Fresh isolated bridge gate (2026-08-19):
 `serverTest/client_drs_k1_bridge.py` preserves `client_drs.py` and pins the
 mature legacy backbone while exposing ordered `legacy`, `direct`, and

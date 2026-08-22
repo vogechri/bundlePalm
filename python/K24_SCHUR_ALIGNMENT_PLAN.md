@@ -315,6 +315,11 @@ Roman/Trafalgar pair; BAL is exactly unchanged. Close this composition without
 breadth. Keep I60 for DRS and I90 for the separate polished scoreboard. See
 `benchmark_results/k24_i60_landmark_response_terminal1_sentinel/report.md`.
 
+The explicit two-proposal I60+I90 gate improves Roman/Trafalgar geomean from
+`0.761715x` to `0.748524x`; BAL52/3068 decline both proposals exactly. Transfer
+unchanged all-15 once and close proposal count/checkpoint additions. See
+`benchmark_results/k24_landmark_response_proposal_i60_i90_sentinel/report.md`.
+
 BAL29 closes timing: all 29 I60 proposals decline exactly, while all-15 is
 `0.786533x` control and `1.171081x` Ceres with no losses. Promote I60 as the
 common checkpoint and freeze all timing/scale/depth/floor/restart settings. See
