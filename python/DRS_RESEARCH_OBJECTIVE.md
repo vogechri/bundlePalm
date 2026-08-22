@@ -402,6 +402,17 @@ remaining research gap is 1DSfM basin/trajectory quality (`1.135772x` Ceres),
 not blocked terminal descent or BAL safety. Report:
 `benchmark_results/k24_landmark_response_terminal_correction_breadth/report.md`.
 
+Ownership-correct ordinary-candidate diagnostics close stale landmark scoring
+as the source of DRS rejection behavior. Three fixed-camera landmark steps give
+refined/unrefined SSE `0.9877--0.9956` on Roman and `0.9587--0.9883` on
+Trafalgar at I30/I60/I89, but flip no primal safeguard decisions; BAL52 is
+`0.9995--0.9996` and also flips none. Worker round-trip error and complete
+trajectories/states are exact. Keep the inconsistent legacy per-iteration
+consensus-refinement path off. The one bounded next test is the previously
+frozen alternate I60 checkpoint with the new joint camera/landmark proposal;
+do not sweep timing. Report:
+`benchmark_results/k24_drs_candidate_landmark_response_accepted_diagnostic/report.md`.
+
 Fresh isolated bridge gate (2026-08-19):
 `serverTest/client_drs_k1_bridge.py` preserves `client_drs.py` and pins the
 mature legacy backbone while exposing ordered `legacy`, `direct`, and

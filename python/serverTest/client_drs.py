@@ -6154,7 +6154,7 @@ def main():
                         landmarks,
                         cluster_count,
                         8 * arguments.iterations + iteration + 1,
-                        source="current",
+                        source="accepted",
                     )
                 diagnostic_state_id = (
                     9 * arguments.iterations + iteration + 1

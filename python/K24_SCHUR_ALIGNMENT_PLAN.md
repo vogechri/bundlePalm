@@ -290,6 +290,14 @@ Peak BAL RSS is `8.306/12.051 GiB`. Retain one correction as separate polish;
 the remaining 1DSfM gap is upstream trajectory/basin quality. See
 `benchmark_results/k24_landmark_response_terminal_correction_breadth/report.md`.
 
+Behavior-neutral accepted-landmark diagnostics at I30/I60/I89 show modest
+ordinary-candidate descent but no primal safeguard flips on Roman, Trafalgar,
+or BAL52; trajectories/states and worker round trips are exact. Stale landmark
+scoring is not the DRS rejection cause. Keep legacy per-iteration refinement
+off. The sole bounded timing follow-up is the previously frozen I60 checkpoint
+with the joint camera/landmark proposal. See
+`benchmark_results/k24_drs_candidate_landmark_response_accepted_diagnostic/report.md`.
+
 The serial BAL29 gate passes unchanged: all 29 proposals decline exactly,
 W/T/L `0/29/0`, with `6.873/9.689 GiB` maximum coordinator/worker RSS. Together
 with all-15 `0.790889x`, W/T/L `14/1/0`, this promotes the common no-loss

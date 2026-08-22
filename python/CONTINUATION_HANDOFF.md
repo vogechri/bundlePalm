@@ -350,6 +350,14 @@ exactly. Bounded low-memory transpose assembly keeps peak BAL RSS at
 1DSfM trajectory/basin quality, not terminal descent. See
 `benchmark_results/k24_landmark_response_terminal_correction_breadth/report.md`.
 
+Ordinary-candidate landmark diagnostics are exact and do not change primal
+safeguard decisions at I30/I60/I89. Roman/Trafalgar refined SSE improves by
+`0.4--4.1%`; BAL52 by less than `0.05%`. Thus stale landmark scoring is not the
+ordinary DRS rejection mechanism, and legacy per-iteration refinement remains
+off. Next test only the previously frozen I60 checkpoint with the new joint
+camera/landmark proposal; no timing sweep. See
+`benchmark_results/k24_drs_candidate_landmark_response_accepted_diagnostic/report.md`.
+
 Only `all15_corrected/` is authoritative. The sibling `all15/` directory is a
 quarantined setup error with the wrong trust cap and recovery controls.
 
