@@ -439,6 +439,14 @@ canonical restart, and selected-only I61 trust rebase. Do not test another
 checkpoint. Report:
 `benchmark_results/k24_landmark_response_proposal_i60_breadth/report.md`.
 
+The I60-plus-one-terminal-correction composition is mixed and closes without
+breadth expansion. Roman/Trafalgar correction improves the I60 handoff by
+`0.968427x`, but the corrected pair is `1.003848x` the established I90-polished
+pair: Trafalgar improves and Roman regresses. BAL52/3068 are exactly unchanged.
+Retain I60 for the promoted DRS endpoint and I90 for the separately labeled
+one-correction polished scoreboard; do not checkpoint-tune polishing. Report:
+`benchmark_results/k24_i60_landmark_response_terminal1_sentinel/report.md`.
+
 Fresh isolated bridge gate (2026-08-19):
 `serverTest/client_drs_k1_bridge.py` preserves `client_drs.py` and pins the
 mature legacy backbone while exposing ordered `legacy`, `direct`, and

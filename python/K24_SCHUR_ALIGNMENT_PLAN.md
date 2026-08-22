@@ -310,6 +310,11 @@ geometric/summed control `0.786533x/0.754474x`, W/T/L `14/1/0`, versus I90
 unchanged BAL29 once. See
 `benchmark_results/k24_landmark_response_proposal_i60_breadth/report.md`.
 
+I60 plus one terminal correction is mixed and `1.003848x` the I90-polished
+Roman/Trafalgar pair; BAL is exactly unchanged. Close this composition without
+breadth. Keep I60 for DRS and I90 for the separate polished scoreboard. See
+`benchmark_results/k24_i60_landmark_response_terminal1_sentinel/report.md`.
+
 BAL29 closes timing: all 29 I60 proposals decline exactly, while all-15 is
 `0.786533x` control and `1.171081x` Ceres with no losses. Promote I60 as the
 common checkpoint and freeze all timing/scale/depth/floor/restart settings. See

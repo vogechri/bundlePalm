@@ -369,6 +369,12 @@ is `1.171081x`. Close timing comparison; run unchanged serial BAL29 once and do
 not test another checkpoint. See
 `benchmark_results/k24_landmark_response_proposal_i60_breadth/report.md`.
 
+I60 plus one terminal correction is `1.003848x` the I90-polished
+Roman/Trafalgar pair, with mixed scene effects; BAL52/3068 are exactly
+unchanged. Close without breadth. Keep I60 as the DRS endpoint and I90 as the
+separate polished scoreboard. See
+`benchmark_results/k24_i60_landmark_response_terminal1_sentinel/report.md`.
+
 BAL29 confirms I60 unchanged: all 29 proposals decline exactly, W/T/L
 `0/29/0`, peak RSS `6.859/9.823 GiB`. Promote I60 as the common checkpoint with
 all-15 `0.786533x` control, `1.171081x` Ceres, W/T/L `14/1/0`. Freeze timing and

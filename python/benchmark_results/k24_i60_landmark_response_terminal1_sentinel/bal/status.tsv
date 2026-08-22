@@ -1,0 +1,3 @@
+variant	dataset	clusters	iterations	local_steps	threads_per_cluster	status	exit_code	elapsed_seconds	coordinator_max_rss_kb	worker_max_rss_kb
+i60_landmark_terminal1	/home/chvogel/bundlePalm/python/problem-52-64053-pre.txt	24	120	1	1	completed	0	21	824688	374100
+i60_landmark_terminal1	/home/chvogel/bundlePalm/python/problem-3068-310854-pre.txt	24	120	1	1	completed	0	201	8700488	5070320
