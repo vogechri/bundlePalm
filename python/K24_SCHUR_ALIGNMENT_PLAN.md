@@ -378,6 +378,14 @@ as the common preset and close proposal count/checkpoint tuning; do not tune
 the second proposal. See
 `benchmark_results/k24_quarter_i60_i90_krylov_interaction_v3/report.md`.
 
+The continuation-aware repair is a fixed `1%` intervention margin only for the
+I90 repeat; I60 retains the established `0.1%` floor. It selects 9/15 repeats,
+improves all15 to `0.978063x` I60 and `1.112123x` Ceres, has no I60 or control
+losses within `1e-8`, and leaves BAL29 bitwise exact. Promote guarded I60+I90 as
+the common preset. Freeze the margin/checkpoints/count and retain I60-only plus
+unguarded repetition as references. See
+`benchmark_results/k24_quarter_i60_i90_krylov_repeat_guard/report.md`.
+
 BAL29 closes timing: all 29 I60 proposals decline exactly, while all-15 is
 `0.786533x` control and `1.171081x` Ceres with no losses. Promote I60 as the
 common checkpoint and freeze all timing/scale/depth/floor/restart settings. See

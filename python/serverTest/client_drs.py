@@ -1686,6 +1686,9 @@ def parse_arguments():
     parser.add_argument(
         "--shared-schur-minimum-relative-decrease", type=float, default=1e-4
     )
+    parser.add_argument(
+        "--schur-repeat-minimum-relative-decrease", type=float, default=-1.0
+    )
     parser.add_argument("--shared-schur-warm-start", action="store_true")
     parser.add_argument(
         "--shared-schur-preconditioner",
@@ -2459,6 +2462,10 @@ def validate_arguments(arguments):
         if not 0.0 <= arguments.shared_schur_minimum_relative_decrease < 1.0:
             raise ValueError(
                 "shared Schur minimum relative decrease must be in [0, 1)"
+            )
+        if not -1.0 <= arguments.schur_repeat_minimum_relative_decrease < 1.0:
+            raise ValueError(
+                "Schur repeat minimum relative decrease must be in [-1, 1)"
             )
     if arguments.nesterov_max_iterations <= 0:
         raise ValueError("Nesterov maximum iterations must be positive")
@@ -5812,6 +5819,16 @@ def main():
                             shared_only=arguments.shared_only_camera_proximal,
                         )
             elif iteration in one_step_schur_residual_proposal_iterations:
+                proposal_minimum_relative_decrease = (
+                    arguments.schur_repeat_minimum_relative_decrease
+                    if (
+                        iteration
+                        != min(one_step_schur_residual_proposal_iterations)
+                        and arguments.schur_repeat_minimum_relative_decrease
+                        >= 0.0
+                    )
+                    else arguments.shared_schur_minimum_relative_decrease
+                )
                 consensus_tangent = left_se3_camera_minus(
                     physical_candidate, schur_alignment_base_cameras
                 )
@@ -5912,7 +5929,7 @@ def main():
                 selected_consensus = candidate_consensus
                 selected_physical_candidate = physical_candidate
                 required_worker_sse = ordinary_worker_sse * (
-                    1.0 - arguments.shared_schur_minimum_relative_decrease
+                    1.0 - proposal_minimum_relative_decrease
                 )
                 for attempt in range(8):
                     scale = 0.5 ** attempt
@@ -5951,7 +5968,7 @@ def main():
                     "ordinaryWorkerSSE": ordinary_worker_sse,
                     "candidateWorkerSSE": selected_worker_sse,
                     "minimumRelativeDecrease": (
-                        arguments.shared_schur_minimum_relative_decrease
+                        proposal_minimum_relative_decrease
                     ),
                     "selectedScale": selected_scale,
                     "selected": one_step_selected,
@@ -6001,8 +6018,7 @@ def main():
                     landmark_response_required_sse = (
                         ordinary_refined_worker_sse
                         * (
-                            1.0
-                            - arguments.shared_schur_minimum_relative_decrease
+                            1.0 - proposal_minimum_relative_decrease
                         )
                     )
                     for attempt in range(8):
@@ -6105,7 +6121,7 @@ def main():
                             landmark_response_worker_sse
                         ),
                         "minimumRelativeDecrease": (
-                            arguments.shared_schur_minimum_relative_decrease
+                            proposal_minimum_relative_decrease
                         ),
                         "selectedScale": landmark_response_selected_scale,
                         "selected": landmark_response_selected_scale > 0.0,
@@ -8632,6 +8648,9 @@ def main():
         ),
         "schurResidualProposalDirection": (
             arguments.schur_residual_proposal_direction
+        ),
+        "schurRepeatMinimumRelativeDecrease": (
+            arguments.schur_repeat_minimum_relative_decrease
         ),
         "allowTwoSchurResidualProposals": (
             arguments.allow_two_schur_residual_proposals

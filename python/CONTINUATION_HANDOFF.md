@@ -450,6 +450,15 @@ bitwise exact with both proposals declined. Retain I60+I90 only as a frozen
 portfolio component and close count/checkpoint tuning. See
 `benchmark_results/k24_quarter_i60_i90_krylov_interaction_v3/report.md`.
 
+A fixed `1%` repeat-intervention margin promotes the guarded I60+I90 policy:
+the first I60 proposal keeps the `0.1%` floor, while I90 must cover restart and
+continuation opportunity cost. All15 is `0.978063x` I60, `0.746935x` control,
+and `1.112123x` Ceres, W/T/L `9/6/0` versus I60 and `15/0/0` versus control;
+BAL29 remains bitwise exact. Canonical wrapper defaults now encode guarded
+I60+I90. Keep I60-only as conservative reference and unguarded repetition as
+ablation; do not tune the frozen margin or checkpoints. See
+`benchmark_results/k24_quarter_i60_i90_krylov_repeat_guard/report.md`.
+
 BAL29 confirms I60 unchanged: all 29 proposals decline exactly, W/T/L
 `0/29/0`, peak RSS `6.859/9.823 GiB`. Promote I60 as the common checkpoint with
 all-15 `0.786533x` control, `1.171081x` Ceres, W/T/L `14/1/0`. Freeze timing and

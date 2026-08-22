@@ -561,6 +561,19 @@ common preset. Do not retune checkpoint, count, floor, scale, damping, or
 Krylov depth. See
 `benchmark_results/k24_quarter_i60_i90_krylov_interaction_v3/report.md`.
 
+Continuation-aware intervention costing repairs that bounded-loss component
+without changing the first proposal. The I60 Krylov2 proposal retains its
+`0.1%` floor; the I90 repeat must clear a fixed `1%` immediate refined-SSE
+margin. All15 selects 9/15 repeats and reaches `0.978063x` I60-only,
+`0.746935x` ordinary control, and `1.112123x` Ceres, with W/T/L versus I60
+`9/6/0` at `1e-8` numerical tie tolerance and versus control `15/0/0`. BAL29
+remains bitwise exact with both proposals declined. Promote guarded I60+I90 as
+the common canonical preset; retain I60-only as the conservative reference and
+unguarded repetition as an ablation. The `1%` margin is a frozen intervention
+cost, not a new floor sweep. Do not tune margin, checkpoint, count, scale,
+damping, landmark depth, or Krylov depth. See
+`benchmark_results/k24_quarter_i60_i90_krylov_repeat_guard/report.md`.
+
 Fresh isolated bridge gate (2026-08-19):
 `serverTest/client_drs_k1_bridge.py` preserves `client_drs.py` and pins the
 mature legacy backbone while exposing ordered `legacy`, `direct`, and
