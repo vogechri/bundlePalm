@@ -34,6 +34,7 @@ METRIC_PROPOSAL_DISAGREEMENT_HYSTERESIS=${METRIC_PROPOSAL_DISAGREEMENT_HYSTERESI
 CAMERA_DIAGONAL_QUANTILE_ITERATIONS=${CAMERA_DIAGONAL_QUANTILE_ITERATIONS:-}
 CAMERA_DISAGREEMENT_DIAGNOSTIC_IDS=${CAMERA_DISAGREEMENT_DIAGNOSTIC_IDS:-}
 CAMERA_DISAGREEMENT_DIAGNOSTIC_ITERATIONS=${CAMERA_DISAGREEMENT_DIAGNOSTIC_ITERATIONS:-}
+DRS_CANDIDATE_LANDMARK_RESPONSE_DIAGNOSTIC_ITERATIONS=${DRS_CANDIDATE_LANDMARK_RESPONSE_DIAGNOSTIC_ITERATIONS:-}
 SCHUR_ALIGNMENT_DIAGNOSTIC_ITERATIONS=${SCHUR_ALIGNMENT_DIAGNOSTIC_ITERATIONS:-}
 SCHUR_ALIGNMENT_CAMERA_DAMPING=${SCHUR_ALIGNMENT_CAMERA_DAMPING:-3}
 SCHUR_ALIGNMENT_LANDMARK_DAMPING=${SCHUR_ALIGNMENT_LANDMARK_DAMPING:-3}
@@ -790,6 +791,7 @@ for problem in "${PROBLEMS[@]}"; do
             --camera-diagonal-quantile-iterations "$CAMERA_DIAGONAL_QUANTILE_ITERATIONS" \
             --camera-disagreement-diagnostic-ids "$CAMERA_DISAGREEMENT_DIAGNOSTIC_IDS" \
             --camera-disagreement-diagnostic-iterations "$CAMERA_DISAGREEMENT_DIAGNOSTIC_ITERATIONS" \
+            --drs-candidate-landmark-response-diagnostic-iterations "$DRS_CANDIDATE_LANDMARK_RESPONSE_DIAGNOSTIC_ITERATIONS" \
             --schur-alignment-diagnostic-iterations "$SCHUR_ALIGNMENT_DIAGNOSTIC_ITERATIONS" \
             --schur-alignment-camera-damping "$SCHUR_ALIGNMENT_CAMERA_DAMPING" \
             --schur-alignment-landmark-damping "$SCHUR_ALIGNMENT_LANDMARK_DAMPING" \
@@ -888,6 +890,7 @@ for problem in "${PROBLEMS[@]}"; do
             --camera-diagonal-quantile-iterations "$CAMERA_DIAGONAL_QUANTILE_ITERATIONS" \
             --camera-disagreement-diagnostic-ids "$CAMERA_DISAGREEMENT_DIAGNOSTIC_IDS" \
             --camera-disagreement-diagnostic-iterations "$CAMERA_DISAGREEMENT_DIAGNOSTIC_ITERATIONS" \
+            --drs-candidate-landmark-response-diagnostic-iterations "$DRS_CANDIDATE_LANDMARK_RESPONSE_DIAGNOSTIC_ITERATIONS" \
             --schur-alignment-diagnostic-iterations "$SCHUR_ALIGNMENT_DIAGNOSTIC_ITERATIONS" \
             --schur-alignment-camera-damping "$SCHUR_ALIGNMENT_CAMERA_DAMPING" \
             --schur-alignment-landmark-damping "$SCHUR_ALIGNMENT_LANDMARK_DAMPING" \

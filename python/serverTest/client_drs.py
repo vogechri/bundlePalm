@@ -1497,6 +1497,11 @@ def parse_arguments():
         help="comma-separated one-based nominal outer iterations",
     )
     parser.add_argument(
+        "--drs-candidate-landmark-response-diagnostic-iterations",
+        default="",
+        help="comma-separated one-based nominal outer iterations",
+    )
+    parser.add_argument(
         "--schur-alignment-diagnostic-iterations",
         default="",
         help="comma-separated one-based nominal outer iterations",
@@ -3106,6 +3111,14 @@ def main():
         for value in arguments.camera_disagreement_diagnostic_iterations.split(",")
         if value
     }
+    drs_candidate_landmark_response_diagnostic_iterations = {
+        int(value) - 1
+        for value in (
+            arguments.
+            drs_candidate_landmark_response_diagnostic_iterations.split(",")
+        )
+        if value
+    }
     schur_alignment_diagnostic_iterations = {
         int(value) - 1
         for value in arguments.schur_alignment_diagnostic_iterations.split(",")
@@ -3123,6 +3136,13 @@ def main():
     if any(value < 0 for value in camera_disagreement_diagnostic_iterations):
         raise ValueError(
             "camera disagreement diagnostic iterations must be positive"
+        )
+    if any(
+        value < 0
+        for value in drs_candidate_landmark_response_diagnostic_iterations
+    ):
+        raise ValueError(
+            "DRS candidate landmark diagnostic iterations must be positive"
         )
     if any(value < 0 for value in schur_alignment_diagnostic_iterations):
         raise ValueError("Schur alignment diagnostic iterations must be positive")
@@ -4382,6 +4402,7 @@ def main():
             accelerated_trials = 0
             accepted_acceleration_weight = 0.0
             camera_copy_diagnostics = []
+            drs_candidate_landmark_response_diagnostics = None
             applied_unique_camera_metric_scale = (
                 current_unique_camera_metric_scale
             )
@@ -6122,6 +6143,101 @@ def main():
                     arguments.safeguard_relative_deadband,
                 )
             )
+            if (
+                iteration
+                in drs_candidate_landmark_response_diagnostic_iterations
+            ):
+                diagnostic_landmarks = landmarks
+                if arguments.worker_owned_landmarks:
+                    diagnostic_landmarks = worker.materialize_current_landmarks(
+                        point_indices_in_cluster,
+                        landmarks,
+                        cluster_count,
+                        8 * arguments.iterations + iteration + 1,
+                        source="current",
+                    )
+                diagnostic_state_id = (
+                    9 * arguments.iterations + iteration + 1
+                )
+                unrefined_worker_sse = worker.evaluate_consensus_sse(
+                    camera_indices_in_cluster,
+                    candidate_consensus,
+                    cluster_count,
+                    preserve_cameras=True,
+                    packed_request_buffers=arguments.packed_request_buffers,
+                )
+                worker.control_nominal_landmark_state(
+                    cluster_count,
+                    diagnostic_state_id,
+                    "save",
+                )
+                refined_costs, _ = worker.refine_landmarks_at_consensus(
+                    camera_indices_in_cluster,
+                    point_indices_in_cluster,
+                    candidate_consensus,
+                    diagnostic_landmarks,
+                    cluster_count,
+                    arguments.shared_schur_landmark_refinement_steps,
+                    use_landmark_state=True,
+                    preserve_cameras=True,
+                    packed_request_buffers=arguments.packed_request_buffers,
+                )
+                refined_worker_sse = float(np.sum(refined_costs))
+                worker.control_nominal_landmark_state(
+                    cluster_count,
+                    diagnostic_state_id,
+                    (
+                        "restore_roundtrip"
+                        if arguments.worker_owned_landmarks
+                        else "restore"
+                    ),
+                )
+                roundtrip_worker_sse = worker.evaluate_consensus_sse(
+                    camera_indices_in_cluster,
+                    candidate_consensus,
+                    cluster_count,
+                    preserve_cameras=True,
+                    packed_request_buffers=arguments.packed_request_buffers,
+                )
+                roundtrip_relative_error = abs(
+                    roundtrip_worker_sse - unrefined_worker_sse
+                ) / max(
+                    abs(unrefined_worker_sse),
+                    np.finfo(np.float64).tiny,
+                )
+                if roundtrip_relative_error > WORKER_SSE_RELATIVE_TOLERANCE:
+                    raise RuntimeError(
+                        "DRS landmark diagnostic changed worker state: "
+                        f"relative_error={roundtrip_relative_error:.3g}"
+                    )
+                worker.control_nominal_landmark_state(
+                    cluster_count,
+                    diagnostic_state_id,
+                    "discard",
+                )
+                primal_threshold = primal_ratio * reference_sse
+                drs_candidate_landmark_response_diagnostics = {
+                    "refinementSteps": (
+                        arguments.shared_schur_landmark_refinement_steps
+                    ),
+                    "unrefinedWorkerSSE": unrefined_worker_sse,
+                    "refinedWorkerSSE": refined_worker_sse,
+                    "refinedOverUnrefined": (
+                        refined_worker_sse / unrefined_worker_sse
+                    ),
+                    "primalThreshold": primal_threshold,
+                    "unrefinedPrimalThresholdExceeded": (
+                        unrefined_worker_sse > primal_threshold
+                    ),
+                    "refinedPrimalThresholdExceeded": (
+                        refined_worker_sse > primal_threshold
+                    ),
+                    "workerStateRoundtripSSE": roundtrip_worker_sse,
+                    "workerStateRoundtripRelativeError": (
+                        roundtrip_relative_error
+                    ),
+                    "applied": False,
+                }
             if arguments.safeguard_mode == "relative":
                 rejected = should_reject_trial(
                     0,
@@ -7415,6 +7531,9 @@ def main():
                     shared_camera_compatibility
                 ),
                 "schurAlignmentDiagnostics": schur_alignment_diagnostics,
+                "drsCandidateLandmarkResponseDiagnostics": (
+                    drs_candidate_landmark_response_diagnostics
+                ),
                 "uniqueCameraMetricScale": (
                     applied_unique_camera_metric_scale
                 ),
@@ -8070,6 +8189,12 @@ def main():
         "oneStepSchurResidualProposalIterations": sorted(
             iteration + 1
             for iteration in one_step_schur_residual_proposal_iterations
+        ),
+        "drsCandidateLandmarkResponseDiagnosticIterations": sorted(
+            iteration + 1
+            for iteration in (
+                drs_candidate_landmark_response_diagnostic_iterations
+            )
         ),
         "oneStepSchurResidualProposalRebaseTrustState": (
             arguments.one_step_schur_residual_proposal_rebase_trust_state
