@@ -1,0 +1,504 @@
+{
+  "scenes": {
+    "alamo": {
+      "best_proposal": "joint_i60",
+      "best_proposal_over_ceres": 1.0792920618603483,
+      "ceres_ratios": {
+        "camera_i90": 1.1122539302958698,
+        "camera_i90_rebase": 1.1140879173042435,
+        "control": 1.2015378215127046,
+        "joint_i60": 1.0792920618603483,
+        "joint_i60_i90": 1.088680446324753,
+        "joint_i90": 1.0811837556604524
+      }
+    },
+    "ellis_island": {
+      "best_proposal": "joint_i60_i90",
+      "best_proposal_over_ceres": 1.050407169418305,
+      "ceres_ratios": {
+        "camera_i90": 1.0751276052931678,
+        "camera_i90_rebase": 1.0792896992530154,
+        "control": 1.0995192361582224,
+        "joint_i60": 1.058775019729866,
+        "joint_i60_i90": 1.050407169418305,
+        "joint_i90": 1.0601216248127017
+      }
+    },
+    "gendarmenmarkt": {
+      "best_proposal": "joint_i60",
+      "best_proposal_over_ceres": 1.2500702034743716,
+      "ceres_ratios": {
+        "camera_i90": 1.354660294443109,
+        "camera_i90_rebase": 1.3193107355359315,
+        "control": 1.305392370040686,
+        "joint_i60": 1.2500702034743716,
+        "joint_i60_i90": 1.3309218723568423,
+        "joint_i90": 1.2740942966784534
+      }
+    },
+    "madrid_metropolis": {
+      "best_proposal": "camera_i90",
+      "best_proposal_over_ceres": 1.1212537575963075,
+      "ceres_ratios": {
+        "camera_i90": 1.1212537575963075,
+        "camera_i90_rebase": 1.1212537575963075,
+        "control": 1.1212537575978074,
+        "joint_i60": 1.1212537575963075,
+        "joint_i60_i90": 1.1212537575963075,
+        "joint_i90": 1.1212537575963075
+      }
+    },
+    "montreal_notre_dame": {
+      "best_proposal": "joint_i60_i90",
+      "best_proposal_over_ceres": 1.053309629285946,
+      "ceres_ratios": {
+        "camera_i90": 1.4269426148379971,
+        "camera_i90_rebase": 1.4236226260875302,
+        "control": 1.9871275541077904,
+        "joint_i60": 1.139342484973214,
+        "joint_i60_i90": 1.053309629285946,
+        "joint_i90": 1.1362596286774445
+      }
+    },
+    "notre_dame": {
+      "best_proposal": "joint_i60_i90",
+      "best_proposal_over_ceres": 1.080931001865247,
+      "ceres_ratios": {
+        "camera_i90": 1.3424533639151255,
+        "camera_i90_rebase": 1.3433535169468895,
+        "control": 1.7775353408108638,
+        "joint_i60": 1.107871000025701,
+        "joint_i60_i90": 1.080931001865247,
+        "joint_i90": 1.1241071976571237
+      }
+    },
+    "nyc_library": {
+      "best_proposal": "joint_i60_i90",
+      "best_proposal_over_ceres": 1.1258839791633861,
+      "ceres_ratios": {
+        "camera_i90": 1.286790239561011,
+        "camera_i90_rebase": 1.278252476438327,
+        "control": 1.2961853555086902,
+        "joint_i60": 1.1393275678400467,
+        "joint_i60_i90": 1.1258839791633861,
+        "joint_i90": 1.1333567263180893
+      }
+    },
+    "piazza_del_popolo": {
+      "best_proposal": "joint_i60_i90",
+      "best_proposal_over_ceres": 0.9547812068119199,
+      "ceres_ratios": {
+        "camera_i90": 1.341771229827334,
+        "camera_i90_rebase": 1.3224964437309292,
+        "control": 1.8263046878765616,
+        "joint_i60": 1.0527063623831474,
+        "joint_i60_i90": 0.9547812068119199,
+        "joint_i90": 1.0599976991016573
+      }
+    },
+    "piccadilly": {
+      "best_proposal": "joint_i60_i90",
+      "best_proposal_over_ceres": 0.7226479580559185,
+      "ceres_ratios": {
+        "camera_i90": 0.7738095275430831,
+        "camera_i90_rebase": 0.7706856061322127,
+        "control": 0.8047213068009919,
+        "joint_i60": 0.725631292351354,
+        "joint_i60_i90": 0.7226479580559185,
+        "joint_i90": 0.7485223324077122
+      }
+    },
+    "roman_forum": {
+      "best_proposal": "joint_i60_i90",
+      "best_proposal_over_ceres": 1.142784271627463,
+      "ceres_ratios": {
+        "camera_i90": 1.4328674863452506,
+        "camera_i90_rebase": 1.4494409977645082,
+        "control": 1.8168991065404143,
+        "joint_i60": 1.186286949937291,
+        "joint_i60_i90": 1.142784271627463,
+        "joint_i90": 1.1803163399192236
+      }
+    },
+    "tower_of_london": {
+      "best_proposal": "joint_i60_i90",
+      "best_proposal_over_ceres": 1.7553541550521816,
+      "ceres_ratios": {
+        "camera_i90": 2.0737563408260606,
+        "camera_i90_rebase": 2.0488693104099016,
+        "control": 2.050635876153724,
+        "joint_i60": 1.8303228180457713,
+        "joint_i60_i90": 1.7553541550521816,
+        "joint_i90": 1.8288466469695652
+      }
+    },
+    "trafalgar": {
+      "best_proposal": "joint_i60",
+      "best_proposal_over_ceres": 0.941663928666453,
+      "ceres_ratios": {
+        "camera_i90": 1.0311301487988225,
+        "camera_i90_rebase": 1.0299417712373413,
+        "control": 1.059667618457943,
+        "joint_i60": 0.941663928666453,
+        "joint_i60_i90": 0.943946446354654,
+        "joint_i90": 0.9488204289064267
+      }
+    },
+    "union_square": {
+      "best_proposal": "joint_i60_i90",
+      "best_proposal_over_ceres": 1.1290269750243325,
+      "ceres_ratios": {
+        "camera_i90": 1.2921391841881074,
+        "camera_i90_rebase": 1.2943765284277855,
+        "control": 1.4980298099123832,
+        "joint_i60": 1.164794272956209,
+        "joint_i60_i90": 1.1290269750243325,
+        "joint_i90": 1.172070194590704
+      }
+    },
+    "vienna_cathedral": {
+      "best_proposal": "joint_i60_i90",
+      "best_proposal_over_ceres": 1.0614165619084497,
+      "ceres_ratios": {
+        "camera_i90": 1.357308492608735,
+        "camera_i90_rebase": 1.356641327652619,
+        "control": 1.8184700837705712,
+        "joint_i60": 1.117719377864982,
+        "joint_i60_i90": 1.0614165619084497,
+        "joint_i90": 1.1191963143090908
+      }
+    },
+    "yorkminster": {
+      "best_proposal": "joint_i60_i90",
+      "best_proposal_over_ceres": 2.1015633670495606,
+      "ceres_ratios": {
+        "camera_i90": 2.625802901602844,
+        "camera_i90_rebase": 2.618202316764656,
+        "control": 2.7997730379908305,
+        "joint_i60": 2.281468289835059,
+        "joint_i60_i90": 2.1015633670495606,
+        "joint_i90": 2.2974473562402387
+      }
+    }
+  },
+  "summaries": {
+    "camera_i90": {
+      "over_ceres": {
+        "geometric": 1.3216712255498944,
+        "losses": 14,
+        "ratios": {
+          "alamo": 1.1122539302958698,
+          "ellis_island": 1.0751276052931678,
+          "gendarmenmarkt": 1.354660294443109,
+          "madrid_metropolis": 1.1212537575963075,
+          "montreal_notre_dame": 1.4269426148379971,
+          "notre_dame": 1.3424533639151255,
+          "nyc_library": 1.286790239561011,
+          "piazza_del_popolo": 1.341771229827334,
+          "piccadilly": 0.7738095275430831,
+          "roman_forum": 1.4328674863452506,
+          "tower_of_london": 2.0737563408260606,
+          "trafalgar": 1.0311301487988225,
+          "union_square": 1.2921391841881074,
+          "vienna_cathedral": 1.357308492608735,
+          "yorkminster": 2.625802901602844
+        },
+        "summed": 1.2303525850136985,
+        "ties": 0,
+        "wins": 1,
+        "worst": 2.625802901602844
+      },
+      "over_control": {
+        "geometric": 0.887673382522077,
+        "losses": 2,
+        "ratios": {
+          "alamo": 0.9256919843734684,
+          "ellis_island": 0.9778160944684513,
+          "gendarmenmarkt": 1.037741851058075,
+          "madrid_metropolis": 0.9999999999986623,
+          "montreal_notre_dame": 0.7180931148019266,
+          "notre_dame": 0.7552330089272568,
+          "nyc_library": 0.9927517187971993,
+          "piazza_del_popolo": 0.7346918828683547,
+          "piccadilly": 0.9615869755197706,
+          "roman_forum": 0.7886334916381768,
+          "tower_of_london": 1.0112747781998734,
+          "trafalgar": 0.973069414255907,
+          "union_square": 0.8625590596649622,
+          "vienna_cathedral": 0.7464013319341365,
+          "yorkminster": 0.9378627717220855
+        },
+        "summed": 0.8619475617558781,
+        "ties": 1,
+        "wins": 12,
+        "worst": 1.037741851058075
+      },
+      "total_rejections": 136
+    },
+    "camera_i90_rebase": {
+      "over_ceres": {
+        "geometric": 1.3171722225981557,
+        "losses": 14,
+        "ratios": {
+          "alamo": 1.1140879173042435,
+          "ellis_island": 1.0792896992530154,
+          "gendarmenmarkt": 1.3193107355359315,
+          "madrid_metropolis": 1.1212537575963075,
+          "montreal_notre_dame": 1.4236226260875302,
+          "notre_dame": 1.3433535169468895,
+          "nyc_library": 1.278252476438327,
+          "piazza_del_popolo": 1.3224964437309292,
+          "piccadilly": 0.7706856061322127,
+          "roman_forum": 1.4494409977645082,
+          "tower_of_london": 2.0488693104099016,
+          "trafalgar": 1.0299417712373413,
+          "union_square": 1.2943765284277855,
+          "vienna_cathedral": 1.356641327652619,
+          "yorkminster": 2.618202316764656
+        },
+        "summed": 1.2284481268950516,
+        "ties": 0,
+        "wins": 1,
+        "worst": 2.618202316764656
+      },
+      "over_control": {
+        "geometric": 0.8846517194254282,
+        "losses": 1,
+        "ratios": {
+          "alamo": 0.9272183508144888,
+          "ellis_island": 0.9816014706792305,
+          "gendarmenmarkt": 1.0106622084016101,
+          "madrid_metropolis": 0.9999999999986623,
+          "montreal_notre_dame": 0.7164223671221394,
+          "notre_dame": 0.7557394140664949,
+          "nyc_library": 0.9861648806676069,
+          "piazza_del_popolo": 0.7241379012549058,
+          "piccadilly": 0.9577049838482825,
+          "roman_forum": 0.7977553583172877,
+          "tower_of_london": 0.9991385278272142,
+          "trafalgar": 0.971947951694646,
+          "union_square": 0.8640525841762061,
+          "vienna_cathedral": 0.7460344493760619,
+          "yorkminster": 0.9351480570880584
+        },
+        "summed": 0.8606133563810704,
+        "ties": 1,
+        "wins": 13,
+        "worst": 1.0106622084016101
+      },
+      "total_rejections": 121
+    },
+    "control": {
+      "over_ceres": {
+        "geometric": 1.4889161391712942,
+        "losses": 14,
+        "ratios": {
+          "alamo": 1.2015378215127046,
+          "ellis_island": 1.0995192361582224,
+          "gendarmenmarkt": 1.305392370040686,
+          "madrid_metropolis": 1.1212537575978074,
+          "montreal_notre_dame": 1.9871275541077904,
+          "notre_dame": 1.7775353408108638,
+          "nyc_library": 1.2961853555086902,
+          "piazza_del_popolo": 1.8263046878765616,
+          "piccadilly": 0.8047213068009919,
+          "roman_forum": 1.8168991065404143,
+          "tower_of_london": 2.050635876153724,
+          "trafalgar": 1.059667618457943,
+          "union_square": 1.4980298099123832,
+          "vienna_cathedral": 1.8184700837705712,
+          "yorkminster": 2.7997730379908305
+        },
+        "summed": 1.4274100184323748,
+        "ties": 0,
+        "wins": 1,
+        "worst": 2.7997730379908305
+      },
+      "over_control": {
+        "geometric": 1.0,
+        "losses": 0,
+        "ratios": {
+          "alamo": 1.0,
+          "ellis_island": 1.0,
+          "gendarmenmarkt": 1.0,
+          "madrid_metropolis": 1.0,
+          "montreal_notre_dame": 1.0,
+          "notre_dame": 1.0,
+          "nyc_library": 1.0,
+          "piazza_del_popolo": 1.0,
+          "piccadilly": 1.0,
+          "roman_forum": 1.0,
+          "tower_of_london": 1.0,
+          "trafalgar": 1.0,
+          "union_square": 1.0,
+          "vienna_cathedral": 1.0,
+          "yorkminster": 1.0
+        },
+        "summed": 1.0,
+        "ties": 15,
+        "wins": 0,
+        "worst": 1.0
+      },
+      "total_rejections": 275
+    },
+    "joint_i60": {
+      "over_ceres": {
+        "geometric": 1.1710813827479178,
+        "losses": 13,
+        "ratios": {
+          "alamo": 1.0792920618603483,
+          "ellis_island": 1.058775019729866,
+          "gendarmenmarkt": 1.2500702034743716,
+          "madrid_metropolis": 1.1212537575963075,
+          "montreal_notre_dame": 1.139342484973214,
+          "notre_dame": 1.107871000025701,
+          "nyc_library": 1.1393275678400467,
+          "piazza_del_popolo": 1.0527063623831474,
+          "piccadilly": 0.725631292351354,
+          "roman_forum": 1.186286949937291,
+          "tower_of_london": 1.8303228180457713,
+          "trafalgar": 0.941663928666453,
+          "union_square": 1.164794272956209,
+          "vienna_cathedral": 1.117719377864982,
+          "yorkminster": 2.281468289835059
+        },
+        "summed": 1.07694389909363,
+        "ties": 0,
+        "wins": 2,
+        "worst": 2.281468289835059
+      },
+      "over_control": {
+        "geometric": 0.7865328019076494,
+        "losses": 0,
+        "ratios": {
+          "alamo": 0.8982589166452938,
+          "ellis_island": 0.9629436074527274,
+          "gendarmenmarkt": 0.9576202773694853,
+          "madrid_metropolis": 0.9999999999986623,
+          "montreal_notre_dame": 0.5733615250908102,
+          "notre_dame": 0.6232624323071518,
+          "nyc_library": 0.8789850641329887,
+          "piazza_del_popolo": 0.5764133276179264,
+          "piccadilly": 0.9017175091783709,
+          "roman_forum": 0.6529184508192744,
+          "tower_of_london": 0.8925635405729939,
+          "trafalgar": 0.888640845736881,
+          "union_square": 0.7775507972196732,
+          "vienna_cathedral": 0.6146482077656221,
+          "yorkminster": 0.8148761556302018
+        },
+        "summed": 0.7544741070798724,
+        "ties": 1,
+        "wins": 14,
+        "worst": 0.9999999999986623
+      },
+      "total_rejections": 127
+    },
+    "joint_i60_i90": {
+      "over_ceres": {
+        "geometric": 1.1406352639807076,
+        "losses": 12,
+        "ratios": {
+          "alamo": 1.088680446324753,
+          "ellis_island": 1.050407169418305,
+          "gendarmenmarkt": 1.3309218723568423,
+          "madrid_metropolis": 1.1212537575963075,
+          "montreal_notre_dame": 1.053309629285946,
+          "notre_dame": 1.080931001865247,
+          "nyc_library": 1.1258839791633861,
+          "piazza_del_popolo": 0.9547812068119199,
+          "piccadilly": 0.7226479580559185,
+          "roman_forum": 1.142784271627463,
+          "tower_of_london": 1.7553541550521816,
+          "trafalgar": 0.943946446354654,
+          "union_square": 1.1290269750243325,
+          "vienna_cathedral": 1.0614165619084497,
+          "yorkminster": 2.1015633670495606
+        },
+        "summed": 1.0449926119542852,
+        "ties": 0,
+        "wins": 3,
+        "worst": 2.1015633670495606
+      },
+      "over_control": {
+        "geometric": 0.7660842904258973,
+        "losses": 1,
+        "ratios": {
+          "alamo": 0.906072557045381,
+          "ellis_island": 0.9553331445918879,
+          "gendarmenmarkt": 1.0195569568982241,
+          "madrid_metropolis": 0.9999999999986623,
+          "montreal_notre_dame": 0.5300664404298276,
+          "notre_dame": 0.6081066165312671,
+          "nyc_library": 0.8686134080889466,
+          "piazza_del_popolo": 0.5227940404194225,
+          "piccadilly": 0.8980102203689133,
+          "roman_forum": 0.6289750859107726,
+          "tower_of_london": 0.8560048009813485,
+          "trafalgar": 0.8907948397331518,
+          "union_square": 0.7536745714628782,
+          "vienna_cathedral": 0.5836865678359788,
+          "yorkminster": 0.7506191889602887
+        },
+        "summed": 0.7320900080986736,
+        "ties": 1,
+        "wins": 13,
+        "worst": 1.0195569568982241
+      },
+      "total_rejections": 128
+    },
+    "joint_i90": {
+      "over_ceres": {
+        "geometric": 1.1775675613578553,
+        "losses": 13,
+        "ratios": {
+          "alamo": 1.0811837556604524,
+          "ellis_island": 1.0601216248127017,
+          "gendarmenmarkt": 1.2740942966784534,
+          "madrid_metropolis": 1.1212537575963075,
+          "montreal_notre_dame": 1.1362596286774445,
+          "notre_dame": 1.1241071976571237,
+          "nyc_library": 1.1333567263180893,
+          "piazza_del_popolo": 1.0599976991016573,
+          "piccadilly": 0.7485223324077122,
+          "roman_forum": 1.1803163399192236,
+          "tower_of_london": 1.8288466469695652,
+          "trafalgar": 0.9488204289064267,
+          "union_square": 1.172070194590704,
+          "vienna_cathedral": 1.1191963143090908,
+          "yorkminster": 2.2974473562402387
+        },
+        "summed": 1.0848875266484124,
+        "ties": 0,
+        "wins": 2,
+        "worst": 2.2974473562402387
+      },
+      "over_control": {
+        "geometric": 0.7908891107952324,
+        "losses": 0,
+        "ratios": {
+          "alamo": 0.8998333105313908,
+          "ellis_island": 0.964168329166138,
+          "gendarmenmarkt": 0.9760240108027771,
+          "madrid_metropolis": 0.9999999999986623,
+          "montreal_notre_dame": 0.5718101117004635,
+          "notre_dame": 0.632396539100222,
+          "nyc_library": 0.8743785921522786,
+          "piazza_del_popolo": 0.5804057264585533,
+          "piccadilly": 0.9301634318386729,
+          "roman_forum": 0.6496322969560385,
+          "tower_of_london": 0.8918436804099235,
+          "trafalgar": 0.8953943787460221,
+          "union_square": 0.7824077911101488,
+          "vienna_cathedral": 0.6154603940409368,
+          "yorkminster": 0.8205834276798843
+        },
+        "summed": 0.7600391706931334,
+        "ties": 1,
+        "wins": 14,
+        "worst": 0.9999999999986623
+      },
+      "total_rejections": 118
+    }
+  }
+}

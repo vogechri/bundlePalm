@@ -1,0 +1,4 @@
+variant	dataset	clusters	iterations	local_steps	threads_per_cluster	status	exit_code	elapsed_seconds	coordinator_max_rss_kb	worker_max_rss_kb
+landmarks_5	benchmark_results/sfm_init_1dsfm/madrid_metropolis/madrid_metropolis_sfm_init_derived.txt	24	120	1	1	completed	0	13	733812	105948
+landmarks_5	benchmark_results/sfm_init_1dsfm/tower_of_london/tower_of_london_sfm_init_derived.txt	24	120	1	1	completed	0	19	787028	227452
+landmarks_5	benchmark_results/sfm_init_1dsfm/yorkminster/yorkminster_sfm_init_derived.txt	24	120	1	1	completed	0	26	854296	402912

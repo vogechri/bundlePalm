@@ -114,6 +114,7 @@ SHARED_SCHUR_LANDMARK_DAMPING=${SHARED_SCHUR_LANDMARK_DAMPING:-3}
 SHARED_SCHUR_MINIMUM_RELATIVE_DECREASE=${SHARED_SCHUR_MINIMUM_RELATIVE_DECREASE:-1e-4}
 SHARED_SCHUR_RELATIVE_TOLERANCE=${SHARED_SCHUR_RELATIVE_TOLERANCE:-1e-6}
 SHARED_SCHUR_MAXIMUM_ITERATIONS=${SHARED_SCHUR_MAXIMUM_ITERATIONS:-500}
+SHARED_SCHUR_LANDMARK_REFINEMENT_STEPS=${SHARED_SCHUR_LANDMARK_REFINEMENT_STEPS:-3}
 SCHUR_ALIGNMENT_MAXIMUM_ITERATIONS=${SCHUR_ALIGNMENT_MAXIMUM_ITERATIONS:-$SHARED_SCHUR_MAXIMUM_ITERATIONS}
 ONE_STEP_SCHUR_RESIDUAL_PROPOSAL_ITERATIONS=${ONE_STEP_SCHUR_RESIDUAL_PROPOSAL_ITERATIONS:-}
 ALLOW_TWO_SCHUR_RESIDUAL_PROPOSALS=${ALLOW_TWO_SCHUR_RESIDUAL_PROPOSALS:-0}
@@ -808,6 +809,7 @@ for problem in "${PROBLEMS[@]}"; do
             --schur-alignment-landmark-damping "$SCHUR_ALIGNMENT_LANDMARK_DAMPING" \
             --schur-alignment-maximum-iterations "$SCHUR_ALIGNMENT_MAXIMUM_ITERATIONS" \
             --one-step-schur-residual-proposal-iterations "$ONE_STEP_SCHUR_RESIDUAL_PROPOSAL_ITERATIONS" \
+            --shared-schur-landmark-refinement-steps "$SHARED_SCHUR_LANDMARK_REFINEMENT_STEPS" \
             --shared-camera-metric-beta "$SHARED_CAMERA_METRIC_BETA" \
             --threads-per-cluster "$THREADS_PER_CLUSTER" \
             --nesterov-max-iterations "$NESTEROV_MAX_ITERATIONS" \
@@ -907,6 +909,7 @@ for problem in "${PROBLEMS[@]}"; do
             --schur-alignment-landmark-damping "$SCHUR_ALIGNMENT_LANDMARK_DAMPING" \
             --schur-alignment-maximum-iterations "$SCHUR_ALIGNMENT_MAXIMUM_ITERATIONS" \
             --one-step-schur-residual-proposal-iterations "$ONE_STEP_SCHUR_RESIDUAL_PROPOSAL_ITERATIONS" \
+            --shared-schur-landmark-refinement-steps "$SHARED_SCHUR_LANDMARK_REFINEMENT_STEPS" \
             --shared-camera-metric-beta "$SHARED_CAMERA_METRIC_BETA" \
             --threads-per-cluster "$THREADS_PER_CLUSTER" \
             --nesterov-max-iterations "$NESTEROV_MAX_ITERATIONS" \

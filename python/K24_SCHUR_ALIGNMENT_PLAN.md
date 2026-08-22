@@ -331,6 +331,15 @@ worsens the sentinel aggregate. Repeated proposal state is the cause. Close
 proposal-count/checkpoint tuning and retain I60-only. See
 `benchmark_results/k24_landmark_response_i60_i90_first_rebase_sentinel/report.md`.
 
+Full all-15 evaluation confirms joint response dominates camera-only proposals;
+I60 is the no-loss default and I60+I90 is bounded-loss. Yorkminster/Tower are
+absolute tails; Madrid alone declines. A bounded global sensitivity finds
+three landmark steps best and half damping advances all-15 to `0.777854x`
+control versus `0.786533x`, with only bounded regressions. Madrid remains below
+the fixed floor. Close damping/depth sweeps and transfer half damping unchanged
+to BAL29. See `benchmark_results/k24_proposal_full_1dsfm_evaluation/report.md`
+and `benchmark_results/k24_landmark_response_damping_half_validation/report.md`.
+
 BAL29 closes timing: all 29 I60 proposals decline exactly, while all-15 is
 `0.786533x` control and `1.171081x` Ceres with no losses. Promote I60 as the
 common checkpoint and freeze all timing/scale/depth/floor/restart settings. See

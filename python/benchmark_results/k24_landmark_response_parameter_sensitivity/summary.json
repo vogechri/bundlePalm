@@ -1,0 +1,201 @@
+{
+  "scenes": {
+    "base/madrid_metropolis": {
+      "arm": "base",
+      "best_immediate_ratio": 0.999327842327066,
+      "best_scale": 0.5,
+      "delivered_over_ceres": 1.1212537575963075,
+      "delivered_over_control": 0.9999999999986623,
+      "rejections": 4,
+      "scene": "madrid_metropolis",
+      "selected": false,
+      "selected_scale": 0.0
+    },
+    "base/tower_of_london": {
+      "arm": "base",
+      "best_immediate_ratio": 0.9238712910805502,
+      "best_scale": 1.0,
+      "delivered_over_ceres": 1.8303228180457713,
+      "delivered_over_control": 0.8925635405729939,
+      "rejections": 3,
+      "scene": "tower_of_london",
+      "selected": true,
+      "selected_scale": 1.0
+    },
+    "base/yorkminster": {
+      "arm": "base",
+      "best_immediate_ratio": 0.8317595643874597,
+      "best_scale": 1.0,
+      "delivered_over_ceres": 2.281468289835059,
+      "delivered_over_control": 0.8148761556302018,
+      "rejections": 18,
+      "scene": "yorkminster",
+      "selected": true,
+      "selected_scale": 1.0
+    },
+    "damping_double/madrid_metropolis": {
+      "arm": "damping_double",
+      "best_immediate_ratio": 0.9993344565325845,
+      "best_scale": 1.0,
+      "delivered_over_ceres": 1.1212537575963075,
+      "delivered_over_control": 0.9999999999986623,
+      "rejections": 4,
+      "scene": "madrid_metropolis",
+      "selected": false,
+      "selected_scale": 0.0
+    },
+    "damping_double/tower_of_london": {
+      "arm": "damping_double",
+      "best_immediate_ratio": 0.9320230591086441,
+      "best_scale": 1.0,
+      "delivered_over_ceres": 1.854034715613785,
+      "delivered_over_control": 0.9041267331630353,
+      "rejections": 3,
+      "scene": "tower_of_london",
+      "selected": true,
+      "selected_scale": 1.0
+    },
+    "damping_double/yorkminster": {
+      "arm": "damping_double",
+      "best_immediate_ratio": 0.8383122644444028,
+      "best_scale": 1.0,
+      "delivered_over_ceres": 2.283192489715387,
+      "delivered_over_control": 0.8154919912200629,
+      "rejections": 10,
+      "scene": "yorkminster",
+      "selected": true,
+      "selected_scale": 1.0
+    },
+    "damping_half/madrid_metropolis": {
+      "arm": "damping_half",
+      "best_immediate_ratio": 0.9990360757151907,
+      "best_scale": 0.5,
+      "delivered_over_ceres": 1.1212537575963075,
+      "delivered_over_control": 0.9999999999986623,
+      "rejections": 4,
+      "scene": "madrid_metropolis",
+      "selected": false,
+      "selected_scale": 0.0
+    },
+    "damping_half/tower_of_london": {
+      "arm": "damping_half",
+      "best_immediate_ratio": 0.9171875148910148,
+      "best_scale": 1.0,
+      "delivered_over_ceres": 1.8159211698742765,
+      "delivered_over_control": 0.885540524766547,
+      "rejections": 3,
+      "scene": "tower_of_london",
+      "selected": true,
+      "selected_scale": 1.0
+    },
+    "damping_half/yorkminster": {
+      "arm": "damping_half",
+      "best_immediate_ratio": 0.8192234416798218,
+      "best_scale": 1.0,
+      "delivered_over_ceres": 2.2458515896520677,
+      "delivered_over_control": 0.80215487440501,
+      "rejections": 14,
+      "scene": "yorkminster",
+      "selected": true,
+      "selected_scale": 1.0
+    },
+    "landmarks_1/madrid_metropolis": {
+      "arm": "landmarks_1",
+      "best_immediate_ratio": 0.9999127367904975,
+      "best_scale": 0.125,
+      "delivered_over_ceres": 1.1212537575963075,
+      "delivered_over_control": 0.9999999999986623,
+      "rejections": 4,
+      "scene": "madrid_metropolis",
+      "selected": false,
+      "selected_scale": 0.0
+    },
+    "landmarks_1/tower_of_london": {
+      "arm": "landmarks_1",
+      "best_immediate_ratio": 0.9339542633939495,
+      "best_scale": 1.0,
+      "delivered_over_ceres": 1.8750021799825047,
+      "delivered_over_control": 0.9143515929797119,
+      "rejections": 3,
+      "scene": "tower_of_london",
+      "selected": true,
+      "selected_scale": 1.0
+    },
+    "landmarks_1/yorkminster": {
+      "arm": "landmarks_1",
+      "best_immediate_ratio": 0.8663171410440533,
+      "best_scale": 1.0,
+      "delivered_over_ceres": 2.2951942653163497,
+      "delivered_over_control": 0.8197786871193761,
+      "rejections": 14,
+      "scene": "yorkminster",
+      "selected": true,
+      "selected_scale": 1.0
+    },
+    "landmarks_5/madrid_metropolis": {
+      "arm": "landmarks_5",
+      "best_immediate_ratio": 0.9993373524869914,
+      "best_scale": 0.5,
+      "delivered_over_ceres": 1.1212537575963075,
+      "delivered_over_control": 0.9999999999986623,
+      "rejections": 4,
+      "scene": "madrid_metropolis",
+      "selected": false,
+      "selected_scale": 0.0
+    },
+    "landmarks_5/tower_of_london": {
+      "arm": "landmarks_5",
+      "best_immediate_ratio": 0.9237994311363132,
+      "best_scale": 1.0,
+      "delivered_over_ceres": 1.8293349734099136,
+      "delivered_over_control": 0.8920818145643226,
+      "rejections": 3,
+      "scene": "tower_of_london",
+      "selected": true,
+      "selected_scale": 1.0
+    },
+    "landmarks_5/yorkminster": {
+      "arm": "landmarks_5",
+      "best_immediate_ratio": 0.8312070760264092,
+      "best_scale": 1.0,
+      "delivered_over_ceres": 2.3795663327295435,
+      "delivered_over_control": 0.8499140110432539,
+      "rejections": 20,
+      "scene": "yorkminster",
+      "selected": true,
+      "selected_scale": 1.0
+    }
+  },
+  "summaries": {
+    "base": {
+      "geometric_over_ceres": 1.6729463514826977,
+      "geometric_over_control": 0.899311715158697,
+      "selected": 2,
+      "total_rejections": 25
+    },
+    "damping_double": {
+      "geometric_over_ceres": 1.680562880522749,
+      "geometric_over_control": 0.9034060686856311,
+      "selected": 2,
+      "total_rejections": 17
+    },
+    "damping_half": {
+      "geometric_over_ceres": 1.6598186967450925,
+      "geometric_over_control": 0.892254792091425,
+      "selected": 2,
+      "total_rejections": 21
+    },
+    "landmarks_1": {
+      "geometric_over_ceres": 1.6898249295992367,
+      "geometric_over_control": 0.9083849905939625,
+      "selected": 2,
+      "total_rejections": 21
+    },
+    "landmarks_5": {
+      "geometric_over_ceres": 1.6962830463143994,
+      "geometric_over_control": 0.9118566261396335,
+      "selected": 2,
+      "total_rejections": 27
+    }
+  }
+}

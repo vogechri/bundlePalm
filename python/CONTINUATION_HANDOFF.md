@@ -394,6 +394,19 @@ Repeated proposal state, not the second trust rebase, is the cause. Close
 proposal count/checkpoint tuning; retain I60 only. See
 `benchmark_results/k24_landmark_response_i60_i90_first_rebase_sentinel/report.md`.
 
+The unified all-15 scoreboard places proposal variants at `1.488916x` Ceres
+ordinary, `1.321671x` camera I90, `1.177568x` joint I90, `1.171081x` joint I60,
+and `1.140635x` bounded-loss I60+I90. Yorkminster/Tower are absolute tails;
+Madrid alone declines. See
+`benchmark_results/k24_proposal_full_1dsfm_evaluation/report.md`.
+
+Bounded sensitivity finds three landmark steps remain best and half Schur
+damping is the only advancing global setting. It validates all-15 at
+`0.777854x` control versus base `0.786533x`, W/T/L half/base `11/1/3`, with
+bounded regressions. Madrid remains below the unchanged `0.1%` floor. Close
+damping/depth sweeps; run half damping unchanged on BAL29. See
+`benchmark_results/k24_landmark_response_damping_half_validation/report.md`.
+
 BAL29 confirms I60 unchanged: all 29 proposals decline exactly, W/T/L
 `0/29/0`, peak RSS `6.859/9.823 GiB`. Promote I60 as the common checkpoint with
 all-15 `0.786533x` control, `1.171081x` Ceres, W/T/L `14/1/0`. Freeze timing and

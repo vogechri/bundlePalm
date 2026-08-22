@@ -476,6 +476,27 @@ Close proposal-count/checkpoint tuning and retain I60-only as common default.
 Report:
 `benchmark_results/k24_landmark_response_i60_i90_first_rebase_sentinel/report.md`.
 
+Unified full-1DSfM proposal evaluation confirms the progression: ordinary
+control `1.488916x` Ceres, camera-only I90 `1.321671x`, camera-only plus rebase
+`1.317172x`, joint I90 `1.177568x`, promoted joint I60 `1.171081x`, and
+bounded-loss I60+I90 `1.140635x`. Joint camera/landmark response is the dominant
+mechanism. I60 remains the no-loss common default; Yorkminster and Tower are
+the absolute quality tails, while Madrid is the sole declined 1DSfM proposal.
+See `benchmark_results/k24_proposal_full_1dsfm_evaluation/report.md`.
+
+A bounded mechanistic sensitivity on Yorkminster, Tower, and Madrid compares
+half/base/double Schur damping and one/three/five landmark steps. Three steps
+remain best. Half damping (`0.0029296875`) improves both tails and wins the
+three-scene aggregate, then validates unchanged on the other 12 scenes:
+all-15 delivered/control `0.777854x` geometric and `0.748190x` summed versus
+base `0.786533x/0.754474x`; W/T/L half/base `11/1/3`. Regressions are bounded
+to Gendarmenmarkt `+0.79%`, Alamo `+0.36%`, Trafalgar `+0.21%`. Madrid moves
+from `0.0672%` to `0.0964%` immediate decrease but remains below the frozen
+`0.1%` floor and declines. Do not continue a damping/depth sweep. Run half
+damping unchanged on BAL29 before promotion. See
+`benchmark_results/k24_landmark_response_parameter_sensitivity/report.md` and
+`benchmark_results/k24_landmark_response_damping_half_validation/report.md`.
+
 Fresh isolated bridge gate (2026-08-19):
 `serverTest/client_drs_k1_bridge.py` preserves `client_drs.py` and pins the
 mature legacy backbone while exposing ordered `legacy`, `direct`, and

@@ -1,0 +1,13 @@
+variant	dataset	clusters	iterations	local_steps	threads_per_cluster	status	exit_code	elapsed_seconds	coordinator_max_rss_kb	worker_max_rss_kb
+damping_half_validation	benchmark_results/sfm_init_1dsfm/alamo/alamo_sfm_init_derived.txt	24	120	1	1	completed	0	36	1097176	684036
+damping_half_validation	benchmark_results/sfm_init_1dsfm/ellis_island/ellis_island_sfm_init_derived.txt	24	120	1	1	completed	0	17	802688	268968
+damping_half_validation	benchmark_results/sfm_init_1dsfm/gendarmenmarkt/gendarmenmarkt_sfm_init_derived.txt	24	120	1	1	completed	0	16	777608	149496
+damping_half_validation	benchmark_results/sfm_init_1dsfm/montreal_notre_dame/montreal_notre_dame_sfm_init_derived.txt	24	120	1	1	completed	0	56	1481700	1383400
+damping_half_validation	benchmark_results/sfm_init_1dsfm/notre_dame/notre_dame_sfm_init_derived.txt	24	120	1	1	completed	0	50	1053204	863224
+damping_half_validation	benchmark_results/sfm_init_1dsfm/nyc_library/nyc_library_sfm_init_derived.txt	24	120	1	1	completed	0	17	769316	181060
+damping_half_validation	benchmark_results/sfm_init_1dsfm/piazza_del_popolo/piazza_del_popolo_sfm_init_derived.txt	24	120	1	1	completed	0	18	793892	254080
+damping_half_validation	benchmark_results/sfm_init_1dsfm/piccadilly/piccadilly_sfm_init_derived.txt	24	120	1	1	completed	0	52	1052256	746680
+damping_half_validation	benchmark_results/sfm_init_1dsfm/roman_forum/roman_forum_sfm_init_derived.txt	24	120	1	1	completed	0	48	931512	729356
+damping_half_validation	benchmark_results/sfm_init_1dsfm/trafalgar/trafalgar_sfm_init_derived.txt	24	120	1	1	completed	0	136	1899160	1852256
+damping_half_validation	benchmark_results/sfm_init_1dsfm/union_square/union_square_sfm_init_derived.txt	24	120	1	1	completed	0	29	830524	396100
+damping_half_validation	benchmark_results/sfm_init_1dsfm/vienna_cathedral/vienna_cathedral_sfm_init_derived.txt	24	120	1	1	completed	0	50	1089272	965596
