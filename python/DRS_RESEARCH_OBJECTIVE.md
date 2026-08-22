@@ -413,6 +413,13 @@ frozen alternate I60 checkpoint with the new joint camera/landmark proposal;
 do not sweep timing. Report:
 `benchmark_results/k24_drs_candidate_landmark_response_accepted_diagnostic/report.md`.
 
+The sole bounded alternate checkpoint, I60, is safe and slightly
+aggregate-positive for the joint camera/landmark proposal. Roman is
+`0.652918x` control versus I90 `0.649632x`; Trafalgar is `0.888641x` versus
+`0.895394x`, giving pair geomeans `0.761715x/0.762678x`. BAL52/3068 decline
+exactly. Transfer I60 unchanged to all-15 once; do not test another checkpoint.
+Report: `benchmark_results/k24_landmark_response_proposal_i60_sentinel_actual/report.md`.
+
 Fresh isolated bridge gate (2026-08-19):
 `serverTest/client_drs_k1_bridge.py` preserves `client_drs.py` and pins the
 mature legacy backbone while exposing ordered `legacy`, `direct`, and

@@ -358,6 +358,11 @@ off. Next test only the previously frozen I60 checkpoint with the new joint
 camera/landmark proposal; no timing sweep. See
 `benchmark_results/k24_drs_candidate_landmark_response_accepted_diagnostic/report.md`.
 
+The one bounded I60 joint-proposal gate is safe and slightly aggregate-positive:
+Roman/Trafalgar geomean `0.761715x` control versus I90 `0.762678x`; BAL52/3068
+decline exactly. Transfer unchanged to all-15 once. Do not test another timing.
+See `benchmark_results/k24_landmark_response_proposal_i60_sentinel_actual/report.md`.
+
 Only `all15_corrected/` is authoritative. The sibling `all15/` directory is a
 quarantined setup error with the wrong trust cap and recovery controls.
 

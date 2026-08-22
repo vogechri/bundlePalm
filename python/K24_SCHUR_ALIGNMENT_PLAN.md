@@ -298,6 +298,12 @@ off. The sole bounded timing follow-up is the previously frozen I60 checkpoint
 with the joint camera/landmark proposal. See
 `benchmark_results/k24_drs_candidate_landmark_response_accepted_diagnostic/report.md`.
 
+The frozen alternate I60 checkpoint passes the four-scene safety gate and is
+slightly aggregate-positive on Roman/Trafalgar (`0.761715x` versus I90
+`0.762678x`); BAL52/3068 decline exactly. Run unchanged all-15 once and close
+timing afterward. See
+`benchmark_results/k24_landmark_response_proposal_i60_sentinel_actual/report.md`.
+
 The serial BAL29 gate passes unchanged: all 29 proposals decline exactly,
 W/T/L `0/29/0`, with `6.873/9.689 GiB` maximum coordinator/worker RSS. Together
 with all-15 `0.790889x`, W/T/L `14/1/0`, this promotes the common no-loss
