@@ -358,9 +358,25 @@ Two-direction block-PCG/Krylov refinement passes the structural gate. It raises
 all15 median cosine/norm/model gain from `0.592/0.496/0.917` to
 `0.728/0.668/0.992` and improves the quarter endpoint by `0.985801x` while all
 BAL29 proposals decline exactly. Promote the lightweight proposal-only
-`krylov2` direction; retain one-action Jacobi as ablation and do not add a
-Krylov-depth sweep. See
+`krylov2` direction; its all29 BAL trajectories/states exactly match the
+diagnostic path at `0.899325x` elapsed time. Retain one-action Jacobi as
+ablation and do not add a Krylov-depth sweep. See
 `benchmark_results/k24_quarter_i60_krylov_applied_sentinel/report.md`.
+
+The converged shared-camera Schur tangent is not a common improvement:
+full/Krylov physical scoring is `0.994705x`, W/T/L `1/0/3`, over
+Gendarmenmarkt/Madrid/Tower/Yorkminster. It helps Tower but loses the other
+three decisions. This closes linear-convergence/depth as the missing common
+mechanism; next diagnose nonlinear model fidelity and basin formation without
+applying full Schur. See
+`benchmark_results/k24_quarter_i60_full_schur_model_fidelity/report.md`.
+
+One unchanged I60+I90 Krylov2 interaction is retained as a bounded-loss
+component: all15 `0.979939x` I60-only, `1.114256x` Ceres, W/T/L `11/0/4`, but
+Madrid is `1.014837x` ordinary control. BAL29 remains bitwise exact. Keep I60
+as the common preset and close proposal count/checkpoint tuning; do not tune
+the second proposal. See
+`benchmark_results/k24_quarter_i60_i90_krylov_interaction_v3/report.md`.
 
 BAL29 closes timing: all 29 I60 proposals decline exactly, while all-15 is
 `0.786533x` control and `1.171081x` Ceres with no losses. Promote I60 as the

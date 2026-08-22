@@ -2,7 +2,9 @@
 
 Two preconditioned conjugate directions replace the promoted single block-Jacobi camera action. Eight scales, three fixed-camera landmark steps, the `1e-3` floor, atomic commit, canonical restart, and selected-only trust rebase remain unchanged.
 
-The proposal-only path skips the converged Schur reference and is trajectory- and state-exact to the diagnostic path on all 15 1DSfM scenes plus BAL52/3068.
+The proposal-only path skips the converged Schur reference and is trajectory- and state-exact to the diagnostic path on all 15 1DSfM scenes and all 29 BAL scenes.
+
+Lightweight/diagnostic elapsed geometric ratios are `0.991012x` for 1DSfM and `0.899325x` for BAL.
 
 | Family | Completed | Candidate/quarter | Candidate/base | Candidate/control | Candidate/Ceres | W/T/L quarter | Selected | Max RSS GiB C/W |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|

@@ -110,16 +110,18 @@ def validate_candidate(scene, row, control):
 
 def validate_lightweight(candidate_root, lightweight_root):
     summary = {}
-    for family, expected_scenes in (
-        ("1dsfm", None),
-        ("bal", {"bal52", "bal3068"}),
-    ):
+    for family in ("1dsfm", "bal"):
         candidates = load_rows(candidate_root / family)
         lightweight = load_rows(lightweight_root / family)
         statuses = load_status(lightweight_root / family)
-        if expected_scenes is None:
-            expected_scenes = set(candidates)
-        if set(lightweight) != expected_scenes or set(statuses) != expected_scenes:
+        candidate_statuses = load_status(candidate_root / family)
+        expected_scenes = set(candidates)
+        if not (
+            set(lightweight)
+            == set(statuses)
+            == set(candidate_statuses)
+            == expected_scenes
+        ):
             raise ValueError(f"lightweight coverage mismatch for {family}")
         for scene in sorted(expected_scenes):
             left = lightweight[scene]
@@ -152,6 +154,19 @@ def validate_lightweight(candidate_root, lightweight_root):
             "count": len(expected_scenes),
             "trajectory_and_state_exact": True,
             "reference_solve_skipped": True,
+            "elapsed_geometric_ratio": geometric_mean(
+                float(statuses[scene]["elapsed_seconds"])
+                / float(candidate_statuses[scene]["elapsed_seconds"])
+                for scene in expected_scenes
+            ),
+            "maximum_coordinator_rss_gib": max(
+                int(statuses[scene]["coordinator_max_rss_kb"])
+                for scene in expected_scenes
+            ) / 1048576.0,
+            "maximum_worker_rss_gib": max(
+                int(statuses[scene]["worker_max_rss_kb"])
+                for scene in expected_scenes
+            ) / 1048576.0,
         }
     return summary
 
@@ -322,7 +337,14 @@ def write_report(path, summary):
         output.write(
             "The proposal-only path skips the converged Schur reference and "
             "is trajectory- and state-exact to the diagnostic path on all 15 "
-            "1DSfM scenes plus BAL52/3068.\n\n"
+            "1DSfM scenes and all 29 BAL scenes.\n\n"
+        )
+        output.write(
+            "Lightweight/diagnostic elapsed geometric ratios are "
+            f"`{summary['lightweight_equivalence']['1dsfm']['elapsed_geometric_ratio']:.6f}x` "
+            "for 1DSfM and "
+            f"`{summary['lightweight_equivalence']['bal']['elapsed_geometric_ratio']:.6f}x` "
+            "for BAL.\n\n"
         )
         output.write(
             "| Family | Completed | Candidate/quarter | Candidate/base | "

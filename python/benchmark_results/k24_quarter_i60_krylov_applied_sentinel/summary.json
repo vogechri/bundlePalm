@@ -284,11 +284,17 @@
   "lightweight_equivalence": {
     "1dsfm": {
       "count": 15,
+      "elapsed_geometric_ratio": 0.9910123138500164,
+      "maximum_coordinator_rss_gib": 1.6454048156738281,
+      "maximum_worker_rss_gib": 1.7181205749511719,
       "reference_solve_skipped": true,
       "trajectory_and_state_exact": true
     },
     "bal": {
-      "count": 2,
+      "count": 29,
+      "elapsed_geometric_ratio": 0.8993249263222161,
+      "maximum_coordinator_rss_gib": 6.8586273193359375,
+      "maximum_worker_rss_gib": 10.684040069580078,
       "reference_solve_skipped": true,
       "trajectory_and_state_exact": true
     }

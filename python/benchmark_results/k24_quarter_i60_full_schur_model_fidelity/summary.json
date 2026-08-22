@@ -1,0 +1,79 @@
+{
+  "geometric_full_over_krylov": 0.9947050872238863,
+  "scenes": {
+    "gendarmenmarkt": {
+      "actual_preference": "krylov",
+      "full_actual_increment": 1551.913330078125,
+      "full_over_krylov": 1.0108139958115905,
+      "full_over_ordinary": 0.9873495785798551,
+      "full_predicted_increment": -471.125,
+      "full_scale": 0.25,
+      "full_selected": true,
+      "krylov_actual_increment": 9137.82373046875,
+      "krylov_over_ordinary": 0.976786612246207,
+      "krylov_predicted_increment": 9833.75,
+      "krylov_scale": 1.0,
+      "krylov_selected": true,
+      "predicted_preference": "krylov",
+      "ranking_match": true,
+      "schur_relative_residual": 8.265169288332975e-07
+    },
+    "madrid_metropolis": {
+      "actual_preference": "krylov",
+      "full_actual_increment": -3646.731201171875,
+      "full_over_krylov": 1.0012647345123682,
+      "full_over_ordinary": 1.0,
+      "full_predicted_increment": 299.811683277489,
+      "full_scale": 0.0,
+      "full_selected": false,
+      "krylov_actual_increment": 177.56884765625,
+      "krylov_over_ordinary": 0.9987368630205635,
+      "krylov_predicted_increment": 523.068839482862,
+      "krylov_scale": 1.0,
+      "krylov_selected": true,
+      "predicted_preference": "krylov",
+      "ranking_match": true,
+      "schur_relative_residual": 9.980839235605959e-07
+    },
+    "tower_of_london": {
+      "actual_preference": "full",
+      "full_actual_increment": 134102.05322265625,
+      "full_over_krylov": 0.9607232609633294,
+      "full_over_ordinary": 0.8532520019620559,
+      "full_predicted_increment": 131072.0,
+      "full_scale": 1.0,
+      "full_selected": true,
+      "krylov_actual_increment": 102225.0361328125,
+      "krylov_over_ordinary": 0.8881350505727209,
+      "krylov_predicted_increment": 0.0,
+      "krylov_scale": 1.0,
+      "krylov_selected": true,
+      "predicted_preference": "full",
+      "ranking_match": true,
+      "schur_relative_residual": 9.048889356664413e-07
+    },
+    "yorkminster": {
+      "actual_preference": "krylov",
+      "full_actual_increment": 72427.5625,
+      "full_over_krylov": 1.0068363430350304,
+      "full_over_ordinary": 0.7957295454747872,
+      "full_predicted_increment": 775806.4099121094,
+      "full_scale": 0.5,
+      "full_selected": true,
+      "krylov_actual_increment": 717658.8671875,
+      "krylov_over_ordinary": 0.7903266017157484,
+      "krylov_predicted_increment": 701487.7266845703,
+      "krylov_scale": 1.0,
+      "krylov_selected": true,
+      "predicted_preference": "full",
+      "ranking_match": false,
+      "schur_relative_residual": 9.307891936836387e-07
+    }
+  },
+  "status": "passed",
+  "wins_ties_losses": {
+    "losses": 3,
+    "ties": 0,
+    "wins": 1
+  }
+}

@@ -534,10 +534,32 @@ delivered/control `0.763688x`, and delivered/Ceres `1.137067x`; W/T/L versus
 quarter is `13/0/2`, with bounded Alamo/Gendarmenmarkt regressions
 `1.000488x/1.003041x`. All 29 BAL proposals decline and reproduce quarter/base
 exactly. The proposal-only `krylov2` path is trajectory- and state-exact to the
-diagnostic applied path on all15 plus BAL52/3068 and skips the converged Schur
-reference. Promote `krylov2` in the canonical proposal preset; retain lower-level
-`jacobi` for ablation. See
+diagnostic applied path on all15 and all29 BAL scenes and skips the converged
+Schur reference. On BAL29 it runs in `0.899325x` diagnostic elapsed time with
+peak coordinator/worker RSS `6.859/10.684 GiB`. Promote `krylov2` in the
+canonical proposal preset; retain lower-level `jacobi` for ablation. See
 `benchmark_results/k24_quarter_i60_krylov_applied_sentinel/report.md`.
+
+A rollback-safe physical ceiling compares the converged shared-camera Schur
+tangent with Krylov2 on Gendarmenmarkt, Madrid, Tower, and Yorkminster. Full
+Schur/Krylov is `0.994705x` geometrically but W/T/L `1/0/3`: it improves Tower
+to `0.960723x`, regresses Gendarmenmarkt/Yorkminster to
+`1.010814x/1.006836x`, and declines Madrid. All 120 ordinary trajectories and
+worker-state roundtrips are exact. Therefore more linear convergence is not a
+transferable proposal mechanism. Keep bounded Krylov2 and move to
+basin/nonlinear-model diagnosis; do not add Krylov depth or apply full Schur.
+See `benchmark_results/k24_quarter_i60_full_schur_model_fidelity/report.md`.
+
+One frozen orthogonal interaction retests the previously closed I60+I90 count
+with the new Krylov2 direction. All15 improves `0.979939x` over I60-only and
+reaches `0.748367x` ordinary control / `1.114256x` Ceres, W/T/L versus I60
+`11/0/4`. Tower/Yorkminster improve to `0.939289x/0.937256x` I60, while
+Gendarmenmarkt/Madrid regress to `1.015436x/1.023649x`; Madrid is
+`1.014837x` ordinary control. BAL29 remains bitwise exact with both proposals
+declined. Retain I60+I90 as a frozen bounded-loss portfolio component, not the
+common preset. Do not retune checkpoint, count, floor, scale, damping, or
+Krylov depth. See
+`benchmark_results/k24_quarter_i60_i90_krylov_interaction_v3/report.md`.
 
 Fresh isolated bridge gate (2026-08-19):
 `serverTest/client_drs_k1_bridge.py` preserves `client_drs.py` and pins the

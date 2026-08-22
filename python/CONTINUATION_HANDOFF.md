@@ -430,9 +430,25 @@ improves `0.985801x` over quarter and reaches `1.137067x` Ceres, W/T/L
 `13/0/2`; all BAL29 proposals decline exactly. Median selected-scene
 cosine/norm/model-gain improves from `0.592/0.496/0.917` to
 `0.728/0.668/0.992`. The lightweight proposal-only path exactly matches all15
-diagnostic trajectories/states and BAL52/3068 no-ops. Canonical runner default
-is now `krylov2`; generic/client defaults remain `jacobi` for ablation. See
+and all29 BAL diagnostic trajectories/states, at `0.899325x` BAL diagnostic
+elapsed time and `6.859/10.684 GiB` peak coordinator/worker RSS. Canonical
+runner default is now `krylov2`; generic/client defaults remain `jacobi` for
+ablation. See
 `benchmark_results/k24_quarter_i60_krylov_applied_sentinel/report.md`.
+
+Converged full-Schur physical scoring closes direction depth: full/Krylov is
+`0.994705x` on Gendarmenmarkt/Madrid/Tower/Yorkminster, W/T/L `1/0/3`. Only
+Tower improves (`0.960723x`); Gendarmenmarkt/Yorkminster regress and Madrid
+declines. Keep Krylov2 and diagnose basin/nonlinear-model mismatch next; do not
+apply full Schur or sweep Krylov depth. See
+`benchmark_results/k24_quarter_i60_full_schur_model_fidelity/report.md`.
+
+The sole repeated-proposal retest with Krylov2 is aggregate-positive but remains
+bounded-loss: all15 is `0.979939x` I60-only and `1.114256x` Ceres, W/T/L
+`11/0/4`; Madrid reaches `1.023649x` I60 and `1.014837x` control. BAL29 is
+bitwise exact with both proposals declined. Retain I60+I90 only as a frozen
+portfolio component and close count/checkpoint tuning. See
+`benchmark_results/k24_quarter_i60_i90_krylov_interaction_v3/report.md`.
 
 BAL29 confirms I60 unchanged: all 29 proposals decline exactly, W/T/L
 `0/29/0`, peak RSS `6.859/9.823 GiB`. Promote I60 as the common checkpoint with

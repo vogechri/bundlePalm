@@ -1,0 +1,607 @@
+{
+  "families": {
+    "1dsfm": {
+      "count": 15,
+      "maximum_coordinator_rss_gib": 1.8581886291503906,
+      "maximum_worker_rss_gib": 1.7772598266601562,
+      "over_ceres": {
+        "geometric": 1.1142556701448467,
+        "losses": 12,
+        "ratios": {
+          "alamo": 1.0779704826223289,
+          "ellis_island": 1.0469545670382836,
+          "gendarmenmarkt": 1.2818585844888593,
+          "madrid_metropolis": 1.1378898089389236,
+          "montreal_notre_dame": 1.0425322489706808,
+          "notre_dame": 1.0612786981505609,
+          "nyc_library": 1.098027132571804,
+          "piazza_del_popolo": 0.9267053855886023,
+          "piccadilly": 0.7120722574382322,
+          "roman_forum": 1.0723452451358118,
+          "tower_of_london": 1.6220965786283632,
+          "trafalgar": 0.9464730578677347,
+          "union_square": 1.112460132881274,
+          "vienna_cathedral": 1.037351161074729,
+          "yorkminster": 2.0210178291799745
+        },
+        "summed": 1.0269363053475746,
+        "ties": 0,
+        "wins": 3,
+        "worst": 2.0210178291799745
+      },
+      "over_control": {
+        "geometric": 0.7483669770448071,
+        "losses": 1,
+        "ratios": {
+          "alamo": 0.8971590101634856,
+          "ellis_island": 0.9521930427487539,
+          "gendarmenmarkt": 0.9819718683118294,
+          "madrid_metropolis": 1.0148370083296376,
+          "montreal_notre_dame": 0.5246428427886061,
+          "notre_dame": 0.5970506879860032,
+          "nyc_library": 0.847122001421534,
+          "piazza_del_popolo": 0.5074210189243282,
+          "piccadilly": 0.8848681542544619,
+          "roman_forum": 0.590206270274237,
+          "tower_of_london": 0.7910212619857453,
+          "trafalgar": 0.8931791831527965,
+          "union_square": 0.742615484364987,
+          "vienna_cathedral": 0.5704526955559239,
+          "yorkminster": 0.7218505935146425
+        },
+        "summed": 0.7194403094321753,
+        "ties": 0,
+        "wins": 14,
+        "worst": 1.0148370083296376
+      },
+      "over_i60": {
+        "geometric": 0.9799385576604024,
+        "losses": 4,
+        "ratios": {
+          "alamo": 1.0002026457063529,
+          "ellis_island": 0.9943912806211038,
+          "gendarmenmarkt": 1.0154359870630576,
+          "madrid_metropolis": 1.0236492135668414,
+          "montreal_notre_dame": 0.9735566933823963,
+          "notre_dame": 0.9888179842607978,
+          "nyc_library": 0.9877121950578834,
+          "piazza_del_popolo": 0.9387108916689386,
+          "piccadilly": 0.9931363695553984,
+          "roman_forum": 0.9710758542155274,
+          "tower_of_london": 0.9392887994871977,
+          "trafalgar": 1.0023594978894148,
+          "union_square": 0.9740379468559746,
+          "vienna_cathedral": 0.9646615502967425,
+          "yorkminster": 0.9372560692273321
+        },
+        "summed": 0.9807818758245483,
+        "ties": 0,
+        "wins": 11,
+        "worst": 1.0236492135668414
+      },
+      "second_selected": 15
+    },
+    "bal": {
+      "count": 29,
+      "maximum_coordinator_rss_gib": 6.904552459716797,
+      "maximum_worker_rss_gib": 9.895305633544922,
+      "over_ceres": {
+        "geometric": 0.9990389394935648,
+        "losses": 18,
+        "ratios": {
+          "bal1064": 1.0017986653532909,
+          "bal126": 1.0168522497985126,
+          "bal1266": 1.0022869852733614,
+          "bal135": 1.0014612133381067,
+          "bal142": 1.0033813511183087,
+          "bal1490": 0.9947708421769396,
+          "bal1723": 0.9964969233729449,
+          "bal173": 0.9987153341886121,
+          "bal1778": 1.01213780229864,
+          "bal245": 0.9642969600522376,
+          "bal253": 0.9964606847305623,
+          "bal257": 1.0257017605747354,
+          "bal287": 0.9986829862547778,
+          "bal3068": 0.9909239428919583,
+          "bal308": 1.0029295347325342,
+          "bal356": 1.020981401359244,
+          "bal394": 1.0073675095382986,
+          "bal427": 0.9969463893167924,
+          "bal49": 1.0020883945405954,
+          "bal52": 0.9706850334514984,
+          "bal646": 1.00205231370768,
+          "bal744": 0.9973144668457183,
+          "bal783": 1.0006926638574811,
+          "bal871": 1.0006148839773534,
+          "bal88": 1.0000939681719225,
+          "bal89": 1.006441419225707,
+          "bal931": 1.0003085654635482,
+          "bal951": 0.9622798874103952,
+          "bal961": 1.0000733240861008
+        },
+        "summed": 0.9950795731275637,
+        "ties": 0,
+        "wins": 11,
+        "worst": 1.0257017605747354
+      },
+      "over_control": {
+        "geometric": 1.0000000000002425,
+        "losses": 0,
+        "ratios": {
+          "bal1064": 1.0000000000027887,
+          "bal126": 0.9999999999999992,
+          "bal1266": 1.0000000000031402,
+          "bal135": 0.9999999999999993,
+          "bal142": 1.0,
+          "bal1490": 1.0000000000000007,
+          "bal1723": 1.0000000000019915,
+          "bal173": 1.000000000000002,
+          "bal1778": 0.9999999999999997,
+          "bal245": 1.0000000000000029,
+          "bal253": 1.000000000000001,
+          "bal257": 0.9999999999999988,
+          "bal287": 0.9999999999999992,
+          "bal3068": 0.9999999999999986,
+          "bal308": 0.9999999999999991,
+          "bal356": 0.9999999999999993,
+          "bal394": 1.0000000000000007,
+          "bal427": 1.0000000000000009,
+          "bal49": 0.9999999999999994,
+          "bal52": 0.9999999999999997,
+          "bal646": 0.9999999999975442,
+          "bal744": 0.9999999999999983,
+          "bal783": 1.0000000000001743,
+          "bal871": 1.0000000000000007,
+          "bal88": 1.0,
+          "bal89": 1.0000000000000009,
+          "bal931": 1.0000000000013871,
+          "bal951": 1.0000000000000042,
+          "bal961": 0.9999999999999981
+        },
+        "summed": 1.000000000000136,
+        "ties": 29,
+        "wins": 0,
+        "worst": 1.0000000000031402
+      },
+      "over_i60": {
+        "geometric": 1.0,
+        "losses": 0,
+        "ratios": {
+          "bal1064": 1.0,
+          "bal126": 1.0,
+          "bal1266": 1.0,
+          "bal135": 1.0,
+          "bal142": 1.0,
+          "bal1490": 1.0,
+          "bal1723": 1.0,
+          "bal173": 1.0,
+          "bal1778": 1.0,
+          "bal245": 1.0,
+          "bal253": 1.0,
+          "bal257": 1.0,
+          "bal287": 1.0,
+          "bal3068": 1.0,
+          "bal308": 1.0,
+          "bal356": 1.0,
+          "bal394": 1.0,
+          "bal427": 1.0,
+          "bal49": 1.0,
+          "bal52": 1.0,
+          "bal646": 1.0,
+          "bal744": 1.0,
+          "bal783": 1.0,
+          "bal871": 1.0,
+          "bal88": 1.0,
+          "bal89": 1.0,
+          "bal931": 1.0,
+          "bal951": 1.0,
+          "bal961": 1.0
+        },
+        "summed": 1.0,
+        "ties": 29,
+        "wins": 0,
+        "worst": 1.0
+      },
+      "second_selected": 0
+    }
+  },
+  "scenes": {
+    "alamo": {
+      "delivered_over_ceres": 1.0779704826223289,
+      "delivered_over_control": 0.8971590101634856,
+      "delivered_over_i60": 1.0002026457063529,
+      "family": "1dsfm",
+      "rejection_delta": 2,
+      "second_scale": 1.0,
+      "second_selected": true
+    },
+    "bal1064": {
+      "delivered_over_ceres": 1.0017986653532909,
+      "delivered_over_control": 1.0000000000027887,
+      "delivered_over_i60": 1.0,
+      "family": "bal",
+      "rejection_delta": 0,
+      "second_scale": 0.0,
+      "second_selected": false
+    },
+    "bal126": {
+      "delivered_over_ceres": 1.0168522497985126,
+      "delivered_over_control": 0.9999999999999992,
+      "delivered_over_i60": 1.0,
+      "family": "bal",
+      "rejection_delta": 0,
+      "second_scale": 0.0,
+      "second_selected": false
+    },
+    "bal1266": {
+      "delivered_over_ceres": 1.0022869852733614,
+      "delivered_over_control": 1.0000000000031402,
+      "delivered_over_i60": 1.0,
+      "family": "bal",
+      "rejection_delta": 0,
+      "second_scale": 0.0,
+      "second_selected": false
+    },
+    "bal135": {
+      "delivered_over_ceres": 1.0014612133381067,
+      "delivered_over_control": 0.9999999999999993,
+      "delivered_over_i60": 1.0,
+      "family": "bal",
+      "rejection_delta": 0,
+      "second_scale": 0.0,
+      "second_selected": false
+    },
+    "bal142": {
+      "delivered_over_ceres": 1.0033813511183087,
+      "delivered_over_control": 1.0,
+      "delivered_over_i60": 1.0,
+      "family": "bal",
+      "rejection_delta": 0,
+      "second_scale": 0.0,
+      "second_selected": false
+    },
+    "bal1490": {
+      "delivered_over_ceres": 0.9947708421769396,
+      "delivered_over_control": 1.0000000000000007,
+      "delivered_over_i60": 1.0,
+      "family": "bal",
+      "rejection_delta": 0,
+      "second_scale": 0.0,
+      "second_selected": false
+    },
+    "bal1723": {
+      "delivered_over_ceres": 0.9964969233729449,
+      "delivered_over_control": 1.0000000000019915,
+      "delivered_over_i60": 1.0,
+      "family": "bal",
+      "rejection_delta": 0,
+      "second_scale": 0.0,
+      "second_selected": false
+    },
+    "bal173": {
+      "delivered_over_ceres": 0.9987153341886121,
+      "delivered_over_control": 1.000000000000002,
+      "delivered_over_i60": 1.0,
+      "family": "bal",
+      "rejection_delta": 0,
+      "second_scale": 0.0,
+      "second_selected": false
+    },
+    "bal1778": {
+      "delivered_over_ceres": 1.01213780229864,
+      "delivered_over_control": 0.9999999999999997,
+      "delivered_over_i60": 1.0,
+      "family": "bal",
+      "rejection_delta": 0,
+      "second_scale": 0.0,
+      "second_selected": false
+    },
+    "bal245": {
+      "delivered_over_ceres": 0.9642969600522376,
+      "delivered_over_control": 1.0000000000000029,
+      "delivered_over_i60": 1.0,
+      "family": "bal",
+      "rejection_delta": 0,
+      "second_scale": 0.0,
+      "second_selected": false
+    },
+    "bal253": {
+      "delivered_over_ceres": 0.9964606847305623,
+      "delivered_over_control": 1.000000000000001,
+      "delivered_over_i60": 1.0,
+      "family": "bal",
+      "rejection_delta": 0,
+      "second_scale": 0.0,
+      "second_selected": false
+    },
+    "bal257": {
+      "delivered_over_ceres": 1.0257017605747354,
+      "delivered_over_control": 0.9999999999999988,
+      "delivered_over_i60": 1.0,
+      "family": "bal",
+      "rejection_delta": 0,
+      "second_scale": 0.0,
+      "second_selected": false
+    },
+    "bal287": {
+      "delivered_over_ceres": 0.9986829862547778,
+      "delivered_over_control": 0.9999999999999992,
+      "delivered_over_i60": 1.0,
+      "family": "bal",
+      "rejection_delta": 0,
+      "second_scale": 0.0,
+      "second_selected": false
+    },
+    "bal3068": {
+      "delivered_over_ceres": 0.9909239428919583,
+      "delivered_over_control": 0.9999999999999986,
+      "delivered_over_i60": 1.0,
+      "family": "bal",
+      "rejection_delta": 0,
+      "second_scale": 0.0,
+      "second_selected": false
+    },
+    "bal308": {
+      "delivered_over_ceres": 1.0029295347325342,
+      "delivered_over_control": 0.9999999999999991,
+      "delivered_over_i60": 1.0,
+      "family": "bal",
+      "rejection_delta": 0,
+      "second_scale": 0.0,
+      "second_selected": false
+    },
+    "bal356": {
+      "delivered_over_ceres": 1.020981401359244,
+      "delivered_over_control": 0.9999999999999993,
+      "delivered_over_i60": 1.0,
+      "family": "bal",
+      "rejection_delta": 0,
+      "second_scale": 0.0,
+      "second_selected": false
+    },
+    "bal394": {
+      "delivered_over_ceres": 1.0073675095382986,
+      "delivered_over_control": 1.0000000000000007,
+      "delivered_over_i60": 1.0,
+      "family": "bal",
+      "rejection_delta": 0,
+      "second_scale": 0.0,
+      "second_selected": false
+    },
+    "bal427": {
+      "delivered_over_ceres": 0.9969463893167924,
+      "delivered_over_control": 1.0000000000000009,
+      "delivered_over_i60": 1.0,
+      "family": "bal",
+      "rejection_delta": 0,
+      "second_scale": 0.0,
+      "second_selected": false
+    },
+    "bal49": {
+      "delivered_over_ceres": 1.0020883945405954,
+      "delivered_over_control": 0.9999999999999994,
+      "delivered_over_i60": 1.0,
+      "family": "bal",
+      "rejection_delta": 0,
+      "second_scale": 0.0,
+      "second_selected": false
+    },
+    "bal52": {
+      "delivered_over_ceres": 0.9706850334514984,
+      "delivered_over_control": 0.9999999999999997,
+      "delivered_over_i60": 1.0,
+      "family": "bal",
+      "rejection_delta": 0,
+      "second_scale": 0.0,
+      "second_selected": false
+    },
+    "bal646": {
+      "delivered_over_ceres": 1.00205231370768,
+      "delivered_over_control": 0.9999999999975442,
+      "delivered_over_i60": 1.0,
+      "family": "bal",
+      "rejection_delta": 0,
+      "second_scale": 0.0,
+      "second_selected": false
+    },
+    "bal744": {
+      "delivered_over_ceres": 0.9973144668457183,
+      "delivered_over_control": 0.9999999999999983,
+      "delivered_over_i60": 1.0,
+      "family": "bal",
+      "rejection_delta": 0,
+      "second_scale": 0.0,
+      "second_selected": false
+    },
+    "bal783": {
+      "delivered_over_ceres": 1.0006926638574811,
+      "delivered_over_control": 1.0000000000001743,
+      "delivered_over_i60": 1.0,
+      "family": "bal",
+      "rejection_delta": 0,
+      "second_scale": 0.0,
+      "second_selected": false
+    },
+    "bal871": {
+      "delivered_over_ceres": 1.0006148839773534,
+      "delivered_over_control": 1.0000000000000007,
+      "delivered_over_i60": 1.0,
+      "family": "bal",
+      "rejection_delta": 0,
+      "second_scale": 0.0,
+      "second_selected": false
+    },
+    "bal88": {
+      "delivered_over_ceres": 1.0000939681719225,
+      "delivered_over_control": 1.0,
+      "delivered_over_i60": 1.0,
+      "family": "bal",
+      "rejection_delta": 0,
+      "second_scale": 0.0,
+      "second_selected": false
+    },
+    "bal89": {
+      "delivered_over_ceres": 1.006441419225707,
+      "delivered_over_control": 1.0000000000000009,
+      "delivered_over_i60": 1.0,
+      "family": "bal",
+      "rejection_delta": 0,
+      "second_scale": 0.0,
+      "second_selected": false
+    },
+    "bal931": {
+      "delivered_over_ceres": 1.0003085654635482,
+      "delivered_over_control": 1.0000000000013871,
+      "delivered_over_i60": 1.0,
+      "family": "bal",
+      "rejection_delta": 0,
+      "second_scale": 0.0,
+      "second_selected": false
+    },
+    "bal951": {
+      "delivered_over_ceres": 0.9622798874103952,
+      "delivered_over_control": 1.0000000000000042,
+      "delivered_over_i60": 1.0,
+      "family": "bal",
+      "rejection_delta": 0,
+      "second_scale": 0.0,
+      "second_selected": false
+    },
+    "bal961": {
+      "delivered_over_ceres": 1.0000733240861008,
+      "delivered_over_control": 0.9999999999999981,
+      "delivered_over_i60": 1.0,
+      "family": "bal",
+      "rejection_delta": 0,
+      "second_scale": 0.0,
+      "second_selected": false
+    },
+    "ellis_island": {
+      "delivered_over_ceres": 1.0469545670382836,
+      "delivered_over_control": 0.9521930427487539,
+      "delivered_over_i60": 0.9943912806211038,
+      "family": "1dsfm",
+      "rejection_delta": 2,
+      "second_scale": 1.0,
+      "second_selected": true
+    },
+    "gendarmenmarkt": {
+      "delivered_over_ceres": 1.2818585844888593,
+      "delivered_over_control": 0.9819718683118294,
+      "delivered_over_i60": 1.0154359870630576,
+      "family": "1dsfm",
+      "rejection_delta": 1,
+      "second_scale": 1.0,
+      "second_selected": true
+    },
+    "madrid_metropolis": {
+      "delivered_over_ceres": 1.1378898089389236,
+      "delivered_over_control": 1.0148370083296376,
+      "delivered_over_i60": 1.0236492135668414,
+      "family": "1dsfm",
+      "rejection_delta": 1,
+      "second_scale": 1.0,
+      "second_selected": true
+    },
+    "montreal_notre_dame": {
+      "delivered_over_ceres": 1.0425322489706808,
+      "delivered_over_control": 0.5246428427886061,
+      "delivered_over_i60": 0.9735566933823963,
+      "family": "1dsfm",
+      "rejection_delta": 5,
+      "second_scale": 1.0,
+      "second_selected": true
+    },
+    "notre_dame": {
+      "delivered_over_ceres": 1.0612786981505609,
+      "delivered_over_control": 0.5970506879860032,
+      "delivered_over_i60": 0.9888179842607978,
+      "family": "1dsfm",
+      "rejection_delta": 0,
+      "second_scale": 0.5,
+      "second_selected": true
+    },
+    "nyc_library": {
+      "delivered_over_ceres": 1.098027132571804,
+      "delivered_over_control": 0.847122001421534,
+      "delivered_over_i60": 0.9877121950578834,
+      "family": "1dsfm",
+      "rejection_delta": 1,
+      "second_scale": 1.0,
+      "second_selected": true
+    },
+    "piazza_del_popolo": {
+      "delivered_over_ceres": 0.9267053855886023,
+      "delivered_over_control": 0.5074210189243282,
+      "delivered_over_i60": 0.9387108916689386,
+      "family": "1dsfm",
+      "rejection_delta": 1,
+      "second_scale": 1.0,
+      "second_selected": true
+    },
+    "piccadilly": {
+      "delivered_over_ceres": 0.7120722574382322,
+      "delivered_over_control": 0.8848681542544619,
+      "delivered_over_i60": 0.9931363695553984,
+      "family": "1dsfm",
+      "rejection_delta": 1,
+      "second_scale": 1.0,
+      "second_selected": true
+    },
+    "roman_forum": {
+      "delivered_over_ceres": 1.0723452451358118,
+      "delivered_over_control": 0.590206270274237,
+      "delivered_over_i60": 0.9710758542155274,
+      "family": "1dsfm",
+      "rejection_delta": 0,
+      "second_scale": 1.0,
+      "second_selected": true
+    },
+    "tower_of_london": {
+      "delivered_over_ceres": 1.6220965786283632,
+      "delivered_over_control": 0.7910212619857453,
+      "delivered_over_i60": 0.9392887994871977,
+      "family": "1dsfm",
+      "rejection_delta": 0,
+      "second_scale": 1.0,
+      "second_selected": true
+    },
+    "trafalgar": {
+      "delivered_over_ceres": 0.9464730578677347,
+      "delivered_over_control": 0.8931791831527965,
+      "delivered_over_i60": 1.0023594978894148,
+      "family": "1dsfm",
+      "rejection_delta": 8,
+      "second_scale": 0.5,
+      "second_selected": true
+    },
+    "union_square": {
+      "delivered_over_ceres": 1.112460132881274,
+      "delivered_over_control": 0.742615484364987,
+      "delivered_over_i60": 0.9740379468559746,
+      "family": "1dsfm",
+      "rejection_delta": 1,
+      "second_scale": 1.0,
+      "second_selected": true
+    },
+    "vienna_cathedral": {
+      "delivered_over_ceres": 1.037351161074729,
+      "delivered_over_control": 0.5704526955559239,
+      "delivered_over_i60": 0.9646615502967425,
+      "family": "1dsfm",
+      "rejection_delta": 0,
+      "second_scale": 1.0,
+      "second_selected": true
+    },
+    "yorkminster": {
+      "delivered_over_ceres": 2.0210178291799745,
+      "delivered_over_control": 0.7218505935146425,
+      "delivered_over_i60": 0.9372560692273321,
+      "family": "1dsfm",
+      "rejection_delta": -8,
+      "second_scale": 1.0,
+      "second_selected": true
+    }
+  },
+  "status": "passed"
+}

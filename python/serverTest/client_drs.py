@@ -5220,7 +5220,21 @@ def main():
                     arguments.schur_alignment_camera_damping,
                     two_direction_krylov_tangent,
                 )
+                krylov_physical_model = evaluate_global_schur_direction(
+                    schur_alignment_systems,
+                    camera_count,
+                    arguments.schur_alignment_camera_damping,
+                    unique_consensus_tangent
+                    + two_direction_krylov_tangent,
+                )
+                full_schur_physical_model = evaluate_global_schur_direction(
+                    schur_alignment_systems,
+                    camera_count,
+                    arguments.schur_alignment_camera_damping,
+                    unique_consensus_tangent + shared_schur_tangent,
+                )
                 krylov_landmark_response_diagnostics = None
+                full_schur_landmark_response_diagnostics = None
                 krylov_selected_consensus = candidate_consensus
                 krylov_selected_physical = physical_candidate
                 krylov_selected_landmarks = diagnostic_landmarks
@@ -5312,6 +5326,50 @@ def main():
                                 trial_physical_candidate
                             )
                             krylov_selected_landmarks = refined_landmarks
+                    full_schur_correction = (
+                        shared_schur_tangent - shared_consensus_tangent
+                    )
+                    full_schur_attempts = []
+                    full_schur_selected_scale = 0.0
+                    full_schur_worker_sse = ordinary_refined_worker_sse
+                    for attempt in range(8):
+                        scale = 0.5 ** attempt
+                        trial_physical_candidate = left_se3_camera_plus(
+                            schur_alignment_base_cameras,
+                            consensus_tangent
+                            + scale * full_schur_correction,
+                        )
+                        trial_consensus = to_scaled_cameras(
+                            trial_physical_candidate, camera_scaling
+                        )
+                        refined_costs, _ = (
+                            worker.refine_landmarks_at_consensus(
+                                camera_indices_in_cluster,
+                                point_indices_in_cluster,
+                                trial_consensus,
+                                diagnostic_landmarks,
+                                cluster_count,
+                                arguments.
+                                shared_schur_landmark_refinement_steps,
+                                use_landmark_state=True,
+                                preserve_cameras=True,
+                                packed_request_buffers=(
+                                    arguments.packed_request_buffers
+                                ),
+                            )
+                        )
+                        trial_worker_sse = float(np.sum(refined_costs))
+                        full_schur_attempts.append({
+                            "scale": scale,
+                            "workerSSE": trial_worker_sse,
+                        })
+                        if (
+                            np.isfinite(trial_worker_sse)
+                            and trial_worker_sse < full_schur_worker_sse
+                            and trial_worker_sse < required_worker_sse
+                        ):
+                            full_schur_selected_scale = scale
+                            full_schur_worker_sse = trial_worker_sse
                     worker.control_nominal_landmark_state(
                         cluster_count,
                         landmark_oracle_state_id,
@@ -5360,6 +5418,26 @@ def main():
                         "selectedScale": selected_scale,
                         "selected": selected_scale > 0.0,
                         "attempts": attempts,
+                        "workerStateRoundtripSSE": roundtrip_worker_sse,
+                        "workerStateRoundtripRelativeError": (
+                            roundtrip_relative_error
+                        ),
+                        "applied": False,
+                    }
+                    full_schur_landmark_response_diagnostics = {
+                        "refinementSteps": (
+                            arguments.shared_schur_landmark_refinement_steps
+                        ),
+                        "ordinaryRefinedWorkerSSE": (
+                            ordinary_refined_worker_sse
+                        ),
+                        "candidateRefinedWorkerSSE": full_schur_worker_sse,
+                        "minimumRelativeDecrease": (
+                            arguments.shared_schur_minimum_relative_decrease
+                        ),
+                        "selectedScale": full_schur_selected_scale,
+                        "selected": full_schur_selected_scale > 0.0,
+                        "attempts": full_schur_attempts,
                         "workerStateRoundtripSSE": roundtrip_worker_sse,
                         "workerStateRoundtripRelativeError": (
                             roundtrip_relative_error
@@ -5438,9 +5516,14 @@ def main():
                             two_direction_krylov_alignment
                         ),
                         "model": two_direction_krylov_model,
+                        "physicalModel": krylov_physical_model,
                     },
+                    "fullSchurPhysicalModel": full_schur_physical_model,
                     "twoDirectionSchurKrylovLandmarkResponseOracle": (
                         krylov_landmark_response_diagnostics
+                    ),
+                    "fullSchurLandmarkResponseOracle": (
+                        full_schur_landmark_response_diagnostics
                     ),
                     "quotientAllCamerasDiagonalWeighted": (
                         diagonal_weighted_tangent_alignment(

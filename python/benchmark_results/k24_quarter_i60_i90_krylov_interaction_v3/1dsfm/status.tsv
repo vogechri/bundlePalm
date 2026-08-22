@@ -1,0 +1,16 @@
+variant	dataset	clusters	iterations	local_steps	threads_per_cluster	status	exit_code	elapsed_seconds	coordinator_max_rss_kb	worker_max_rss_kb
+i60_i90_krylov	benchmark_results/sfm_init_1dsfm/gendarmenmarkt/gendarmenmarkt_sfm_init_derived.txt	24	120	1	1	completed	0	16	761644	147816
+i60_i90_krylov	benchmark_results/sfm_init_1dsfm/madrid_metropolis/madrid_metropolis_sfm_init_derived.txt	24	120	1	1	completed	0	14	736484	103588
+i60_i90_krylov	benchmark_results/sfm_init_1dsfm/tower_of_london/tower_of_london_sfm_init_derived.txt	24	120	1	1	completed	0	19	789284	226640
+i60_i90_krylov	benchmark_results/sfm_init_1dsfm/yorkminster/yorkminster_sfm_init_derived.txt	24	120	1	1	completed	0	28	857132	414308
+i60_i90_krylov	benchmark_results/sfm_init_1dsfm/alamo/alamo_sfm_init_derived.txt	24	120	1	1	completed	0	37	1133724	769588
+i60_i90_krylov	benchmark_results/sfm_init_1dsfm/ellis_island/ellis_island_sfm_init_derived.txt	24	120	1	1	completed	0	17	779480	274648
+i60_i90_krylov	benchmark_results/sfm_init_1dsfm/montreal_notre_dame/montreal_notre_dame_sfm_init_derived.txt	24	120	1	1	completed	0	59	1360252	1274088
+i60_i90_krylov	benchmark_results/sfm_init_1dsfm/notre_dame/notre_dame_sfm_init_derived.txt	24	120	1	1	completed	0	51	1028512	814804
+i60_i90_krylov	benchmark_results/sfm_init_1dsfm/nyc_library/nyc_library_sfm_init_derived.txt	24	120	1	1	completed	0	17	766936	180436
+i60_i90_krylov	benchmark_results/sfm_init_1dsfm/piazza_del_popolo/piazza_del_popolo_sfm_init_derived.txt	24	120	1	1	completed	0	17	785888	301720
+i60_i90_krylov	benchmark_results/sfm_init_1dsfm/piccadilly/piccadilly_sfm_init_derived.txt	24	120	1	1	completed	0	52	1118124	781612
+i60_i90_krylov	benchmark_results/sfm_init_1dsfm/roman_forum/roman_forum_sfm_init_derived.txt	24	120	1	1	completed	0	51	958732	727728
+i60_i90_krylov	benchmark_results/sfm_init_1dsfm/trafalgar/trafalgar_sfm_init_derived.txt	24	120	1	1	completed	0	128	1948452	1863592
+i60_i90_krylov	benchmark_results/sfm_init_1dsfm/union_square/union_square_sfm_init_derived.txt	24	120	1	1	completed	0	28	924364	414276
+i60_i90_krylov	benchmark_results/sfm_init_1dsfm/vienna_cathedral/vienna_cathedral_sfm_init_derived.txt	24	120	1	1	completed	0	53	1068652	901532

@@ -1,0 +1,5 @@
+variant	dataset	clusters	iterations	local_steps	threads_per_cluster	status	exit_code	elapsed_seconds	coordinator_max_rss_kb	worker_max_rss_kb
+quarter_i60_model_fidelity	benchmark_results/sfm_init_1dsfm/gendarmenmarkt/gendarmenmarkt_sfm_init_derived.txt	24	120	1	1	completed	0	17	761180	150064
+quarter_i60_model_fidelity	benchmark_results/sfm_init_1dsfm/madrid_metropolis/madrid_metropolis_sfm_init_derived.txt	24	120	1	1	completed	0	14	735072	102036
+quarter_i60_model_fidelity	benchmark_results/sfm_init_1dsfm/tower_of_london/tower_of_london_sfm_init_derived.txt	24	120	1	1	completed	0	19	787364	226224
+quarter_i60_model_fidelity	benchmark_results/sfm_init_1dsfm/yorkminster/yorkminster_sfm_init_derived.txt	24	120	1	1	completed	0	29	828204	407380
