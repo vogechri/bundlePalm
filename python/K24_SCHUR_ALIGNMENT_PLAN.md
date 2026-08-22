@@ -346,6 +346,22 @@ bitwise exact. Landmark damping is the useful sensitivity and Madrid still
 declines. Close damping/depth sweeps and freeze quarter damping. See
 `benchmark_results/k24_landmark_response_damping_quarter_breadth/report.md`.
 
+The remaining Tower/Yorkminster tails are direction-limited at I60, not
+restart-limited. A converged, behavior-neutral Schur oracle shows the promoted
+one action reaches weighted cosine `0.585/0.536`, only `0.382/0.437x` Schur
+norm, and `0.623/0.728x` camera-model gain; I61-I120 then improves the accepted
+states by another `0.847/0.761x`. Seek a structurally better cross-camera
+direction, not another scalar/depth/timing/tail sweep. See
+`benchmark_results/k24_quarter_i60_tail_alignment_oracle_clean/report.md`.
+
+Two-direction block-PCG/Krylov refinement passes the structural gate. It raises
+all15 median cosine/norm/model gain from `0.592/0.496/0.917` to
+`0.728/0.668/0.992` and improves the quarter endpoint by `0.985801x` while all
+BAL29 proposals decline exactly. Promote the lightweight proposal-only
+`krylov2` direction; retain one-action Jacobi as ablation and do not add a
+Krylov-depth sweep. See
+`benchmark_results/k24_quarter_i60_krylov_applied_sentinel/report.md`.
+
 BAL29 closes timing: all 29 I60 proposals decline exactly, while all-15 is
 `0.786533x` control and `1.171081x` Ceres with no losses. Promote I60 as the
 common checkpoint and freeze all timing/scale/depth/floor/restart settings. See

@@ -5,6 +5,7 @@ import numpy as np
 from drs_coupled_metrics import assemble_coupled_metric
 from schur_consensus_oracle import (
     jacobi_refine_schur_tangent,
+    krylov_refine_schur_tangent,
     project_stabilized_coupled_tangents,
     stabilized_coupled_metric_from_schur_systems,
 )
@@ -170,3 +171,71 @@ def test_model_optimal_second_step_maximizes_directional_model_decrease():
         unit["steps"][1]["modelDecrease"]
     )
     assert np.all(np.isfinite(refined))
+
+
+def test_krylov_refinement_solves_diagonal_schur_system_in_one_step():
+    identity = np.eye(9)
+    system = SimpleNamespace(
+        camera_ids=np.array([0, 1]),
+        block_rows=np.array([0, 1]),
+        block_columns=np.array([0, 1]),
+        blocks=np.array([2.0 * identity, 3.0 * identity]),
+        reduced_gradient=np.array([
+            np.full(9, -5.0),
+            np.full(9, -7.0),
+        ]),
+        camera_diagonal=np.array([identity, identity]),
+    )
+
+    refined, diagnostics = krylov_refine_schur_tangent(
+        [system],
+        camera_count=2,
+        camera_damping=0.5,
+        tangent=np.zeros((2, 9)),
+        active_cameras=np.array([True, False]),
+        krylov_steps=1,
+    )
+
+    np.testing.assert_allclose(refined[0], 2.0)
+    np.testing.assert_allclose(refined[1], 0.0)
+    assert diagnostics["activeCameraCount"] == 1
+
+
+def test_two_krylov_directions_solve_two_camera_coupled_system():
+    identity = np.eye(9)
+    system = SimpleNamespace(
+        camera_ids=np.array([0, 1]),
+        block_rows=np.array([0, 0, 1]),
+        block_columns=np.array([0, 1, 1]),
+        blocks=np.array([
+            2.0 * identity,
+            -0.5 * identity,
+            3.0 * identity,
+        ]),
+        reduced_gradient=np.array([
+            np.full(9, -1.0),
+            np.full(9, -2.0),
+        ]),
+        camera_diagonal=np.array([identity, identity]),
+    )
+
+    refined, diagnostics = krylov_refine_schur_tangent(
+        [system],
+        camera_count=2,
+        camera_damping=0.5,
+        tangent=np.zeros((2, 9)),
+        active_cameras=np.array([True, True]),
+        krylov_steps=2,
+    )
+    expected = np.linalg.solve(
+        np.array([[2.5, -0.5], [-0.5, 3.5]]),
+        np.array([1.0, 2.0]),
+    )
+
+    np.testing.assert_allclose(refined[:, 0], expected, rtol=1e-12, atol=1e-12)
+    np.testing.assert_allclose(
+        refined, np.broadcast_to(refined[:, :1], refined.shape)
+    )
+    assert diagnostics["steps"][1]["residualNorm"] < (
+        diagnostics["steps"][0]["residualNorm"]
+    )

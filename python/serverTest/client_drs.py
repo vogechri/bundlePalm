@@ -64,6 +64,7 @@ from outer_acceleration import create_accelerator, interpolate_line_search_cente
 from partition_cache import PARTITION_CACHE_MODES, partition_with_cache
 from schur_consensus_oracle import (
     jacobi_refine_schur_tangent,
+    krylov_refine_schur_tangent,
     project_stabilized_coupled_tangents,
 )
 from admm_scaling import (
@@ -1521,6 +1522,11 @@ def parse_arguments():
         help="at most one comma-separated one-based alignment iteration",
     )
     parser.add_argument(
+        "--schur-residual-proposal-direction",
+        choices=("jacobi", "krylov2"),
+        default="jacobi",
+    )
+    parser.add_argument(
         "--one-step-schur-residual-proposal-rebase-trust-state",
         action="store_true",
     )
@@ -1546,6 +1552,14 @@ def parse_arguments():
     )
     parser.add_argument(
         "--schur-proposal-landmark-response-oracle",
+        action="store_true",
+    )
+    parser.add_argument(
+        "--schur-krylov-landmark-response-oracle",
+        action="store_true",
+    )
+    parser.add_argument(
+        "--apply-schur-krylov-landmark-response",
         action="store_true",
     )
     parser.add_argument(
@@ -3166,7 +3180,10 @@ def main():
         )
     if (
         arguments.one_step_schur_residual_proposal_rebase_trust_state
-        and not one_step_schur_residual_proposal_iterations
+        and not (
+            one_step_schur_residual_proposal_iterations
+            or arguments.apply_schur_krylov_landmark_response
+        )
     ):
         raise ValueError(
             "one-step Schur proposal trust rebase requires a proposal iteration"
@@ -3228,11 +3245,53 @@ def main():
             "Schur proposal landmark oracle requires a proposal iteration"
         )
     if (
+        arguments.schur_residual_proposal_direction == "krylov2"
+        and not arguments.schur_proposal_landmark_response_oracle
+    ):
+        raise ValueError(
+            "Krylov proposal direction requires landmark-response scoring"
+        )
+    if (
+        arguments.schur_proposal_landmark_response_oracle
+        and schur_alignment_diagnostic_iterations
+    ):
+        raise ValueError(
+            "Schur proposal landmark oracle requires proposal-only diagnostics"
+        )
+    if (
         arguments.schur_proposal_landmark_response_oracle
         and arguments.shared_schur_landmark_refinement_steps <= 0
     ):
         raise ValueError(
             "Schur proposal landmark oracle requires positive refinement steps"
+        )
+    if (
+        arguments.schur_krylov_landmark_response_oracle
+        and not schur_alignment_diagnostic_iterations
+    ):
+        raise ValueError(
+            "Schur Krylov landmark oracle requires an alignment diagnostic"
+        )
+    if (
+        arguments.schur_krylov_landmark_response_oracle
+        and one_step_schur_residual_proposal_iterations
+    ):
+        raise ValueError(
+            "Schur Krylov landmark oracle requires behavior-neutral diagnostics"
+        )
+    if (
+        arguments.schur_krylov_landmark_response_oracle
+        and arguments.shared_schur_landmark_refinement_steps <= 0
+    ):
+        raise ValueError(
+            "Schur Krylov landmark oracle requires positive refinement steps"
+        )
+    if (
+        arguments.apply_schur_krylov_landmark_response
+        and not arguments.schur_krylov_landmark_response_oracle
+    ):
+        raise ValueError(
+            "applying Schur Krylov landmark response requires its oracle"
         )
     if (
         arguments.apply_schur_proposal_landmark_response
@@ -5137,6 +5196,176 @@ def main():
                     arguments.schur_alignment_camera_damping,
                     one_step_schur_tangent,
                 )
+                (
+                    two_direction_krylov_tangent,
+                    two_direction_krylov_diagnostics,
+                ) = krylov_refine_schur_tangent(
+                    schur_alignment_systems,
+                    camera_count,
+                    arguments.schur_alignment_camera_damping,
+                    shared_consensus_tangent,
+                    shared_cameras,
+                    krylov_steps=2,
+                )
+                two_direction_krylov_alignment = (
+                    diagonal_weighted_tangent_alignment(
+                        schur_alignment_tangent[shared_cameras],
+                        two_direction_krylov_tangent[shared_cameras],
+                        schur_alignment_diagonal[shared_cameras],
+                    )
+                )
+                two_direction_krylov_model = evaluate_global_schur_direction(
+                    schur_alignment_systems,
+                    camera_count,
+                    arguments.schur_alignment_camera_damping,
+                    two_direction_krylov_tangent,
+                )
+                krylov_landmark_response_diagnostics = None
+                krylov_selected_consensus = candidate_consensus
+                krylov_selected_physical = physical_candidate
+                krylov_selected_landmarks = diagnostic_landmarks
+                if arguments.schur_krylov_landmark_response_oracle:
+                    ordinary_worker_sse = worker.evaluate_consensus_sse(
+                        camera_indices_in_cluster,
+                        candidate_consensus,
+                        cluster_count,
+                        preserve_cameras=True,
+                        packed_request_buffers=(
+                            arguments.packed_request_buffers
+                        ),
+                    )
+                    landmark_oracle_state_id = (
+                        9 * arguments.iterations + iteration + 1
+                    )
+                    worker.control_nominal_landmark_state(
+                        cluster_count,
+                        landmark_oracle_state_id,
+                        "save",
+                    )
+                    ordinary_refined_costs, _ = (
+                        worker.refine_landmarks_at_consensus(
+                            camera_indices_in_cluster,
+                            point_indices_in_cluster,
+                            candidate_consensus,
+                            diagnostic_landmarks,
+                            cluster_count,
+                            arguments.shared_schur_landmark_refinement_steps,
+                            use_landmark_state=True,
+                            preserve_cameras=True,
+                            packed_request_buffers=(
+                                arguments.packed_request_buffers
+                            ),
+                        )
+                    )
+                    ordinary_refined_worker_sse = float(np.sum(
+                        ordinary_refined_costs
+                    ))
+                    required_worker_sse = ordinary_refined_worker_sse * (
+                        1.0 - arguments.shared_schur_minimum_relative_decrease
+                    )
+                    correction = (
+                        two_direction_krylov_tangent
+                        - shared_consensus_tangent
+                    )
+                    attempts = []
+                    selected_scale = 0.0
+                    selected_worker_sse = ordinary_refined_worker_sse
+                    for attempt in range(8):
+                        scale = 0.5 ** attempt
+                        trial_physical_candidate = left_se3_camera_plus(
+                            schur_alignment_base_cameras,
+                            consensus_tangent + scale * correction,
+                        )
+                        trial_consensus = to_scaled_cameras(
+                            trial_physical_candidate, camera_scaling
+                        )
+                        refined_costs, refined_landmarks = (
+                            worker.refine_landmarks_at_consensus(
+                                camera_indices_in_cluster,
+                                point_indices_in_cluster,
+                                trial_consensus,
+                                diagnostic_landmarks,
+                                cluster_count,
+                                arguments.
+                                shared_schur_landmark_refinement_steps,
+                                use_landmark_state=True,
+                                preserve_cameras=True,
+                                packed_request_buffers=(
+                                    arguments.packed_request_buffers
+                                ),
+                            )
+                        )
+                        trial_worker_sse = float(np.sum(refined_costs))
+                        attempts.append({
+                            "scale": scale,
+                            "workerSSE": trial_worker_sse,
+                        })
+                        if (
+                            np.isfinite(trial_worker_sse)
+                            and trial_worker_sse < selected_worker_sse
+                            and trial_worker_sse < required_worker_sse
+                        ):
+                            selected_scale = scale
+                            selected_worker_sse = trial_worker_sse
+                            krylov_selected_consensus = trial_consensus
+                            krylov_selected_physical = (
+                                trial_physical_candidate
+                            )
+                            krylov_selected_landmarks = refined_landmarks
+                    worker.control_nominal_landmark_state(
+                        cluster_count,
+                        landmark_oracle_state_id,
+                        (
+                            "restore_roundtrip"
+                            if arguments.worker_owned_landmarks
+                            else "restore"
+                        ),
+                    )
+                    roundtrip_worker_sse = worker.evaluate_consensus_sse(
+                        camera_indices_in_cluster,
+                        candidate_consensus,
+                        cluster_count,
+                        preserve_cameras=True,
+                        packed_request_buffers=(
+                            arguments.packed_request_buffers
+                        ),
+                    )
+                    roundtrip_relative_error = abs(
+                        roundtrip_worker_sse - ordinary_worker_sse
+                    ) / max(
+                        abs(ordinary_worker_sse),
+                        np.finfo(np.float64).tiny,
+                    )
+                    if roundtrip_relative_error > WORKER_SSE_RELATIVE_TOLERANCE:
+                        raise RuntimeError(
+                            "Krylov landmark oracle changed worker state: "
+                            f"relative_error={roundtrip_relative_error:.3g}"
+                        )
+                    worker.control_nominal_landmark_state(
+                        cluster_count,
+                        landmark_oracle_state_id,
+                        "discard",
+                    )
+                    krylov_landmark_response_diagnostics = {
+                        "refinementSteps": (
+                            arguments.shared_schur_landmark_refinement_steps
+                        ),
+                        "ordinaryRefinedWorkerSSE": (
+                            ordinary_refined_worker_sse
+                        ),
+                        "candidateRefinedWorkerSSE": selected_worker_sse,
+                        "minimumRelativeDecrease": (
+                            arguments.shared_schur_minimum_relative_decrease
+                        ),
+                        "selectedScale": selected_scale,
+                        "selected": selected_scale > 0.0,
+                        "attempts": attempts,
+                        "workerStateRoundtripSSE": roundtrip_worker_sse,
+                        "workerStateRoundtripRelativeError": (
+                            roundtrip_relative_error
+                        ),
+                        "applied": False,
+                    }
                 similarity_gauge_basis = similarity_gauge_tangent_basis(
                     schur_alignment_base_cameras
                 )
@@ -5203,6 +5432,16 @@ def main():
                         ),
                         "model": one_step_schur_model,
                     },
+                    "twoDirectionSchurKrylovOracle": {
+                        **two_direction_krylov_diagnostics,
+                        "sharedCamerasDiagonalWeighted": (
+                            two_direction_krylov_alignment
+                        ),
+                        "model": two_direction_krylov_model,
+                    },
+                    "twoDirectionSchurKrylovLandmarkResponseOracle": (
+                        krylov_landmark_response_diagnostics
+                    ),
                     "quotientAllCamerasDiagonalWeighted": (
                         diagonal_weighted_tangent_alignment(
                             quotient_schur_tangent,
@@ -5261,6 +5500,65 @@ def main():
                     ),
                     "schur": schur_alignment_solve_diagnostics,
                 }
+                krylov_landmark_response_applied = (
+                    arguments.apply_schur_krylov_landmark_response
+                    and krylov_landmark_response_diagnostics["selected"]
+                )
+                if krylov_landmark_response_applied:
+                    landmarks = krylov_selected_landmarks.copy()
+                    commit_costs, committed_consensus, committed_landmarks = (
+                        worker.apply_camera_step(
+                            camera_indices_in_cluster,
+                            point_indices_in_cluster,
+                            krylov_selected_consensus,
+                            landmarks,
+                            np.zeros_like(krylov_selected_consensus),
+                            cluster_count,
+                            0,
+                        )
+                    )
+                    if not (
+                        np.allclose(
+                            committed_consensus,
+                            krylov_selected_consensus,
+                            rtol=1e-12,
+                            atol=1e-14,
+                        )
+                        and np.allclose(
+                            committed_landmarks,
+                            landmarks,
+                            rtol=1e-12,
+                            atol=1e-14,
+                        )
+                        and np.isfinite(np.sum(commit_costs))
+                    ):
+                        raise RuntimeError(
+                            "Krylov landmark-response commit changed geometry"
+                        )
+                    candidate_consensus = committed_consensus
+                    physical_candidate = krylov_selected_physical
+                    landmarks = committed_landmarks
+                    local_cameras = np.repeat(
+                        candidate_consensus[None, :, :],
+                        cluster_count,
+                        axis=0,
+                    )
+                    restart_centers = local_cameras.copy()
+                    candidate_centers, residuals = drs_state_for_consensus(
+                        local_cameras,
+                        restart_centers,
+                        camera_masks,
+                        candidate_consensus,
+                        arguments.relaxation,
+                        selected_metric_blocks,
+                        shared_only=arguments.shared_only_camera_proximal,
+                    )
+                    accelerator.reset()
+                    acceleration_failures = 0
+                    one_step_proposal_selected_this_iteration = True
+                    schur_alignment_diagnostics[
+                        "twoDirectionSchurKrylovLandmarkResponseOracle"
+                    ]["applied"] = True
                 if iteration in one_step_schur_residual_proposal_iterations:
                     ordinary_worker_sse = worker.evaluate_consensus_sse(
                         camera_indices_in_cluster,
@@ -5449,6 +5747,20 @@ def main():
                     shared_consensus_tangent,
                     shared_cameras,
                 )
+                landmark_response_tangent = one_step_schur_tangent
+                proposal_krylov_diagnostics = None
+                if arguments.schur_residual_proposal_direction == "krylov2":
+                    (
+                        landmark_response_tangent,
+                        proposal_krylov_diagnostics,
+                    ) = krylov_refine_schur_tangent(
+                        schur_alignment_systems,
+                        camera_count,
+                        arguments.schur_alignment_camera_damping,
+                        shared_consensus_tangent,
+                        shared_cameras,
+                        krylov_steps=2,
+                    )
                 all_camera_schur_tangent = None
                 all_camera_schur_diagnostics = None
                 if arguments.all_camera_schur_residual_oracle:
@@ -5498,6 +5810,10 @@ def main():
                     "referenceSolveSkipped": True,
                     "coupledConsensusOracle": None,
                     "oneStepSchurResidualOracle": one_step_schur_diagnostics,
+                    "proposalDirection": (
+                        arguments.schur_residual_proposal_direction
+                    ),
+                    "proposalKrylovOracle": proposal_krylov_diagnostics,
                 }
                 ordinary_worker_sse = worker.evaluate_consensus_sse(
                     camera_indices_in_cluster,
@@ -5561,6 +5877,10 @@ def main():
                 }
                 landmark_response_selected_scale = 0.0
                 if arguments.schur_proposal_landmark_response_oracle:
+                    landmark_response_correction = (
+                        landmark_response_tangent
+                        - shared_consensus_tangent
+                    )
                     landmark_response_selected_consensus = candidate_consensus
                     landmark_response_selected_physical = physical_candidate
                     landmark_response_selected_landmarks = diagnostic_landmarks
@@ -5606,7 +5926,8 @@ def main():
                         scale = 0.5 ** attempt
                         trial_physical_candidate = left_se3_camera_plus(
                             schur_alignment_base_cameras,
-                            consensus_tangent + scale * correction,
+                            consensus_tangent
+                            + scale * landmark_response_correction,
                         )
                         trial_consensus = to_scaled_cameras(
                             trial_physical_candidate, camera_scaling
@@ -5689,6 +6010,9 @@ def main():
                     ] = {
                         "refinementSteps": (
                             arguments.shared_schur_landmark_refinement_steps
+                        ),
+                        "direction": (
+                            arguments.schur_residual_proposal_direction
                         ),
                         "fixedOrdinaryWorkerSSE": ordinary_worker_sse,
                         "ordinaryRefinedWorkerSSE": (
@@ -8223,6 +8547,9 @@ def main():
             iteration + 1
             for iteration in one_step_schur_residual_proposal_iterations
         ),
+        "schurResidualProposalDirection": (
+            arguments.schur_residual_proposal_direction
+        ),
         "allowTwoSchurResidualProposals": (
             arguments.allow_two_schur_residual_proposals
         ),
@@ -8249,6 +8576,12 @@ def main():
         ),
         "schurProposalLandmarkResponseOracle": (
             arguments.schur_proposal_landmark_response_oracle
+        ),
+        "schurKrylovLandmarkResponseOracle": (
+            arguments.schur_krylov_landmark_response_oracle
+        ),
+        "applySchurKrylovLandmarkResponse": (
+            arguments.apply_schur_krylov_landmark_response
         ),
         "applySchurProposalLandmarkResponse": (
             arguments.apply_schur_proposal_landmark_response

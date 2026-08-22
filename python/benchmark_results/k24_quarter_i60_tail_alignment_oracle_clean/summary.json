@@ -1,0 +1,29 @@
+{
+  "scenes": {
+    "tower_of_london": {
+      "continuation_over_proposal": 0.8468033978169818,
+      "delivered_over_ceres": 1.7902706614334682,
+      "nominal_cosine": 0.15443071843848838,
+      "nominal_over_schur_norm": 0.03112791574822436,
+      "one_action_cosine": 0.5848284998199534,
+      "one_action_over_schur_model_gain": 0.6231072426801774,
+      "one_action_over_schur_norm": 0.38156551857798016,
+      "proposal_immediate_ratio": 0.9142783907440883,
+      "schur_linear_iterations": 243,
+      "schur_relative_residual": 9.048889356664413e-07
+    },
+    "yorkminster": {
+      "continuation_over_proposal": 0.7613662377593013,
+      "delivered_over_ceres": 2.219245186058242,
+      "nominal_cosine": 0.30474261939798564,
+      "nominal_over_schur_norm": 0.01595256331896505,
+      "one_action_cosine": 0.5355834657796751,
+      "one_action_over_schur_model_gain": 0.7279290042786094,
+      "one_action_over_schur_norm": 0.43746024212721135,
+      "proposal_immediate_ratio": 0.816113873380801,
+      "schur_linear_iterations": 180,
+      "schur_relative_residual": 9.307891936836387e-07
+    }
+  },
+  "status": "passed"
+}

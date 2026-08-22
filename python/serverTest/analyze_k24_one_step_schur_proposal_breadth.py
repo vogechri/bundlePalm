@@ -94,6 +94,10 @@ def validate_configuration(
     proposal_trust_rebase,
     proposal_landmark_response,
     proposal_iteration,
+    proposal_camera_damping,
+    proposal_landmark_damping,
+    proposal_landmark_refinement_steps,
+    proposal_direction,
 ):
     expected = {
         "clusters": 24,
@@ -106,6 +110,9 @@ def validate_configuration(
         "sharedOnlyCameraProximal": True,
         "oneStepSchurResidualProposalIterations": [proposal_iteration],
         "schurCoupledConsensusOracle": False,
+        "schurAlignmentCameraDamping": proposal_camera_damping,
+        "schurAlignmentLandmarkDamping": proposal_landmark_damping,
+        "sharedSchurLandmarkRefinementSteps": proposal_landmark_refinement_steps,
         "sharedSchurMinimumRelativeDecrease": 1e-3,
     }
     for field, value in expected.items():
@@ -114,6 +121,13 @@ def validate_configuration(
                 f"configuration mismatch {scene}: {field}={row.get(field)!r}, "
                 f"expected={value!r}"
             )
+    actual_direction = row.get("schurResidualProposalDirection", "jacobi")
+    if actual_direction != proposal_direction:
+        raise ValueError(
+            f"configuration mismatch {scene}: "
+            f"schurResidualProposalDirection={actual_direction!r}, "
+            f"expected={proposal_direction!r}"
+        )
     actual_trust_rebase = bool(
         row.get("oneStepSchurResidualProposalRebaseTrustState", False)
     )
@@ -186,6 +200,10 @@ def analyze(
     proposal_trust_rebase=False,
     proposal_landmark_response=False,
     proposal_iteration=90,
+    proposal_camera_damping=0.005859375,
+    proposal_landmark_damping=0.005859375,
+    proposal_landmark_refinement_steps=3,
+    proposal_direction="jacobi",
 ):
     ceres = ceres_rows()
     details = {}
@@ -214,6 +232,10 @@ def analyze(
                 proposal_trust_rebase,
                 proposal_landmark_response,
                 proposal_iteration,
+                proposal_camera_damping,
+                proposal_landmark_damping,
+                proposal_landmark_refinement_steps,
+                proposal_direction,
             )
             assert_prefix(control, candidate, scene, proposal_iteration)
             if status["status"] != "completed" or int(status["exit_code"]) != 0:
@@ -401,6 +423,12 @@ def main():
     parser.add_argument("--proposal-trust-rebase", action="store_true")
     parser.add_argument("--proposal-landmark-response", action="store_true")
     parser.add_argument("--proposal-iteration", type=int, default=90)
+    parser.add_argument("--proposal-camera-damping", type=float, default=0.005859375)
+    parser.add_argument("--proposal-landmark-damping", type=float, default=0.005859375)
+    parser.add_argument("--proposal-landmark-refinement-steps", type=int, default=3)
+    parser.add_argument(
+        "--proposal-direction", choices=("jacobi", "krylov2"), default="jacobi"
+    )
     arguments = parser.parse_args()
     summary = analyze(
         arguments.root,
@@ -409,6 +437,10 @@ def main():
         proposal_trust_rebase=arguments.proposal_trust_rebase,
         proposal_landmark_response=arguments.proposal_landmark_response,
         proposal_iteration=arguments.proposal_iteration,
+        proposal_camera_damping=arguments.proposal_camera_damping,
+        proposal_landmark_damping=arguments.proposal_landmark_damping,
+        proposal_landmark_refinement_steps=arguments.proposal_landmark_refinement_steps,
+        proposal_direction=arguments.proposal_direction,
     )
     arguments.root.mkdir(parents=True, exist_ok=True)
     (arguments.root / "summary.json").write_text(

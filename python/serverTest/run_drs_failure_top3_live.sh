@@ -7,7 +7,7 @@ set -euo pipefail
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 WORKSPACE=$(cd -- "$SCRIPT_DIR/.." && pwd)
 PYTHON=${PYTHON:-"$SCRIPT_DIR/.venv/bin/python"}
-CLIENT="$SCRIPT_DIR/client_drs.py"
+CLIENT=${CLIENT:-"$SCRIPT_DIR/client_drs.py"}
 WORKER=${WORKER:-"$SCRIPT_DIR/build_admm/zeromq_cpp_server_ex"}
 PROTO_BUILD=${PROTO_BUILD:-"$SCRIPT_DIR/build_admm"}
 OUTPUT_DIR=${OUTPUT_DIR:-"$WORKSPACE/benchmark_results/drs_failure_top3_i30_k10_k20_k30"}
@@ -117,6 +117,7 @@ SHARED_SCHUR_MAXIMUM_ITERATIONS=${SHARED_SCHUR_MAXIMUM_ITERATIONS:-500}
 SHARED_SCHUR_LANDMARK_REFINEMENT_STEPS=${SHARED_SCHUR_LANDMARK_REFINEMENT_STEPS:-3}
 SCHUR_ALIGNMENT_MAXIMUM_ITERATIONS=${SCHUR_ALIGNMENT_MAXIMUM_ITERATIONS:-$SHARED_SCHUR_MAXIMUM_ITERATIONS}
 ONE_STEP_SCHUR_RESIDUAL_PROPOSAL_ITERATIONS=${ONE_STEP_SCHUR_RESIDUAL_PROPOSAL_ITERATIONS:-}
+SCHUR_RESIDUAL_PROPOSAL_DIRECTION=${SCHUR_RESIDUAL_PROPOSAL_DIRECTION:-jacobi}
 ALLOW_TWO_SCHUR_RESIDUAL_PROPOSALS=${ALLOW_TWO_SCHUR_RESIDUAL_PROPOSALS:-0}
 ONE_STEP_SCHUR_RESIDUAL_PROPOSAL_REBASE_TRUST_STATE=${ONE_STEP_SCHUR_RESIDUAL_PROPOSAL_REBASE_TRUST_STATE:-0}
 SCHUR_RESIDUAL_PROPOSAL_REBASE_FIRST_ONLY=${SCHUR_RESIDUAL_PROPOSAL_REBASE_FIRST_ONLY:-0}
@@ -125,6 +126,8 @@ RELINEARIZED_SECOND_SCHUR_RESIDUAL_ORACLE=${RELINEARIZED_SECOND_SCHUR_RESIDUAL_O
 ALL_CAMERA_SCHUR_RESIDUAL_ORACLE=${ALL_CAMERA_SCHUR_RESIDUAL_ORACLE:-0}
 SCHUR_PROPOSAL_LANDMARK_RESPONSE_ORACLE=${SCHUR_PROPOSAL_LANDMARK_RESPONSE_ORACLE:-0}
 APPLY_SCHUR_PROPOSAL_LANDMARK_RESPONSE=${APPLY_SCHUR_PROPOSAL_LANDMARK_RESPONSE:-0}
+SCHUR_KRYLOV_LANDMARK_RESPONSE_ORACLE=${SCHUR_KRYLOV_LANDMARK_RESPONSE_ORACLE:-0}
+APPLY_SCHUR_KRYLOV_LANDMARK_RESPONSE=${APPLY_SCHUR_KRYLOV_LANDMARK_RESPONSE:-0}
 SHARED_SCHUR_OPERATOR=${SHARED_SCHUR_OPERATOR:-python}
 SHARED_SCHUR_PRECONDITIONER=${SHARED_SCHUR_PRECONDITIONER:-jacobi}
 VARIANT_TAG=${VARIANT_TAG:-}
@@ -339,9 +342,18 @@ if [[ "$MID_SHARED_SCHUR_CORRECTION_ITERATION" != "0" ]]; then
 fi
 if [[ -n "$SCHUR_ALIGNMENT_DIAGNOSTIC_ITERATIONS" ]]; then
   VARIANT_NAME="${VARIANT_NAME}_align"
+  if [[ "$SCHUR_KRYLOV_LANDMARK_RESPONSE_ORACLE" == "1" ]]; then
+    VARIANT_NAME="${VARIANT_NAME}_krylov_landmark_oracle"
+    if [[ "$APPLY_SCHUR_KRYLOV_LANDMARK_RESPONSE" == "1" ]]; then
+      VARIANT_NAME="${VARIANT_NAME}_applied"
+    fi
+  fi
 fi
 if [[ -n "$ONE_STEP_SCHUR_RESIDUAL_PROPOSAL_ITERATIONS" ]]; then
   VARIANT_NAME="${VARIANT_NAME}_one_step_schur${ONE_STEP_SCHUR_RESIDUAL_PROPOSAL_ITERATIONS}"
+  if [[ "$SCHUR_RESIDUAL_PROPOSAL_DIRECTION" != "jacobi" ]]; then
+    VARIANT_NAME="${VARIANT_NAME}_${SCHUR_RESIDUAL_PROPOSAL_DIRECTION}"
+  fi
   if [[ "$ONE_STEP_SCHUR_RESIDUAL_PROPOSAL_REBASE_TRUST_STATE" == "1" ]]; then
     VARIANT_NAME="${VARIANT_NAME}_trust_rebase"
   fi
@@ -751,6 +763,17 @@ for problem in "${PROBLEMS[@]}"; do
         )
       fi
     fi
+    krylov_landmark_response_oracle_args=()
+    if [[ "$SCHUR_KRYLOV_LANDMARK_RESPONSE_ORACLE" == "1" ]]; then
+      krylov_landmark_response_oracle_args+=(
+        --schur-krylov-landmark-response-oracle
+      )
+      if [[ "$APPLY_SCHUR_KRYLOV_LANDMARK_RESPONSE" == "1" ]]; then
+        krylov_landmark_response_oracle_args+=(
+          --apply-schur-krylov-landmark-response
+        )
+      fi
+    fi
     final_shared_schur_args=()
     if [[ "$FINAL_SHARED_SCHUR_CORRECTION" == "1" ]]; then
       final_shared_schur_args+=(
@@ -809,6 +832,7 @@ for problem in "${PROBLEMS[@]}"; do
             --schur-alignment-landmark-damping "$SCHUR_ALIGNMENT_LANDMARK_DAMPING" \
             --schur-alignment-maximum-iterations "$SCHUR_ALIGNMENT_MAXIMUM_ITERATIONS" \
             --one-step-schur-residual-proposal-iterations "$ONE_STEP_SCHUR_RESIDUAL_PROPOSAL_ITERATIONS" \
+            --schur-residual-proposal-direction "$SCHUR_RESIDUAL_PROPOSAL_DIRECTION" \
             --shared-schur-landmark-refinement-steps "$SHARED_SCHUR_LANDMARK_REFINEMENT_STEPS" \
             --shared-camera-metric-beta "$SHARED_CAMERA_METRIC_BETA" \
             --threads-per-cluster "$THREADS_PER_CLUSTER" \
@@ -876,7 +900,7 @@ for problem in "${PROBLEMS[@]}"; do
             --catastrophic-ratio "$CATASTROPHIC_RATIO" \
             --recovery-penalty-ratio "$RECOVERY_PENALTY_RATIO" \
             --results "$RESULT_FILE" --state "$state_file" \
-            "${debug_args[@]}" "${trust_args[@]}" "${scaling_args[@]}" "${worker_sse_args[@]}" "${adaptive_depth_args[@]}" "${single_cluster_args[@]}" "${shared_only_args[@]}" "${initial_shared_schur_args[@]}" "${mid_shared_schur_args[@]}" "${alignment_schur_args[@]}" "${proposal_trust_rebase_args[@]}" "${proposal_count_args[@]}" "${two_step_schur_oracle_args[@]}" "${relinearized_schur_oracle_args[@]}" "${all_camera_schur_oracle_args[@]}" "${landmark_response_oracle_args[@]}" "${final_shared_schur_args[@]}" "${initial_state_args[@]}") 2>&1 | tee "$log_file"
+            "${debug_args[@]}" "${trust_args[@]}" "${scaling_args[@]}" "${worker_sse_args[@]}" "${adaptive_depth_args[@]}" "${single_cluster_args[@]}" "${shared_only_args[@]}" "${initial_shared_schur_args[@]}" "${mid_shared_schur_args[@]}" "${alignment_schur_args[@]}" "${proposal_trust_rebase_args[@]}" "${proposal_count_args[@]}" "${two_step_schur_oracle_args[@]}" "${relinearized_schur_oracle_args[@]}" "${all_camera_schur_oracle_args[@]}" "${landmark_response_oracle_args[@]}" "${krylov_landmark_response_oracle_args[@]}" "${final_shared_schur_args[@]}" "${initial_state_args[@]}") 2>&1 | tee "$log_file"
       exit_code=${PIPESTATUS[0]}
     else
       (cd "$SCRIPT_DIR" && /usr/bin/time -v -o "$coordinator_time" \
@@ -909,6 +933,7 @@ for problem in "${PROBLEMS[@]}"; do
             --schur-alignment-landmark-damping "$SCHUR_ALIGNMENT_LANDMARK_DAMPING" \
             --schur-alignment-maximum-iterations "$SCHUR_ALIGNMENT_MAXIMUM_ITERATIONS" \
             --one-step-schur-residual-proposal-iterations "$ONE_STEP_SCHUR_RESIDUAL_PROPOSAL_ITERATIONS" \
+            --schur-residual-proposal-direction "$SCHUR_RESIDUAL_PROPOSAL_DIRECTION" \
             --shared-schur-landmark-refinement-steps "$SHARED_SCHUR_LANDMARK_REFINEMENT_STEPS" \
             --shared-camera-metric-beta "$SHARED_CAMERA_METRIC_BETA" \
             --threads-per-cluster "$THREADS_PER_CLUSTER" \
@@ -976,7 +1001,7 @@ for problem in "${PROBLEMS[@]}"; do
             --catastrophic-ratio "$CATASTROPHIC_RATIO" \
             --recovery-penalty-ratio "$RECOVERY_PENALTY_RATIO" \
             --results "$RESULT_FILE" --state "$state_file" \
-            "${debug_args[@]}" "${trust_args[@]}" "${scaling_args[@]}" "${worker_sse_args[@]}" "${adaptive_depth_args[@]}" "${single_cluster_args[@]}" "${shared_only_args[@]}" "${initial_shared_schur_args[@]}" "${mid_shared_schur_args[@]}" "${alignment_schur_args[@]}" "${proposal_trust_rebase_args[@]}" "${proposal_count_args[@]}" "${two_step_schur_oracle_args[@]}" "${relinearized_schur_oracle_args[@]}" "${all_camera_schur_oracle_args[@]}" "${landmark_response_oracle_args[@]}" "${final_shared_schur_args[@]}" "${initial_state_args[@]}") > "$log_file" 2>&1
+            "${debug_args[@]}" "${trust_args[@]}" "${scaling_args[@]}" "${worker_sse_args[@]}" "${adaptive_depth_args[@]}" "${single_cluster_args[@]}" "${shared_only_args[@]}" "${initial_shared_schur_args[@]}" "${mid_shared_schur_args[@]}" "${alignment_schur_args[@]}" "${proposal_trust_rebase_args[@]}" "${proposal_count_args[@]}" "${two_step_schur_oracle_args[@]}" "${relinearized_schur_oracle_args[@]}" "${all_camera_schur_oracle_args[@]}" "${landmark_response_oracle_args[@]}" "${krylov_landmark_response_oracle_args[@]}" "${final_shared_schur_args[@]}" "${initial_state_args[@]}") > "$log_file" 2>&1
       exit_code=$?
     fi
     set -e

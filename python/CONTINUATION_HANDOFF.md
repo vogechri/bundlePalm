@@ -413,6 +413,26 @@ Ceres, W/T/L `14/1/0`; BAL29 remains bitwise exact with all proposals declined.
 Landmark damping drives the gain; Madrid remains below the unchanged floor.
 Close damping/depth sensitivity and do not halve again. See
 `benchmark_results/k24_landmark_response_damping_quarter_breadth/report.md`.
+`serverTest/run_k24_one_step_schur_proposal_breadth.sh` now defaults to this
+complete I60 quarter-damped landmark-response/rebase preset; overrides remain
+available for reproducing historical arms.
+
+Tower/Yorkminster I60 full-Schur diagnostics are behavior-neutral through all
+120 ordinary-control rows. The one action improves weighted cosine to
+`0.585/0.536`, but captures only `0.382/0.437x` Schur norm and `0.623/0.728x`
+camera-model gain; later continuation still improves both states. Diagnose a
+broad cross-camera direction deficit next. Do not revisit damping, depth,
+restart, or fixed repeated actions. See
+`benchmark_results/k24_quarter_i60_tail_alignment_oracle_clean/report.md`.
+
+That deficit is repaired by two preconditioned conjugate directions. All15
+improves `0.985801x` over quarter and reaches `1.137067x` Ceres, W/T/L
+`13/0/2`; all BAL29 proposals decline exactly. Median selected-scene
+cosine/norm/model-gain improves from `0.592/0.496/0.917` to
+`0.728/0.668/0.992`. The lightweight proposal-only path exactly matches all15
+diagnostic trajectories/states and BAL52/3068 no-ops. Canonical runner default
+is now `krylov2`; generic/client defaults remain `jacobi` for ablation. See
+`benchmark_results/k24_quarter_i60_krylov_applied_sentinel/report.md`.
 
 BAL29 confirms I60 unchanged: all 29 proposals decline exactly, W/T/L
 `0/29/0`, peak RSS `6.859/9.823 GiB`. Promote I60 as the common checkpoint with

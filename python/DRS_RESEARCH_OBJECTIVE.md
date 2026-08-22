@@ -510,6 +510,34 @@ declined. Promote quarter damping as the common global proposal setting and
 close damping/depth sensitivity; do not halve again. See
 `benchmark_results/k24_landmark_response_damping_quarter_validation/report.md`
 and `benchmark_results/k24_landmark_response_damping_quarter_breadth/report.md`.
+The canonical `run_k24_one_step_schur_proposal_breadth.sh` defaults now encode
+the complete promoted preset: I60, quarter camera/landmark damping, three
+landmark steps, atomic landmark response, and selected-only trust rebase.
+
+A behavior-neutral I60 full-Schur oracle on Tower and Yorkminster reproduces
+all 120 ordinary-control trajectory rows exactly. Nominal shared-camera DRS has
+weighted cosine `0.154/0.305` and only `0.031/0.016x` Schur norm. The promoted
+one-action proposal raises cosine to `0.585/0.536`, but reaches only
+`0.382/0.437x` Schur norm and `0.623/0.728x` shared-Schur camera-model gain.
+The accepted proposal then improves another `0.847/0.761x` through I120, so the
+remaining tails are not caused by restart or continuation. The next mechanism
+must improve broad cross-camera direction quality; do not reopen damping,
+landmark depth, fixed second-Jacobi action, or correction-tail sweeps. See
+`benchmark_results/k24_quarter_i60_tail_alignment_oracle_clean/report.md`.
+
+Two preconditioned conjugate directions provide that missing mechanism. Across
+all 15 1DSfM scenes, median shared-camera cosine/norm/model-gain recovery rises
+from `0.592/0.496/0.917` for one block-Jacobi action to
+`0.728/0.668/0.992`. With unchanged eight scales, three landmark steps, floor,
+atomic commit, restart, and trust rebase, delivered/quarter is `0.985801x`,
+delivered/control `0.763688x`, and delivered/Ceres `1.137067x`; W/T/L versus
+quarter is `13/0/2`, with bounded Alamo/Gendarmenmarkt regressions
+`1.000488x/1.003041x`. All 29 BAL proposals decline and reproduce quarter/base
+exactly. The proposal-only `krylov2` path is trajectory- and state-exact to the
+diagnostic applied path on all15 plus BAL52/3068 and skips the converged Schur
+reference. Promote `krylov2` in the canonical proposal preset; retain lower-level
+`jacobi` for ablation. See
+`benchmark_results/k24_quarter_i60_krylov_applied_sentinel/report.md`.
 
 Fresh isolated bridge gate (2026-08-19):
 `serverTest/client_drs_k1_bridge.py` preserves `client_drs.py` and pins the
