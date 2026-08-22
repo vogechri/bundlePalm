@@ -466,6 +466,16 @@ floor. Next test only the state mechanism: keep the proven first trust rebase
 but suppress the second. Report:
 `benchmark_results/k24_landmark_response_proposal_i60_i90_breadth/report.md`.
 
+Suppressing the second trust rebase does not repair the two-proposal tail.
+Gendarmenmarkt remains a loss (`1.016089x` control versus `1.019557x` with both
+rebases and `0.957620x` I60-only); Roman/Trafalgar also slightly worsen versus
+both-rebase. The three-scene geomean is `0.831329x` first-only,
+`0.829738x` both-rebase, and `0.822103x` I60-only. BAL52/3068 remain exact.
+Thus repeated proposal state, not the second trust rebase, causes the tail.
+Close proposal-count/checkpoint tuning and retain I60-only as common default.
+Report:
+`benchmark_results/k24_landmark_response_i60_i90_first_rebase_sentinel/report.md`.
+
 Fresh isolated bridge gate (2026-08-19):
 `serverTest/client_drs_k1_bridge.py` preserves `client_drs.py` and pins the
 mature legacy backbone while exposing ordered `legacy`, `direct`, and

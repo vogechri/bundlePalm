@@ -1525,6 +1525,10 @@ def parse_arguments():
         action="store_true",
     )
     parser.add_argument(
+        "--schur-residual-proposal-rebase-first-only",
+        action="store_true",
+    )
+    parser.add_argument(
         "--allow-two-schur-residual-proposals",
         action="store_true",
     )
@@ -3168,6 +3172,13 @@ def main():
             "one-step Schur proposal trust rebase requires a proposal iteration"
         )
     if (
+        arguments.schur_residual_proposal_rebase_first_only
+        and not arguments.one_step_schur_residual_proposal_rebase_trust_state
+    ):
+        raise ValueError(
+            "first-only proposal trust rebase requires trust rebasing"
+        )
+    if (
         arguments.two_step_schur_residual_oracle
         and not one_step_schur_residual_proposal_iterations
     ):
@@ -3522,6 +3533,7 @@ def main():
     bootstrap_basin_guard_rejections = 0
     bootstrap_basin_guard_release_iteration = -1
     one_step_proposal_trust_rebase_pending = False
+    one_step_proposal_trust_rebase_count = 0
     initialization_seconds = float("nan")
     optimization_seconds = float("nan")
     accelerator = create_accelerator(arguments.outer_acceleration)
@@ -4103,6 +4115,7 @@ def main():
             )
             one_step_proposal_trust_rebase_pending = False
             if proposal_trust_state_rebase_applied:
+                one_step_proposal_trust_rebase_count += 1
                 rebase_landmarks = accepted_landmarks.copy()
                 if arguments.worker_owned_landmarks:
                     rebase_landmarks = worker.materialize_current_landmarks(
@@ -4288,6 +4301,7 @@ def main():
             schur_alignment_systems = None
             schur_alignment_diagnostics = None
             one_step_proposal_selected_this_iteration = False
+            proposal_trust_state_rebase_suppressed = False
             if iteration in (
                 schur_alignment_diagnostic_iterations
                 | one_step_schur_residual_proposal_iterations
@@ -7322,7 +7336,13 @@ def main():
                         "save_accepted",
                     )
                 if one_step_proposal_selected_this_iteration:
-                    one_step_proposal_trust_rebase_pending = True
+                    proposal_trust_state_rebase_suppressed = (
+                        arguments.schur_residual_proposal_rebase_first_only
+                        and one_step_proposal_trust_rebase_count > 0
+                    )
+                    one_step_proposal_trust_rebase_pending = (
+                        not proposal_trust_state_rebase_suppressed
+                    )
                 metrics = candidate_metrics
                 recovery_action = "none"
                 if proposal_hysteresis is not None:
@@ -7583,6 +7603,9 @@ def main():
                 "localStateRebaseApplied": local_state_rebase_applied,
                 "proposalTrustStateRebaseApplied": (
                     proposal_trust_state_rebase_applied
+                ),
+                "proposalTrustStateRebaseSuppressed": (
+                    proposal_trust_state_rebase_suppressed
                 ),
                 "midSharedSchurTriggered": mid_shared_schur_triggered,
                 "midSharedSchurAccepted": (
@@ -8211,6 +8234,9 @@ def main():
         ),
         "oneStepSchurResidualProposalRebaseTrustState": (
             arguments.one_step_schur_residual_proposal_rebase_trust_state
+        ),
+        "schurResidualProposalRebaseFirstOnly": (
+            arguments.schur_residual_proposal_rebase_first_only
         ),
         "twoStepSchurResidualOracle": (
             arguments.two_step_schur_residual_oracle

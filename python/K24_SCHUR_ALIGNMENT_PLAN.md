@@ -326,6 +326,11 @@ bounded-loss evidence, do not tune the floor, and test only suppressing the
 second trust rebase. See
 `benchmark_results/k24_landmark_response_proposal_i60_i90_breadth/report.md`.
 
+Suppressing the second trust rebase fails to repair Gendarmenmarkt and slightly
+worsens the sentinel aggregate. Repeated proposal state is the cause. Close
+proposal-count/checkpoint tuning and retain I60-only. See
+`benchmark_results/k24_landmark_response_i60_i90_first_rebase_sentinel/report.md`.
+
 BAL29 closes timing: all 29 I60 proposals decline exactly, while all-15 is
 `0.786533x` control and `1.171081x` Ceres with no losses. Promote I60 as the
 common checkpoint and freeze all timing/scale/depth/floor/restart settings. See

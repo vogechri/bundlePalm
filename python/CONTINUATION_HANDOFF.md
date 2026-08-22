@@ -388,6 +388,12 @@ bounded-loss candidate and do not floor-tune. Next test first-rebase-only state
 handling. See
 `benchmark_results/k24_landmark_response_proposal_i60_i90_breadth/report.md`.
 
+First-rebase-only does not repair repeated-proposal tails: Gendarmenmarkt stays
+above control and the three-scene geomean is worse than both-rebase and I60-only.
+Repeated proposal state, not the second trust rebase, is the cause. Close
+proposal count/checkpoint tuning; retain I60 only. See
+`benchmark_results/k24_landmark_response_i60_i90_first_rebase_sentinel/report.md`.
+
 BAL29 confirms I60 unchanged: all 29 proposals decline exactly, W/T/L
 `0/29/0`, peak RSS `6.859/9.823 GiB`. Promote I60 as the common checkpoint with
 all-15 `0.786533x` control, `1.171081x` Ceres, W/T/L `14/1/0`. Freeze timing and
