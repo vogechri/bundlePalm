@@ -369,6 +369,13 @@ is `1.171081x`. Close timing comparison; run unchanged serial BAL29 once and do
 not test another checkpoint. See
 `benchmark_results/k24_landmark_response_proposal_i60_breadth/report.md`.
 
+BAL29 confirms I60 unchanged: all 29 proposals decline exactly, W/T/L
+`0/29/0`, peak RSS `6.859/9.823 GiB`. Promote I60 as the common checkpoint with
+all-15 `0.786533x` control, `1.171081x` Ceres, W/T/L `14/1/0`. Freeze timing and
+retain the same scales, three landmark steps, floor, atomic commit, restart, and
+I61 trust rebase. Do not test another checkpoint. See
+`benchmark_results/k24_landmark_response_proposal_i60_breadth/report.md`.
+
 Only `all15_corrected/` is authoritative. The sibling `all15/` directory is a
 quarantined setup error with the wrong trust cap and recovery controls.
 

@@ -429,6 +429,16 @@ comparison and run I60 unchanged on serial BAL29 once. Do not test another
 timing. Report:
 `benchmark_results/k24_landmark_response_proposal_i60_breadth/report.md`.
 
+The final serial BAL29 timing gate passes unchanged: all 29 I60 proposals
+decline exactly, W/T/L `0/29/0`, with peak coordinator/worker RSS
+`6.859/9.823 GiB`. Combined with all-15 `0.786533x` control and `1.171081x`
+Ceres, W/T/L `14/1/0`, this promotes I60 over I90 as the common checkpoint.
+Freeze timing now: one I60 shared-camera residual action, eight fixed scales,
+three rollback-safe landmark steps, `1e-3` floor, atomic camera/landmark commit,
+canonical restart, and selected-only I61 trust rebase. Do not test another
+checkpoint. Report:
+`benchmark_results/k24_landmark_response_proposal_i60_breadth/report.md`.
+
 Fresh isolated bridge gate (2026-08-19):
 `serverTest/client_drs_k1_bridge.py` preserves `client_drs.py` and pins the
 mature legacy backbone while exposing ordered `legacy`, `direct`, and

@@ -2,13 +2,43 @@
 
 One global I60 proposal, eight fixed geometric scales, precise worker-SSE selection, atomic DRS state rebuild, and I120 delivery. The rejected coupled-consensus oracle is disabled. Selected proposals rebase worker trust and coordinator curvature/acceleration state on the next iteration. Proposal scales include three rollback-safe fixed-camera landmark response steps and atomically commit selected cameras plus refined landmarks.
 
-| Family | Completed | Selected/declined | Immediate I90 | Trajectory I120 | Delivered/control | Summed | W/T/L | Candidate/Ceres | Max RSS GiB C/W |
+| Family | Completed | Selected/declined | Immediate I60 | Trajectory I120 | Delivered/control | Summed | W/T/L | Candidate/Ceres | Max RSS GiB C/W |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
 | 1dsfm | 15/15 | 14/1 | 0.813980303 | 0.786549858 | 0.786532802 | 0.754474107 | 14/1/0 | 1.171081383 | 1.762/1.722 |
+| bal | 29/29 | 0/29 | 1.000000000 | 1.000000000 | 1.000000000 | 1.000000000 | 0/29/0 | 0.999038939 | 6.859/9.823 |
 
-| Scene | Scale | Worker SSE | I90 | I120 trajectory | Delivered | Rejections C/P |
+| Scene | Scale | Worker SSE | I60 | I120 trajectory | Delivered | Rejections C/P |
 |---|---:|---:|---:|---:|---:|---:|
 | alamo | 1 | 0.909516486 | 0.908732732 | 0.898258917 | 0.898258917 | 12/7 |
+| bal1064 | declined | 1.000000000 | 1.000000000 | 1.000000000 | 1.000000000 | 0/0 |
+| bal126 | declined | 1.000000000 | 1.000000000 | 1.000000000 | 1.000000000 | 0/0 |
+| bal1266 | declined | 1.000000000 | 1.000000000 | 1.000000000 | 1.000000000 | 0/0 |
+| bal135 | declined | 1.000000000 | 1.000000000 | 1.000000000 | 1.000000000 | 3/3 |
+| bal142 | declined | 1.000000000 | 1.000000000 | 1.000000000 | 1.000000000 | 0/0 |
+| bal1490 | declined | 1.000000000 | 1.000000000 | 1.000000000 | 1.000000000 | 0/0 |
+| bal1723 | declined | 1.000000000 | 1.000000000 | 1.000000000 | 1.000000000 | 16/16 |
+| bal173 | declined | 1.000000000 | 1.000000000 | 1.000000000 | 1.000000000 | 0/0 |
+| bal1778 | declined | 1.000000000 | 1.000000000 | 1.000000000 | 1.000000000 | 0/0 |
+| bal245 | declined | 1.000000000 | 1.000000000 | 1.000000000 | 1.000000000 | 4/4 |
+| bal253 | declined | 1.000000000 | 1.000000000 | 1.000000000 | 1.000000000 | 1/1 |
+| bal257 | declined | 1.000000000 | 1.000000000 | 1.000000000 | 1.000000000 | 0/0 |
+| bal287 | declined | 1.000000000 | 1.000000000 | 1.000000000 | 1.000000000 | 3/3 |
+| bal3068 | declined | 1.000000000 | 1.000000000 | 1.000000000 | 1.000000000 | 3/3 |
+| bal308 | declined | 1.000000000 | 1.000000000 | 1.000000000 | 1.000000000 | 2/2 |
+| bal356 | declined | 1.000000000 | 1.000000000 | 1.000000000 | 1.000000000 | 0/0 |
+| bal394 | declined | 1.000000000 | 1.000000000 | 1.000000000 | 1.000000000 | 0/0 |
+| bal427 | declined | 1.000000000 | 1.000000000 | 1.000000000 | 1.000000000 | 0/0 |
+| bal49 | declined | 1.000000000 | 1.000000000 | 1.000000000 | 1.000000000 | 0/0 |
+| bal52 | declined | 1.000000000 | 1.000000000 | 1.000000000 | 1.000000000 | 0/0 |
+| bal646 | declined | 1.000000000 | 1.000000000 | 1.000000000 | 1.000000000 | 0/0 |
+| bal744 | declined | 1.000000000 | 1.000000000 | 1.000000000 | 1.000000000 | 0/0 |
+| bal783 | declined | 1.000000000 | 1.000000000 | 1.000000000 | 1.000000000 | 0/0 |
+| bal871 | declined | 1.000000000 | 1.000000000 | 1.000000000 | 1.000000000 | 0/0 |
+| bal88 | declined | 1.000000000 | 1.000000000 | 1.000000000 | 1.000000000 | 0/0 |
+| bal89 | declined | 1.000000000 | 1.000000000 | 1.000000000 | 1.000000000 | 0/0 |
+| bal931 | declined | 1.000000000 | 1.000000000 | 1.000000000 | 1.000000000 | 0/0 |
+| bal951 | declined | 1.000000000 | 1.000000000 | 1.000000000 | 1.000000000 | 0/0 |
+| bal961 | declined | 1.000000000 | 1.000000000 | 1.000000000 | 1.000000000 | 0/0 |
 | ellis_island | 1 | 0.963488133 | 0.958833715 | 0.962943607 | 0.962943607 | 17/19 |
 | gendarmenmarkt | 1 | 0.976325069 | 0.954959272 | 0.957620277 | 0.957620277 | 2/2 |
 | madrid_metropolis | declined | 1.000000000 | 1.000000000 | 1.000000000 | 1.000000000 | 4/4 |

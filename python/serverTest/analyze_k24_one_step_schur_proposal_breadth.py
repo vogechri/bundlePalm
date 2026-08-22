@@ -352,7 +352,12 @@ def write_report(path, summary):
                 "cameras plus refined landmarks."
             )
         output.write("\n\n")
-        output.write("| Family | Completed | Selected/declined | Immediate I90 | Trajectory I120 | Delivered/control | Summed | W/T/L | Candidate/Ceres | Max RSS GiB C/W |\n")
+        output.write(
+            "| Family | Completed | Selected/declined | Immediate I"
+            f"{summary['proposal_iteration']} | Trajectory I120 | "
+            "Delivered/control | Summed | W/T/L | Candidate/Ceres | "
+            "Max RSS GiB C/W |\n"
+        )
         output.write("|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|\n")
         for family in summary["families"]:
             row = summary["summaries"][family]
@@ -368,7 +373,11 @@ def write_report(path, summary):
                 f"{row['maximum_coordinator_rss_gib']:.3f}/"
                 f"{row['maximum_worker_rss_gib']:.3f} |\n"
             )
-        output.write("\n| Scene | Scale | Worker SSE | I90 | I120 trajectory | Delivered | Rejections C/P |\n")
+        output.write(
+            "\n| Scene | Scale | Worker SSE | I"
+            f"{summary['proposal_iteration']} | I120 trajectory | Delivered | "
+            "Rejections C/P |\n"
+        )
         output.write("|---|---:|---:|---:|---:|---:|---:|\n")
         for scene, row in sorted(summary["scenes"].items()):
             scale = f"{row['selected_scale']:.6g}" if row["selected"] else "declined"

@@ -310,6 +310,11 @@ geometric/summed control `0.786533x/0.754474x`, W/T/L `14/1/0`, versus I90
 unchanged BAL29 once. See
 `benchmark_results/k24_landmark_response_proposal_i60_breadth/report.md`.
 
+BAL29 closes timing: all 29 I60 proposals decline exactly, while all-15 is
+`0.786533x` control and `1.171081x` Ceres with no losses. Promote I60 as the
+common checkpoint and freeze all timing/scale/depth/floor/restart settings. See
+`benchmark_results/k24_landmark_response_proposal_i60_breadth/report.md`.
+
 The serial BAL29 gate passes unchanged: all 29 proposals decline exactly,
 W/T/L `0/29/0`, with `6.873/9.689 GiB` maximum coordinator/worker RSS. Together
 with all-15 `0.790889x`, W/T/L `14/1/0`, this promotes the common no-loss
