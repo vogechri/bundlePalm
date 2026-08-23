@@ -574,6 +574,25 @@ cost, not a new floor sweep. Do not tune margin, checkpoint, count, scale,
 damping, landmark depth, or Krylov depth. See
 `benchmark_results/k24_quarter_i60_i90_krylov_repeat_guard/report.md`.
 
+The missing copied-baseline interaction factorial is complete and must not be
+conflated with the older C1--C5 publication matrix. Direct left-SE3 and exact
+tangent-metric consistency are fixed; the 2x2 varies only shared-only
+product-space semantics and guarded I60+I90 Krylov proposals on the copied
+mature DRS policy. All15 1DSfM gives shared/direct `0.992877x`, proposal/direct
+`0.787326x`, combined/direct `0.762902x`, proposal under shared `0.768375x`,
+shared under proposal `0.968978x`, and beneficial interaction `0.975930x`.
+Combined W/T/L versus direct is `14/0/1`; Madrid is the sole loss
+(`1.049375x`). Shared-only alone recovery-exhausts Tower at I112, while the
+combined arm completes it. On BAL29, proposal under shared is nearly neutral
+but favorable (`0.999953x`, one selected proposal on BAL1723), interaction is
+`0.999955x`, and combined/direct is `1.000131x`; the small cost comes from the
+mandatory shared-only factor, not the proposal. Thus the K1-derived additions
+have clear mutual conditional benefit on 1DSfM, mild positive interaction on
+BAL, and no evidence that guarded Krylov merely compensates for shared-only.
+Retain shared-only as a correctness invariant and guarded Krylov as the quality
+mechanism. This is already full all15/all29 breadth; do not retune or rerun the
+factorial. See `benchmark_results/k1_carryover_joint_factorial/report.md`.
+
 Fresh isolated bridge gate (2026-08-19):
 `serverTest/client_drs_k1_bridge.py` preserves `client_drs.py` and pins the
 mature legacy backbone while exposing ordered `legacy`, `direct`, and

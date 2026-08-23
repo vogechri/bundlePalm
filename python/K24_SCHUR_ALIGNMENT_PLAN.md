@@ -386,6 +386,15 @@ the common preset. Freeze the margin/checkpoints/count and retain I60-only plus
 unguarded repetition as references. See
 `benchmark_results/k24_quarter_i60_i90_krylov_repeat_guard/report.md`.
 
+The copied mature-baseline 2x2 confirms mutual K1-carryover benefit. Holding
+direct left-SE3 and exact metrics fixed, all15 shared/direct is `0.992877x`,
+proposal/direct `0.787326x`, combined/direct `0.762902x`, proposal/shared
+`0.768375x`, and interaction `0.975930x`. BAL29 proposal/shared is
+`0.999953x` and interaction `0.999955x`; combined/direct `1.000131x` inherits
+the mandatory shared-only cost. Shared-only Tower exhausts while combined
+completes. Freeze this full factorial and retain both factors. See
+`benchmark_results/k1_carryover_joint_factorial/report.md`.
+
 BAL29 closes timing: all 29 I60 proposals decline exactly, while all-15 is
 `0.786533x` control and `1.171081x` Ceres with no losses. Promote I60 as the
 common checkpoint and freeze all timing/scale/depth/floor/restart settings. See

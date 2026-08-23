@@ -42,6 +42,7 @@ BASELINE_ARGUMENTS = (
 
 
 def build_invocation(arguments, environment=None):
+    child_environment = dict(os.environ if environment is None else environment)
     parser = argparse.ArgumentParser(add_help=False)
     parser.add_argument(
         "--bridge-arm",
@@ -49,10 +50,9 @@ def build_invocation(arguments, environment=None):
             "legacy", "direct", "direct_shared", "direct_shared_diag",
             "direct_shared_l2",
         ),
-        default="legacy",
+        default=child_environment.get("BUNDLE_PALM_K1_BRIDGE_ARM", "legacy"),
     )
     bridge, forwarded = parser.parse_known_args(arguments)
-    child_environment = dict(os.environ if environment is None else environment)
     base_client = child_environment.get(
         "BUNDLE_PALM_BASE_CLIENT_DRS",
         str(Path(__file__).with_name("client_drs.py")),

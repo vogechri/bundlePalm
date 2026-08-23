@@ -459,6 +459,16 @@ I60+I90. Keep I60-only as conservative reference and unguarded repetition as
 ablation; do not tune the frozen margin or checkpoints. See
 `benchmark_results/k24_quarter_i60_i90_krylov_repeat_guard/report.md`.
 
+Copied-baseline K1 carryover 2x2 is complete: with direct left-SE3/exact metric
+fixed, shared-only and guarded Krylov jointly reach `0.762902x` direct on
+all15, versus `0.992877x` shared-only and `0.787326x` proposal-only.
+Proposal/shared is `0.768375x`, shared/proposal `0.968978x`, interaction
+`0.975930x`; shared-only Tower exhausts but combined completes. BAL29
+proposal/shared is `0.999953x`, interaction `0.999955x`, combined/direct
+`1.000131x`, with the small cost attributable to mandatory shared-only. This
+is the active K1-to-copied-DRS interaction result, not a C1--C5 factorial. See
+`benchmark_results/k1_carryover_joint_factorial/report.md`.
+
 BAL29 confirms I60 unchanged: all 29 proposals decline exactly, W/T/L
 `0/29/0`, peak RSS `6.859/9.823 GiB`. Promote I60 as the common checkpoint with
 all-15 `0.786533x` control, `1.171081x` Ceres, W/T/L `14/1/0`. Freeze timing and

@@ -48,6 +48,20 @@ class K1BridgeInvocationTest(unittest.TestCase):
             "scene.txt", "--camera-diagonal-metric-scale", "50"
         ])
 
+    def test_environment_selects_default_arm(self):
+        selected, command, environment = build_invocation(
+            ["scene.txt"],
+            {
+                "BUNDLE_PALM_BASE_CLIENT_DRS": "/clean/client_drs.py",
+                "BUNDLE_PALM_K1_BRIDGE_ARM": "direct",
+            },
+        )
+        self.assertEqual(selected, "direct")
+        self.assertEqual(
+            environment["BUNDLE_PALM_DIRECT_TANGENT_NORMAL_EQUATIONS"], "1"
+        )
+        self.assertNotIn("--shared-only-camera-proximal", command)
+
 
 if __name__ == "__main__":
     unittest.main()
