@@ -192,7 +192,9 @@ Ceres timing roles rather than treating unlike execution boundaries as one
 speedup claim. The same builder combines the frozen repeat summary and complete
 terminal-correction summary in `k16_over_k4_resources.pdf`, separating sentinel
 DRS optimization/CPU/transport/worker-RSS ratios from complete-cohort corrected
-quality/time/process-RSS ratios.
+quality/time/process-RSS ratios. Accepted and rejected displayed outer
+iterations for the matched plain/C1/C5/C1+C5 breadth are generated from the
+reproducibility manifest in `outer_iteration_outcomes.pdf`.
 
 **Targets:** small, medium, and largest feasible BAL/1DSfM problems; include sequential and unordered graphs. Report results by graph density and camera-overlap ratio, not only by dataset name.
 

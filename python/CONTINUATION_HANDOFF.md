@@ -1165,8 +1165,10 @@ Comparison policy:
   deterministically by `serverTest/build_stage_c_publication_plots.py` from the
   authoritative publication summary. The same builder now reports K16/K4
   communication and maximum worker/coordinator process-memory ratios from the
-  repeat and terminal-correction summaries. Aggregate-memory and
-  accepted/rejected outer-trial figures remain open.
+  repeat and terminal-correction summaries. Accepted/rejected displayed outer
+  iterations are generated from the reproducibility manifest. A synchronized
+  aggregate-memory figure remains open because the compact summaries expose
+  process peaks, not a simultaneous multi-process aggregate.
 4. Audit every headline number against the independent pixel-SSE evaluator and
    the reproducibility manifest. Regenerate
    `benchmark_results/stage_c_reproducibility_manifest.json` only if an

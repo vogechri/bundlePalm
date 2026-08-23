@@ -5,7 +5,9 @@ import pytest
 from build_stage_c_publication_plots import load_panels, method_class
 from build_stage_c_publication_plots import (
     DEFAULT_CORRECTION_SUMMARY,
+    DEFAULT_MANIFEST,
     DEFAULT_REPEAT_SUMMARY,
+    load_outer_outcomes,
     load_resource_ratios,
 )
 
@@ -39,3 +41,18 @@ def test_resource_ratios_match_authoritative_summaries():
     assert corrected["bal"]["Peak coordinator RSS"] == pytest.approx(
         1.860758527
     )
+
+
+def test_outer_outcomes_match_authoritative_manifest():
+    outcomes = load_outer_outcomes(DEFAULT_MANIFEST)
+
+    assert outcomes["1dsfm"]["plain"] == {
+        "accepted": 359,
+        "rejected": 91,
+        "total": 450,
+    }
+    assert outcomes["bal"]["c1_c5"] == {
+        "accepted": 761,
+        "rejected": 109,
+        "total": 870,
+    }

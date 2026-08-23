@@ -24,10 +24,16 @@ DEFAULT_REPEAT_SUMMARY = (
 DEFAULT_CORRECTION_SUMMARY = (
     ROOT / "benchmark_results/terminal_correction_scaling_all/summary.json"
 )
+DEFAULT_MANIFEST = ROOT / "benchmark_results/stage_c_reproducibility_manifest.json"
 DEFAULT_RESOURCE_OUTPUT = (
     ROOT
     / "benchmark_results/stage_c_publication_comparison/"
     "k16_over_k4_resources.pdf"
+)
+DEFAULT_OUTER_TRIAL_OUTPUT = (
+    ROOT
+    / "benchmark_results/stage_c_publication_comparison/"
+    "outer_iteration_outcomes.pdf"
 )
 PANELS = {
     "all15_1dsfm": {
@@ -349,6 +355,93 @@ def build_resource_figure(repeated, corrected, output):
     plt.close(figure)
 
 
+def load_outer_outcomes(path):
+    manifest = json.loads(path.read_text(encoding="utf-8"))
+    confirmation = manifest.get("final_cross_family_confirmation")
+    if not isinstance(confirmation, dict):
+        raise ValueError("missing final cross-family confirmation")
+    outcomes = {}
+    for family, expected_scenes in (("1dsfm", 15), ("bal", 29)):
+        methods = confirmation.get(family, {}).get("methods")
+        if not isinstance(methods, dict) or set(methods) != {
+            "plain", "c1", "c5", "c1_c5"
+        }:
+            raise ValueError(f"outer-outcome method coverage mismatch for {family}")
+        outcomes[family] = {}
+        for method, record in methods.items():
+            rows = record.get("rows")
+            iterations = record.get("configuration", {}).get("iterations")
+            if not isinstance(rows, dict) or len(rows) != expected_scenes:
+                raise ValueError(f"outer-outcome scene coverage mismatch for {family}/{method}")
+            if not isinstance(iterations, int) or iterations <= 0:
+                raise ValueError(f"invalid iteration budget for {family}/{method}")
+            rejected = sum(int(row["rejections"]) for row in rows.values())
+            total = expected_scenes * iterations
+            if rejected < 0 or rejected > total:
+                raise ValueError(f"invalid rejection count for {family}/{method}")
+            outcomes[family][method] = {
+                "accepted": total - rejected,
+                "rejected": rejected,
+                "total": total,
+            }
+    return outcomes
+
+
+def build_outer_outcome_figure(outcomes, output):
+    figure, axes = plt.subplots(1, 2, figsize=(10.2, 4.4), constrained_layout=True)
+    labels = ("Plain", "C1", "C5", "C1+C5")
+    methods = ("plain", "c1", "c5", "c1_c5")
+    for axis, family, title in zip(
+        axes,
+        ("1dsfm", "bal"),
+        ("SfM_Init-derived 1DSfM (15 scenes)", "BAL (29 scenes)"),
+    ):
+        accepted = [
+            100.0 * outcomes[family][method]["accepted"]
+            / outcomes[family][method]["total"]
+            for method in methods
+        ]
+        rejected = [100.0 - value for value in accepted]
+        positions = list(range(len(methods)))
+        axis.bar(positions, accepted, color="#3a7d44", label="Accepted")
+        bars = axis.bar(
+            positions,
+            rejected,
+            bottom=accepted,
+            color="#b23a48",
+            label="Rejected",
+        )
+        axis.bar_label(
+            bars,
+            labels=[
+                f"{outcomes[family][method]['rejected']} rejected"
+                for method in methods
+            ],
+            label_type="center",
+            color="white",
+            fontsize=7.5,
+        )
+        axis.set_xticks(positions, labels)
+        axis.set_ylim(0, 100)
+        axis.set_ylabel("Displayed outer iterations (%)")
+        axis.set_title(title)
+        axis.grid(axis="y", color="#d9dcdf", linewidth=0.6, alpha=0.8)
+        axis.spines[["top", "right"]].set_visible(False)
+    axes[0].legend(frameon=False, loc="lower left")
+    figure.suptitle("Accepted and rejected Stage-C outer iterations", fontsize=13)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    figure.savefig(
+        output,
+        metadata={
+            "Title": "Accepted and rejected Stage-C outer iterations",
+            "Author": "BundlePalm",
+            "CreationDate": None,
+            "ModDate": None,
+        },
+    )
+    plt.close(figure)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--summary", type=Path, default=DEFAULT_SUMMARY)
@@ -362,6 +455,10 @@ def main():
     parser.add_argument(
         "--resource-output", type=Path, default=DEFAULT_RESOURCE_OUTPUT
     )
+    parser.add_argument("--manifest", type=Path, default=DEFAULT_MANIFEST)
+    parser.add_argument(
+        "--outer-trial-output", type=Path, default=DEFAULT_OUTER_TRIAL_OUTPUT
+    )
     arguments = parser.parse_args()
     build_figure(load_panels(arguments.summary), arguments.output)
     build_resource_figure(
@@ -370,8 +467,12 @@ def main():
         ),
         arguments.resource_output,
     )
+    build_outer_outcome_figure(
+        load_outer_outcomes(arguments.manifest), arguments.outer_trial_output
+    )
     print(arguments.output)
     print(arguments.resource_output)
+    print(arguments.outer_trial_output)
 
 
 if __name__ == "__main__":
