@@ -8,6 +8,8 @@ from pathlib import Path
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 
+from stage_c_publication_contract import PUBLICATION_PANELS
+
 
 ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_SUMMARY = (
@@ -38,32 +40,9 @@ DEFAULT_OUTER_TRIAL_OUTPUT = (
 PANELS = {
     "all15_1dsfm": {
         "title": "SfM_Init-derived 1DSfM (15 scenes)",
-        "expected_scenes": 15,
-        "expected_labels": (
-            "Ceres",
-            "DRS K1 BAE-style",
-            "DRS K1 Schur-PCG",
-            "Base DRS K24",
-            "DRS+Schur fast",
-            "DRS+Schur balanced",
-            "DRS+Schur quality",
-            "DRS K4",
-            "DRS K16",
-            "DRS K4 + terminal correction",
-            "DRS K16 + terminal correction",
-        ),
     },
     "all29_bal": {
         "title": "BAL (29 scenes)",
-        "expected_scenes": 29,
-        "expected_labels": (
-            "Ceres",
-            "Base DRS K24",
-            "DRS K4",
-            "DRS K16",
-            "DRS K4 + terminal correction",
-            "DRS K16 + terminal correction",
-        ),
     },
 }
 STYLES = {
@@ -138,14 +117,15 @@ def load_panels(path):
     summary = json.loads(path.read_text(encoding="utf-8"))
     panels = {}
     for key, contract in PANELS.items():
+        coverage = PUBLICATION_PANELS[key]
         rows = summary.get(key)
         if not isinstance(rows, list):
             raise ValueError(f"missing publication panel: {key}")
         labels = tuple(row.get("label") for row in rows)
-        if labels != contract["expected_labels"]:
+        if labels != coverage["labels"]:
             raise ValueError(f"publication method coverage mismatch for {key}")
         for row in rows:
-            if row.get("scenes") != contract["expected_scenes"]:
+            if row.get("scenes") != coverage["scenes"]:
                 raise ValueError(f"publication scene coverage mismatch for {key}")
             for field in ("optimization_seconds", "sse_vs_ceres_geometric"):
                 value = row.get(field)

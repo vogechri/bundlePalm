@@ -164,39 +164,7 @@ distributed global Schur corrections and are explicitly polishing workflows,
 not DRS-only gains.  Timings are reported within their named CPU boundary, not
 as matched work comparisons.
 
-\begin{table}[t]
-  \centering
-  \caption{Final complete-cohort comparison.  SSE values are geometric ratios
-  to independently evaluated Ceres states; time is aggregate optimizer time.}
-  \label{tab:stage-c-final-reference}
-  \scriptsize
-  \begin{tabular}{llrrrr}
-    \hline
-    Cohort & Method & SSE/Ceres & SSE/base & W/T/L & Time (s) \\
-    \hline
-    1DSfM-15 & Ceres & 1.000000 & 0.686334 & 0/15/0 & 219.521 \\
-    1DSfM-15 & K1 BAE-style & 0.993529 & 0.681892 & 5/0/10 & 2060.937 \\
-    1DSfM-15 & Base K24/I200 & 1.457017 & 1.000000 & 1/0/14 & 572.399 \\
-    1DSfM-15 & DRS+Schur fast & 1.411625 & 0.968846 & 1/0/14 & 191.161 \\
-    1DSfM-15 & DRS+Schur balanced & 1.272048 & 0.873049 & 1/0/14 & 289.496 \\
-    1DSfM-15 & DRS+Schur quality & 1.215246 & 0.834064 & 2/0/13 & 381.521 \\
-    1DSfM-15 & K4 resource & 2.052536 & 1.408725 & 0/0/15 & 160.607 \\
-    1DSfM-15 & K16 latency & 1.957296 & 1.343358 & 0/0/15 & 93.793 \\
-    1DSfM-15 & K4 + terminal correction & 1.612187 & 1.106498
-      & 0/0/15 & 178.001 \\
-    1DSfM-15 & K16 + terminal correction & 1.523013 & 1.045295
-      & 1/0/14 & 109.890 \\
-    BAL-29 & Ceres & 1.000000 & 1.001599 & 0/29/0 & 1803.780 \\
-    BAL-29 & Base K24/I90 & 0.998404 & 1.000000 & 12/0/17 & 1271.575 \\
-    BAL-29 & K4 resource & 1.007309 & 1.008920 & 8/0/21 & 939.466 \\
-    BAL-29 & K16 latency & 1.010098 & 1.011713 & 8/0/21 & 479.087 \\
-    BAL-29 & K4 + terminal correction & 1.005041 & 1.006648
-      & 9/0/20 & 1547.694 \\
-    BAL-29 & K16 + terminal correction & 1.007594 & 1.009206
-      & 9/0/20 & 1000.459 \\
-    \hline
-  \end{tabular}
-\end{table}
+\input{benchmark_results/stage_c_publication_comparison/final_complete_cohort_table.tex}
 
 Verified BAE coverage is limited to six 1DSfM scenes.  On that matched inset,
 Ceres, BAE-style K1, base K24, K4, K16, BAE-CG, and BAE-Nesterov are
@@ -243,25 +211,7 @@ consistency are fixed in every arm.  The $2\times2$ factorial varies only
 shared-only product-space semantics and a guarded I60+I90 two-direction Krylov
 camera/landmark proposal.  This is not a C1--C5 factorial.
 
-\begin{table}[t]
-  \centering
-  \caption{Copied-baseline K24/I120 K1-carryover factorial.  Ratios below one
-  favor the numerator.  S, P, C, and D denote shared-only, proposal-only,
-  combined, and direct arms.  Interaction below one indicates that the
-  combined effect is better than the product of the isolated effects.}
-  \label{tab:k1-carryover-k24-factorial}
-  \scriptsize
-  \begin{tabular}{lrrrrrr}
-    \hline
-    Family & S/D & P/D & C/D & P/S & Interaction & C/Ceres \\
-    \hline
-    1DSfM-15 & 0.992877 & 0.787326 & \textbf{0.762902}
-      & 0.768375 & 0.975930 & 1.169700 \\
-    BAL-29 & 1.000177 & 0.999998 & 1.000131
-      & 0.999953 & 0.999955 & 1.001181 \\
-    \hline
-  \end{tabular}
-\end{table}
+\input{benchmark_results/stage_c_publication_comparison/k1_carryover_factorial_table.tex}
 
 On 1DSfM the combined arm improves the direct baseline on 14 of 15 scenes and
 both conditional effects are favorable.  Shared-only alone exhausts recovery

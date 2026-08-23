@@ -8,6 +8,8 @@ import re
 import subprocess
 from pathlib import Path
 
+from stage_c_publication_contract import PUBLICATION_PANELS
+
 
 ROOT = Path(__file__).resolve().parent.parent
 RESULTS = ROOT / "benchmark_results"
@@ -626,55 +628,11 @@ def build_manifest():
 
     publication_path = RESULTS / "stage_c_publication_comparison/summary.json"
     publication = json.loads(publication_path.read_text(encoding="utf-8"))
-    expected_panels = {
-        "all15_1dsfm": (
-            [
-                "Ceres",
-                "DRS K1 BAE-style",
-                "DRS K1 Schur-PCG",
-                "Base DRS K24",
-                "DRS+Schur fast",
-                "DRS+Schur balanced",
-                "DRS+Schur quality",
-                "DRS K4",
-                "DRS K16",
-                "DRS K4 + terminal correction",
-                "DRS K16 + terminal correction",
-            ],
-            15,
-        ),
-        "all29_bal": (
-            [
-                "Ceres",
-                "Base DRS K24",
-                "DRS K4",
-                "DRS K16",
-                "DRS K4 + terminal correction",
-                "DRS K16 + terminal correction",
-            ],
-            29,
-        ),
-        "bae_six_scene_inset": (
-            [
-                "Ceres",
-                "DRS K1 BAE-style",
-                "DRS K1 Schur-PCG",
-                "Base DRS K24",
-                "DRS K4",
-                "DRS K16",
-                "DRS K4 + terminal correction",
-                "DRS K16 + terminal correction",
-                "BAE Schur-PCG CG",
-                "BAE Schur-PCG Nesterov",
-            ],
-            6,
-        ),
-    }
-    for panel, (labels, scenes) in expected_panels.items():
+    for panel, contract in PUBLICATION_PANELS.items():
         rows = publication.get(panel, [])
-        if [row.get("label") for row in rows] != labels:
+        if tuple(row.get("label") for row in rows) != contract["labels"]:
             raise ValueError(f"publication method coverage mismatch for {panel}")
-        if any(row.get("scenes") != scenes for row in rows):
+        if any(row.get("scenes") != contract["scenes"] for row in rows):
             raise ValueError(f"publication scene coverage mismatch for {panel}")
     coverage_limits = publication.get("coverage_limits", {})
     if not (
@@ -686,7 +644,7 @@ def build_manifest():
     manifest["publication_comparison"] = {
         "objective": publication["objective"],
         "panels": {
-            panel: publication[panel] for panel in expected_panels
+            panel: publication[panel] for panel in PUBLICATION_PANELS
         },
         "coverage_limits": coverage_limits,
         "source_artifacts": publication["source_artifacts"],
