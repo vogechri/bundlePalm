@@ -7,6 +7,7 @@ from build_stage_c_publication_tables import (
     write_carryover_table,
     write_final_table,
 )
+from build_stage_c_reproducibility_manifest import quality_objective
 
 
 def test_base_horizon_label_is_panel_specific():
@@ -32,3 +33,10 @@ def test_generated_tables_cover_authoritative_rows(tmp_path):
     assert "K16 + terminal correction & 1.523013" in final
     assert "1DSfM-15 & 0.992877 & 0.787326 & 0.762902" in carryover
     assert "BAL-29 & 1.000177 & 0.999998 & 1.000131" in carryover
+
+
+def test_quality_objective_uses_explicit_metric_conventions():
+    assert quality_objective({"sumSquaredError": 12.0}) == 12.0
+    assert quality_objective(
+        {"sumSquaredError": 12.0, "huberCeresCost": 3.5}
+    ) == 7.0

@@ -259,6 +259,12 @@ def quality_summary(reference, candidate):
     }
 
 
+def quality_objective(metrics):
+    if "huberCeresCost" in metrics:
+        return 2.0 * metrics["huberCeresCost"]
+    return metrics["sumSquaredError"]
+
+
 def git_value(*args):
     return subprocess.check_output(("git", *args), cwd=ROOT, text=True).strip()
 
@@ -549,7 +555,7 @@ def build_manifest():
         "drs": {
             scene: {
                 "artifact": huber_drs_sources[scene],
-                "objective_value": row["qualityMetrics"]["objectiveValue"],
+                "objective_value": quality_objective(row["qualityMetrics"]),
                 "sum_squared_error": row["qualityMetrics"]["sumSquaredError"],
                 "optimization_seconds": row["optimizationSeconds"],
             }
@@ -558,7 +564,7 @@ def build_manifest():
         "ceres": {
             scene: {
                 "artifact": huber_ceres_sources[scene],
-                "objective_value": row["qualityMetrics"]["objectiveValue"],
+                "objective_value": quality_objective(row["qualityMetrics"]),
                 "sum_squared_error": row["qualityMetrics"]["sumSquaredError"],
                 "native_solve_seconds": row["native"]["solveSeconds"],
                 "native_objective_relative_error": row[
