@@ -5,6 +5,15 @@ table, and two deterministic PDFs are under
 `benchmark_results/ceres_se3_left_unified_benchmark/`. Phase B remains optional
 and requires explicit authorization.
 
+Phase B decision (2026-08-23): **deferred / no-go**. Since the packaged
+`f4feabe` campaign, the only maintained solver-file change is the tested
+private-objective/public-reporting boundary in `client_drs.py`; `main.cpp`, the
+bridge, protocol, consensus, safeguards, and Schur solver are unchanged. Phase
+A already validates 44/44 candidate and control rows against complete Ceres
+coverage. A serialized two-arm plus Ceres rerun is estimated from measured
+timings at `2.31` hours and would currently strengthen provenance without
+changing a scientific decision.
+
 ## Purpose
 
 Produce one cohort-explicit benchmark of the retained distributed method against
@@ -76,6 +85,16 @@ established Stage-C K4/K16 endpoints.
 ## Phase B: Optional Fresh Confirmation
 
 Run only if a fresh same-source benchmark is explicitly requested after Phase A.
+Reopen only if at least one condition holds:
+
+- optimization behavior changes after `f4feabe`;
+- publication review requires rows with an embedded execution commit or fresh
+  binary hash;
+- an artifact-integrity audit finds missing, inconsistent, or non-reproducible
+  Phase A evidence;
+- the hardware/timing question changes enough that old timing classes are no
+  longer useful.
+
 Freeze before launch:
 
 - repository commit and dirty state;

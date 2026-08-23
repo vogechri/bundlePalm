@@ -46,7 +46,10 @@ Active integrated K24/I200 quality protocol:
 Unified 1DSfM/BAL comparison against Ceres left-SE3:
 `CERES_SE3_LEFT_BENCHMARK_PLAN.md`. Artifact-only Phase A is complete under
 `benchmark_results/ceres_se3_left_unified_benchmark/`; no fresh solver rerun is
-authorized.
+authorized. Phase B is deferred because optimization behavior is unchanged
+since the packaged campaign and its measured serialized cost is about 2.31
+hours; reopen only under the plan's explicit provenance or solver-change
+criteria.
 
 Active late-direction diagnostic protocol:
 `K24_SCHUR_ALIGNMENT_PLAN.md`.

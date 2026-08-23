@@ -1149,7 +1149,10 @@ left-SE3 is complete at artifact-only Phase A. K24 combined/Ceres is
 geometric and `0.997696x` summed on BAL; all 44 candidate trajectories
 complete. Reports and figures are under
 `benchmark_results/ceres_se3_left_unified_benchmark/`. Phase B fresh reruns
-remain optional and unauthorized; see `CERES_SE3_LEFT_BENCHMARK_PLAN.md`.
+remain deferred and unauthorized. The only solver-file drift since `f4feabe` is
+the tested objective-reporting boundary, while a serialized two-arm+Ceres rerun
+is estimated at 2.31 measured hours. Reopen only under the explicit criteria in
+`CERES_SE3_LEFT_BENCHMARK_PLAN.md`.
 
 ### P0: Offline Manuscript Consolidation
 
