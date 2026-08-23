@@ -265,7 +265,7 @@ def build_manifest():
     loaded = {}
     manifest = {
         "schema_version": 1,
-        "date": "2026-08-11",
+        "date": "2026-08-23",
         "repository": {
             "commit": git_value("rev-parse", "HEAD"),
             "branch": git_value("branch", "--show-current"),
@@ -633,12 +633,27 @@ def build_manifest():
                 "DRS K1 BAE-style",
                 "DRS K1 Schur-PCG",
                 "Base DRS K24",
+                "DRS+Schur fast",
+                "DRS+Schur balanced",
+                "DRS+Schur quality",
                 "DRS K4",
                 "DRS K16",
+                "DRS K4 + terminal correction",
+                "DRS K16 + terminal correction",
             ],
             15,
         ),
-        "all29_bal": (["Ceres", "Base DRS K24", "DRS K4", "DRS K16"], 29),
+        "all29_bal": (
+            [
+                "Ceres",
+                "Base DRS K24",
+                "DRS K4",
+                "DRS K16",
+                "DRS K4 + terminal correction",
+                "DRS K16 + terminal correction",
+            ],
+            29,
+        ),
         "bae_six_scene_inset": (
             [
                 "Ceres",
@@ -647,6 +662,8 @@ def build_manifest():
                 "Base DRS K24",
                 "DRS K4",
                 "DRS K16",
+                "DRS K4 + terminal correction",
+                "DRS K16 + terminal correction",
                 "BAE Schur-PCG CG",
                 "BAE Schur-PCG Nesterov",
             ],

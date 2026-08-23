@@ -94,11 +94,10 @@ global $2\times2$ factorial with a fresh plain DRS control.
 All 176 DRS cases complete.  C1 is the accepted first cumulative rung.  Current
 C5 alone is not an aggregate improvement, and adding it to C1 gives
 $1.005680\times$ C1 SSE on 1DSfM and $0.999855\times$ on BAL.  We retain both
-innovations and the C1+C5 architecture; the next step is to tune C5's common
-threshold and work policy so its incremental gain over C1 is robust.  No
-parameter or mode is selected by scene.  At this I30 budget every DRS row remains
-behind Ceres on 1DSfM and approximately tied on BAL; cross-solver timing is
-contextual because setup boundaries differ.
+innovations and the C1+C5 architecture.  This factorial motivated the frozen
+global C5 tuning reported below; it was not used to select a mode by scene.  At
+this I30 budget every DRS row remains behind Ceres on 1DSfM and approximately
+tied on BAL; cross-solver timing is contextual because setup boundaries differ.
 
 A matched $2\times2$ diagnosis shows that the losses are not failed fallback
 events.  On Roman, C1 and C5 individually reach $1.0982\times$ and
@@ -170,7 +169,7 @@ as matched work comparisons.
   \caption{Final complete-cohort comparison.  SSE values are geometric ratios
   to independently evaluated Ceres states; time is aggregate optimizer time.}
   \label{tab:stage-c-final-reference}
-  \small
+  \scriptsize
   \begin{tabular}{llrrrr}
     \hline
     Cohort & Method & SSE/Ceres & SSE/base & W/T/L & Time (s) \\
@@ -183,10 +182,18 @@ as matched work comparisons.
     1DSfM-15 & DRS+Schur quality & 1.215246 & 0.834064 & 2/0/13 & 381.521 \\
     1DSfM-15 & K4 resource & 2.052536 & 1.408725 & 0/0/15 & 160.607 \\
     1DSfM-15 & K16 latency & 1.957296 & 1.343358 & 0/0/15 & 93.793 \\
+    1DSfM-15 & K4 + terminal correction & 1.612187 & 1.106498
+      & 0/0/15 & 178.001 \\
+    1DSfM-15 & K16 + terminal correction & 1.523013 & 1.045295
+      & 1/0/14 & 109.890 \\
     BAL-29 & Ceres & 1.000000 & 1.001599 & 0/29/0 & 1803.780 \\
     BAL-29 & Base K24/I90 & 0.998404 & 1.000000 & 12/0/17 & 1271.575 \\
     BAL-29 & K4 resource & 1.007309 & 1.008920 & 8/0/21 & 939.466 \\
     BAL-29 & K16 latency & 1.010098 & 1.011713 & 8/0/21 & 479.087 \\
+    BAL-29 & K4 + terminal correction & 1.005041 & 1.006648
+      & 9/0/20 & 1547.694 \\
+    BAL-29 & K16 + terminal correction & 1.007594 & 1.009206
+      & 9/0/20 & 1000.459 \\
     \hline
   \end{tabular}
 \end{table}
@@ -203,7 +210,11 @@ Consequently, C1+C5 remains a valid matched-I30 component improvement
 ($0.847890$ times plain on 1DSfM and $0.983275$ on BAL), but the shorter K4/K16
 runs do not replace best base DRS in endpoint quality.  Their contribution is
 the measured latency/resource tradeoff; the remaining research problem is to
-retain that speed while recovering the longer-horizon base trajectory.
+retain that speed while recovering the longer-horizon base trajectory.  One
+terminal distributed Schur correction improves the raw K4/K16 endpoints by
+$0.785461/0.778120$ on 1DSfM and $0.997869/0.997663$ on BAL.  These variants
+remain above preserved base quality and are reported as separately timed
+correction workflows, not as DRS-only gains.
 
 Distributed Schur polishing changes that endpoint frontier without changing
 the DRS-only attribution.  Fast I30+10, balanced I60+10, and quality I60+16
@@ -223,6 +234,53 @@ exhausts Tower; proposal-only cutoff at I30 reaches $1.022809$/$1.001478$; and
 cutting both proposal damping and C1 reaches $1.136224$/$1.009261$.  We report
 the hybrid as positive component compatibility evidence, not as a promoted
 long-horizon replacement.
+
+\subsection{K1-derived product-space and guarded proposal carryovers}
+
+We next isolate the two K1-derived additions on a copied mature DRS baseline.
+Direct left-$\mathrm{SE}(3)$ tangent assembly and exact tangent-metric
+consistency are fixed in every arm.  The $2\times2$ factorial varies only
+shared-only product-space semantics and a guarded I60+I90 two-direction Krylov
+camera/landmark proposal.  This is not a C1--C5 factorial.
+
+\begin{table}[t]
+  \centering
+  \caption{Copied-baseline K24/I120 K1-carryover factorial.  Ratios below one
+  favor the numerator.  S, P, C, and D denote shared-only, proposal-only,
+  combined, and direct arms.  Interaction below one indicates that the
+  combined effect is better than the product of the isolated effects.}
+  \label{tab:k1-carryover-k24-factorial}
+  \scriptsize
+  \begin{tabular}{lrrrrrr}
+    \hline
+    Family & S/D & P/D & C/D & P/S & Interaction & C/Ceres \\
+    \hline
+    1DSfM-15 & 0.992877 & 0.787326 & \textbf{0.762902}
+      & 0.768375 & 0.975930 & 1.169700 \\
+    BAL-29 & 1.000177 & 0.999998 & 1.000131
+      & 0.999953 & 0.999955 & 1.001181 \\
+    \hline
+  \end{tabular}
+\end{table}
+
+On 1DSfM the combined arm improves the direct baseline on 14 of 15 scenes and
+both conditional effects are favorable.  Shared-only alone exhausts recovery
+on Tower of London, while the combined arm completes it.  On BAL the proposal
+is nearly neutral and slightly repairs shared-only; the residual $0.013\%$
+combined cost is attributable to the mandatory shared-only factor.  We retain
+shared-only semantics as a correctness invariant and the guarded Krylov move as
+the associated K24 quality mechanism.
+
+The same frozen stack was then tested without retuning at the established K4
+resource and K16 latency budgets on the six-1DSfM/five-BAL development cohort.
+All 22 candidate and control trajectories complete without recovery
+exhaustion.  Candidate/direct geometric SSE is $0.714243/0.788556$ on 1DSfM
+and $1.001972/0.997714$ on BAL at K4/K16.  However, Gendarmenmarkt/K16 reaches
+$1.022191\times$ direct, exceeding the predeclared $1.02\times$ scene-tail
+bound.  We therefore close this combined-stack transfer without held-out or
+all15/all29 expansion and without K-specific tuning.  This decision does not
+demote the separately established Stage-C K4/K16 operating points or their
+separately labeled terminal-correction variants.
 
 \subsection{Coordinate and finite-solver interactions}
 

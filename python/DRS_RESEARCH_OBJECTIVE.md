@@ -2130,8 +2130,10 @@ PYTHONPATH="$PWD/build_admm/generated/proto:$PWD" \
 Expected current maintained source suite: 128 passed.
 
 7. State the active budget class and exact next experiment before launching it.
-   Current active gate: C4 single-trajectory inner-only PCG/Nesterov carry-over,
-   first K2 and then K24 if safe, with outer acceleration off.
+   No solver experiment is currently authorized. The active task is P0 offline
+   manuscript consolidation from existing authoritative artifacts. The frozen
+   combined-stack K4/K16 transfer is closed development-negative; do not resume
+   breadth expansion or retune it.
 8. Update this file whenever a result changes the north star, quality reference,
    current research preset, frozen next experiment, or promotion decision.
 

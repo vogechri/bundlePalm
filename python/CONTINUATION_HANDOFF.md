@@ -1161,6 +1161,10 @@ Comparison policy:
    versus optimization time, K4/K16 time-quality tradeoff, communication bytes,
    maximum-worker/aggregate memory, and accepted/rejected outer trials. Do not
    launch replacement runs merely to simplify a plot.
+  The complete-cohort objective-versus-optimization-time PDF is now generated
+  deterministically by `serverTest/build_stage_c_publication_plots.py` from the
+  authoritative publication summary. Communication, memory, and outer-trial
+  figures remain open.
 4. Audit every headline number against the independent pixel-SSE evaluator and
    the reproducibility manifest. Regenerate
    `benchmark_results/stage_c_reproducibility_manifest.json` only if an
