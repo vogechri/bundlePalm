@@ -469,6 +469,16 @@ proposal/shared is `0.999953x`, interaction `0.999955x`, combined/direct
 is the active K1-to-copied-DRS interaction result, not a C1--C5 factorial. See
 `benchmark_results/k1_carryover_joint_factorial/report.md`.
 
+Frozen K4/K16 transfer of that combined stack is closed as development
+negative. All 22 six-1DSfM/five-BAL `(scene,K)` rows complete with no candidate
+recovery exhaustion. Candidate/direct geometric SSE is
+`0.714243x`/`0.788556x` on 1DSfM and `1.001972x`/`0.997714x` on BAL at K4/K16,
+but Gendarmenmarkt/K16 is `1.022191x`, beyond the fixed `1.02x` scene-tail
+bound. Do not run the missing held-out/all15/all29 rows and do not retune by K.
+Retain the accepted K24 combination and mandatory algebraic carryovers. This
+result is separate from the accepted terminal-correction K4/K16 breadth. See
+`benchmark_results/k1_carryover_scaling_k4_k16/development_report.md`.
+
 BAL29 confirms I60 unchanged: all 29 proposals decline exactly, W/T/L
 `0/29/0`, peak RSS `6.859/9.823 GiB`. Promote I60 as the common checkpoint with
 all-15 `0.786533x` control, `1.171081x` Ceres, W/T/L `14/1/0`. Freeze timing and

@@ -1,0 +1,409 @@
+{
+  "families": {
+    "1dsfm": {
+      "K16": {
+        "candidate_over_ceres": {
+          "geometric": 1.0541645563948099,
+          "losses": 4,
+          "ratios": {
+            "gendarmenmarkt/K16": 1.355708742768957,
+            "piccadilly/K16": 0.7389736360278548,
+            "roman_forum/K16": 1.2673842327989433,
+            "trafalgar/K16": 0.9052679422793688,
+            "union_square/K16": 1.1062705601099316,
+            "vienna_cathedral/K16": 1.0792158694421892
+          },
+          "summed": 0.9356891834201028,
+          "ties": 0,
+          "wins": 2,
+          "worst": 1.355708742768957
+        },
+        "candidate_over_control": {
+          "geometric": 0.788555764832828,
+          "losses": 1,
+          "ratios": {
+            "gendarmenmarkt/K16": 1.0221912181892103,
+            "piccadilly/K16": 0.8769299319042172,
+            "roman_forum/K16": 0.7949263213224721,
+            "trafalgar/K16": 0.7965802165881088,
+            "union_square/K16": 0.7304756676318408,
+            "vienna_cathedral/K16": 0.5798761930321723
+          },
+          "summed": 0.7728705863199401,
+          "ties": 0,
+          "wins": 5,
+          "worst": 1.0221912181892103
+        },
+        "count": 6,
+        "elapsed_candidate_over_control": 1.0074812967581048,
+        "elapsed_seconds": {
+          "direct": 401.0,
+          "direct_shared_proposal": 404.0
+        },
+        "full_trajectories": {
+          "direct": 6,
+          "direct_shared_proposal": 6
+        },
+        "maximum_coordinator_rss_gib": 1.7670173645019531,
+        "maximum_worker_rss_gib": 1.7587165832519531,
+        "proposal_attempted": {
+          "60": 6,
+          "90": 6
+        },
+        "proposal_selected": {
+          "60": 6,
+          "90": 4
+        },
+        "recovery_exhausted": {
+          "direct": [],
+          "direct_shared_proposal": []
+        }
+      },
+      "K16_over_K4": {
+        "elapsed_direct": 0.6661129568106312,
+        "elapsed_direct_shared_proposal": 0.4963144963144963,
+        "geometric": 1.0182087241993518,
+        "losses": 3,
+        "ratios": {
+          "gendarmenmarkt": 1.0875700958421055,
+          "piccadilly": 1.014595638881058,
+          "roman_forum": 1.128267544385907,
+          "trafalgar": 0.9029839410142158,
+          "union_square": 0.9999929575527897,
+          "vienna_cathedral": 0.9912462800287575
+        },
+        "summed": 0.9717482694332591,
+        "ties": 0,
+        "wins": 3,
+        "worst": 1.128267544385907
+      },
+      "K4": {
+        "candidate_over_ceres": {
+          "geometric": 1.035312830602322,
+          "losses": 5,
+          "ratios": {
+            "gendarmenmarkt/K4": 1.246548381526831,
+            "piccadilly/K4": 0.7283430045518711,
+            "roman_forum/K4": 1.123301152377608,
+            "trafalgar/K4": 1.002529393006245,
+            "union_square/K4": 1.1062783510168186,
+            "vienna_cathedral/K4": 1.0887464509938738
+          },
+          "summed": 0.962892564723386,
+          "ties": 0,
+          "wins": 1,
+          "worst": 1.246548381526831
+        },
+        "candidate_over_control": {
+          "geometric": 0.7142433682965974,
+          "losses": 0,
+          "ratios": {
+            "gendarmenmarkt/K4": 0.88712409663857,
+            "piccadilly/K4": 0.8706635361673974,
+            "roman_forum/K4": 0.6065624717624993,
+            "trafalgar/K4": 0.7129134700085279,
+            "union_square/K4": 0.7195408165734866,
+            "vienna_cathedral/K4": 0.552426846083449
+          },
+          "summed": 0.7076132470414976,
+          "ties": 0,
+          "wins": 6,
+          "worst": 0.88712409663857
+        },
+        "count": 6,
+        "elapsed_candidate_over_control": 1.3521594684385383,
+        "elapsed_seconds": {
+          "direct": 602.0,
+          "direct_shared_proposal": 814.0
+        },
+        "full_trajectories": {
+          "direct": 6,
+          "direct_shared_proposal": 6
+        },
+        "maximum_coordinator_rss_gib": 1.458251953125,
+        "maximum_worker_rss_gib": 1.563262939453125,
+        "proposal_attempted": {
+          "60": 6,
+          "90": 6
+        },
+        "proposal_selected": {
+          "60": 6,
+          "90": 2
+        },
+        "recovery_exhausted": {
+          "direct": [],
+          "direct_shared_proposal": []
+        }
+      }
+    },
+    "bal": {
+      "K16": {
+        "candidate_over_ceres": {
+          "geometric": 0.991197118461051,
+          "losses": 1,
+          "ratios": {
+            "bal1490/K16": 0.9956371981654574,
+            "bal1778/K16": 1.0143113012601748,
+            "bal245/K16": 0.9767670168488488,
+            "bal3068/K16": 0.9965132067910292,
+            "bal52/K16": 0.9733157047821193
+          },
+          "summed": 0.9971999540258053,
+          "ties": 0,
+          "wins": 4,
+          "worst": 1.0143113012601748
+        },
+        "candidate_over_control": {
+          "geometric": 0.9977144360088819,
+          "losses": 0,
+          "ratios": {
+            "bal1490/K16": 0.9999951105227571,
+            "bal1778/K16": 0.9996471178376912,
+            "bal245/K16": 0.9999999999999089,
+            "bal3068/K16": 0.9889781254341231,
+            "bal52/K16": 1.0
+          },
+          "summed": 0.9969313451056717,
+          "ties": 2,
+          "wins": 3,
+          "worst": 1.0
+        },
+        "count": 5,
+        "elapsed_candidate_over_control": 1.4716763005780347,
+        "elapsed_seconds": {
+          "direct": 865.0,
+          "direct_shared_proposal": 1273.0
+        },
+        "full_trajectories": {
+          "direct": 5,
+          "direct_shared_proposal": 5
+        },
+        "maximum_coordinator_rss_gib": 3.88726806640625,
+        "maximum_worker_rss_gib": 5.0769805908203125,
+        "proposal_attempted": {
+          "60": 5,
+          "90": 5
+        },
+        "proposal_selected": {
+          "60": 0,
+          "90": 0
+        },
+        "recovery_exhausted": {
+          "direct": [],
+          "direct_shared_proposal": []
+        }
+      },
+      "K16_over_K4": {
+        "elapsed_direct": 0.5598705501618123,
+        "elapsed_direct_shared_proposal": 0.7435747663551402,
+        "geometric": 0.9929957039229059,
+        "losses": 2,
+        "ratios": {
+          "bal1490": 0.9999542748435217,
+          "bal1778": 1.0000831093042155,
+          "bal245": 1.0131019038272056,
+          "bal3068": 0.9536479560703395,
+          "bal52": 0.9992620643667993
+        },
+        "summed": 0.9890728122140102,
+        "ties": 0,
+        "wins": 3,
+        "worst": 1.0131019038272056
+      },
+      "K4": {
+        "candidate_over_ceres": {
+          "geometric": 0.9981887278517424,
+          "losses": 2,
+          "ratios": {
+            "bal1490/K4": 0.9956827259139024,
+            "bal1778/K4": 1.0142270095590937,
+            "bal245/K4": 0.9641350126368394,
+            "bal3068/K4": 1.0449487155588557,
+            "bal52/K4": 0.9740344795325323
+          },
+          "summed": 1.0082169297461556,
+          "ties": 0,
+          "wins": 3,
+          "worst": 1.0449487155588557
+        },
+        "candidate_over_control": {
+          "geometric": 1.0019722516396663,
+          "losses": 3,
+          "ratios": {
+            "bal1490/K4": 1.0000454103106968,
+            "bal1778/K4": 1.0000643000140343,
+            "bal245/K4": 1.0,
+            "bal3068/K4": 1.0097894454790552,
+            "bal52/K4": 1.0
+          },
+          "summed": 1.0027232164236697,
+          "ties": 2,
+          "wins": 0,
+          "worst": 1.0097894454790552
+        },
+        "count": 5,
+        "elapsed_candidate_over_control": 1.1080906148867313,
+        "elapsed_seconds": {
+          "direct": 1545.0,
+          "direct_shared_proposal": 1712.0
+        },
+        "full_trajectories": {
+          "direct": 5,
+          "direct_shared_proposal": 5
+        },
+        "maximum_coordinator_rss_gib": 3.0754127502441406,
+        "maximum_worker_rss_gib": 5.054920196533203,
+        "proposal_attempted": {
+          "60": 5,
+          "90": 5
+        },
+        "proposal_selected": {
+          "60": 0,
+          "90": 0
+        },
+        "recovery_exhausted": {
+          "direct": [],
+          "direct_shared_proposal": []
+        }
+      }
+    }
+  },
+  "gate_failures": [
+    "1dsfm/K16 worst candidate/control 1.022191218 > 1.02"
+  ],
+  "scenes": {
+    "bal1490/K16": {
+      "candidate_over_ceres": 0.9956371981654574,
+      "candidate_over_control": 0.9999951105227571,
+      "clusters": 16,
+      "family": "bal"
+    },
+    "bal1490/K4": {
+      "candidate_over_ceres": 0.9956827259139024,
+      "candidate_over_control": 1.0000454103106968,
+      "clusters": 4,
+      "family": "bal"
+    },
+    "bal1778/K16": {
+      "candidate_over_ceres": 1.0143113012601748,
+      "candidate_over_control": 0.9996471178376912,
+      "clusters": 16,
+      "family": "bal"
+    },
+    "bal1778/K4": {
+      "candidate_over_ceres": 1.0142270095590937,
+      "candidate_over_control": 1.0000643000140343,
+      "clusters": 4,
+      "family": "bal"
+    },
+    "bal245/K16": {
+      "candidate_over_ceres": 0.9767670168488488,
+      "candidate_over_control": 0.9999999999999089,
+      "clusters": 16,
+      "family": "bal"
+    },
+    "bal245/K4": {
+      "candidate_over_ceres": 0.9641350126368394,
+      "candidate_over_control": 1.0,
+      "clusters": 4,
+      "family": "bal"
+    },
+    "bal3068/K16": {
+      "candidate_over_ceres": 0.9965132067910292,
+      "candidate_over_control": 0.9889781254341231,
+      "clusters": 16,
+      "family": "bal"
+    },
+    "bal3068/K4": {
+      "candidate_over_ceres": 1.0449487155588557,
+      "candidate_over_control": 1.0097894454790552,
+      "clusters": 4,
+      "family": "bal"
+    },
+    "bal52/K16": {
+      "candidate_over_ceres": 0.9733157047821193,
+      "candidate_over_control": 1.0,
+      "clusters": 16,
+      "family": "bal"
+    },
+    "bal52/K4": {
+      "candidate_over_ceres": 0.9740344795325323,
+      "candidate_over_control": 1.0,
+      "clusters": 4,
+      "family": "bal"
+    },
+    "gendarmenmarkt/K16": {
+      "candidate_over_ceres": 1.355708742768957,
+      "candidate_over_control": 1.0221912181892103,
+      "clusters": 16,
+      "family": "1dsfm"
+    },
+    "gendarmenmarkt/K4": {
+      "candidate_over_ceres": 1.246548381526831,
+      "candidate_over_control": 0.88712409663857,
+      "clusters": 4,
+      "family": "1dsfm"
+    },
+    "piccadilly/K16": {
+      "candidate_over_ceres": 0.7389736360278548,
+      "candidate_over_control": 0.8769299319042172,
+      "clusters": 16,
+      "family": "1dsfm"
+    },
+    "piccadilly/K4": {
+      "candidate_over_ceres": 0.7283430045518711,
+      "candidate_over_control": 0.8706635361673974,
+      "clusters": 4,
+      "family": "1dsfm"
+    },
+    "roman_forum/K16": {
+      "candidate_over_ceres": 1.2673842327989433,
+      "candidate_over_control": 0.7949263213224721,
+      "clusters": 16,
+      "family": "1dsfm"
+    },
+    "roman_forum/K4": {
+      "candidate_over_ceres": 1.123301152377608,
+      "candidate_over_control": 0.6065624717624993,
+      "clusters": 4,
+      "family": "1dsfm"
+    },
+    "trafalgar/K16": {
+      "candidate_over_ceres": 0.9052679422793688,
+      "candidate_over_control": 0.7965802165881088,
+      "clusters": 16,
+      "family": "1dsfm"
+    },
+    "trafalgar/K4": {
+      "candidate_over_ceres": 1.002529393006245,
+      "candidate_over_control": 0.7129134700085279,
+      "clusters": 4,
+      "family": "1dsfm"
+    },
+    "union_square/K16": {
+      "candidate_over_ceres": 1.1062705601099316,
+      "candidate_over_control": 0.7304756676318408,
+      "clusters": 16,
+      "family": "1dsfm"
+    },
+    "union_square/K4": {
+      "candidate_over_ceres": 1.1062783510168186,
+      "candidate_over_control": 0.7195408165734866,
+      "clusters": 4,
+      "family": "1dsfm"
+    },
+    "vienna_cathedral/K16": {
+      "candidate_over_ceres": 1.0792158694421892,
+      "candidate_over_control": 0.5798761930321723,
+      "clusters": 16,
+      "family": "1dsfm"
+    },
+    "vienna_cathedral/K4": {
+      "candidate_over_ceres": 1.0887464509938738,
+      "candidate_over_control": 0.552426846083449,
+      "clusters": 4,
+      "family": "1dsfm"
+    }
+  },
+  "status": "failed"
+}

@@ -34,7 +34,7 @@ C1 all-15 and large-BAL breadth report:
 WSL incident diagnosis and safe-run contract:
 `WSL_CRASH_ANALYSIS_2026-08-10.md`.
 
-Active K1 carryover and crash-resume test protocol:
+Frozen K1 carryover and crash-resume test protocol:
 `K1_CARRYOVER_TEST_PLAN.md`.
 
 Active terminal-correction K4/K16 transfer protocol:
@@ -705,6 +705,19 @@ solve is nonconverged; maximum residual is `9.971e-7`. Correction time totals
 K4/K16 as DRS-only resource/latency endpoints; add separately labeled terminal
 correction variants. See
 `benchmark_results/terminal_correction_scaling_all/report.md`.
+
+Copied-baseline combined-stack K4/K16 transfer (2026-08-23): the frozen
+shared-only plus guarded I60+I90 Krylov stack completed all 22 development
+`(scene,K)` rows with no recovery exhaustion. Relative to the copied direct
+baseline, geometric SSE is `0.714243x`/`0.788556x` on six 1DSfM scenes and
+`1.001972x`/`0.997714x` on five BAL scenes at K4/K16. K4 wins all six 1DSfM
+scenes; K16 wins five but Gendarmenmarkt is `1.022191x` control, exceeding the
+frozen `1.02x` per-scene tail bound. The development gate therefore fails.
+Close this common K4/K16 transfer without held-out/all15/all29 expansion or
+K-specific retuning. This does not reverse the accepted K24 combined stack,
+the mandatory algebraic carryovers, or the separately accepted terminal
+correction scaling result. See
+`benchmark_results/k1_carryover_scaling_k4_k16/development_report.md`.
 
 Do not implement an adaptive forcing policy from these eight outcomes. The only
 remaining targeted experiment in this direction is a default-off true

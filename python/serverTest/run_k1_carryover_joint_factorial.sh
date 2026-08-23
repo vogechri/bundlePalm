@@ -19,6 +19,7 @@ CASE_TIMEOUT_SECONDS=${CASE_TIMEOUT_SECONDS:-14400}
 ARMS=${ARMS:-"direct direct_shared direct_proposal direct_shared_proposal"}
 ANALYZE=${ANALYZE:-1}
 COHORT=${COHORT:-development}
+CLUSTERS_LIST=${CLUSTERS_LIST:-24}
 
 mkdir -p "$OUTPUT_ROOT"
 if [[ "$MEMORY_LIMIT_KB" != "0" ]]; then
@@ -118,7 +119,7 @@ for arm in $ARMS; do
     BUNDLE_PALM_MAXIMUM_TRUST_REGION_RADIUS=10000 \
     BUNDLE_PALM_DABA_INITIAL_TRUST_REGION_CAP=100 \
     OUTPUT_DIR="$OUTPUT_ROOT/$arm" DATASET_LIST_FILE="$manifest" \
-    PROBLEM_FILTER="$problem_filter" CLUSTERS_LIST=24 ITERATIONS=120 \
+    PROBLEM_FILTER="$problem_filter" CLUSTERS_LIST="$CLUSTERS_LIST" ITERATIONS=120 \
     LOCAL_STEPS=1 THREADS_PER_CLUSTER=1 \
     CAMERA_UPDATE=se3_left LOCAL_SOLVER=nesterov \
     NESTEROV_MAX_ITERATIONS=300 ENHANCED_INNER_MAX_ITERATIONS=300 \
@@ -157,9 +158,14 @@ for arm in $ARMS; do
 done
 
 if [[ "$ANALYZE" == "1" ]]; then
-  "$SCRIPT_DIR/.venv/bin/python" \
-    "$SCRIPT_DIR/analyze_k1_carryover_joint_factorial.py" \
-    --root "$OUTPUT_ROOT" --cohort "$COHORT"
+  if [[ "$CLUSTERS_LIST" == "24" \
+    && "$ARMS" == "direct direct_shared direct_proposal direct_shared_proposal" ]]; then
+    "$SCRIPT_DIR/.venv/bin/python" \
+      "$SCRIPT_DIR/analyze_k1_carryover_joint_factorial.py" \
+      --root "$OUTPUT_ROOT" --cohort "$COHORT"
+  else
+    echo "Non-factorial cluster/arm selections require a dedicated analyzer."
+  fi
 fi
 
 echo "K1 carryover joint factorial finished: $OUTPUT_ROOT"
