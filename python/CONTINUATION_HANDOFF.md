@@ -1163,8 +1163,10 @@ Comparison policy:
    launch replacement runs merely to simplify a plot.
   The complete-cohort objective-versus-optimization-time PDF is now generated
   deterministically by `serverTest/build_stage_c_publication_plots.py` from the
-  authoritative publication summary. Communication, memory, and outer-trial
-  figures remain open.
+  authoritative publication summary. The same builder now reports K16/K4
+  communication and maximum worker/coordinator process-memory ratios from the
+  repeat and terminal-correction summaries. Aggregate-memory and
+  accepted/rejected outer-trial figures remain open.
 4. Audit every headline number against the independent pixel-SSE evaluator and
    the reproducibility manifest. Regenerate
    `benchmark_results/stage_c_reproducibility_manifest.json` only if an

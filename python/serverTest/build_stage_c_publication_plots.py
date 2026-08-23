@@ -18,6 +18,17 @@ DEFAULT_OUTPUT = (
     / "benchmark_results/stage_c_publication_comparison/"
     "objective_vs_optimization_time.pdf"
 )
+DEFAULT_REPEAT_SUMMARY = (
+    ROOT / "benchmark_results/stage_c_scaling_repeats_k4_16_i30/summary.json"
+)
+DEFAULT_CORRECTION_SUMMARY = (
+    ROOT / "benchmark_results/terminal_correction_scaling_all/summary.json"
+)
+DEFAULT_RESOURCE_OUTPUT = (
+    ROOT
+    / "benchmark_results/stage_c_publication_comparison/"
+    "k16_over_k4_resources.pdf"
+)
 PANELS = {
     "all15_1dsfm": {
         "title": "SfM_Init-derived 1DSfM (15 scenes)",
@@ -219,13 +230,148 @@ def build_figure(panels, output):
     plt.close(figure)
 
 
+def load_resource_ratios(repeat_path, correction_path):
+    repeat = json.loads(repeat_path.read_text(encoding="utf-8"))
+    correction = json.loads(correction_path.read_text(encoding="utf-8"))
+    repeat_rows = repeat.get("endpoint_ratios")
+    repeat_cases = repeat.get("cases")
+    if not isinstance(repeat_rows, list) or not isinstance(repeat_cases, list):
+        raise ValueError("invalid scaling-repeat summary")
+    if {row.get("family") for row in repeat_rows} != {"1dsfm", "bal"}:
+        raise ValueError("scaling-repeat family coverage mismatch")
+    if len(repeat_cases) != 8:
+        raise ValueError("scaling-repeat case coverage mismatch")
+
+    repeated = {}
+    for family in ("1dsfm", "bal"):
+        row = next(item for item in repeat_rows if item["family"] == family)
+        by_cluster = {
+            clusters: [
+                item
+                for item in repeat_cases
+                if item.get("family") == family and item.get("clusters") == clusters
+            ]
+            for clusters in (4, 16)
+        }
+        if any(len(rows) != 2 for rows in by_cluster.values()):
+            raise ValueError(f"scaling-repeat scene coverage mismatch for {family}")
+        repeated[family] = {
+            "Optimization": row["optimization_ratio_mean"],
+            "Worker CPU": row["worker_cpu_ratio_mean"],
+            "Transport": row["traffic_ratio_mean"],
+            "Worker RSS": (
+                sum(item["worker_rss_mean_kb"] for item in by_cluster[16])
+                / sum(item["worker_rss_mean_kb"] for item in by_cluster[4])
+            ),
+        }
+
+    summaries = correction.get("summaries")
+    quality = correction.get("corrected_k16_over_k4")
+    if not isinstance(summaries, dict) or not isinstance(quality, dict):
+        raise ValueError("invalid terminal-correction summary")
+    corrected = {}
+    for family in ("1dsfm", "bal"):
+        k4 = summaries.get("4", {}).get(family)
+        k16 = summaries.get("16", {}).get(family)
+        family_quality = quality.get(family)
+        if not all(isinstance(item, dict) for item in (k4, k16, family_quality)):
+            raise ValueError(f"terminal-correction coverage mismatch for {family}")
+        corrected[family] = {
+            "Corrected SSE": family_quality["geometric"],
+            "Correction time": (
+                k16["total_correction_seconds"] / k4["total_correction_seconds"]
+            ),
+            "Peak coordinator RSS": (
+                k16["maximum_coordinator_rss_gib"]
+                / k4["maximum_coordinator_rss_gib"]
+            ),
+            "Peak worker RSS": (
+                k16["maximum_worker_rss_gib"] / k4["maximum_worker_rss_gib"]
+            ),
+        }
+    return repeated, corrected
+
+
+def build_resource_figure(repeated, corrected, output):
+    figure, axes = plt.subplots(1, 2, figsize=(11.2, 4.6), constrained_layout=True)
+    panels = (
+        (
+            axes[0],
+            repeated,
+            "Frozen DRS sentinels (3-repeat mean)",
+            ("Optimization", "Worker CPU", "Transport", "Worker RSS"),
+        ),
+        (
+            axes[1],
+            corrected,
+            "Terminal correction (complete cohorts)",
+            (
+                "Corrected SSE",
+                "Correction time",
+                "Peak coordinator RSS",
+                "Peak worker RSS",
+            ),
+        ),
+    )
+    family_colors = {"1dsfm": "#00798c", "bal": "#d17b0f"}
+    family_labels = {"1dsfm": "1DSfM", "bal": "BAL"}
+    for axis, values, title, metrics in panels:
+        positions = list(range(len(metrics)))
+        width = 0.34
+        for offset, family in ((-width / 2, "1dsfm"), (width / 2, "bal")):
+            bars = axis.bar(
+                [position + offset for position in positions],
+                [values[family][metric] for metric in metrics],
+                width=width,
+                color=family_colors[family],
+                label=family_labels[family],
+            )
+            axis.bar_label(bars, fmt="%.3f", padding=2, fontsize=7.5)
+        axis.axhline(1.0, color="#85898d", linewidth=1.0, linestyle="--")
+        axis.set_xticks(positions, metrics, rotation=18, ha="right")
+        axis.set_ylabel("K16 / K4 ratio")
+        axis.set_title(title)
+        axis.grid(axis="y", color="#d9dcdf", linewidth=0.6, alpha=0.8)
+        axis.spines[["top", "right"]].set_visible(False)
+        axis.set_ylim(0.0, max(2.0, axis.get_ylim()[1] * 1.08))
+    axes[0].legend(frameon=False, loc="upper left")
+    figure.suptitle("K16 latency tradeoffs relative to K4 resource mode", fontsize=13)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    figure.savefig(
+        output,
+        metadata={
+            "Title": "K16 over K4 quality and resource ratios",
+            "Author": "BundlePalm",
+            "CreationDate": None,
+            "ModDate": None,
+        },
+    )
+    plt.close(figure)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--summary", type=Path, default=DEFAULT_SUMMARY)
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
+    parser.add_argument(
+        "--repeat-summary", type=Path, default=DEFAULT_REPEAT_SUMMARY
+    )
+    parser.add_argument(
+        "--correction-summary", type=Path, default=DEFAULT_CORRECTION_SUMMARY
+    )
+    parser.add_argument(
+        "--resource-output", type=Path, default=DEFAULT_RESOURCE_OUTPUT
+    )
     arguments = parser.parse_args()
     build_figure(load_panels(arguments.summary), arguments.output)
+    build_resource_figure(
+        *load_resource_ratios(
+            arguments.repeat_summary, arguments.correction_summary
+        ),
+        arguments.resource_output,
+    )
     print(arguments.output)
+    print(arguments.resource_output)
 
 
 if __name__ == "__main__":
