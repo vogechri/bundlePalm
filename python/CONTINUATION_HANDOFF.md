@@ -1143,6 +1143,11 @@ Comparison policy:
 
 ## Remaining Work, In Priority Order
 
+The requested unified all-15 1DSfM/all-29 BAL comparison against Ceres
+left-SE3 is frozen in `CERES_SE3_LEFT_BENCHMARK_PLAN.md`. Its first phase is an
+artifact-only report from existing authoritative K24 combined, Ceres, and
+publication summaries; no replacement solver run is needed.
+
 ### P0: Offline Manuscript Consolidation
 
 1. Make the manuscript internally consistent with the current Stage-C labels,

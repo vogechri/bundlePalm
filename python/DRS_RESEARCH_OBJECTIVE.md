@@ -43,6 +43,10 @@ Active terminal-correction K4/K16 transfer protocol:
 Active integrated K24/I200 quality protocol:
 `K24_I200_QUALITY_PLAN.md`.
 
+Queued unified 1DSfM/BAL comparison against Ceres left-SE3:
+`CERES_SE3_LEFT_BENCHMARK_PLAN.md`. Generate the artifact-only report before
+authorizing any fresh solver rerun.
+
 Active late-direction diagnostic protocol:
 `K24_SCHUR_ALIGNMENT_PLAN.md`.
 
