@@ -2843,6 +2843,24 @@ def transport_product_camera_state(
     return transported_cameras, transported_centers
 
 
+def with_drs_objective_value(metrics, huber_delta=None):
+    """Add the internal optimization objective to explicit reporting metrics."""
+    result = dict(metrics)
+    result["objectiveValue"] = (
+        2.0 * result["huberCeresCost"]
+        if huber_delta is not None
+        else result["sumSquaredError"]
+    )
+    return result
+
+
+def without_drs_objective_value(metrics):
+    """Return reporting metrics without the private optimization objective."""
+    result = dict(metrics)
+    result.pop("objectiveValue", None)
+    return result
+
+
 def run_mid_shared_schur_rebase(
     worker,
     arguments,
@@ -3399,13 +3417,16 @@ def main():
     point_count = len(points)
     huber_delta = arguments.huber_delta if arguments.huber_delta > 0.0 else None
     def evaluate_state(state_cameras, state_points, *_):
-        return evaluate_bal_state(
-            state_cameras,
-            state_points,
-            camera_indices,
-            point_indices,
-            observations,
-            huber_delta=huber_delta,
+        return with_drs_objective_value(
+            evaluate_bal_state(
+                state_cameras,
+                state_points,
+                camera_indices,
+                point_indices,
+                observations,
+                huber_delta=huber_delta,
+            ),
+            huber_delta,
         )
 
     initial_metrics = evaluate_state(
@@ -9227,8 +9248,8 @@ def main():
         "bestIteration": best_iteration,
         "partitionSeconds": partition_seconds,
         "overallSeconds": time.perf_counter() - started_at,
-        "initialQualityMetrics": initial_metrics,
-        "qualityMetrics": final_metrics,
+        "initialQualityMetrics": without_drs_objective_value(initial_metrics),
+        "qualityMetrics": without_drs_objective_value(final_metrics),
         "transportBytesSent": sent_bytes,
         "transportBytesReceived": received_bytes,
         "trajectory": trajectory,

@@ -487,6 +487,21 @@ def test_product_camera_transport_preserves_scaled_dual_offsets():
     )
 
 
+def test_drs_objective_value_decorates_explicit_reporting_metrics():
+    metrics = {"sumSquaredError": 12.0}
+    robust_metrics = {"sumSquaredError": 12.0, "huberCeresCost": 3.5}
+
+    assert client_drs.with_drs_objective_value(metrics)["objectiveValue"] == 12.0
+    assert client_drs.with_drs_objective_value(
+        robust_metrics, huber_delta=0.5
+    )["objectiveValue"] == 7.0
+    assert client_drs.without_drs_objective_value(
+        {**metrics, "objectiveValue": 12.0}
+    ) == metrics
+    assert "objectiveValue" not in metrics
+    assert "objectiveValue" not in robust_metrics
+
+
 def test_mid_shared_schur_transports_product_state_without_trust_reset(
     monkeypatch,
 ):
