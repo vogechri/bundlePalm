@@ -1144,9 +1144,12 @@ Comparison policy:
 ## Remaining Work, In Priority Order
 
 The requested unified all-15 1DSfM/all-29 BAL comparison against Ceres
-left-SE3 is frozen in `CERES_SE3_LEFT_BENCHMARK_PLAN.md`. Its first phase is an
-artifact-only report from existing authoritative K24 combined, Ceres, and
-publication summaries; no replacement solver run is needed.
+left-SE3 is complete at artifact-only Phase A. K24 combined/Ceres is
+`1.169700x` geometric and `1.046518x` summed on 1DSfM, and `1.001181x`
+geometric and `0.997696x` summed on BAL; all 44 candidate trajectories
+complete. Reports and figures are under
+`benchmark_results/ceres_se3_left_unified_benchmark/`. Phase B fresh reruns
+remain optional and unauthorized; see `CERES_SE3_LEFT_BENCHMARK_PLAN.md`.
 
 ### P0: Offline Manuscript Consolidation
 

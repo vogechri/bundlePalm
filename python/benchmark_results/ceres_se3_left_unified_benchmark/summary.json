@@ -1,0 +1,1193 @@
+{
+  "ceres_reference": "left-SE3, I90, T16",
+  "families": {
+    "1dsfm": {
+      "candidate_over_ceres": {
+        "geometric": 1.1696996553730585,
+        "losses": 12,
+        "ratios": {
+          "alamo": 1.146012760898437,
+          "ellis_island": 1.0474438672984052,
+          "gendarmenmarkt": 1.3306709681696562,
+          "madrid_metropolis": 1.2622676880515,
+          "montreal_notre_dame": 1.0719960102725197,
+          "notre_dame": 1.1358032468433492,
+          "nyc_library": 1.1786021534750277,
+          "piazza_del_popolo": 0.9399029217778119,
+          "piccadilly": 0.7471805520002933,
+          "roman_forum": 1.167470076818625,
+          "tower_of_london": 1.937146407220874,
+          "trafalgar": 0.8754433616576288,
+          "union_square": 1.1182104266816444,
+          "vienna_cathedral": 1.1003353868123356,
+          "yorkminster": 2.120880169333368
+        },
+        "summed": 1.0465179061522758,
+        "ties": 0,
+        "wins": 3,
+        "worst": 2.120880169333368
+      },
+      "candidate_over_direct": {
+        "geometric": 0.7629020121823338,
+        "losses": 1,
+        "ratios": {
+          "alamo": 0.894716127030364,
+          "ellis_island": 0.9338429790444844,
+          "gendarmenmarkt": 0.9176428110493763,
+          "madrid_metropolis": 1.0493746654157574,
+          "montreal_notre_dame": 0.5390172921162356,
+          "notre_dame": 0.6098647288573597,
+          "nyc_library": 0.8234529876965211,
+          "piazza_del_popolo": 0.5393000122032936,
+          "piccadilly": 0.894683480963304,
+          "roman_forum": 0.7272886870498126,
+          "tower_of_london": 0.992800911415235,
+          "trafalgar": 0.691904179010613,
+          "union_square": 0.7393220134270722,
+          "vienna_cathedral": 0.5801963819689017,
+          "yorkminster": 0.7664248192151895
+        },
+        "summed": 0.7007789754923563,
+        "ties": 0,
+        "wins": 14,
+        "worst": 1.0493746654157574
+      },
+      "candidate_peak_rss_gib": {
+        "coordinator": 1.7639541625976562,
+        "worker": 1.818572998046875
+      },
+      "candidate_transport_bytes": 20455915367,
+      "count": 15,
+      "full_trajectories": {
+        "candidate": 15,
+        "direct": 15
+      },
+      "optimization_seconds": {
+        "candidate": 592.2583163709787,
+        "ceres_native_solve": 219.52092426,
+        "direct": 436.0161828220007
+      },
+      "overall_seconds": {
+        "candidate": 654.9771944669919,
+        "ceres_native": 223.853494569,
+        "direct": 495.81533071698505
+      },
+      "proposal": {
+        "60": {
+          "attempted": 15,
+          "no_op": 0,
+          "selected": 15
+        },
+        "90": {
+          "attempted": 15,
+          "no_op": 7,
+          "selected": 8
+        }
+      },
+      "recovery_exhausted": {
+        "candidate": [],
+        "direct": []
+      }
+    },
+    "bal": {
+      "candidate_over_ceres": {
+        "geometric": 1.0011805476457836,
+        "losses": 18,
+        "ratios": {
+          "bal1064": 1.0016643457912426,
+          "bal126": 1.0236406419789899,
+          "bal1266": 1.0023046049376045,
+          "bal135": 1.000415066653806,
+          "bal142": 1.002470330967862,
+          "bal1490": 0.9957770096926143,
+          "bal1723": 0.9972722024980013,
+          "bal173": 0.9995156602181157,
+          "bal1778": 1.014932930372665,
+          "bal245": 0.979402117445965,
+          "bal253": 0.9971330904023573,
+          "bal257": 1.029894954768254,
+          "bal287": 1.0015900932711193,
+          "bal3068": 0.9999997562718134,
+          "bal308": 1.005617479186947,
+          "bal356": 1.0350827114152417,
+          "bal394": 1.0041164935289657,
+          "bal427": 0.99594370345743,
+          "bal49": 1.0037524778790696,
+          "bal52": 0.9722598805822413,
+          "bal646": 1.001976612947246,
+          "bal744": 0.997655063990792,
+          "bal783": 1.00099425263398,
+          "bal871": 1.0029764090683,
+          "bal88": 0.9999168681642693,
+          "bal89": 1.0071052686784763,
+          "bal931": 1.0005573974686366,
+          "bal951": 0.9629751749615004,
+          "bal961": 1.0001077406512622
+        },
+        "summed": 0.9976962981047527,
+        "ties": 0,
+        "wins": 11,
+        "worst": 1.0350827114152417
+      },
+      "candidate_over_direct": {
+        "geometric": 1.0001306589048602,
+        "losses": 9,
+        "ratios": {
+          "bal1064": 1.0,
+          "bal126": 1.0,
+          "bal1266": 0.9999708134205114,
+          "bal135": 1.0,
+          "bal142": 1.0,
+          "bal1490": 1.0000009952083577,
+          "bal1723": 0.9979970849887133,
+          "bal173": 1.0000236490219616,
+          "bal1778": 1.0000054968760377,
+          "bal245": 0.9999999999998419,
+          "bal253": 1.0000002982189704,
+          "bal257": 1.0001136471768235,
+          "bal287": 1.0,
+          "bal3068": 1.0057217240703824,
+          "bal308": 1.0001475022674755,
+          "bal356": 1.0002054777954734,
+          "bal394": 1.0,
+          "bal427": 1.0,
+          "bal49": 1.0,
+          "bal52": 1.0,
+          "bal646": 1.0,
+          "bal744": 1.0,
+          "bal783": 1.00001970435459,
+          "bal871": 0.999672799589542,
+          "bal88": 1.0,
+          "bal89": 1.0,
+          "bal931": 0.9999997386723946,
+          "bal951": 0.9999283399353249,
+          "bal961": 1.0
+        },
+        "summed": 1.000416569783413,
+        "ties": 15,
+        "wins": 5,
+        "worst": 1.0057217240703824
+      },
+      "candidate_peak_rss_gib": {
+        "coordinator": 6.889060974121094,
+        "worker": 8.495880126953125
+      },
+      "candidate_transport_bytes": 78582581161,
+      "count": 29,
+      "full_trajectories": {
+        "candidate": 29,
+        "direct": 29
+      },
+      "optimization_seconds": {
+        "candidate": 2326.6868475729716,
+        "ceres_native_solve": 1803.779569737,
+        "direct": 2039.200904948957
+      },
+      "overall_seconds": {
+        "candidate": 2643.367161565984,
+        "ceres_native": 1827.4252217599999,
+        "direct": 2370.308293553957
+      },
+      "proposal": {
+        "60": {
+          "attempted": 29,
+          "no_op": 28,
+          "selected": 1
+        },
+        "90": {
+          "attempted": 29,
+          "no_op": 29,
+          "selected": 0
+        }
+      },
+      "recovery_exhausted": {
+        "candidate": [],
+        "direct": []
+      }
+    }
+  },
+  "objective": "standard Snavely pixel sum-squared error",
+  "primary_method": "K24/I120 direct left-SE3 + exact tangent metric + shared-only product-space DRS + guarded I60/I90 Krylov2 camera/landmark proposal",
+  "provenance": {
+    "campaign_checkpoint": "f4feabe",
+    "campaign_checkpoint_note": "repository checkpoint that packages the campaign; raw result rows do not embed an execution commit",
+    "carryover_root": "benchmark_results/k1_carryover_joint_factorial",
+    "ceres_artifacts": {
+      "1dsfm": "benchmark_results/1dsfm_drs_ceres_se3_all15/ceres/results.jsonl",
+      "bal": "benchmark_results/bal_ceres_se3_all29/results.jsonl"
+    },
+    "report_generation_commit": "536879bc10a9e7449fac7777032b3c414d819dfa"
+  },
+  "scenes": {
+    "alamo": {
+      "candidate_optimization_seconds": 35.06640415599395,
+      "candidate_over_ceres": 1.146012760898437,
+      "candidate_over_direct": 0.894716127030364,
+      "candidate_sse": 945876.8511073212,
+      "candidate_transport_bytes": 1578190603,
+      "ceres_sse": 825363.2798694007,
+      "direct_sse": 1057180.9566535521,
+      "family": "1dsfm",
+      "proposal": {
+        "60": {
+          "applied": true,
+          "selected": true,
+          "selected_scale": 1.0
+        },
+        "90": {
+          "applied": false,
+          "selected": false,
+          "selected_scale": 0.0
+        }
+      }
+    },
+    "bal1064": {
+      "candidate_optimization_seconds": 39.51227844701498,
+      "candidate_over_ceres": 1.0016643457912426,
+      "candidate_over_direct": 1.0,
+      "candidate_sse": 564244.9371161329,
+      "candidate_transport_bytes": 1850683450,
+      "ceres_sse": 563307.3988177348,
+      "direct_sse": 564244.9371161329,
+      "family": "bal",
+      "proposal": {
+        "60": {
+          "applied": false,
+          "selected": false,
+          "selected_scale": 0.0
+        },
+        "90": {
+          "applied": false,
+          "selected": false,
+          "selected_scale": 0.0
+        }
+      }
+    },
+    "bal126": {
+      "candidate_optimization_seconds": 13.959511694993125,
+      "candidate_over_ceres": 1.0236406419789899,
+      "candidate_over_direct": 1.0,
+      "candidate_sse": 188228.16546084546,
+      "candidate_transport_bytes": 338205842,
+      "ceres_sse": 183881.0982504042,
+      "direct_sse": 188228.16546084546,
+      "family": "bal",
+      "proposal": {
+        "60": {
+          "applied": false,
+          "selected": false,
+          "selected_scale": 0.0
+        },
+        "90": {
+          "applied": false,
+          "selected": false,
+          "selected_scale": 0.0
+        }
+      }
+    },
+    "bal1266": {
+      "candidate_optimization_seconds": 46.646385239990195,
+      "candidate_over_ceres": 1.0023046049376045,
+      "candidate_over_direct": 0.9999708134205114,
+      "candidate_sse": 661002.6955669768,
+      "candidate_transport_bytes": 1937835180,
+      "ceres_sse": 659482.8481388905,
+      "direct_sse": 661021.988537789,
+      "family": "bal",
+      "proposal": {
+        "60": {
+          "applied": false,
+          "selected": false,
+          "selected_scale": 0.0
+        },
+        "90": {
+          "applied": false,
+          "selected": false,
+          "selected_scale": 0.0
+        }
+      }
+    },
+    "bal135": {
+      "candidate_optimization_seconds": 31.696695869002724,
+      "candidate_over_ceres": 1.000415066653806,
+      "candidate_over_direct": 1.0,
+      "candidate_sse": 744081.4174208534,
+      "candidate_transport_bytes": 767128309,
+      "ceres_sse": 743772.7021741697,
+      "direct_sse": 744081.4174208534,
+      "family": "bal",
+      "proposal": {
+        "60": {
+          "applied": false,
+          "selected": false,
+          "selected_scale": 0.0
+        },
+        "90": {
+          "applied": false,
+          "selected": false,
+          "selected_scale": 0.0
+        }
+      }
+    },
+    "bal142": {
+      "candidate_optimization_seconds": 33.23743859201204,
+      "candidate_over_ceres": 1.002470330967862,
+      "candidate_over_direct": 1.0,
+      "candidate_sse": 545230.0481468195,
+      "candidate_transport_bytes": 806636684,
+      "ceres_sse": 543886.4685605332,
+      "direct_sse": 545230.0481468195,
+      "family": "bal",
+      "proposal": {
+        "60": {
+          "applied": false,
+          "selected": false,
+          "selected_scale": 0.0
+        },
+        "90": {
+          "applied": false,
+          "selected": false,
+          "selected_scale": 0.0
+        }
+      }
+    },
+    "bal1490": {
+      "candidate_optimization_seconds": 257.56032272599987,
+      "candidate_over_ceres": 0.9957770096926143,
+      "candidate_over_direct": 1.0000009952083577,
+      "candidate_sse": 3078062.307744134,
+      "candidate_transport_bytes": 5699106707,
+      "ceres_sse": 3091116.0609083544,
+      "direct_sse": 3078059.2444338487,
+      "family": "bal",
+      "proposal": {
+        "60": {
+          "applied": false,
+          "selected": false,
+          "selected_scale": 0.0
+        },
+        "90": {
+          "applied": false,
+          "selected": false,
+          "selected_scale": 0.0
+        }
+      }
+    },
+    "bal1723": {
+      "candidate_optimization_seconds": 49.22571873301058,
+      "candidate_over_ceres": 0.9972722024980013,
+      "candidate_over_direct": 0.9979970849887133,
+      "candidate_sse": 762005.444135483,
+      "candidate_transport_bytes": 2094326205,
+      "ceres_sse": 764089.7261818647,
+      "direct_sse": 763534.739326519,
+      "family": "bal",
+      "proposal": {
+        "60": {
+          "applied": true,
+          "selected": true,
+          "selected_scale": 0.03125
+        },
+        "90": {
+          "applied": false,
+          "selected": false,
+          "selected_scale": 0.0
+        }
+      }
+    },
+    "bal173": {
+      "candidate_optimization_seconds": 35.854971160995774,
+      "candidate_over_ceres": 0.9995156602181157,
+      "candidate_over_direct": 1.0000236490219616,
+      "candidate_sse": 519500.7733059081,
+      "candidate_transport_bytes": 923514991,
+      "ceres_sse": 519752.510123295,
+      "direct_sse": 519488.4879112487,
+      "family": "bal",
+      "proposal": {
+        "60": {
+          "applied": false,
+          "selected": false,
+          "selected_scale": 0.0
+        },
+        "90": {
+          "applied": false,
+          "selected": false,
+          "selected_scale": 0.0
+        }
+      }
+    },
+    "bal1778": {
+      "candidate_optimization_seconds": 287.4386870699964,
+      "candidate_over_ceres": 1.014932930372665,
+      "candidate_over_direct": 1.0000054968760377,
+      "candidate_sse": 3336858.8991227355,
+      "candidate_transport_bytes": 6404783092,
+      "ceres_sse": 3287762.963703918,
+      "direct_sse": 3336840.5569238365,
+      "family": "bal",
+      "proposal": {
+        "60": {
+          "applied": false,
+          "selected": false,
+          "selected_scale": 0.0
+        },
+        "90": {
+          "applied": false,
+          "selected": false,
+          "selected_scale": 0.0
+        }
+      }
+    },
+    "bal245": {
+      "candidate_optimization_seconds": 59.07268668100005,
+      "candidate_over_ceres": 0.979402117445965,
+      "candidate_over_direct": 0.9999999999998419,
+      "candidate_sse": 1797038.8647284955,
+      "candidate_transport_bytes": 1320812085,
+      "ceres_sse": 1834832.5296811918,
+      "direct_sse": 1797038.8647287795,
+      "family": "bal",
+      "proposal": {
+        "60": {
+          "applied": false,
+          "selected": false,
+          "selected_scale": 0.0
+        },
+        "90": {
+          "applied": false,
+          "selected": false,
+          "selected_scale": 0.0
+        }
+      }
+    },
+    "bal253": {
+      "candidate_optimization_seconds": 54.7136174949992,
+      "candidate_over_ceres": 0.9971330904023573,
+      "candidate_over_direct": 1.0000002982189704,
+      "candidate_sse": 689952.6078774848,
+      "candidate_transport_bytes": 1326453313,
+      "ceres_sse": 691936.3267736698,
+      "direct_sse": 689952.4021205897,
+      "family": "bal",
+      "proposal": {
+        "60": {
+          "applied": false,
+          "selected": false,
+          "selected_scale": 0.0
+        },
+        "90": {
+          "applied": false,
+          "selected": false,
+          "selected_scale": 0.0
+        }
+      }
+    },
+    "bal257": {
+      "candidate_optimization_seconds": 18.442923970986158,
+      "candidate_over_ceres": 1.029894954768254,
+      "candidate_over_direct": 1.0001136471768235,
+      "candidate_sse": 198960.43859660844,
+      "candidate_transport_bytes": 523248066,
+      "ceres_sse": 193185.17648373015,
+      "direct_sse": 198937.82987387988,
+      "family": "bal",
+      "proposal": {
+        "60": {
+          "applied": false,
+          "selected": false,
+          "selected_scale": 0.0
+        },
+        "90": {
+          "applied": false,
+          "selected": false,
+          "selected_scale": 0.0
+        }
+      }
+    },
+    "bal287": {
+      "candidate_optimization_seconds": 60.06385677299113,
+      "candidate_over_ceres": 1.0015900932711193,
+      "candidate_over_direct": 1.0,
+      "candidate_sse": 708857.6697805391,
+      "candidate_transport_bytes": 1564009054,
+      "ceres_sse": 707732.3093976122,
+      "direct_sse": 708857.6697805391,
+      "family": "bal",
+      "proposal": {
+        "60": {
+          "applied": false,
+          "selected": false,
+          "selected_scale": 0.0
+        },
+        "90": {
+          "applied": false,
+          "selected": false,
+          "selected_scale": 0.0
+        }
+      }
+    },
+    "bal3068": {
+      "candidate_optimization_seconds": 165.74449079399346,
+      "candidate_over_ceres": 0.9999997562718134,
+      "candidate_over_direct": 1.0057217240703824,
+      "candidate_sse": 3176835.6239187648,
+      "candidate_transport_bytes": 10495447507,
+      "ceres_sse": 3176836.3982033394,
+      "direct_sse": 3158762.0590130985,
+      "family": "bal",
+      "proposal": {
+        "60": {
+          "applied": false,
+          "selected": false,
+          "selected_scale": 0.0
+        },
+        "90": {
+          "applied": false,
+          "selected": false,
+          "selected_scale": 0.0
+        }
+      }
+    },
+    "bal308": {
+      "candidate_optimization_seconds": 64.05575168100768,
+      "candidate_over_ceres": 1.005617479186947,
+      "candidate_over_direct": 1.0001475022674755,
+      "candidate_sse": 784053.067023793,
+      "candidate_transport_bytes": 1576354157,
+      "ceres_sse": 779673.2686644514,
+      "direct_sse": 783937.434474649,
+      "family": "bal",
+      "proposal": {
+        "60": {
+          "applied": false,
+          "selected": false,
+          "selected_scale": 0.0
+        },
+        "90": {
+          "applied": false,
+          "selected": false,
+          "selected_scale": 0.0
+        }
+      }
+    },
+    "bal356": {
+      "candidate_optimization_seconds": 75.33914098898822,
+      "candidate_over_ceres": 1.0350827114152417,
+      "candidate_over_direct": 1.0002054777954734,
+      "candidate_sse": 1022480.3637990255,
+      "candidate_transport_bytes": 1669776552,
+      "ceres_sse": 987824.7917028917,
+      "direct_sse": 1022270.3099493592,
+      "family": "bal",
+      "proposal": {
+        "60": {
+          "applied": false,
+          "selected": false,
+          "selected_scale": 0.0
+        },
+        "90": {
+          "applied": false,
+          "selected": false,
+          "selected_scale": 0.0
+        }
+      }
+    },
+    "bal394": {
+      "candidate_optimization_seconds": 42.922638397998526,
+      "candidate_over_ceres": 1.0041164935289657,
+      "candidate_over_direct": 1.0,
+      "candidate_sse": 598923.9514702838,
+      "candidate_transport_bytes": 2843383547,
+      "ceres_sse": 596468.5923695632,
+      "direct_sse": 598923.9514702838,
+      "family": "bal",
+      "proposal": {
+        "60": {
+          "applied": false,
+          "selected": false,
+          "selected_scale": 0.0
+        },
+        "90": {
+          "applied": false,
+          "selected": false,
+          "selected_scale": 0.0
+        }
+      }
+    },
+    "bal427": {
+      "candidate_optimization_seconds": 91.62034590500116,
+      "candidate_over_ceres": 0.99594370345743,
+      "candidate_over_direct": 1.0,
+      "candidate_sse": 2134204.7854303564,
+      "candidate_transport_bytes": 2198809563,
+      "ceres_sse": 2142897.01116784,
+      "direct_sse": 2134204.7854303564,
+      "family": "bal",
+      "proposal": {
+        "60": {
+          "applied": false,
+          "selected": false,
+          "selected_scale": 0.0
+        },
+        "90": {
+          "applied": false,
+          "selected": false,
+          "selected_scale": 0.0
+        }
+      }
+    },
+    "bal49": {
+      "candidate_optimization_seconds": 9.491939087994979,
+      "candidate_over_ceres": 1.0037524778790696,
+      "candidate_over_direct": 1.0,
+      "candidate_sse": 26788.628727823136,
+      "candidate_transport_bytes": 187500410,
+      "ceres_sse": 26688.48079401761,
+      "direct_sse": 26788.628727823136,
+      "family": "bal",
+      "proposal": {
+        "60": {
+          "applied": false,
+          "selected": false,
+          "selected_scale": 0.0
+        },
+        "90": {
+          "applied": false,
+          "selected": false,
+          "selected_scale": 0.0
+        }
+      }
+    },
+    "bal52": {
+      "candidate_optimization_seconds": 20.139124970999546,
+      "candidate_over_ceres": 0.9722598805822413,
+      "candidate_over_direct": 1.0,
+      "candidate_sse": 478500.11297203734,
+      "candidate_transport_bytes": 328779132,
+      "ceres_sse": 492152.48158289306,
+      "direct_sse": 478500.11297203734,
+      "family": "bal",
+      "proposal": {
+        "60": {
+          "applied": false,
+          "selected": false,
+          "selected_scale": 0.0
+        },
+        "90": {
+          "applied": false,
+          "selected": false,
+          "selected_scale": 0.0
+        }
+      }
+    },
+    "bal646": {
+      "candidate_optimization_seconds": 26.684208766993834,
+      "candidate_over_ceres": 1.001976612947246,
+      "candidate_over_direct": 1.0,
+      "candidate_sse": 360760.6321020775,
+      "candidate_transport_bytes": 1409737403,
+      "ceres_sse": 360048.95467662124,
+      "direct_sse": 360760.6321020775,
+      "family": "bal",
+      "proposal": {
+        "60": {
+          "applied": false,
+          "selected": false,
+          "selected_scale": 0.0
+        },
+        "90": {
+          "applied": false,
+          "selected": false,
+          "selected_scale": 0.0
+        }
+      }
+    },
+    "bal744": {
+      "candidate_optimization_seconds": 171.56365142999857,
+      "candidate_over_ceres": 0.997655063990792,
+      "candidate_over_direct": 1.0,
+      "candidate_sse": 3085983.840051299,
+      "candidate_transport_bytes": 3934502504,
+      "ceres_sse": 3093237.2835425027,
+      "direct_sse": 3085983.840051299,
+      "family": "bal",
+      "proposal": {
+        "60": {
+          "applied": false,
+          "selected": false,
+          "selected_scale": 0.0
+        },
+        "90": {
+          "applied": false,
+          "selected": false,
+          "selected_scale": 0.0
+        }
+      }
+    },
+    "bal783": {
+      "candidate_optimization_seconds": 30.82532247900963,
+      "candidate_over_ceres": 1.00099425263398,
+      "candidate_over_direct": 1.00001970435459,
+      "candidate_sse": 396175.20122356166,
+      "candidate_transport_bytes": 1606261167,
+      "ceres_sse": 395781.69423159084,
+      "direct_sse": 396167.3950007336,
+      "family": "bal",
+      "proposal": {
+        "60": {
+          "applied": false,
+          "selected": false,
+          "selected_scale": 0.0
+        },
+        "90": {
+          "applied": false,
+          "selected": false,
+          "selected_scale": 0.0
+        }
+      }
+    },
+    "bal871": {
+      "candidate_optimization_seconds": 180.9697711399931,
+      "candidate_over_ceres": 1.0029764090683,
+      "candidate_over_direct": 0.999672799589542,
+      "candidate_sse": 3455911.2844624566,
+      "candidate_transport_bytes": 4620958617,
+      "ceres_sse": 3445655.603876839,
+      "direct_sse": 3457042.430164577,
+      "family": "bal",
+      "proposal": {
+        "60": {
+          "applied": false,
+          "selected": false,
+          "selected_scale": 0.0
+        },
+        "90": {
+          "applied": false,
+          "selected": false,
+          "selected_scale": 0.0
+        }
+      }
+    },
+    "bal88": {
+      "candidate_optimization_seconds": 22.4376111439924,
+      "candidate_over_ceres": 0.9999168681642693,
+      "candidate_over_direct": 1.0,
+      "candidate_sse": 577403.6666753435,
+      "candidate_transport_bytes": 495668671,
+      "ceres_sse": 577451.6712928239,
+      "direct_sse": 577403.6666753435,
+      "family": "bal",
+      "proposal": {
+        "60": {
+          "applied": false,
+          "selected": false,
+          "selected_scale": 0.0
+        },
+        "90": {
+          "applied": false,
+          "selected": false,
+          "selected_scale": 0.0
+        }
+      }
+    },
+    "bal89": {
+      "candidate_optimization_seconds": 31.887356431994704,
+      "candidate_over_ceres": 1.0071052686784763,
+      "candidate_over_direct": 1.0,
+      "candidate_sse": 571725.2253430616,
+      "candidate_transport_bytes": 581749321,
+      "ceres_sse": 567691.6238292344,
+      "direct_sse": 571725.2253430616,
+      "family": "bal",
+      "proposal": {
+        "60": {
+          "applied": false,
+          "selected": false,
+          "selected_scale": 0.0
+        },
+        "90": {
+          "applied": false,
+          "selected": false,
+          "selected_scale": 0.0
+        }
+      }
+    },
+    "bal931": {
+      "candidate_optimization_seconds": 34.41614293900784,
+      "candidate_over_ceres": 1.0005573974686366,
+      "candidate_over_direct": 0.9999997386723946,
+      "candidate_sse": 503668.95983560296,
+      "candidate_transport_bytes": 1613343460,
+      "ceres_sse": 503388.3724310688,
+      "direct_sse": 503669.0914582406,
+      "family": "bal",
+      "proposal": {
+        "60": {
+          "applied": false,
+          "selected": false,
+          "selected_scale": 0.0
+        },
+        "90": {
+          "applied": false,
+          "selected": false,
+          "selected_scale": 0.0
+        }
+      }
+    },
+    "bal951": {
+      "candidate_optimization_seconds": 208.8869035030075,
+      "candidate_over_ceres": 0.9629751749615004,
+      "candidate_over_direct": 0.9999283399353249,
+      "candidate_sse": 3211974.9848232716,
+      "candidate_transport_bytes": 4533088422,
+      "ceres_sse": 3335470.1848380314,
+      "direct_sse": 3212205.171653622,
+      "family": "bal",
+      "proposal": {
+        "60": {
+          "applied": false,
+          "selected": false,
+          "selected_scale": 0.0
+        },
+        "90": {
+          "applied": false,
+          "selected": false,
+          "selected_scale": 0.0
+        }
+      }
+    },
+    "bal961": {
+      "candidate_optimization_seconds": 162.27735345999827,
+      "candidate_over_ceres": 1.0001077406512622,
+      "candidate_over_direct": 1.0,
+      "candidate_sse": 3173245.9552006214,
+      "candidate_transport_bytes": 14930477750,
+      "ceres_sse": 3172904.104446016,
+      "direct_sse": 3173245.9552006214,
+      "family": "bal",
+      "proposal": {
+        "60": {
+          "applied": false,
+          "selected": false,
+          "selected_scale": 0.0
+        },
+        "90": {
+          "applied": false,
+          "selected": false,
+          "selected_scale": 0.0
+        }
+      }
+    },
+    "ellis_island": {
+      "candidate_optimization_seconds": 16.35565022499941,
+      "candidate_over_ceres": 1.0474438672984052,
+      "candidate_over_direct": 0.9338429790444844,
+      "candidate_sse": 1725959.7715845003,
+      "candidate_transport_bytes": 684354855,
+      "ceres_sse": 1647782.5929098628,
+      "direct_sse": 1848233.386463446,
+      "family": "1dsfm",
+      "proposal": {
+        "60": {
+          "applied": true,
+          "selected": true,
+          "selected_scale": 1.0
+        },
+        "90": {
+          "applied": false,
+          "selected": false,
+          "selected_scale": 0.0
+        }
+      }
+    },
+    "gendarmenmarkt": {
+      "candidate_optimization_seconds": 14.108448576007504,
+      "candidate_over_ceres": 1.3306709681696562,
+      "candidate_over_direct": 0.9176428110493763,
+      "candidate_sse": 698440.4546337489,
+      "candidate_transport_bytes": 407414185,
+      "ceres_sse": 524878.4044597116,
+      "direct_sse": 761124.5314885024,
+      "family": "1dsfm",
+      "proposal": {
+        "60": {
+          "applied": true,
+          "selected": true,
+          "selected_scale": 1.0
+        },
+        "90": {
+          "applied": false,
+          "selected": false,
+          "selected_scale": 0.0
+        }
+      }
+    },
+    "madrid_metropolis": {
+      "candidate_optimization_seconds": 11.654673620010726,
+      "candidate_over_ceres": 1.2622676880515,
+      "candidate_over_direct": 1.0493746654157574,
+      "candidate_sse": 272521.3700774698,
+      "candidate_transport_bytes": 225314416,
+      "ceres_sse": 215898.2382715884,
+      "direct_sse": 259698.82736734272,
+      "family": "1dsfm",
+      "proposal": {
+        "60": {
+          "applied": true,
+          "selected": true,
+          "selected_scale": 1.0
+        },
+        "90": {
+          "applied": false,
+          "selected": false,
+          "selected_scale": 0.0
+        }
+      }
+    },
+    "montreal_notre_dame": {
+      "candidate_optimization_seconds": 59.32781478000106,
+      "candidate_over_ceres": 1.0719960102725197,
+      "candidate_over_direct": 0.5390172921162356,
+      "candidate_sse": 5806799.297272678,
+      "candidate_transport_bytes": 2056769427,
+      "ceres_sse": 5416810.549319574,
+      "direct_sse": 10772936.939508203,
+      "family": "1dsfm",
+      "proposal": {
+        "60": {
+          "applied": true,
+          "selected": true,
+          "selected_scale": 1.0
+        },
+        "90": {
+          "applied": false,
+          "selected": false,
+          "selected_scale": 0.0
+        }
+      }
+    },
+    "notre_dame": {
+      "candidate_optimization_seconds": 47.92420016899996,
+      "candidate_over_ceres": 1.1358032468433492,
+      "candidate_over_direct": 0.6098647288573597,
+      "candidate_sse": 3247565.2589476043,
+      "candidate_transport_bytes": 1671981773,
+      "ceres_sse": 2859267.454969259,
+      "direct_sse": 5325058.337169671,
+      "family": "1dsfm",
+      "proposal": {
+        "60": {
+          "applied": true,
+          "selected": true,
+          "selected_scale": 1.0
+        },
+        "90": {
+          "applied": true,
+          "selected": true,
+          "selected_scale": 0.5
+        }
+      }
+    },
+    "nyc_library": {
+      "candidate_optimization_seconds": 14.456444002993521,
+      "candidate_over_ceres": 1.1786021534750277,
+      "candidate_over_direct": 0.8234529876965211,
+      "candidate_sse": 899471.7856289363,
+      "candidate_transport_bytes": 446530872,
+      "ceres_sse": 763168.286242228,
+      "direct_sse": 1092317.1074344702,
+      "family": "1dsfm",
+      "proposal": {
+        "60": {
+          "applied": true,
+          "selected": true,
+          "selected_scale": 1.0
+        },
+        "90": {
+          "applied": true,
+          "selected": true,
+          "selected_scale": 1.0
+        }
+      }
+    },
+    "piazza_del_popolo": {
+      "candidate_optimization_seconds": 15.050662112000282,
+      "candidate_over_ceres": 0.9399029217778119,
+      "candidate_over_direct": 0.5393000122032936,
+      "candidate_sse": 682905.8251451547,
+      "candidate_transport_bytes": 786865415,
+      "ceres_sse": 726570.5950285258,
+      "direct_sse": 1266281.8648105792,
+      "family": "1dsfm",
+      "proposal": {
+        "60": {
+          "applied": true,
+          "selected": true,
+          "selected_scale": 1.0
+        },
+        "90": {
+          "applied": true,
+          "selected": true,
+          "selected_scale": 1.0
+        }
+      }
+    },
+    "piccadilly": {
+      "candidate_optimization_seconds": 49.91612071399868,
+      "candidate_over_ceres": 0.7471805520002933,
+      "candidate_over_direct": 0.894683480963304,
+      "candidate_sse": 5222585.857347542,
+      "candidate_transport_bytes": 2351037746,
+      "ceres_sse": 6989724.027701262,
+      "direct_sse": 5837355.85653643,
+      "family": "1dsfm",
+      "proposal": {
+        "60": {
+          "applied": true,
+          "selected": true,
+          "selected_scale": 1.0
+        },
+        "90": {
+          "applied": false,
+          "selected": false,
+          "selected_scale": 0.0
+        }
+      }
+    },
+    "roman_forum": {
+      "candidate_optimization_seconds": 46.58993275099783,
+      "candidate_over_ceres": 1.167470076818625,
+      "candidate_over_direct": 0.7272886870498126,
+      "candidate_sse": 2315255.4930312475,
+      "candidate_transport_bytes": 1174176380,
+      "ceres_sse": 1983139.0448484612,
+      "direct_sse": 3183406.4440392894,
+      "family": "1dsfm",
+      "proposal": {
+        "60": {
+          "applied": true,
+          "selected": true,
+          "selected_scale": 1.0
+        },
+        "90": {
+          "applied": true,
+          "selected": true,
+          "selected_scale": 1.0
+        }
+      }
+    },
+    "tower_of_london": {
+      "candidate_optimization_seconds": 16.10912018599629,
+      "candidate_over_ceres": 1.937146407220874,
+      "candidate_over_direct": 0.992800911415235,
+      "candidate_sse": 1531080.5368340276,
+      "candidate_transport_bytes": 439914884,
+      "ceres_sse": 790379.3596223795,
+      "direct_sse": 1542182.847769022,
+      "family": "1dsfm",
+      "proposal": {
+        "60": {
+          "applied": true,
+          "selected": true,
+          "selected_scale": 1.0
+        },
+        "90": {
+          "applied": true,
+          "selected": true,
+          "selected_scale": 1.0
+        }
+      }
+    },
+    "trafalgar": {
+      "candidate_optimization_seconds": 166.41806645599718,
+      "candidate_over_ceres": 0.8754433616576288,
+      "candidate_over_direct": 0.691904179010613,
+      "candidate_sse": 9941140.057049546,
+      "candidate_transport_bytes": 5087002906,
+      "ceres_sse": 11355549.076557348,
+      "direct_sse": 14367798.834897717,
+      "family": "1dsfm",
+      "proposal": {
+        "60": {
+          "applied": true,
+          "selected": true,
+          "selected_scale": 1.0
+        },
+        "90": {
+          "applied": false,
+          "selected": false,
+          "selected_scale": 0.0
+        }
+      }
+    },
+    "union_square": {
+      "candidate_optimization_seconds": 26.404323776994715,
+      "candidate_over_ceres": 1.1182104266816444,
+      "candidate_over_direct": 0.7393220134270722,
+      "candidate_sse": 2914864.724435606,
+      "candidate_transport_bytes": 1001759415,
+      "ceres_sse": 2606722.8983775796,
+      "direct_sse": 3942618.60393412,
+      "family": "1dsfm",
+      "proposal": {
+        "60": {
+          "applied": true,
+          "selected": true,
+          "selected_scale": 1.0
+        },
+        "90": {
+          "applied": true,
+          "selected": true,
+          "selected_scale": 1.0
+        }
+      }
+    },
+    "vienna_cathedral": {
+      "candidate_optimization_seconds": 48.372263868994196,
+      "candidate_over_ceres": 1.1003353868123356,
+      "candidate_over_direct": 0.5801963819689017,
+      "candidate_sse": 3047571.647460527,
+      "candidate_transport_bytes": 1746181924,
+      "ceres_sse": 2769675.213563132,
+      "direct_sse": 5252655.380439576,
+      "family": "1dsfm",
+      "proposal": {
+        "60": {
+          "applied": true,
+          "selected": true,
+          "selected_scale": 1.0
+        },
+        "90": {
+          "applied": true,
+          "selected": true,
+          "selected_scale": 1.0
+        }
+      }
+    },
+    "yorkminster": {
+      "candidate_optimization_seconds": 24.504190976993414,
+      "candidate_over_ceres": 2.120880169333368,
+      "candidate_over_direct": 0.7664248192151895,
+      "candidate_sse": 4064994.2607819857,
+      "candidate_transport_bytes": 798420566,
+      "ceres_sse": 1916654.3775359495,
+      "direct_sse": 5303839.540249355,
+      "family": "1dsfm",
+      "proposal": {
+        "60": {
+          "applied": true,
+          "selected": true,
+          "selected_scale": 1.0
+        },
+        "90": {
+          "applied": true,
+          "selected": true,
+          "selected_scale": 1.0
+        }
+      }
+    }
+  },
+  "schema_version": 1,
+  "timing_policy": "CPU timing classes are reported by solver boundary; no matched-work or cross-hardware speedup is claimed"
+}

@@ -1,5 +1,10 @@
 # 1DSfM/BAL Versus Ceres Left-SE3 Benchmark Plan
 
+Phase A status: **complete**. The artifact-only report, JSON summary, per-scene
+table, and two deterministic PDFs are under
+`benchmark_results/ceres_se3_left_unified_benchmark/`. Phase B remains optional
+and requires explicit authorization.
+
 ## Purpose
 
 Produce one cohort-explicit benchmark of the retained distributed method against
@@ -28,7 +33,7 @@ resource/latency context; they are a different solver lineage.
 
 ## Phase A: Artifact-Only Unified Report
 
-Do this first. It requires no solver rerun.
+Complete. It required no solver rerun.
 
 Generate one Markdown/JSON report with, for each family:
 
