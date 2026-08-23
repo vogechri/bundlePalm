@@ -2132,7 +2132,9 @@ PYTHONPATH="$PWD/build_admm/generated/proto:$PWD" \
   .venv/bin/python -m pytest -q test_*.py
 ```
 
-Expected current maintained source suite: 128 passed.
+Expected current full `test_*.py` suite: 223 passed against a fresh
+`build_admm` worker build (validated 2026-08-23). See
+`REPRODUCIBILITY_PACKAGE.md` for the pinned worker hash and commands.
 
 7. State the active budget class and exact next experiment before launching it.
    No solver experiment is currently authorized. The active task is P0 offline

@@ -1191,9 +1191,17 @@ remain optional and unauthorized; see `CERES_SE3_LEFT_BENCHMARK_PLAN.md`.
 
 ### P1: Reproducibility Package
 
+P1 checkpoint (2026-08-23): the maintained worker rebuild succeeds and the full
+source suite passes `223/223`. `REPRODUCIBILITY_PACKAGE.md` records the build,
+test, archive, and limitation contract. The machine-readable registry at
+`benchmark_results/stage_c_reproducibility_registry.json` covers eight
+canonical modes and all six manuscript tables; its validator checks report and
+artifact existence, worker hash, resumable commands, table-label coverage, and
+the tracked raw-run boundary.
+
 6. Run the maintained test suite and worker build before the next source
-   checkpoint. The last full camera-parameterization validation passed 224
-   tests and the worker built successfully.
+  checkpoint. The current full maintained suite passes 223 tests and the worker
+  builds successfully.
 7. Record one canonical command/configuration for plain, C1, C5, C1+C5, K4,
    K16, product-SO3, and startup bootstrap. Verify that every paper table can be
    traced to one report and one machine-readable artifact.

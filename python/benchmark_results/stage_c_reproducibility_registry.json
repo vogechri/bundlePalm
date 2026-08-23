@@ -1,0 +1,99 @@
+{
+  "schema_version": 1,
+  "validated_commit": "ae22019",
+  "worker": {
+    "path": "serverTest/build_admm/zeromq_cpp_server_ex",
+    "sha256": "c408131a6977de3d92281f195c9ca888fe6c11e05182915bc36ba45d10326b3d"
+  },
+  "environment": {
+    "python": "3.12.13",
+    "cmake": "4.2.3",
+    "g++": "15.2.0",
+    "protoc": "3.21.12",
+    "maintained_tests": 223
+  },
+  "modes": {
+    "plain": {
+      "role": "Stage-C plain control",
+      "report": "benchmark_results/stage_c_final_all15_all29_k24_i30/comparison_to_ceres_and_plain_drs.md",
+      "artifact": "benchmark_results/stage_c_final_all15_all29_k24_i30/1dsfm/plain",
+      "command": "OUTPUT_ROOT=$PWD/benchmark_results/stage_c_tuned_final_all15_all29_k24_i30 FAMILIES='1dsfm bal' MODES=plain OVERWRITE=0 bash serverTest/run_stage_c_final_benchmarks.sh"
+    },
+    "c1": {
+      "role": "safeguarded fast DRS ablation",
+      "report": "benchmark_results/stage_c_final_all15_all29_k24_i30/comparison_to_ceres_and_plain_drs.md",
+      "artifact": "benchmark_results/stage_c_final_all15_all29_k24_i30/1dsfm/c1",
+      "command": "OUTPUT_ROOT=$PWD/benchmark_results/stage_c_tuned_final_all15_all29_k24_i30 FAMILIES='1dsfm bal' MODES=c1 OVERWRITE=0 bash serverTest/run_stage_c_final_benchmarks.sh"
+    },
+    "c5": {
+      "role": "adaptive local nonlinear work ablation",
+      "report": "benchmark_results/stage_c_final_all15_all29_k24_i30/comparison_to_ceres_and_plain_drs.md",
+      "artifact": "benchmark_results/stage_c_final_all15_all29_k24_i30/1dsfm/c5",
+      "command": "OUTPUT_ROOT=$PWD/benchmark_results/stage_c_tuned_final_all15_all29_k24_i30 FAMILIES='1dsfm bal' MODES=c5 OVERWRITE=0 bash serverTest/run_stage_c_final_benchmarks.sh"
+    },
+    "c1_c5": {
+      "role": "frozen common Stage-C stack",
+      "report": "benchmark_results/stage_c_tuned_c5_final_report.md",
+      "artifact": "benchmark_results/stage_c_c5_frozen_bal_all29_k24_i30/bal/c1_c5",
+      "command": "OUTPUT_ROOT=$PWD/benchmark_results/stage_c_tuned_final_all15_all29_k24_i30 FAMILIES='1dsfm bal' MODES=c1_c5 C5_START_ITERATION=5 C5_HIGH_THRESHOLD=0.35 C5_LOW_THRESHOLD=0.20 C5_WINDOW=3 C5_DWELL=3 C5_MAXIMUM_DEPTH=2 OVERWRITE=0 bash serverTest/run_stage_c_final_benchmarks.sh"
+    },
+    "k4": {
+      "role": "frozen Stage-C resource endpoint",
+      "report": "benchmark_results/stage_c_scaling_confirmation_k4_16_i30/report.md",
+      "artifact": "benchmark_results/stage_c_scaling_confirmation_k4_16_i30/summary.json",
+      "command": "OUTPUT_ROOT=$PWD/benchmark_results/stage_c_scaling_confirmation_k4_16_i30 FAMILIES='1dsfm bal' MODES=c1_c5 CLUSTERS=4 OVERWRITE=0 bash serverTest/run_stage_c_final_benchmarks.sh"
+    },
+    "k16": {
+      "role": "frozen Stage-C latency endpoint",
+      "report": "benchmark_results/stage_c_scaling_confirmation_k4_16_i30/report.md",
+      "artifact": "benchmark_results/stage_c_scaling_confirmation_k4_16_i30/summary.json",
+      "command": "OUTPUT_ROOT=$PWD/benchmark_results/stage_c_scaling_confirmation_k4_16_i30 FAMILIES='1dsfm bal' MODES=c1_c5 CLUSTERS=16 OVERWRITE=0 bash serverTest/run_stage_c_final_benchmarks.sh"
+    },
+    "product_so3": {
+      "role": "default-off BAL-oriented publication ablation",
+      "report": "benchmark_results/so3_c1_confirmation_k24_i30/report.md",
+      "artifact": "benchmark_results/so3_c1_confirmation_k24_i30/bal",
+      "command": "OUTPUT_ROOT=$PWD/benchmark_results/so3_c1_confirmation_k24_i30 FAMILIES='1dsfm bal' MODES=c1 CAMERA_UPDATE=so3_left CAMERA_DIAGONAL_METRIC_SCALE=25 SCHUR_PCG_MAX_ITERATIONS=1000 OVERWRITE=0 bash serverTest/run_stage_c_final_benchmarks.sh"
+    },
+    "startup_bootstrap": {
+      "role": "default-off short-handoff diagnostic",
+      "report": "benchmark_results/initial_schur_repeat_gate/report.md",
+      "artifact": "benchmark_results/initial_schur_repeat_gate/report.md",
+      "command": "OUTPUT_DIR=$PWD/benchmark_results/initial_schur_repeat_reproduction ALL_PROBLEMS=1 PROBLEM_FILTER='1490 1778 3068' CLUSTERS_LIST=24 ITERATIONS=5 INITIAL_SHARED_SCHUR_CORRECTION=1 INITIAL_SHARED_SCHUR_MAXIMUM_CORRECTIONS=3 INITIAL_SHARED_SCHUR_MAXIMUM_ITERATIONS=1000 INITIAL_SHARED_SCHUR_OPERATOR=bsr_low_memory LOCAL_SOLVER=nesterov TRUST_REGION_POLICY=drs PERSISTENT_TRUST_REGION=1 OVERWRITE=0 bash serverTest/run_drs_failure_top3_live.sh"
+    }
+  },
+  "tables": {
+    "tab:stage-c-breadth": {
+      "report": "benchmark_results/c1_c5_all15_large_bal_i30_report.md",
+      "artifact": "benchmark_results/stage_c_reproducibility_manifest.json"
+    },
+    "tab:stage-c-fresh-cross-family": {
+      "report": "benchmark_results/stage_c_final_all15_all29_k24_i30/comparison_to_ceres_and_plain_drs.md",
+      "artifact": "benchmark_results/stage_c_reproducibility_manifest.json"
+    },
+    "tab:stage-c-final-reference": {
+      "report": "benchmark_results/stage_c_publication_comparison/report.md",
+      "artifact": "benchmark_results/stage_c_publication_comparison/summary.json"
+    },
+    "tab:k1-carryover-k24-factorial": {
+      "report": "benchmark_results/k1_carryover_joint_factorial/report.md",
+      "artifact": "benchmark_results/k1_carryover_joint_factorial/summary.json"
+    },
+    "tab:stage-c-factorials": {
+      "report": "benchmark_results/c1_c2_c4_sentinel_factorial_i30_report.md",
+      "artifact": "benchmark_results/stage_c_reproducibility_manifest.json"
+    },
+    "tab:stage-c-c4-all15": {
+      "report": "benchmark_results/c4_k24_postcrash_all15_i30/DECISION.md",
+      "artifact": "benchmark_results/stage_c_reproducibility_manifest.json"
+    }
+  },
+  "limitations": {
+    "artifact_only": [
+      "historical exact checkpoint/BAE handoff portfolios",
+      "full factorized-C3 coordinator execution"
+    ],
+    "raw_archive_policy": "Raw JSONL, logs, states, timing, and memory trees remain outside ordinary Git; compact reports, summaries, generators, figures, and manuscript inputs are tracked.",
+    "aggregate_memory": "Compact summaries expose process peaks, not synchronized multi-process aggregate peak memory."
+  }
+}
